@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard</title>
+<style>
+:root {
+  --bg: #0f1419;
+  --panel: #1a2129;
+  --panel-2: #232c36;
+  --text: #e6edf3;
+  --muted: #8a96a3;
+  --accent: #4fc3f7;
+  --green: #4caf50;
+  --red: #f44336;
+  --yellow: #ffc107;
+  --gray: #607d8b;
+  --border: #2d3742;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+header .spacer { flex: 1; }
+button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { background: #2d3742; }
+button.primary { background: var(--accent); color: #001; border-color: var(--accent); }
+button.primary:hover { background: #6fcef9; }
+main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  transition: border-color 0.15s;
+}
+.card:hover { border-color: var(--accent); }
+.card .name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+.card .descr { color: var(--muted); font-size: 0.85rem; }
+.card .memo {
+  background: var(--panel-2);
+  border-left: 2px solid var(--accent);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  font-style: italic;
+  border-radius: 0 4px 4px 0;
+  white-space: pre-wrap;
+}
+.url-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; }
+.url-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.url-link:hover { border-color: var(--accent); background: #2d3742; }
+.card .actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.4rem;
+}
+.card .actions button {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+}
+.status-dot {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--gray);
+  flex-shrink: 0;
+}
+.status-online { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.status-offline { background: var(--red); }
+.status-checking { background: var(--yellow); animation: pulse 1s infinite; }
+.status-unknown { background: var(--gray); }
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  width: min(450px, 90vw);
+}
+dialog::backdrop { background: rgba(0,0,0,0.7); }
+dialog h3 { margin: 0 0 1rem; }
+dialog form { display: flex; flex-direction: column; gap: 0.75rem; }
+dialog label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+dialog input, dialog textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font: inherit;
+  font-family: inherit;
+  resize: vertical;
+}
+dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem; }
+.empty { color: var(--muted); font-style: italic; padding: 0.5rem 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Dashboard</h1>
+  <div class="spacer"></div>
+  <button id="refresh-status" title="Rafraîchir les statuts">↻</button>
+  <button id="add-link" class="primary">+ Ajouter</button>
+</header>
+<main>
+  <ul id="links" class="cards"></ul>
+</main>
+
+<dialog id="link-dialog">
+  <h3 id="dialog-title">Nouveau lien</h3>
+  <form id="link-form">
+    <input type="hidden" name="id">
+    <label>Nom<input type="text" name="name" required></label>
+    <label>Description<input type="text" name="descr"></label>
+    <label>🌐 URL publique<input type="text" name="url_public" placeholder="https://service.domain.tld"></label>
+    <label>🔒 URL VPN / locale<input type="text" name="url_local" placeholder="http://192.168.1.x"></label>
+    <label>Mémo<textarea name="memo" rows="3" placeholder="Notes, identifiants, rappels..."></textarea></label>
+    <div class="actions">
+      <button type="button" id="cancel">Annuler</button>
+      <button type="submit" class="primary">Sauver</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const state = { links: [] };
+
+const dialog = document.getElementById('link-dialog');
+const form = document.getElementById('link-form');
+
+function el(tag, opts = {}, ...children) {
+  const e = document.createElement(tag);
+  if (opts.class) e.className = opts.class;
+  if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
+  if (opts.text != null) e.textContent = opts.text;
+  if (opts.on) for (const [k, v] of Object.entries(opts.on)) e.addEventListener(k, v);
+  for (const c of children) if (c != null) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  return e;
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (r.status === 204) return null;
+  return r.json();
+}
+
+async function loadLinks() {
+  state.links = await api('/api/links');
+  render();
+  loadStatus();
+}
+
+async function loadStatus() {
+  try {
+    const status = await api('/api/links/status');
+    for (const [id, kinds] of Object.entries(status)) {
+      const card = document.querySelector(`[data-id="${id}"]`);
+      if (!card) continue;
+      for (const [kind, st] of Object.entries(kinds)) {
+        const dot = card.querySelector(`.url-link[data-kind="${kind}"] .status-dot`);
+        if (dot) dot.className = `status-dot status-${st}`;
+      }
+    }
+  } catch (e) {
+    console.error('status check failed', e);
+  }
+}
+
+function urlLink(href, emoji, kind) {
+  const wrap = el('a', {
+    class: 'url-link',
+    attrs: {
+      href: href,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      title: href,
+      'data-kind': kind,
+    },
+  });
+  wrap.appendChild(el('span', { class: 'status-dot status-checking' }));
+  wrap.appendChild(el('span', { text: emoji }));
+  return wrap;
+}
+
+function render() {
+  const ul = document.getElementById('links');
+  ul.innerHTML = '';
+  if (state.links.length === 0) {
+    ul.appendChild(el('li', { class: 'empty', text: 'Aucun lien. Clique sur « + Ajouter » pour commencer.' }));
+    return;
+  }
+  state.links.forEach((link) => {
+    const card = el('li', { class: 'card', attrs: { 'data-id': link.id } });
+    card.appendChild(el('div', { class: 'name', text: link.name }));
+    if (link.descr) card.appendChild(el('div', { class: 'descr', text: link.descr }));
+    if (link.memo) card.appendChild(el('div', { class: 'memo', text: link.memo }));
+
+    const urls = el('div', { class: 'url-links' });
+    if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
+    if (link.url_local) urls.appendChild(urlLink(link.url_local, '🔒', 'local'));
+    card.appendChild(urls);
+
+    const actions = el('div', { class: 'actions' });
+    actions.appendChild(el('button', {
+      text: '↑', attrs: { title: 'Monter' },
+      on: { click: () => move(link.id, -1) },
+    }));
+    actions.appendChild(el('button', {
+      text: '↓', attrs: { title: 'Descendre' },
+      on: { click: () => move(link.id, +1) },
+    }));
+    actions.appendChild(el('button', {
+      text: '✎', attrs: { title: 'Éditer' },
+      on: { click: () => openDialog(link) },
+    }));
+    actions.appendChild(el('button', {
+      text: '×', attrs: { title: 'Supprimer' },
+      on: { click: () => deleteLink(link.id) },
+    }));
+    card.appendChild(actions);
+
+    ul.appendChild(card);
+  });
+}
+
+async function move(id, delta) {
+  const orderedIds = state.links.map(l => l.id);
+  const idx = orderedIds.indexOf(id);
+  const targetIdx = idx + delta;
+  if (targetIdx < 0 || targetIdx >= orderedIds.length) return;
+  [orderedIds[idx], orderedIds[targetIdx]] = [orderedIds[targetIdx], orderedIds[idx]];
+  await api('/api/links/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ ids: orderedIds }),
+  });
+  await loadLinks();
+}
+
+async function deleteLink(id) {
+  if (!confirm('Supprimer ce lien ?')) return;
+  await api(`/api/links/${id}`, { method: 'DELETE' });
+  await loadLinks();
+}
+
+function openDialog(link = null) {
+  document.getElementById('dialog-title').textContent = link ? 'Éditer le lien' : 'Nouveau lien';
+  form.reset();
+  if (link) {
+    form.elements.id.value = link.id;
+    form.elements.name.value = link.name;
+    form.elements.descr.value = link.descr || '';
+    form.elements.url_public.value = link.url_public || '';
+    form.elements.url_local.value = link.url_local || '';
+    form.elements.memo.value = link.memo || '';
+  } else {
+    form.elements.id.value = '';
+  }
+  dialog.showModal();
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const data = {
+    name: form.elements.name.value.trim(),
+    descr: form.elements.descr.value.trim(),
+    url_public: form.elements.url_public.value.trim(),
+    url_local: form.elements.url_local.value.trim(),
+    memo: form.elements.memo.value,
+  };
+  const id = form.elements.id.value;
+  if (id) {
+    await api(`/api/links/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  } else {
+    await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
+  }
+  dialog.close();
+  await loadLinks();
+});
+
+document.getElementById('cancel').addEventListener('click', () => dialog.close());
+document.getElementById('add-link').addEventListener('click', () => openDialog());
+document.getElementById('refresh-status').addEventListener('click', loadStatus);
+
+loadLinks();
+</script>
+</body>
+</html>
