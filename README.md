@@ -38,8 +38,26 @@ Les URLs sans scheme (`http://` ou `https://`) sont préfixées automatiquement 
 | DELETE  | `/api/links/<id>`         | Supprime un lien                              |
 | POST    | `/api/links/reorder`      | `{ids: [...]}` — réécrit les positions        |
 | GET     | `/api/links/status`       | `{id: {public, local}}` — ping côté serveur   |
+| GET     | `/api/export`             | Sauvegarde JSON de tous les liens             |
+| POST    | `/api/import`             | Réimporte une sauvegarde (append, pas remplace) |
 
 Le check de statut est fait côté Flask pour éviter le CORS. Renvoie `online` / `offline` / `unknown` (URL vide) par URL renseignée.
+
+## Backup / restore
+
+Depuis l'UI : boutons **⬇ Export** (télécharge `dashboard-backup-YYYY-MM-DD.json`) et **⬆ Import** (choisit un fichier, append les liens).
+
+En CLI :
+
+```bash
+# backup
+curl http://localhost:8099/api/export > backup.json
+
+# restore (sur la prod)
+curl -X POST http://localhost:8099/api/import -H 'Content-Type: application/json' -d @backup.json
+```
+
+Les fichiers `backup*.json` sont gitignorés (potentiellement des infos perso) — transfère-les manuellement (scp, drag&drop, etc.).
 
 ## Persistance
 

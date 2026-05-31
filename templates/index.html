@@ -156,6 +156,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 <header>
   <h1>Dashboard</h1>
   <div class="spacer"></div>
+  <button id="export-btn" title="Télécharger une sauvegarde JSON">⬇ Export</button>
+  <button id="import-btn" title="Importer depuis un JSON">⬆ Import</button>
+  <input type="file" id="import-file" accept="application/json,.json" style="display:none">
   <button id="refresh-status" title="Rafraîchir les statuts">↻</button>
   <button id="add-link" class="primary">+ Ajouter</button>
 </header>
@@ -341,6 +344,40 @@ form.addEventListener('submit', async (e) => {
 document.getElementById('cancel').addEventListener('click', () => dialog.close());
 document.getElementById('add-link').addEventListener('click', () => openDialog());
 document.getElementById('refresh-status').addEventListener('click', loadStatus);
+
+document.getElementById('export-btn').addEventListener('click', async () => {
+  const data = await api('/api/export');
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `dashboard-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+const importFile = document.getElementById('import-file');
+document.getElementById('import-btn').addEventListener('click', () => importFile.click());
+importFile.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const n = Array.isArray(data.links) ? data.links.length : 0;
+    if (!n) { alert('Aucun lien trouvé dans le fichier.'); return; }
+    if (!confirm(`Importer ${n} lien${n > 1 ? 's' : ''} ? (ajoutés à la suite des liens existants)`)) return;
+    const result = await api('/api/import', { method: 'POST', body: JSON.stringify(data) });
+    alert(`${result.imported} lien${result.imported > 1 ? 's' : ''} importé${result.imported > 1 ? 's' : ''}.`);
+    await loadLinks();
+  } catch (err) {
+    alert("Erreur d'import : " + err.message);
+  } finally {
+    e.target.value = '';
+  }
+});
 
 loadLinks();
 </script>

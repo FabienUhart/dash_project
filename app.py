@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import requests
@@ -170,6 +171,55 @@ def links_status():
     for (lid, kind, _), st in zip(tasks, statuses):
         result.setdefault(str(lid), {})[kind] = st
     return jsonify(result)
+
+
+@app.route("/api/export", methods=["GET"])
+def export_links():
+    rows = (
+        get_db()
+        .execute(
+            "SELECT name, descr, url_public, url_local, memo, position "
+            "FROM links ORDER BY position, id"
+        )
+        .fetchall()
+    )
+    return jsonify(
+        {
+            "version": 1,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "links": [dict(r) for r in rows],
+        }
+    )
+
+
+@app.route("/api/import", methods=["POST"])
+def import_links():
+    data = request.get_json(silent=True) or {}
+    links = data.get("links")
+    if not isinstance(links, list):
+        return jsonify({"error": "expected JSON with 'links' as a list"}), 400
+    db = get_db()
+    max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM links").fetchone()[0]
+    count = 0
+    for offset, link in enumerate(links):
+        name = (link.get("name") or "").strip()
+        if not name:
+            continue
+        db.execute(
+            "INSERT INTO links (name, descr, url_public, url_local, memo, position) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                name,
+                link.get("descr", ""),
+                _normalize_url(link.get("url_public", "")),
+                _normalize_url(link.get("url_local", "")),
+                link.get("memo", ""),
+                max_pos + 1 + offset,
+            ),
+        )
+        count += 1
+    db.commit()
+    return jsonify({"imported": count})
 
 
 init_db()
