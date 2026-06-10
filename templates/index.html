@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard</title>
+<link rel="stylesheet" href="/static/quill.snow.css">
+<script src="/static/quill.min.js" defer></script>
 <style>
 :root {
   --bg: #0f1419;
@@ -14,6 +16,7 @@
   --accent: #4fc3f7;
   --green: #4caf50;
   --red: #f44336;
+  --orange: #ff9800;
   --yellow: #ffc107;
   --gray: #607d8b;
   --border: #2d3742;
@@ -72,6 +75,17 @@ header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
   font-size: 0.75rem;
   color: var(--muted);
 }
+#search-scope {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.2rem;
+  cursor: pointer;
+}
+#search-scope.scoped { color: var(--accent); border-color: var(--accent); }
 header .spacer { flex: 1; }
 #clock-wrap { text-align: right; line-height: 1.2; }
 #clock { font-size: 1.05rem; font-weight: 600; }
@@ -90,6 +104,8 @@ button {
 button:hover { background: #2d3742; }
 button.primary { background: var(--accent); color: #001; border-color: var(--accent); }
 button.primary:hover { background: #6fcef9; }
+button.danger { background: var(--red); color: #fff; border-color: var(--red); }
+button.danger:hover { background: #d32f2f; }
 button.icon { padding: 0.45rem 0.6rem; }
 
 /* ---------- layout ---------- */
@@ -119,6 +135,42 @@ nav#sidebar {
 .cat-item.drop-target { outline: 1px dashed var(--accent); color: var(--accent); }
 .cat-item .count { margin-left: auto; font-size: 0.75rem; opacity: 0.7; }
 .cat-item .emoji { width: 1.1rem; text-align: center; }
+.cat-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+  margin: 0 0.2rem;
+}
+.sidebar-sep { border-top: 1px solid var(--border); margin: 0.6rem 0.3rem; }
+.cat-item.sub { padding-left: 2rem; font-size: 0.85rem; }
+#add-proj {
+  padding: 0.3rem 0.6rem 0.3rem 2rem;
+  font-size: 0.78rem;
+  color: var(--gray);
+  cursor: pointer;
+}
+#add-proj:hover { color: var(--accent); }
+.proj-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+#board-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+}
 #add-cat {
   margin-top: 0.6rem;
   padding: 0.4rem 0.6rem;
@@ -192,6 +244,18 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   border-radius: 0;
   white-space: pre-wrap;
 }
+.tag-chip {
+  display: inline-block;
+  background: var(--panel-2);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tag-chip:hover { background: #2d3742; text-decoration: underline; }
+.link-tags { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.15rem; }
 .url-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.2rem; }
 .url-link {
   display: inline-flex;
@@ -224,7 +288,236 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 .empty { color: var(--muted); font-style: italic; padding: 0.5rem 0; list-style: none; }
 
-/* ---------- memos panel ---------- */
+/* ---------- vue Mémos (board) ---------- */
+#memo-board { max-width: 760px; margin: 0 auto; }
+#memo-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+.mfilter {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  cursor: pointer;
+  user-select: none;
+}
+.mfilter:hover { background: var(--panel-2); }
+.mfilter .mf-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.mfilter .mf-count { font-weight: 600; font-size: 0.95rem; }
+.mfilter .mf-label { font-size: 0.78rem; font-weight: 600; display: block; margin-top: 0.1rem; }
+.mfilter.f-inbox .mf-label, .mfilter.f-inbox .mf-icon { color: var(--accent); }
+.mfilter.f-today .mf-label, .mfilter.f-today .mf-icon { color: var(--green); }
+.mfilter.f-scheduled .mf-label, .mfilter.f-scheduled .mf-icon { color: #b39ddb; }
+.mfilter.f-overdue .mf-label, .mfilter.f-overdue .mf-icon { color: #ff8a80; }
+.mfilter.f-done .mf-label, .mfilter.f-done .mf-icon { color: var(--orange); }
+.mfilter.active.f-inbox { border-color: var(--accent); background: #15232e; }
+.mfilter.active.f-today { border-color: var(--green); background: #16271a; }
+.mfilter.active.f-scheduled { border-color: #b39ddb; background: #221f2e; }
+.mfilter.active.f-overdue { border-color: #ff8a80; background: #2e1a1a; }
+.mfilter.active.f-done { border-color: var(--orange); background: #2c2113; }
+#memo-add-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+#memo-add-bar input[type="text"] {
+  flex: 1;
+  min-width: 180px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 0.55rem 0.8rem;
+  outline: none;
+}
+#memo-add-bar input[type="text"]:focus { border-color: var(--yellow); }
+#memo-add-bar input[type="date"], #memo-add-bar select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.5rem;
+}
+.memo-section { margin-bottom: 1.4rem; }
+.memo-section h2 {
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+.memo-section h2 .sec-count { opacity: 0.7; font-weight: 400; }
+.memo-section.sec-overdue h2 { color: #ff8a80; }
+.memo-section.sec-today h2 { color: var(--yellow); }
+.task {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.45rem;
+  cursor: grab;
+}
+.task.p1 { border-left-color: var(--red); }
+.task.p2 { border-left-color: var(--orange); }
+.task.p3 { border-left-color: var(--accent); }
+.task.dragging { opacity: 0.4; }
+.task .task-row { display: flex; align-items: flex-start; gap: 0.6rem; }
+.task-check {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  border: 2px solid var(--muted);
+  background: none;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin-top: 0.1rem;
+  padding: 0;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: transparent;
+}
+.task.p1 .task-check { border-color: var(--red); }
+.task.p2 .task-check { border-color: var(--orange); }
+.task.p3 .task-check { border-color: var(--accent); }
+.task-check:hover { background: var(--panel-2); color: var(--muted); }
+.task.done-task .task-check { background: var(--green); border-color: var(--green); color: #fff; }
+.task .task-content { flex: 1; font-size: 0.92rem; white-space: pre-wrap; word-break: break-word; cursor: text; min-width: 0; }
+.task.done-task .task-content { text-decoration: line-through; color: var(--muted); }
+.task .task-content a { color: var(--accent); word-break: break-all; }
+.task .task-badges { display: flex; gap: 0.35rem; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+.badge {
+  font-size: 0.72rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.due-late { background: #3a1f1f; color: #ff8a80; }
+.badge.due-today { background: #38301a; color: var(--yellow); }
+.task .task-actions { display: flex; gap: 0.15rem; opacity: 0; transition: opacity 0.15s; }
+.task:hover .task-actions { opacity: 1; }
+.task .task-actions button {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+}
+.task .task-actions button:hover { color: var(--text); background: var(--panel-2); border-radius: 4px; }
+.task-detail { margin: 0.55rem 0 0.15rem 1.75rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.task-detail .detail-row { display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
+.task-detail input[type="date"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.2rem 0.35rem;
+}
+.prio-btn { padding: 0.12rem 0.5rem; font-size: 0.78rem; border-radius: 4px; }
+.prio-btn.sel-p0 { background: var(--panel-2); border-color: var(--muted); }
+.prio-btn.sel-p1 { background: var(--red); color: #fff; border-color: var(--red); }
+.prio-btn.sel-p2 { background: var(--orange); color: #221500; border-color: var(--orange); }
+.prio-btn.sel-p3 { background: var(--accent); color: #001; border-color: var(--accent); }
+.subtask { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; }
+.subtask input[type="checkbox"] { accent-color: var(--green); cursor: pointer; }
+.subtask.stdone span { text-decoration: line-through; color: var(--muted); }
+.subtask .st-del { background: none; border: none; color: var(--muted); padding: 0 0.25rem; font-size: 0.8rem; opacity: 0.5; cursor: pointer; }
+.subtask .st-del:hover { color: var(--red); opacity: 1; background: none; }
+.st-add {
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.28rem 0.5rem;
+  outline: none;
+  width: min(280px, 100%);
+}
+.st-add:focus { border-style: solid; border-color: var(--accent); }
+.task textarea.edit-area {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.35rem;
+  resize: vertical;
+}
+.task-thumbs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 0.1rem 1.75rem;
+}
+.task-thumbs .thumb-wrap { position: relative; }
+.task-thumbs img {
+  height: 64px;
+  max-width: 130px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: zoom-in;
+  display: block;
+}
+.task-thumbs img:hover { border-color: var(--accent); }
+.thumb-del {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  font-size: 0.75rem;
+  line-height: 1;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  display: none;
+}
+.thumb-wrap:hover .thumb-del { display: block; }
+.thumb-del:hover { background: #d32f2f; }
+#lightbox {
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: auto;
+  max-width: 92vw;
+  max-height: 92vh;
+}
+#lightbox img {
+  max-width: 92vw;
+  max-height: 88vh;
+  border-radius: 8px;
+  display: block;
+  cursor: zoom-out;
+}
+#done-section summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  user-select: none;
+}
+#clear-done { font-size: 0.78rem; padding: 0.2rem 0.6rem; margin-left: 0.6rem; }
+
+/* ---------- colonne mémos (résumé) ---------- */
 aside#memo-panel {
   width: 250px;
   flex-shrink: 0;
@@ -234,15 +527,20 @@ aside#memo-panel {
 }
 #memo-details summary {
   list-style: none;
-  cursor: default;
+  cursor: pointer;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.05em;
   margin-bottom: 0.6rem;
   user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
+#memo-details summary:hover { color: var(--accent); }
 #memo-details summary::-webkit-details-marker { display: none; }
+#memo-open { margin-left: auto; font-size: 0.85rem; }
 .memo-note {
   background: var(--memo-bg);
   border-left: 2px solid var(--yellow);
@@ -252,33 +550,16 @@ aside#memo-panel {
   margin-bottom: 0.45rem;
   white-space: pre-wrap;
   position: relative;
-  cursor: grab;
+  cursor: pointer;
   word-break: break-word;
 }
-.memo-note.dragging { opacity: 0.4; }
-.memo-note .memo-del {
-  position: absolute;
-  top: 0.15rem;
-  right: 0.3rem;
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 0.85rem;
-  padding: 0 0.2rem;
-  opacity: 0;
-}
-.memo-note:hover .memo-del { opacity: 1; }
-.memo-note .memo-del:hover { color: var(--red); background: none; }
-.memo-note textarea {
-  width: 100%;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font: inherit;
-  padding: 0.3rem;
-  resize: vertical;
-}
+.memo-note.mp1 { border-left-color: var(--red); }
+.memo-note.mp2 { border-left-color: var(--orange); }
+.memo-note.mp3 { border-left-color: var(--accent); }
+.memo-note .mini-due { display: block; font-size: 0.7rem; margin-top: 0.2rem; }
+.memo-note .mini-due.due-late { color: #ff8a80; }
+.memo-note .mini-due.due-today { color: var(--yellow); }
+.memo-note .mini-due.due-future { color: var(--muted); }
 #memo-quick {
   width: 100%;
   background: var(--bg);
@@ -292,6 +573,64 @@ aside#memo-panel {
   outline: none;
 }
 #memo-quick:focus { border-color: var(--yellow); border-style: solid; }
+
+/* ---------- contenu riche ---------- */
+.task-content p { margin: 0 0 0.15rem; }
+.task-content p:last-child { margin-bottom: 0; }
+.task-content ul, .task-content ol { margin: 0.15rem 0; padding-left: 1.3rem; }
+.task-content h1, .task-content h2, .task-content h3 { margin: 0.25rem 0 0.15rem; font-weight: 600; }
+.task-content h1 { font-size: 1.15em; }
+.task-content h2 { font-size: 1.08em; }
+.task-content h3 { font-size: 1.02em; }
+.task-content blockquote {
+  border-left: 3px solid var(--border);
+  margin: 0.2rem 0;
+  padding-left: 0.6rem;
+  color: var(--muted);
+}
+.task-content pre {
+  background: var(--panel-2);
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
+.task-content code { background: var(--panel-2); padding: 0.05rem 0.3rem; border-radius: 3px; font-size: 0.88em; }
+
+/* ---------- éditeur Quill (thème sombre) ---------- */
+#memo-edit-dialog { width: min(640px, 94vw); }
+#quill-wrap .ql-toolbar {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+}
+#quill-wrap .ql-container {
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  min-height: 200px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+#quill-wrap .ql-editor { min-height: 200px; }
+#quill-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
+.ql-snow .ql-stroke { stroke: var(--muted); }
+.ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--muted); }
+.ql-snow .ql-picker { color: var(--muted); }
+.ql-snow .ql-picker-options { background: var(--panel); border-color: var(--border) !important; }
+.ql-snow .ql-toolbar button:hover .ql-stroke, .ql-snow.ql-toolbar button:hover .ql-stroke,
+.ql-snow .ql-toolbar button.ql-active .ql-stroke, .ql-snow.ql-toolbar button.ql-active .ql-stroke,
+.ql-snow .ql-picker-label:hover .ql-stroke { stroke: var(--accent); }
+.ql-snow .ql-toolbar button:hover .ql-fill, .ql-snow.ql-toolbar button:hover .ql-fill,
+.ql-snow .ql-toolbar button.ql-active .ql-fill, .ql-snow.ql-toolbar button.ql-active .ql-fill { fill: var(--accent); }
+.ql-snow .ql-picker-label:hover, .ql-snow .ql-picker-label.ql-active,
+.ql-snow .ql-picker-item:hover, .ql-snow .ql-picker-item.ql-selected { color: var(--accent); }
+.ql-snow a { color: var(--accent); }
 
 /* ---------- dialogs ---------- */
 dialog {
@@ -328,6 +667,15 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 }
 .cat-manage-row .grow { flex: 1; }
 .cat-manage-row button { padding: 0.15rem 0.45rem; font-size: 0.78rem; }
+.cat-manage-row input[type="color"] {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
 
 /* ---------- mobile ---------- */
 @media (max-width: 900px) {
@@ -343,6 +691,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   }
   .cat-item { flex-shrink: 0; margin-bottom: 0; padding: 0.35rem 0.7rem; }
   .cat-item .count { margin-left: 0.3rem; }
+  .sidebar-sep { border-top: none; border-left: 1px solid var(--border); margin: 0.2rem 0.3rem; }
   #add-cat { border-top: none; margin-top: 0; flex-shrink: 0; padding: 0.35rem 0.5rem; }
   aside#memo-panel {
     width: 100%;
@@ -350,7 +699,6 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     border-left: none;
     border-bottom: 1px solid var(--border);
   }
-  #memo-details summary { cursor: pointer; }
   #memo-details summary::before { content: "▸ "; }
   #memo-details[open] summary::before { content: "▾ "; }
   #clock-date, #weather { display: none; }
@@ -363,7 +711,13 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <h1>Dashboard</h1>
   <div id="search-wrap">
     <span style="color:var(--muted)">🔍</span>
-    <input id="search" type="text" placeholder="Rechercher liens et mémos…" autocomplete="off">
+    <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off">
+    <select id="search-scope" title="Portée de la recherche (raccourcis : p# l# m#)">
+      <option value="all">Tout</option>
+      <option value="links">Liens</option>
+      <option value="memos">Mémos</option>
+      <option value="projects">Projets</option>
+    </select>
     <kbd>/</kbd>
   </div>
   <div class="spacer"></div>
@@ -380,10 +734,11 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <nav id="sidebar"></nav>
   <main>
     <ul id="links" class="cards"></ul>
+    <div id="memo-board" hidden></div>
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
-      <summary>📝 MÉMOS <span id="memo-count"></span></summary>
+      <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span></summary>
       <div id="memos"></div>
       <textarea id="memo-quick" rows="2" placeholder="+ Note rapide… (Entrée pour ajouter)"></textarea>
     </details>
@@ -401,12 +756,54 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     </label>
     <label>🌐 URL publique<input type="text" name="url_public" placeholder="https://service.domain.tld"></label>
     <label>🔒 URL VPN / locale<input type="text" name="url_local" placeholder="http://192.168.1.x"></label>
+    <label># Tags<input type="text" name="tags" placeholder="#docker #media — relie ce lien aux mémos qui portent le même tag"></label>
     <label>Mémo<textarea name="memo" rows="3" placeholder="Notes, identifiants, rappels..."></textarea></label>
     <div class="actions">
       <button type="button" id="cancel">Annuler</button>
       <button type="submit" class="primary">Sauver</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="lightbox"><img alt=""></dialog>
+
+<dialog id="confirm-dialog">
+  <h3 id="confirm-title">Confirmer la suppression</h3>
+  <p id="confirm-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
+  <div class="actions">
+    <button type="button" id="confirm-no">Annuler</button>
+    <button type="button" id="confirm-yes" class="danger">Supprimer</button>
+  </div>
+</dialog>
+
+<dialog id="notify-dialog">
+  <h3 id="notify-title">Info</h3>
+  <p id="notify-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
+  <div class="actions">
+    <button type="button" id="notify-ok" class="primary">OK</button>
+  </div>
+</dialog>
+
+<dialog id="create-dialog">
+  <h3 id="create-title">Nouveau projet</h3>
+  <form id="create-form">
+    <label>Nom<input type="text" name="name" required autocomplete="off"></label>
+    <label>Couleur<input type="color" name="color" value="#4fc3f7" style="height:2.4rem;padding:0.2rem;cursor:pointer"></label>
+    <label id="create-tags-label"># Tags<input type="text" name="tags" autocomplete="off" placeholder="#docker #infra — retrouvables via la recherche p#"></label>
+    <div class="actions">
+      <button type="button" id="create-cancel">Annuler</button>
+      <button type="submit" class="primary" id="create-submit">Créer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="memo-edit-dialog">
+  <h3>Éditer le mémo</h3>
+  <div id="quill-wrap"><div id="quill-editor"></div></div>
+  <div class="actions">
+    <button type="button" id="memo-edit-cancel">Annuler</button>
+    <button type="button" id="memo-edit-save" class="primary">Sauver</button>
+  </div>
 </dialog>
 
 <dialog id="settings-dialog">
@@ -420,12 +817,16 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     </div>
     <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
       L'export contient les liens, les catégories et les mémos.
-      L'import accepte aussi les anciennes sauvegardes (liens seuls) et ajoute sans remplacer.
+      L'import accepte aussi les anciennes sauvegardes, met à jour les éléments connus et ignore les doublons.
     </p>
   </div>
   <div class="settings-section">
     <h4>CATÉGORIES</h4>
     <div id="cat-manage"></div>
+  </div>
+  <div class="settings-section">
+    <h4>PROJETS (MÉMOS)</h4>
+    <div id="proj-manage"></div>
   </div>
   <div class="settings-section">
     <h4>STATUTS</h4>
@@ -441,11 +842,39 @@ const state = {
   links: [],
   categories: [],
   memos: [],
+  projects: [],
   filterCat: 'all',
   search: '',
+  view: 'links',
+  memoFilter: 'all',
+  memoProject: 'all',
+  searchScope: 'all',
 };
 
+function parseSearch() {
+  let raw = state.search.trim();
+  let scope = state.searchScope;
+  const m = raw.match(/^([plm])[#:](.*)$/i);
+  if (m) {
+    scope = { p: 'projects', l: 'links', m: 'memos' }[m[1].toLowerCase()];
+    raw = m[2].trim();
+    if (scope === 'projects' || raw.startsWith('#')) { /* tag ou texte, géré plus bas */ }
+  }
+  return { scope, q: raw.toLowerCase() };
+}
+
+function matchingProjects(q) {
+  const needle = q.startsWith('#') ? q.slice(1) : q;
+  if (!needle) return [];
+  return state.projects.filter(p =>
+    p.name.toLowerCase().includes(needle) ||
+    (p.tags || '').split(/\s+/).includes(needle) ||
+    (p.tags || '').includes(needle)
+  );
+}
+
 const CAT_EMOJIS = ['📁', '🎬', '🏠', '🔧', '📄', '🎮', '💾', '🌐'];
+const PRIO_LABELS = ['Aucune', 'P1', 'P2', 'P3'];
 
 function el(tag, opts = {}, ...children) {
   const e = document.createElement(tag);
@@ -457,6 +886,44 @@ function el(tag, opts = {}, ...children) {
   return e;
 }
 
+function confirmPopin(message, { title = 'Confirmer la suppression', okLabel = 'Supprimer', danger = true } = {}) {
+  return new Promise(resolve => {
+    const dlg = document.getElementById('confirm-dialog');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-msg').textContent = message;
+    const yes = document.getElementById('confirm-yes');
+    const no = document.getElementById('confirm-no');
+    yes.textContent = okLabel;
+    yes.className = danger ? 'danger' : 'primary';
+    const done = (val) => {
+      dlg.close();
+      yes.onclick = no.onclick = dlg.oncancel = null;
+      resolve(val);
+    };
+    yes.onclick = () => done(true);
+    no.onclick = () => done(false);
+    dlg.oncancel = (e) => { e.preventDefault(); done(false); };
+    dlg.showModal();
+  });
+}
+
+function notify(message, { title = 'ℹ️ Info', error = false } = {}) {
+  return new Promise(resolve => {
+    const dlg = document.getElementById('notify-dialog');
+    document.getElementById('notify-title').textContent = error ? '⚠️ Erreur' : title;
+    document.getElementById('notify-msg').textContent = message;
+    const ok = document.getElementById('notify-ok');
+    const done = () => {
+      dlg.close();
+      ok.onclick = dlg.oncancel = null;
+      resolve();
+    };
+    ok.onclick = done;
+    dlg.oncancel = (e) => { e.preventDefault(); done(); };
+    dlg.showModal();
+  });
+}
+
 async function api(path, opts = {}) {
   const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -465,20 +932,28 @@ async function api(path, opts = {}) {
 }
 
 async function loadAll() {
-  [state.links, state.categories, state.memos] = await Promise.all([
-    api('/api/links'), api('/api/categories'), api('/api/memos'),
+  [state.links, state.categories, state.memos, state.projects] = await Promise.all([
+    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'),
   ]);
   if (state.filterCat !== 'all' && state.filterCat !== 'none'
       && !state.categories.some(c => c.id === state.filterCat)) {
     state.filterCat = 'all';
   }
+  if (state.memoProject !== 'all' && state.memoProject !== 'inbox'
+      && !state.projects.some(p => p.id === state.memoProject)) {
+    state.memoProject = 'all';
+  }
   renderAll();
-  loadStatus();
+  if (state.view === 'links') loadStatus();
 }
 
 function renderAll() {
   renderSidebar();
-  renderLinks();
+  const memosView = state.view === 'memos';
+  document.getElementById('links').style.display = memosView ? 'none' : '';
+  document.getElementById('memo-board').hidden = !memosView;
+  document.getElementById('memo-panel').style.display = memosView ? 'none' : '';
+  if (memosView) renderBoard(); else renderLinks();
   renderMemos();
 }
 
@@ -490,22 +965,35 @@ function renderSidebar() {
   const nav = document.getElementById('sidebar');
   nav.innerHTML = '';
   const uncat = state.links.filter(l => !l.category_id).length;
+  const pendingMemoCount = state.memos.filter(m => !m.done).length;
 
-  const mkItem = (key, emoji, label, count) => {
+  const mkItem = (key, icon, label, count) => {
+    const active = state.view === 'links' && state.filterCat === key;
     const item = el('div', {
-      class: 'cat-item' + (state.filterCat === key ? ' active' : ''),
-      on: { click: () => { state.filterCat = key; renderAll(); } },
+      class: 'cat-item' + (active ? ' active' : ''),
+      on: { click: () => { state.view = 'links'; state.filterCat = key; renderAll(); } },
     });
-    item.appendChild(el('span', { class: 'emoji', text: emoji }));
+    item.appendChild(icon);
     item.appendChild(el('span', { text: label }));
     item.appendChild(el('span', { class: 'count', text: String(count) }));
     return item;
   };
+  const emojiIcon = (em) => el('span', { class: 'emoji', text: em });
+  const catIcon = (cat, idx) => {
+    if (cat.color) {
+      const dot = el('span', { class: 'cat-dot' });
+      dot.style.background = cat.color;
+      return dot;
+    }
+    return emojiIcon(catEmoji(idx));
+  };
 
-  nav.appendChild(mkItem('all', '🗂', 'Tous', state.links.length));
+  nav.appendChild(mkItem('all', emojiIcon('🗂'), 'Tous', state.links.length));
 
   state.categories.forEach((cat, idx) => {
-    const item = mkItem(cat.id, catEmoji(idx), cat.name, cat.link_count);
+    const item = mkItem(cat.id, catIcon(cat, idx), cat.name, cat.link_count);
+    item.title = 'Double-clic pour modifier';
+    item.addEventListener('dblclick', () => openCreateDialog('category', cat));
     item.addEventListener('dragover', (e) => {
       if (!dragLinkId) return;
       e.preventDefault();
@@ -525,7 +1013,7 @@ function renderSidebar() {
   });
 
   if (uncat > 0 && state.categories.length > 0) {
-    const item = mkItem('none', '📦', 'Sans catégorie', uncat);
+    const item = mkItem('none', emojiIcon('📦'), 'Sans catégorie', uncat);
     item.addEventListener('dragover', (e) => { if (dragLinkId) { e.preventDefault(); item.classList.add('drop-target'); } });
     item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
     item.addEventListener('drop', async (e) => {
@@ -538,31 +1026,138 @@ function renderSidebar() {
     nav.appendChild(item);
   }
 
+  nav.appendChild(el('div', { class: 'sidebar-sep' }));
+  const memoItem = el('div', {
+    class: 'cat-item' + (state.view === 'memos' && state.memoProject === 'all' ? ' active' : ''),
+    on: { click: () => { state.view = 'memos'; state.memoProject = 'all'; renderAll(); } },
+  });
+  memoItem.appendChild(emojiIcon('📝'));
+  memoItem.appendChild(el('span', { text: 'Mémos' }));
+  memoItem.appendChild(el('span', { class: 'count', text: String(pendingMemoCount) }));
+  nav.appendChild(memoItem);
+
+  const inboxCount = state.memos.filter(m => !m.done && !m.project_id).length;
+  const mkProjItem = (key, icon, label, count, projId) => {
+    const item = el('div', {
+      class: 'cat-item sub' + (state.view === 'memos' && state.memoProject === key ? ' active' : ''),
+      on: { click: () => { state.view = 'memos'; state.memoProject = key; renderAll(); } },
+    });
+    item.appendChild(icon);
+    item.appendChild(el('span', { text: label }));
+    item.appendChild(el('span', { class: 'count', text: String(count) }));
+    item.addEventListener('dragover', (e) => {
+      if (!dragMemoId) return;
+      e.preventDefault();
+      item.classList.add('drop-target');
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+    item.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      item.classList.remove('drop-target');
+      if (!dragMemoId) return;
+      await api(`/api/memos/${dragMemoId}`, {
+        method: 'PUT', body: JSON.stringify({ project_id: projId }),
+      });
+      await loadAll();
+    });
+    return item;
+  };
+
+  nav.appendChild(mkProjItem('inbox', emojiIcon('📥'), 'Inbox', inboxCount, null));
+  state.projects.forEach(p => {
+    const dot = el('span', { class: 'cat-dot' });
+    dot.style.background = p.color || 'var(--gray)';
+    const item = mkProjItem(p.id, dot, p.name, p.memo_count, p.id);
+    item.title = 'Double-clic pour modifier';
+    item.addEventListener('dblclick', () => openCreateDialog('project', p));
+    nav.appendChild(item);
+  });
+  nav.appendChild(el('div', {
+    attrs: { id: 'add-proj' }, text: '+ Projet',
+    on: { click: addProject },
+  }));
+
   nav.appendChild(el('div', {
     attrs: { id: 'add-cat' }, text: '+ Catégorie',
     on: { click: addCategory },
   }));
 }
 
-async function addCategory() {
-  const name = prompt('Nom de la nouvelle catégorie :');
-  if (!name || !name.trim()) return;
-  try {
-    await api('/api/categories', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
-    await loadAll();
-  } catch (e) { alert('Erreur : ' + e.message); }
+const PROJ_COLORS = ['#4fc3f7', '#81c784', '#ffb74d', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
+const createDialog = document.getElementById('create-dialog');
+const createForm = document.getElementById('create-form');
+let createKind = 'project';
+let editingItem = null;
+
+function openCreateDialog(kind, item = null) {
+  createKind = kind;
+  editingItem = item;
+  const titles = {
+    project: item ? '📁 Modifier le projet' : '📁 Nouveau projet',
+    category: item ? '🗂 Modifier la catégorie' : '🗂 Nouvelle catégorie',
+  };
+  document.getElementById('create-title').textContent = titles[kind];
+  document.getElementById('create-submit').textContent = item ? 'Enregistrer' : 'Créer';
+  document.getElementById('create-tags-label').style.display = kind === 'project' ? '' : 'none';
+  createForm.reset();
+  if (item) {
+    createForm.elements.name.value = item.name;
+    createForm.elements.color.value = item.color || '#4fc3f7';
+    createForm.elements.tags.value = (item.tags || '').split(/\s+/).filter(Boolean).map(t => '#' + t).join(' ');
+  } else {
+    createForm.elements.color.value =
+      PROJ_COLORS[(kind === 'project' ? state.projects.length : state.categories.length) % PROJ_COLORS.length];
+  }
+  createDialog.showModal();
+  createForm.elements.name.focus();
 }
+
+function addCategory() { openCreateDialog('category'); }
+function addProject() { openCreateDialog('project'); }
+
+document.getElementById('create-cancel').addEventListener('click', () => createDialog.close());
+createForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = createForm.elements.name.value.trim();
+  if (!name) return;
+  const base = createKind === 'project' ? '/api/projects' : '/api/categories';
+  const payload = { name, color: createForm.elements.color.value };
+  if (createKind === 'project') payload.tags = createForm.elements.tags.value.trim();
+  const body = JSON.stringify(payload);
+  try {
+    if (editingItem) {
+      await api(`${base}/${editingItem.id}`, { method: 'PUT', body });
+    } else {
+      await api(base, { method: 'POST', body });
+    }
+    createDialog.close();
+    editingItem = null;
+    await loadAll();
+    if (settingsDialog.open) { renderCatManage(); renderProjManage(); }
+  } catch (err) { await notify('Erreur : ' + err.message, { error: true }); }
+});
 
 /* ------------------------------------------------ links */
 
+function tagQuery() {
+  const { q } = parseSearch();
+  return (q.startsWith('#') && q.length > 1) ? q.slice(1) : null;
+}
+
 function visibleLinks() {
   let links = state.links;
-  const q = state.search.trim().toLowerCase();
+  const { scope, q } = parseSearch();
   if (q) {
+    if (scope === 'memos' || scope === 'projects') return [];
+    const tag = q.startsWith('#') && q.length > 1 ? q.slice(1) : null;
+    if (tag) {
+      return links.filter(l => (l.tags || '').split(/\s+/).includes(tag));
+    }
     return links.filter(l =>
       (l.name || '').toLowerCase().includes(q) ||
       (l.descr || '').toLowerCase().includes(q) ||
       (l.memo || '').toLowerCase().includes(q) ||
+      (l.tags || '').toLowerCase().includes(q) ||
       (l.url_public || '').toLowerCase().includes(q) ||
       (l.url_local || '').toLowerCase().includes(q)
     );
@@ -616,15 +1211,18 @@ function renderLinks() {
     ul.appendChild(el('li', { class: 'empty', text: msg }));
     return;
   }
-  const catNames = Object.fromEntries(state.categories.map(c => [c.id, c.name]));
+  const catById = Object.fromEntries(state.categories.map(c => [c.id, c]));
   links.forEach((link) => {
     const card = el('li', { class: 'card', attrs: { 'data-id': link.id, draggable: 'true' } });
 
     const titleRow = el('div', { class: 'title-row' });
     titleRow.appendChild(faviconEl(link));
     titleRow.appendChild(el('span', { class: 'name', text: link.name }));
-    if (state.filterCat === 'all' && link.category_id && catNames[link.category_id]) {
-      titleRow.appendChild(el('span', { class: 'cat-tag', text: catNames[link.category_id] }));
+    if (state.filterCat === 'all' && link.category_id && catById[link.category_id]) {
+      const cat = catById[link.category_id];
+      const tag = el('span', { class: 'cat-tag', text: cat.name });
+      if (cat.color) tag.style.color = cat.color;
+      titleRow.appendChild(tag);
     }
     card.appendChild(titleRow);
 
@@ -635,6 +1233,19 @@ function renderLinks() {
     if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
     if (link.url_local) urls.appendChild(urlLink(link.url_local, '🔒', 'local'));
     card.appendChild(urls);
+
+    if ((link.tags || '').trim()) {
+      const tagsRow = el('div', { class: 'link-tags' });
+      link.tags.split(/\s+/).forEach(tag => {
+        const chip = el('span', {
+          class: 'tag-chip', text: '#' + tag,
+          attrs: { title: 'Voir les mémos portant #' + tag },
+          on: { click: () => goTag(tag) },
+        });
+        tagsRow.appendChild(chip);
+      });
+      card.appendChild(tagsRow);
+    }
 
     const actions = el('div', { class: 'actions' });
     actions.appendChild(el('button', { text: '✎', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
@@ -680,7 +1291,8 @@ async function onLinksDrop(e) {
 }
 
 async function deleteLink(id) {
-  if (!confirm('Supprimer ce lien ?')) return;
+  const link = state.links.find(l => l.id === id);
+  if (!(await confirmPopin(`Supprimer le lien « ${link ? link.name : '?'} » ?`))) return;
   await api(`/api/links/${id}`, { method: 'DELETE' });
   await loadAll();
 }
@@ -701,83 +1313,740 @@ async function loadStatus() {
   } catch (e) { console.error('status check failed', e); }
 }
 
-/* ------------------------------------------------ memos */
+/* ------------------------------------------------ mémos : helpers */
 
 let dragMemoId = null;
+const expandedMemos = new Set();
+let doneOpen = false;
 
 function visibleMemos() {
-  const q = state.search.trim().toLowerCase();
+  const { scope, q } = parseSearch();
   if (!q) return state.memos;
-  return state.memos.filter(m => m.content.toLowerCase().includes(q));
+  if (scope === 'links') return [];
+  const projIds = new Set(matchingProjects(q).map(p => p.id));
+  if (scope === 'projects') {
+    return state.memos.filter(m => projIds.has(m.project_id));
+  }
+  const tag = q.startsWith('#') && q.length > 1 ? q.slice(1) : null;
+  if (tag) {
+    const re = new RegExp('#' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9_à-ÿ-])', 'i');
+    return state.memos.filter(m => re.test(stripHTML(m.content)) || projIds.has(m.project_id));
+  }
+  return state.memos.filter(m =>
+    stripHTML(m.content).toLowerCase().includes(q) ||
+    (m.subtasks || []).some(st => st.content.toLowerCase().includes(q))
+  );
 }
 
-function renderMemos() {
-  const wrap = document.getElementById('memos');
-  wrap.innerHTML = '';
-  const memos = visibleMemos();
-  document.getElementById('memo-count').textContent = state.memos.length ? `(${state.memos.length})` : '';
-  memos.forEach((memo) => {
-    const note = el('div', { class: 'memo-note', attrs: { 'data-memo-id': memo.id, draggable: 'true', title: 'Cliquer pour éditer' } });
-    note.appendChild(el('span', { text: memo.content }));
-    note.appendChild(el('button', {
-      class: 'memo-del', text: '×', attrs: { title: 'Supprimer' },
-      on: { click: async (e) => {
-        e.stopPropagation();
-        if (!confirm('Supprimer ce mémo ?')) return;
-        await api(`/api/memos/${memo.id}`, { method: 'DELETE' });
-        await loadAll();
-      } },
-    }));
-    note.addEventListener('click', () => editMemoInline(note, memo));
+function dateStr(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
 
-    note.addEventListener('dragstart', (e) => {
-      dragMemoId = memo.id;
-      note.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
+function dueInfo(due) {
+  if (!due) return null;
+  const today = dateStr(new Date());
+  const tomorrow = dateStr(new Date(Date.now() + 86400000));
+  if (due < today) return { cls: 'due-late', label: 'En retard' };
+  if (due === today) return { cls: 'due-today', label: "Aujourd'hui" };
+  if (due === tomorrow) return { cls: 'due-future', label: 'Demain' };
+  return {
+    cls: 'due-future',
+    label: new Date(due + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+  };
+}
+
+function linkify(text) {
+  const frag = document.createDocumentFragment();
+  const re = /https?:\/\/[^\s<>"]+/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const short = m[0].replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const a = el('a', {
+      attrs: { href: m[0], target: '_blank', rel: 'noopener noreferrer', title: m[0] },
+      text: short.length > 40 ? short.slice(0, 38) + '…' : short,
     });
-    note.addEventListener('dragend', () => { dragMemoId = null; note.classList.remove('dragging'); });
-    note.addEventListener('dragover', (e) => {
-      if (!dragMemoId || dragMemoId === memo.id) return;
-      e.preventDefault();
-      const dragging = wrap.querySelector('.memo-note.dragging');
-      if (!dragging) return;
-      const rect = note.getBoundingClientRect();
-      const before = (e.clientY - rect.top) < rect.height / 2;
-      wrap.insertBefore(dragging, before ? note : note.nextSibling);
+    a.addEventListener('click', (e) => e.stopPropagation());
+    frag.appendChild(a);
+    last = m.index + m[0].length;
+  }
+  frag.appendChild(document.createTextNode(text.slice(last)));
+  return frag;
+}
+
+async function patchMemo(id, body) {
+  await api(`/api/memos/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  await loadAll();
+}
+
+function isRichHTML(content) {
+  return /<(p|div|ul|ol|li|br|strong|em|u|s|a|h[1-6]|blockquote|pre|code|span)[\s>/]/i.test(content || '');
+}
+
+function stripHTML(content) {
+  if (!isRichHTML(content)) return content;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = content;
+  return (tpl.content.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function sanitizeHTML(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll('script,style,iframe,object,embed,link,meta,form').forEach(n => n.remove());
+  tpl.content.querySelectorAll('*').forEach(n => {
+    [...n.attributes].forEach(a => {
+      if (/^on/i.test(a.name)) n.removeAttribute(a.name);
+      if ((a.name === 'href' || a.name === 'src') && /^\s*javascript:/i.test(a.value)) n.removeAttribute(a.name);
     });
-    wrap.appendChild(note);
+    if (n.tagName === 'A') {
+      n.setAttribute('target', '_blank');
+      n.setAttribute('rel', 'noopener noreferrer');
+      n.addEventListener('click', (e) => e.stopPropagation());
+    }
+  });
+  return tpl.content;
+}
+
+const TAG_RE = /#[A-Za-z0-9_À-ÿ-]+/g;
+
+function goTag(tag) {
+  state.search = '#' + tag;
+  searchInput.value = '#' + tag;
+  state.searchScope = 'all';
+  document.getElementById('search-scope').value = 'all';
+  document.getElementById('search-scope').classList.remove('scoped');
+  state.view = 'memos';
+  renderAll();
+}
+
+function applyTags(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    if (node.parentElement && node.parentElement.closest('a, .tag-chip, pre, code')) return;
+    const text = node.textContent;
+    TAG_RE.lastIndex = 0;
+    if (!TAG_RE.test(text)) return;
+    TAG_RE.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    while ((m = TAG_RE.exec(text)) !== null) {
+      frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const tag = m[0].slice(1).toLowerCase();
+      const chip = el('span', { class: 'tag-chip', text: m[0], attrs: { title: 'Voir tout ce qui porte ' + m[0] } });
+      chip.addEventListener('click', (e) => { e.stopPropagation(); goTag(tag); });
+      frag.appendChild(chip);
+      last = m.index + m[0].length;
+    }
+    frag.appendChild(document.createTextNode(text.slice(last)));
+    node.replaceWith(frag);
   });
 }
 
-document.getElementById('memos').addEventListener('drop', async (e) => {
-  e.preventDefault();
-  if (!dragMemoId) return;
-  const ids = [...document.querySelectorAll('#memos .memo-note')].map(n => Number(n.dataset.memoId));
-  await api('/api/memos/reorder', { method: 'POST', body: JSON.stringify({ ids }) });
-  await loadAll();
-});
-document.getElementById('memos').addEventListener('dragover', (e) => { if (dragMemoId) e.preventDefault(); });
+function contentNode(content) {
+  const div = document.createElement('div');
+  if (isRichHTML(content)) {
+    div.appendChild(sanitizeHTML(content));
+  } else {
+    div.appendChild(linkify(content));
+  }
+  applyTags(div);
+  return div;
+}
 
-function editMemoInline(note, memo) {
-  if (note.querySelector('textarea')) return;
-  note.innerHTML = '';
-  const ta = el('textarea', { attrs: { rows: '3' } });
+/* ------------------------------------------------ éditeur riche */
+
+const memoEditDialog = document.getElementById('memo-edit-dialog');
+let quillInstance = null;
+let editingMemoId = null;
+
+function getQuill() {
+  if (typeof Quill === 'undefined') return null;
+  if (!quillInstance) {
+    quillInstance = new Quill('#quill-editor', {
+      theme: 'snow',
+      placeholder: 'Contenu du mémo…',
+      modules: {
+        toolbar: [
+          [{ header: [1, 2, 3, false] }],
+          ['bold', 'italic', 'underline', 'strike'],
+          [{ color: [] }, { background: [] }],
+          [{ list: 'ordered' }, { list: 'bullet' }],
+          ['link', 'blockquote', 'code-block'],
+          ['clean'],
+        ],
+      },
+    });
+  }
+  return quillInstance;
+}
+
+function openMemoEditor(memo) {
+  const q = getQuill();
+  if (!q) return false;
+  editingMemoId = memo.id;
+  q.setContents([]);
+  if (isRichHTML(memo.content)) {
+    q.clipboard.dangerouslyPasteHTML(0, memo.content);
+  } else {
+    q.setText(memo.content);
+  }
+  memoEditDialog.showModal();
+  q.focus();
+  return true;
+}
+
+document.getElementById('memo-edit-cancel').addEventListener('click', () => memoEditDialog.close());
+document.getElementById('memo-edit-save').addEventListener('click', async () => {
+  const q = getQuill();
+  if (!q || editingMemoId == null) return;
+  const text = q.getText().trim();
+  if (!text) { await notify('Le mémo ne peut pas être vide.', { error: true }); return; }
+  let html = q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ');
+  memoEditDialog.close();
+  await patchMemo(editingMemoId, { content: html });
+  editingMemoId = null;
+});
+
+const lightbox = document.getElementById('lightbox');
+lightbox.addEventListener('click', () => lightbox.close());
+function openLightbox(src) {
+  lightbox.querySelector('img').src = src;
+  lightbox.showModal();
+}
+
+async function uploadMemoImages(memoId, files) {
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue;
+    const fd = new FormData();
+    fd.append('image', file);
+    const r = await fetch(`/api/memos/${memoId}/images`, { method: 'POST', body: fd });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      await notify('Erreur upload : ' + (err.error || r.statusText), { error: true });
+    }
+  }
+  await loadAll();
+}
+
+function thumbsEl(memo, editable) {
+  const images = memo.images || [];
+  if (!images.length) return null;
+  const wrap = el('div', { class: 'task-thumbs' });
+  images.forEach(name => {
+    const tw = el('div', { class: 'thumb-wrap' });
+    const img = el('img', { attrs: { src: `/uploads/${name}`, alt: '', loading: 'lazy' } });
+    img.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(`/uploads/${name}`); });
+    tw.appendChild(img);
+    if (editable) {
+      tw.appendChild(el('button', {
+        class: 'thumb-del', text: '×', attrs: { title: "Supprimer l'image" },
+        on: { click: async (e) => {
+          e.stopPropagation();
+          if (!(await confirmPopin('Supprimer cette image ?'))) return;
+          await fetch(`/api/memos/${memo.id}/images/${name}`, { method: 'DELETE' });
+          await loadAll();
+        } },
+      }));
+    }
+    wrap.appendChild(tw);
+  });
+  return wrap;
+}
+
+async function deleteMemo(id, skipConfirm = false) {
+  if (!skipConfirm) {
+    const memo = state.memos.find(m => m.id === id);
+    const excerpt = memo ? stripHTML(memo.content).slice(0, 60) : '';
+    if (!(await confirmPopin(`Supprimer le mémo « ${excerpt}${excerpt.length >= 60 ? '…' : ''} » ?`))) return;
+  }
+  await api(`/api/memos/${id}`, { method: 'DELETE' });
+  await loadAll();
+}
+
+/* ------------------------------------------------ mémos : vue board */
+
+function taskEl(memo) {
+  const prioCls = memo.priority >= 1 && memo.priority <= 3 ? ` p${memo.priority}` : '';
+  const task = el('div', {
+    class: 'task' + prioCls + (memo.done ? ' done-task' : ''),
+    attrs: { 'data-memo-id': memo.id, draggable: 'true' },
+  });
+
+  const row = el('div', { class: 'task-row' });
+  row.appendChild(el('button', {
+    class: 'task-check', text: '✓',
+    attrs: { title: memo.done ? 'Rouvrir' : 'Terminer' },
+    on: { click: () => patchMemo(memo.id, { done: !memo.done }) },
+  }));
+
+  const content = el('div', { class: 'task-content', attrs: { title: 'Cliquer pour éditer' } });
+  content.appendChild(contentNode(memo.content));
+  content.addEventListener('click', () => {
+    if (!openMemoEditor(memo)) editTaskInline(task, content, memo);
+  });
+  row.appendChild(content);
+
+  const badges = el('div', { class: 'task-badges' });
+  const due = dueInfo(memo.due_date);
+  if (due && !memo.done) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label }));
+  const subs = memo.subtasks || [];
+  if (subs.length) {
+    badges.appendChild(el('span', {
+      class: 'badge',
+      text: `☑ ${subs.filter(s => s.done).length}/${subs.length}`,
+    }));
+  }
+  if (state.memoProject === 'all' && memo.project_id) {
+    const proj = state.projects.find(p => p.id === memo.project_id);
+    if (proj) {
+      const pb = el('span', { class: 'proj-badge' });
+      const dot = el('span', { class: 'cat-dot' });
+      dot.style.width = '0.5rem';
+      dot.style.height = '0.5rem';
+      dot.style.background = proj.color || 'var(--gray)';
+      pb.appendChild(dot);
+      pb.appendChild(el('span', { text: proj.name }));
+      badges.appendChild(pb);
+    }
+  }
+  row.appendChild(badges);
+
+  const actions = el('div', { class: 'task-actions' });
+  actions.appendChild(el('button', {
+    text: expandedMemos.has(memo.id) ? '▾' : '▸',
+    attrs: { title: 'Date, priorité, sous-tâches' },
+    on: { click: () => {
+      if (expandedMemos.has(memo.id)) expandedMemos.delete(memo.id);
+      else expandedMemos.add(memo.id);
+      renderBoard();
+    } },
+  }));
+  actions.appendChild(el('button', {
+    text: '×', attrs: { title: 'Supprimer' },
+    on: { click: () => deleteMemo(memo.id) },
+  }));
+  row.appendChild(actions);
+  task.appendChild(row);
+
+  const thumbs = thumbsEl(memo, expandedMemos.has(memo.id));
+  if (thumbs) task.appendChild(thumbs);
+
+  if (expandedMemos.has(memo.id)) task.appendChild(taskDetailEl(memo));
+
+  task.addEventListener('drop', (e) => {
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      e.preventDefault();
+      e.stopPropagation();
+      uploadMemoImages(memo.id, [...e.dataTransfer.files]);
+    }
+  });
+
+  task.addEventListener('dragstart', (e) => {
+    dragMemoId = memo.id;
+    task.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  task.addEventListener('dragend', () => { dragMemoId = null; task.classList.remove('dragging'); });
+  task.addEventListener('dragover', (e) => {
+    if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (!dragMemoId || dragMemoId === memo.id) return;
+    e.preventDefault();
+    const dragging = document.querySelector('#memo-board .task.dragging');
+    if (!dragging || dragging.parentElement !== task.parentElement) return;
+    const rect = task.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    task.parentElement.insertBefore(dragging, before ? task : task.nextSibling);
+  });
+
+  return task;
+}
+
+function taskDetailEl(memo) {
+  const detail = el('div', { class: 'task-detail' });
+
+  const row1 = el('div', { class: 'detail-row' });
+  row1.appendChild(el('span', { text: '📅' }));
+  const dateIn = el('input', { attrs: { type: 'date' } });
+  dateIn.value = memo.due_date || '';
+  dateIn.addEventListener('change', () => patchMemo(memo.id, { due_date: dateIn.value }));
+  row1.appendChild(dateIn);
+  if (memo.due_date) {
+    row1.appendChild(el('button', {
+      text: '× date', class: 'prio-btn', attrs: { title: "Retirer l'échéance" },
+      on: { click: () => patchMemo(memo.id, { due_date: '' }) },
+    }));
+  }
+  row1.appendChild(el('span', { text: '🚩' }));
+  PRIO_LABELS.forEach((label, p) => {
+    const btn = el('button', {
+      class: 'prio-btn' + (memo.priority === p ? ` sel-p${p}` : ''),
+      text: label,
+      on: { click: () => patchMemo(memo.id, { priority: p }) },
+    });
+    row1.appendChild(btn);
+  });
+  row1.appendChild(el('span', { text: '📁' }));
+  const projSel = el('select');
+  projSel.appendChild(el('option', { attrs: { value: '' }, text: 'Inbox' }));
+  state.projects.forEach(p => {
+    const opt = el('option', { attrs: { value: p.id }, text: p.name });
+    if (memo.project_id === p.id) opt.selected = true;
+    projSel.appendChild(opt);
+  });
+  projSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.18rem 0.3rem';
+  projSel.addEventListener('change', () => patchMemo(memo.id, { project_id: projSel.value ? Number(projSel.value) : null }));
+  row1.appendChild(projSel);
+  const fileIn = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: '' } });
+  fileIn.style.display = 'none';
+  fileIn.addEventListener('change', () => { if (fileIn.files.length) uploadMemoImages(memo.id, [...fileIn.files]); });
+  row1.appendChild(el('button', {
+    class: 'prio-btn', text: '📎 Image',
+    attrs: { title: 'Ajouter une image (ou glisser un fichier sur le mémo)' },
+    on: { click: () => fileIn.click() },
+  }));
+  row1.appendChild(fileIn);
+  detail.appendChild(row1);
+
+  const subs = memo.subtasks || [];
+  subs.forEach((st, i) => {
+    const stRow = el('div', { class: 'subtask' + (st.done ? ' stdone' : '') });
+    const cb = el('input', { attrs: { type: 'checkbox' } });
+    cb.checked = !!st.done;
+    cb.addEventListener('change', () => {
+      const next = subs.map((s, j) => j === i ? { ...s, done: cb.checked } : s);
+      patchMemo(memo.id, { subtasks: next });
+    });
+    stRow.appendChild(cb);
+    stRow.appendChild(el('span', { text: st.content }));
+    stRow.appendChild(el('button', {
+      class: 'st-del', text: '×', attrs: { title: 'Supprimer la sous-tâche' },
+      on: { click: () => {
+        const next = subs.filter((_, j) => j !== i);
+        patchMemo(memo.id, { subtasks: next });
+      } },
+    }));
+    detail.appendChild(stRow);
+  });
+
+  const stAdd = el('input', { class: 'st-add', attrs: { type: 'text', placeholder: '+ sous-tâche (Entrée)' } });
+  stAdd.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && stAdd.value.trim()) {
+      e.preventDefault();
+      patchMemo(memo.id, { subtasks: [...subs, { content: stAdd.value.trim(), done: false }] });
+    }
+  });
+  detail.appendChild(stAdd);
+
+  return detail;
+}
+
+function editTaskInline(container, contentDiv, memo) {
+  if (container.querySelector('textarea')) return;
+  const ta = el('textarea', { class: 'edit-area', attrs: { rows: '3' } });
   ta.value = memo.content;
-  note.appendChild(ta);
+  contentDiv.replaceWith(ta);
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
   const save = async () => {
     const content = ta.value.trim();
-    if (!content || content === memo.content) { renderMemos(); return; }
-    await api(`/api/memos/${memo.id}`, { method: 'PUT', body: JSON.stringify({ content }) });
-    await loadAll();
+    if (!content || content === memo.content) { renderAll(); return; }
+    await patchMemo(memo.id, { content });
   };
   ta.addEventListener('blur', save);
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
-    if (e.key === 'Escape') { ta.removeEventListener('blur', save); renderMemos(); }
+    if (e.key === 'Escape') { ta.removeEventListener('blur', save); renderAll(); }
   });
 }
+
+function renderBoard() {
+  const board = document.getElementById('memo-board');
+  board.innerHTML = '';
+
+  const searchActive = !!parseSearch().q;
+  const allMemos = visibleMemos().filter(m => {
+    if (searchActive) return true;
+    if (state.memoProject === 'all') return true;
+    if (state.memoProject === 'inbox') return !m.project_id;
+    return m.project_id === state.memoProject;
+  });
+  const todayD = dateStr(new Date());
+
+  const title = el('div', { attrs: { id: 'board-title' } });
+  if (state.memoProject === 'all') {
+    title.appendChild(el('span', { text: '📝 Tous les mémos' }));
+  } else if (state.memoProject === 'inbox') {
+    title.appendChild(el('span', { text: '📥 Inbox' }));
+  } else {
+    const proj = state.projects.find(p => p.id === state.memoProject);
+    if (proj) {
+      const dot = el('span', { class: 'cat-dot' });
+      dot.style.background = proj.color || 'var(--gray)';
+      title.appendChild(dot);
+      title.appendChild(el('span', { text: proj.name }));
+    }
+  }
+  board.appendChild(title);
+
+  const { scope: sScope, q: sQ } = parseSearch();
+  if (sQ && sScope !== 'links') {
+    const projs = matchingProjects(sQ);
+    if (projs.length) {
+      const wrap = el('div', { class: 'memo-section' });
+      const h = el('h2', { text: 'PROJETS ' });
+      h.appendChild(el('span', { class: 'sec-count', text: `(${projs.length})` }));
+      wrap.appendChild(h);
+      projs.forEach(p => {
+        const row = el('div', {
+          class: 'task',
+          attrs: { style: 'cursor:pointer', title: 'Ouvrir le projet' },
+          on: { click: () => {
+            state.memoProject = p.id;
+            state.search = '';
+            searchInput.value = '';
+            document.getElementById('search-scope').classList.remove('scoped');
+            renderAll();
+          } },
+        });
+        const r1 = el('div', { class: 'task-row', attrs: { style: 'align-items:center' } });
+        const dot = el('span', { class: 'cat-dot' });
+        dot.style.background = p.color || 'var(--gray)';
+        r1.appendChild(dot);
+        r1.appendChild(el('span', { class: 'task-content', text: p.name }));
+        const badges = el('div', { class: 'task-badges' });
+        (p.tags || '').split(/\s+/).filter(Boolean).forEach(t =>
+          badges.appendChild(el('span', { class: 'tag-chip', text: '#' + t })));
+        badges.appendChild(el('span', { class: 'badge', text: `${p.memo_count} mémo${p.memo_count > 1 ? 's' : ''}` }));
+        r1.appendChild(badges);
+        row.appendChild(r1);
+        wrap.appendChild(row);
+      });
+      board.appendChild(wrap);
+    }
+  }
+
+  const activeTag = tagQuery();
+  if (activeTag && sScope !== 'projects') {
+    const taggedLinks = state.links.filter(l => (l.tags || '').split(/\s+/).includes(activeTag));
+    if (taggedLinks.length) {
+      const banner = el('div', { class: 'detail-row', attrs: { style: 'margin-bottom:1rem' } });
+      banner.appendChild(el('span', { text: '🔗' }));
+      banner.appendChild(el('button', {
+        class: 'prio-btn',
+        text: `Voir ${taggedLinks.length} lien${taggedLinks.length > 1 ? 's' : ''} avec #${activeTag}`,
+        on: { click: () => { state.view = 'links'; state.filterCat = 'all'; renderAll(); loadStatus(); } },
+      }));
+      board.appendChild(banner);
+    }
+  }
+
+  const counts = {
+    all: allMemos.filter(m => !m.done).length,
+    overdue: allMemos.filter(m => !m.done && m.due_date && m.due_date < todayD).length,
+    today: allMemos.filter(m => !m.done && m.due_date === todayD).length,
+    scheduled: allMemos.filter(m => !m.done && m.due_date && m.due_date > todayD).length,
+    done: allMemos.filter(m => m.done).length,
+  };
+  const filters = el('div', { attrs: { id: 'memo-filters' } });
+  [
+    ['all', 'f-inbox', '📥', 'En cours'],
+    ['today', 'f-today', '⭐', "Aujourd'hui"],
+    ['scheduled', 'f-scheduled', '📅', 'Planifiés'],
+    ['overdue', 'f-overdue', '⚠️', 'En retard'],
+    ['done', 'f-done', '✅', 'Terminés'],
+  ].forEach(([key, cls, icon, label]) => {
+    const tile = el('div', {
+      class: 'mfilter ' + cls + (state.memoFilter === key ? ' active' : ''),
+      on: { click: () => { state.memoFilter = key; renderBoard(); } },
+    });
+    const top = el('div', { class: 'mf-top' });
+    top.appendChild(el('span', { class: 'mf-icon', text: icon }));
+    top.appendChild(el('span', { class: 'mf-count', text: String(counts[key]) }));
+    tile.appendChild(top);
+    tile.appendChild(el('span', { class: 'mf-label', text: label }));
+    filters.appendChild(tile);
+  });
+  board.appendChild(filters);
+
+  const addBar = el('div', { attrs: { id: 'memo-add-bar' } });
+  const txt = el('input', { attrs: { type: 'text', placeholder: '+ Nouveau mémo… (Entrée pour ajouter)' } });
+  const dateIn = el('input', { attrs: { type: 'date', title: 'Échéance (optionnelle)' } });
+  const prioSel = el('select', { attrs: { title: 'Priorité' } });
+  ['Priorité', '🚩 P1', '🚩 P2', '🚩 P3'].forEach((label, p) => {
+    prioSel.appendChild(el('option', { attrs: { value: p }, text: label }));
+  });
+  const projSel = el('select', { attrs: { title: 'Projet' } });
+  projSel.appendChild(el('option', { attrs: { value: '' }, text: '📥 Inbox' }));
+  state.projects.forEach(p => {
+    const opt = el('option', { attrs: { value: p.id }, text: p.name });
+    if (state.memoProject === p.id) opt.selected = true;
+    projSel.appendChild(opt);
+  });
+  const addBtn = el('button', { class: 'primary', text: 'Ajouter' });
+  const submit = async () => {
+    const content = txt.value.trim();
+    if (!content) return;
+    await api('/api/memos', {
+      method: 'POST',
+      body: JSON.stringify({
+        content,
+        due_date: dateIn.value,
+        priority: Number(prioSel.value),
+        project_id: projSel.value ? Number(projSel.value) : null,
+      }),
+    });
+    txt.value = ''; dateIn.value = ''; prioSel.value = '0';
+    await loadAll();
+  };
+  txt.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+  addBtn.addEventListener('click', submit);
+  addBar.appendChild(txt);
+  addBar.appendChild(dateIn);
+  addBar.appendChild(prioSel);
+  addBar.appendChild(projSel);
+  addBar.appendChild(addBtn);
+  board.appendChild(addBar);
+
+  const memos = allMemos;
+  const pending = memos.filter(m => !m.done);
+  const done = memos.filter(m => m.done);
+  const today = todayD;
+
+  let sections = [
+    { key: 'sec-overdue', filter: 'overdue', title: 'EN RETARD', items: pending.filter(m => m.due_date && m.due_date < today) },
+    { key: 'sec-today', filter: 'today', title: "AUJOURD'HUI", items: pending.filter(m => m.due_date === today) },
+    { key: 'sec-upcoming', filter: 'scheduled', title: 'À VENIR', items: pending.filter(m => m.due_date && m.due_date > today) },
+    { key: 'sec-nodate', filter: null, title: 'SANS DATE', items: pending.filter(m => !m.due_date) },
+  ];
+
+  if (state.memoFilter === 'done') {
+    const wrap = el('div', { class: 'memo-section' });
+    const h = el('h2', { text: `TERMINÉS (${done.length}) ` });
+    if (done.length) {
+      h.appendChild(el('button', {
+        attrs: { id: 'clear-done', title: 'Supprimer tous les mémos terminés' },
+        text: 'Tout effacer',
+        on: { click: async () => {
+          if (!(await confirmPopin(`Supprimer définitivement ${done.length} mémo(s) terminé(s) ?`, { okLabel: 'Tout effacer' }))) return;
+          for (const m of done) await api(`/api/memos/${m.id}`, { method: 'DELETE' });
+          await loadAll();
+        } },
+      }));
+    }
+    wrap.appendChild(h);
+    if (!done.length) wrap.appendChild(el('div', { class: 'empty', text: 'Aucun mémo terminé.' }));
+    done.forEach(m => wrap.appendChild(taskEl(m)));
+    board.appendChild(wrap);
+    return;
+  }
+
+  if (state.memoFilter !== 'all') {
+    sections = sections.filter(s => s.filter === state.memoFilter);
+    if (!sections[0] || !sections[0].items.length) {
+      board.appendChild(el('div', { class: 'empty', text: 'Rien ici. 🎉' }));
+      return;
+    }
+  } else if (pending.length === 0 && done.length === 0) {
+    board.appendChild(el('div', { class: 'empty', text: state.search ? 'Aucun résultat.' : 'Aucun mémo. Ajoute ta première note ci-dessus.' }));
+    return;
+  }
+
+  sections.forEach(sec => {
+    if (!sec.items.length) return;
+    const wrap = el('div', { class: 'memo-section ' + sec.key });
+    const h = el('h2', { text: sec.title + ' ' });
+    h.appendChild(el('span', { class: 'sec-count', text: `(${sec.items.length})` }));
+    wrap.appendChild(h);
+    sec.items.forEach(m => wrap.appendChild(taskEl(m)));
+    board.appendChild(wrap);
+  });
+
+  if (state.memoFilter === 'all' && done.length) {
+    const details = el('details', { attrs: { id: 'done-section' } });
+    if (doneOpen) details.setAttribute('open', '');
+    const summary = el('summary', { text: `TERMINÉS (${done.length})` });
+    const clearBtn = el('button', {
+      attrs: { id: 'clear-done', title: 'Supprimer tous les mémos terminés' },
+      text: 'Tout effacer',
+      on: { click: async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!(await confirmPopin(`Supprimer définitivement ${done.length} mémo(s) terminé(s) ?`, { okLabel: 'Tout effacer' }))) return;
+        for (const m of done) await api(`/api/memos/${m.id}`, { method: 'DELETE' });
+        await loadAll();
+      } },
+    });
+    summary.appendChild(clearBtn);
+    details.appendChild(summary);
+    done.forEach(m => details.appendChild(taskEl(m)));
+    details.addEventListener('toggle', () => { doneOpen = details.open; });
+    board.appendChild(details);
+  }
+}
+
+document.getElementById('memo-board').addEventListener('drop', async (e) => {
+  e.preventDefault();
+  if (!dragMemoId) return;
+  const visibleIds = [...document.querySelectorAll('#memo-board .task')].map(n => Number(n.dataset.memoId));
+  const globalIds = state.memos.map(m => m.id);
+  const visibleSet = new Set(visibleIds);
+  let vi = 0;
+  const merged = globalIds.map(id => visibleSet.has(id) ? visibleIds[vi++] : id);
+  await api('/api/memos/reorder', { method: 'POST', body: JSON.stringify({ ids: merged }) });
+  await loadAll();
+});
+document.getElementById('memo-board').addEventListener('dragover', (e) => { if (dragMemoId) e.preventDefault(); });
+
+/* ------------------------------------------------ mémos : colonne résumé */
+
+function renderMemos() {
+  const wrap = document.getElementById('memos');
+  wrap.innerHTML = '';
+  const pending = visibleMemos().filter(m => !m.done);
+  const doneCount = state.memos.filter(m => m.done).length;
+  document.getElementById('memo-count').textContent = pending.length ? `(${pending.length})` : '';
+  pending.forEach((memo) => {
+    const prioCls = memo.priority >= 1 && memo.priority <= 3 ? ` mp${memo.priority}` : '';
+    const note = el('div', {
+      class: 'memo-note' + prioCls,
+      attrs: { 'data-memo-id': memo.id, title: 'Ouvrir dans la vue Mémos' },
+    });
+    const plain = stripHTML(memo.content);
+    note.appendChild(el('span', { text: plain.length > 120 ? plain.slice(0, 118) + '…' : plain }));
+    const due = dueInfo(memo.due_date);
+    const extras = [];
+    if (due) extras.push('📅 ' + due.label);
+    if ((memo.images || []).length) extras.push('📎 ' + memo.images.length);
+    if (extras.length) note.appendChild(el('span', { class: 'mini-due ' + (due ? due.cls : 'due-future'), text: extras.join('  ') }));
+    note.addEventListener('click', () => {
+      state.view = 'memos';
+      expandedMemos.add(memo.id);
+      renderAll();
+    });
+    wrap.appendChild(note);
+  });
+  if (doneCount) {
+    wrap.appendChild(el('div', {
+      class: 'empty', text: `${doneCount} terminé${doneCount > 1 ? 's' : ''}`,
+      attrs: { style: 'font-size:0.75rem' },
+    }));
+  }
+}
+
+document.getElementById('memo-details').querySelector('summary').addEventListener('click', (e) => {
+  if (window.matchMedia('(min-width: 901px)').matches) {
+    e.preventDefault();
+    state.view = 'memos';
+    renderAll();
+  }
+});
 
 const memoQuick = document.getElementById('memo-quick');
 memoQuick.addEventListener('keydown', async (e) => {
@@ -794,14 +2063,38 @@ memoQuick.addEventListener('keydown', async (e) => {
 /* ------------------------------------------------ search */
 
 const searchInput = document.getElementById('search');
+const searchScopeSel = document.getElementById('search-scope');
+
+function refreshSearch() {
+  const { scope, q } = parseSearch();
+  searchScopeSel.value = scope;
+  searchScopeSel.classList.toggle('scoped', scope !== 'all');
+  if (q && scope === 'projects' && state.view !== 'memos') {
+    state.view = 'memos';
+    renderAll();
+    return;
+  }
+  if (state.view === 'memos') {
+    renderSidebar();
+    renderBoard();
+  } else {
+    renderSidebar();
+    renderLinks();
+    loadStatus();
+  }
+  renderMemos();
+}
+
 searchInput.addEventListener('input', () => {
   state.search = searchInput.value;
-  renderLinks();
-  renderMemos();
-  loadStatus();
+  refreshSearch();
+});
+searchScopeSel.addEventListener('change', () => {
+  state.searchScope = searchScopeSel.value;
+  refreshSearch();
 });
 searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && state.view === 'links') {
     const first = visibleLinks()[0];
     if (first) {
       const url = first.url_public || first.url_local;
@@ -811,8 +2104,8 @@ searchInput.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     searchInput.value = '';
     state.search = '';
-    renderLinks();
-    renderMemos();
+    searchScopeSel.classList.toggle('scoped', state.searchScope !== 'all');
+    renderAll();
     searchInput.blur();
   }
 });
@@ -877,7 +2170,7 @@ function fillCategorySelect(selected) {
 function openDialog(link = null) {
   document.getElementById('dialog-title').textContent = link ? 'Éditer le lien' : 'Nouveau lien';
   form.reset();
-  const defaultCat = (state.filterCat !== 'all' && state.filterCat !== 'none') ? state.filterCat : null;
+  const defaultCat = (state.view === 'links' && state.filterCat !== 'all' && state.filterCat !== 'none') ? state.filterCat : null;
   fillCategorySelect(link ? link.category_id : defaultCat);
   if (link) {
     form.elements.id.value = link.id;
@@ -885,6 +2178,7 @@ function openDialog(link = null) {
     form.elements.descr.value = link.descr || '';
     form.elements.url_public.value = link.url_public || '';
     form.elements.url_local.value = link.url_local || '';
+    form.elements.tags.value = (link.tags || '').split(/\s+/).filter(Boolean).map(t => '#' + t).join(' ');
     form.elements.memo.value = link.memo || '';
   } else {
     form.elements.id.value = '';
@@ -899,6 +2193,7 @@ form.addEventListener('submit', async (e) => {
     descr: form.elements.descr.value.trim(),
     url_public: form.elements.url_public.value.trim(),
     url_local: form.elements.url_local.value.trim(),
+    tags: form.elements.tags.value.trim(),
     memo: form.elements.memo.value,
     category_id: form.elements.category_id.value ? Number(form.elements.category_id.value) : null,
   };
@@ -920,6 +2215,7 @@ document.getElementById('add-link').addEventListener('click', () => openDialog()
 const settingsDialog = document.getElementById('settings-dialog');
 document.getElementById('settings-btn').addEventListener('click', () => {
   renderCatManage();
+  renderProjManage();
   settingsDialog.showModal();
 });
 document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
@@ -933,22 +2229,23 @@ function renderCatManage() {
   }
   state.categories.forEach((cat, idx) => {
     const row = el('div', { class: 'cat-manage-row' });
-    row.appendChild(el('span', { text: catEmoji(idx) }));
+    const colorIn = el('input', { attrs: { type: 'color', title: 'Couleur de la catégorie' } });
+    colorIn.value = cat.color || '#4fc3f7';
+    colorIn.addEventListener('change', async () => {
+      await api(`/api/categories/${cat.id}`, { method: 'PUT', body: JSON.stringify({ color: colorIn.value }) });
+      await loadAll();
+      renderCatManage();
+    });
+    row.appendChild(colorIn);
     row.appendChild(el('span', { class: 'grow', text: `${cat.name} (${cat.link_count})` }));
     row.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Renommer' },
-      on: { click: async () => {
-        const name = prompt('Nouveau nom :', cat.name);
-        if (!name || !name.trim() || name.trim() === cat.name) return;
-        await api(`/api/categories/${cat.id}`, { method: 'PUT', body: JSON.stringify({ name: name.trim() }) });
-        await loadAll();
-        renderCatManage();
-      } },
+      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      on: { click: () => openCreateDialog('category', cat) },
     }));
     row.appendChild(el('button', {
       text: '×', attrs: { title: 'Supprimer (les liens deviennent sans catégorie)' },
       on: { click: async () => {
-        if (!confirm(`Supprimer la catégorie « ${cat.name} » ? Les liens ne seront pas supprimés.`)) return;
+        if (!(await confirmPopin(`Supprimer la catégorie « ${cat.name} » ?\nLes liens ne seront pas supprimés.`))) return;
         await api(`/api/categories/${cat.id}`, { method: 'DELETE' });
         await loadAll();
         renderCatManage();
@@ -957,6 +2254,43 @@ function renderCatManage() {
     wrap.appendChild(row);
   });
   const addBtn = el('button', { text: '+ Catégorie', on: { click: async () => { await addCategory(); renderCatManage(); } } });
+  addBtn.style.marginTop = '0.5rem';
+  wrap.appendChild(addBtn);
+}
+
+function renderProjManage() {
+  const wrap = document.getElementById('proj-manage');
+  wrap.innerHTML = '';
+  if (state.projects.length === 0) {
+    wrap.appendChild(el('div', { class: 'empty', text: 'Aucun projet.' }));
+  }
+  state.projects.forEach((proj) => {
+    const row = el('div', { class: 'cat-manage-row' });
+    const colorIn = el('input', { attrs: { type: 'color', title: 'Couleur du projet' } });
+    colorIn.value = proj.color || '#607d8b';
+    colorIn.addEventListener('change', async () => {
+      await api(`/api/projects/${proj.id}`, { method: 'PUT', body: JSON.stringify({ color: colorIn.value }) });
+      await loadAll();
+      renderProjManage();
+    });
+    row.appendChild(colorIn);
+    row.appendChild(el('span', { class: 'grow', text: `${proj.name} (${proj.memo_count})` }));
+    row.appendChild(el('button', {
+      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      on: { click: () => openCreateDialog('project', proj) },
+    }));
+    row.appendChild(el('button', {
+      text: '×', attrs: { title: "Supprimer (les mémos retournent dans l'Inbox)" },
+      on: { click: async () => {
+        if (!(await confirmPopin(`Supprimer le projet « ${proj.name} » ?\nLes mémos retournent dans l'Inbox.`))) return;
+        await api(`/api/projects/${proj.id}`, { method: 'DELETE' });
+        await loadAll();
+        renderProjManage();
+      } },
+    }));
+    wrap.appendChild(row);
+  });
+  const addBtn = el('button', { text: '+ Projet', on: { click: async () => { await addProject(); renderProjManage(); } } });
   addBtn.style.marginTop = '0.5rem';
   wrap.appendChild(addBtn);
 }
@@ -984,21 +2318,24 @@ importFile.addEventListener('change', async (e) => {
     const data = JSON.parse(text);
     const nLinks = Array.isArray(data.links) ? data.links.length : 0;
     const nMemos = Array.isArray(data.memos) ? data.memos.length : 0;
-    if (!nLinks && !nMemos) { alert('Aucun lien ni mémo trouvé dans le fichier.'); return; }
+    if (!nLinks && !nMemos) { await notify('Aucun lien ni mémo trouvé dans le fichier.', { error: true }); return; }
     const parts = [];
     if (nLinks) parts.push(`${nLinks} lien${nLinks > 1 ? 's' : ''}`);
     if (nMemos) parts.push(`${nMemos} mémo${nMemos > 1 ? 's' : ''}`);
-    if (!confirm(`Importer ${parts.join(' et ')} ? (doublons ignorés, éléments connus mis à jour si plus récents)`)) return;
+    if (!(await confirmPopin(
+      `Importer ${parts.join(' et ')} ?\nDoublons ignorés, éléments connus mis à jour si plus récents.`,
+      { title: '⬆ Import', okLabel: 'Importer', danger: false }
+    ))) return;
     const result = await api('/api/import', { method: 'POST', body: JSON.stringify(data) });
     const updated = (result.updated || 0) + (result.updated_memos || 0);
     const skipped = (result.skipped || 0) + (result.skipped_memos || 0);
-    let msg = `Import terminé : ${result.imported} lien(s), ${result.imported_memos} mémo(s) ajoutés`;
+    let msg = `${result.imported} lien(s), ${result.imported_memos} mémo(s) ajoutés`;
     if (updated) msg += `, ${updated} mis à jour`;
     if (skipped) msg += `, ${skipped} doublon(s) ignoré(s)`;
-    alert(msg + '.');
+    await notify(msg + '.', { title: '⬆ Import terminé' });
     await loadAll();
   } catch (err) {
-    alert("Erreur d'import : " + err.message);
+    await notify("Erreur d'import : " + err.message, { error: true });
   } finally {
     e.target.value = '';
   }

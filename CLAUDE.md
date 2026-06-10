@@ -11,16 +11,17 @@ Dashboard perso auto-hébergé sur un Zimaboard (page d'accueil navigateur) : li
 - **`app.py`** : tout le backend. Flask + SQLite, pas d'ORM, pas de blueprint. La migration de schéma est dans `init_db()` (ALTER TABLE additifs + backfill, jamais destructif — ne JAMAIS dropper de colonne ou de données).
 - **`templates/index.html`** : tout le frontend en un seul fichier (CSS + HTML + JS vanilla, pas de framework, pas de build). Layout "3 zones" : sidebar catégories / cards / colonne mémos.
 - **`data/dashboard.db`** : SQLite, monté en volume Docker. Contient les vraies données de l'utilisateur — ne jamais la modifier ou supprimer dans un commit.
+- **`data/uploads/`** : images des mémos (noms `uuid4().hex.ext`, validés par regex côté serveur). Même volume Docker, même règle : ne jamais y toucher dans un commit. Le JSON d'export ne contient que les noms de fichiers.
 - Déploiement : `docker compose up -d --build` (gunicorn, port 8099, derrière Caddy + Authelia en prod).
 
 ## Invariants à respecter
 
-1. **Compat ascendante des sauvegardes** : `/api/import` doit toujours accepter les exports v1 (liens seuls), v2 (+ catégories/mémos) et v3 (+ uid/dates). Toute évolution du format incrémente `version` dans l'export et reste importable.
+1. **Compat ascendante des sauvegardes** : `/api/import` doit toujours accepter les exports v1 (liens seuls), v2 (+ catégories/mémos), v3 (+ uid/dates), v4 (+ done/due_date/priority/subtasks sur les mémos, color sur les catégories), v5 (+ projets de mémos, rattachés par nom), v6 (+ images sur les mémos, noms de fichiers seulement), v7 (+ tags sur les liens, normalisés minuscules sans #) et v8 (+ tags sur les projets). Toute évolution du format incrémente `version` dans l'export et reste importable.
 2. **L'import n'est jamais destructif** : il ajoute, met à jour (uid identique + `updated_at` plus récent) ou enrichit les champs vides (match nom+URLs sans uid). Il ne supprime ni n'écrase jamais un champ rempli avec une donnée plus ancienne.
 3. **`uid`** : UUID stable qui suit chaque lien/mémo à travers exports/imports. Généré à la création et backfillé par `init_db()`. Ne jamais le régénérer pour une ligne existante.
 4. **Les URLs locales** (`192.168.1.x`) servent au check de statut ET à la récupération des favicons côté serveur (contournement d'Authelia). Le cache favicon (`_favicon_cache`, en mémoire) doit être invalidé quand les URLs d'un lien changent.
 5. **Pas d'auth dans l'app** : la sécurité est assurée par le reverse proxy. Ne pas ajouter de login.
-6. **Un seul fichier HTML** : pas de séparation CSS/JS, pas de dépendance front externe (sauf les deux appels réseau existants : open-meteo et icons.duckduckgo.com en fallback).
+6. **Un seul fichier HTML** : pas de séparation CSS/JS du code maison, pas de build. Dépendances front autorisées uniquement si **auto-hébergées dans `static/`** (actuellement : Quill 2 pour l'édition riche des mémos — l'UI doit dégrader proprement en textarea si le fichier manque). Pas de CDN au runtime, sauf les deux appels existants : open-meteo et icons.duckduckgo.com en fallback favicon.
 
 ## Comment tester avant de commit
 
@@ -45,6 +46,7 @@ DB_PATH=/tmp/test.db flask --app app run -p 8099
 
 - **v1 (origine)** : liste de liens à plat, 2 URLs par lien, statut, mémo par lien, export/import basique.
 - **Juin 2026 — refonte "3 zones"** : catégories (table + sidebar + drag & drop), mémos indépendants (table `memos`, colonne post-its), recherche instantanée (`/`), favicons via serveur, horloge + météo, panneau Paramètres (export/import/gestion catégories), responsive mobile, import anti-doublons puis import avec `uid` + dates (mise à jour des éléments connus au lieu de dupliquer).
+- **Juin 2026 — vue Mémos façon Planify** : page dédiée (sidebar → Mémos) avec tuiles de filtres, sections par échéance (En retard / Aujourd'hui / À venir / Sans date / Terminés repliable), cases à cocher, priorités P1-P3, sous-tâches JSON, liens cliquables, couleurs de catégories (export v4), puis projets de mémos avec Inbox, couleurs et drag & drop depuis la sidebar (export v5), puis images sur les mémos (upload dans `data/uploads/`, miniatures + visionneuse, export v6), puis tags `#` reliant liens et mémos + pop-in de création projet/catégorie avec couleur (export v7), puis tags sur les projets + recherche scopée (sélecteur Tout/Liens/Mémos/Projets + préfixes `p#` `l#` `m#`) et remplacement de tous les confirm/alert natifs par des pop-ins (export v8).
 
 ## Backlog
 
