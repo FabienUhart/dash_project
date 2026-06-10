@@ -17,6 +17,7 @@
   --yellow: #ffc107;
   --gray: #607d8b;
   --border: #2d3742;
+  --memo-bg: #2e2a1f;
 }
 * { box-sizing: border-box; }
 body {
@@ -26,24 +27,62 @@ body {
   color: var(--text);
   min-height: 100vh;
 }
+
+/* ---------- header ---------- */
 header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 1rem 1.5rem;
+  padding: 0.6rem 1.25rem;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 10;
+  flex-wrap: wrap;
 }
-header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+#search-wrap {
+  flex: 1;
+  max-width: 340px;
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+}
+#search-wrap:focus-within { border-color: var(--accent); }
+#search {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  min-width: 0;
+}
+#search-wrap kbd {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
 header .spacer { flex: 1; }
+#clock-wrap { text-align: right; line-height: 1.2; }
+#clock { font-size: 1.05rem; font-weight: 600; }
+#clock-date { font-size: 0.72rem; color: var(--muted); }
+#weather { font-size: 0.72rem; color: var(--muted); }
+
 button {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
-  padding: 0.5rem 0.9rem;
+  padding: 0.45rem 0.8rem;
   border-radius: 6px;
   cursor: pointer;
   font: inherit;
@@ -51,10 +90,49 @@ button {
 button:hover { background: #2d3742; }
 button.primary { background: var(--accent); color: #001; border-color: var(--accent); }
 button.primary:hover { background: #6fcef9; }
-main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+button.icon { padding: 0.45rem 0.6rem; }
+
+/* ---------- layout ---------- */
+.layout { display: flex; min-height: calc(100vh - 57px); }
+
+nav#sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 0.75rem 0.5rem;
+}
+.cat-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 2px;
+  user-select: none;
+}
+.cat-item:hover { background: var(--panel-2); color: var(--text); }
+.cat-item.active { background: var(--panel-2); color: var(--accent); }
+.cat-item.drop-target { outline: 1px dashed var(--accent); color: var(--accent); }
+.cat-item .count { margin-left: auto; font-size: 0.75rem; opacity: 0.7; }
+.cat-item .emoji { width: 1.1rem; text-align: center; }
+#add-cat {
+  margin-top: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  color: var(--gray);
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+}
+#add-cat:hover { color: var(--accent); }
+
+main { flex: 1; padding: 1.25rem; min-width: 0; }
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 0.75rem;
   list-style: none;
   padding: 0;
@@ -64,56 +142,77 @@ main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0.9rem 1rem;
+  padding: 0.8rem 0.9rem;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.35rem;
   transition: border-color 0.15s;
+  cursor: grab;
 }
 .card:hover { border-color: var(--accent); }
-.card .name {
-  font-weight: 600;
-  font-size: 1.05rem;
-  color: var(--text);
+.card.dragging { opacity: 0.4; }
+.card .title-row { display: flex; align-items: center; gap: 0.5rem; }
+.favicon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+.favicon-letter {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: var(--panel-2);
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.card .name { font-weight: 600; font-size: 1rem; }
+.card .cat-tag {
+  margin-left: auto;
+  font-size: 0.65rem;
+  color: var(--muted);
+  background: var(--panel-2);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 .card .descr { color: var(--muted); font-size: 0.85rem; }
 .card .memo {
   background: var(--panel-2);
   border-left: 2px solid var(--accent);
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
-  color: var(--text);
+  padding: 0.35rem 0.55rem;
+  font-size: 0.82rem;
   font-style: italic;
-  border-radius: 0 4px 4px 0;
+  border-radius: 0;
   white-space: pre-wrap;
 }
-.url-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.25rem; }
+.url-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.2rem; }
 .url-link {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.35rem 0.65rem;
+  padding: 0.3rem 0.6rem;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 4px;
   text-decoration: none;
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
 }
 .url-link:hover { border-color: var(--accent); background: #2d3742; }
-.card .actions {
-  display: flex;
-  gap: 0.25rem;
-  margin-top: 0.4rem;
-}
-.card .actions button {
-  padding: 0.2rem 0.5rem;
-  font-size: 0.8rem;
-}
+.card .actions { display: flex; gap: 0.25rem; margin-top: 0.3rem; opacity: 0; transition: opacity 0.15s; }
+.card:hover .actions { opacity: 1; }
+.card .actions button { padding: 0.15rem 0.45rem; font-size: 0.78rem; }
 .status-dot {
   display: inline-block;
-  width: 0.65rem;
-  height: 0.65rem;
+  width: 0.6rem;
+  height: 0.6rem;
   border-radius: 50%;
   background: var(--gray);
   flex-shrink: 0;
@@ -122,10 +221,79 @@ main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
 .status-offline { background: var(--red); }
 .status-checking { background: var(--yellow); animation: pulse 1s infinite; }
 .status-unknown { background: var(--gray); }
-@keyframes pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+@keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+.empty { color: var(--muted); font-style: italic; padding: 0.5rem 0; list-style: none; }
+
+/* ---------- memos panel ---------- */
+aside#memo-panel {
+  width: 250px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  padding: 0.75rem;
 }
+#memo-details summary {
+  list-style: none;
+  cursor: default;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.6rem;
+  user-select: none;
+}
+#memo-details summary::-webkit-details-marker { display: none; }
+.memo-note {
+  background: var(--memo-bg);
+  border-left: 2px solid var(--yellow);
+  border-radius: 0;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.45rem;
+  white-space: pre-wrap;
+  position: relative;
+  cursor: grab;
+  word-break: break-word;
+}
+.memo-note.dragging { opacity: 0.4; }
+.memo-note .memo-del {
+  position: absolute;
+  top: 0.15rem;
+  right: 0.3rem;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0 0.2rem;
+  opacity: 0;
+}
+.memo-note:hover .memo-del { opacity: 1; }
+.memo-note .memo-del:hover { color: var(--red); background: none; }
+.memo-note textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  padding: 0.3rem;
+  resize: vertical;
+}
+#memo-quick {
+  width: 100%;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.6rem;
+  resize: none;
+  outline: none;
+}
+#memo-quick:focus { border-color: var(--yellow); border-style: solid; }
+
+/* ---------- dialogs ---------- */
 dialog {
   background: var(--panel);
   color: var(--text);
@@ -138,33 +306,89 @@ dialog::backdrop { background: rgba(0,0,0,0.7); }
 dialog h3 { margin: 0 0 1rem; }
 dialog form { display: flex; flex-direction: column; gap: 0.75rem; }
 dialog label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
-dialog input, dialog textarea {
+dialog input, dialog textarea, dialog select {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.5rem;
   font: inherit;
-  font-family: inherit;
   resize: vertical;
 }
 dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem; }
-.empty { color: var(--muted); font-style: italic; padding: 0.5rem 0; }
+.settings-section { margin-bottom: 1.25rem; }
+.settings-section h4 { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--muted); letter-spacing: 0.04em; }
+.settings-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.cat-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  font-size: 0.9rem;
+}
+.cat-manage-row .grow { flex: 1; }
+.cat-manage-row button { padding: 0.15rem 0.45rem; font-size: 0.78rem; }
+
+/* ---------- mobile ---------- */
+@media (max-width: 900px) {
+  .layout { flex-direction: column; }
+  nav#sidebar {
+    width: 100%;
+    display: flex;
+    overflow-x: auto;
+    padding: 0.5rem 0.75rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    gap: 0.3rem;
+  }
+  .cat-item { flex-shrink: 0; margin-bottom: 0; padding: 0.35rem 0.7rem; }
+  .cat-item .count { margin-left: 0.3rem; }
+  #add-cat { border-top: none; margin-top: 0; flex-shrink: 0; padding: 0.35rem 0.5rem; }
+  aside#memo-panel {
+    width: 100%;
+    order: -1;
+    border-left: none;
+    border-bottom: 1px solid var(--border);
+  }
+  #memo-details summary { cursor: pointer; }
+  #memo-details summary::before { content: "▸ "; }
+  #memo-details[open] summary::before { content: "▾ "; }
+  #clock-date, #weather { display: none; }
+  main { padding: 0.75rem; }
+}
 </style>
 </head>
 <body>
 <header>
   <h1>Dashboard</h1>
+  <div id="search-wrap">
+    <span style="color:var(--muted)">🔍</span>
+    <input id="search" type="text" placeholder="Rechercher liens et mémos…" autocomplete="off">
+    <kbd>/</kbd>
+  </div>
   <div class="spacer"></div>
-  <button id="export-btn" title="Télécharger une sauvegarde JSON">⬇ Export</button>
-  <button id="import-btn" title="Importer depuis un JSON">⬆ Import</button>
-  <input type="file" id="import-file" accept="application/json,.json" style="display:none">
-  <button id="refresh-status" title="Rafraîchir les statuts">↻</button>
+  <div id="clock-wrap">
+    <div id="clock">--:--</div>
+    <div id="clock-date"></div>
+  </div>
+  <div id="weather" title="Météo Bayonne"></div>
+  <button id="settings-btn" class="icon" title="Paramètres">⚙</button>
   <button id="add-link" class="primary">+ Ajouter</button>
 </header>
-<main>
-  <ul id="links" class="cards"></ul>
-</main>
+
+<div class="layout">
+  <nav id="sidebar"></nav>
+  <main>
+    <ul id="links" class="cards"></ul>
+  </main>
+  <aside id="memo-panel">
+    <details id="memo-details" open>
+      <summary>📝 MÉMOS <span id="memo-count"></span></summary>
+      <div id="memos"></div>
+      <textarea id="memo-quick" rows="2" placeholder="+ Note rapide… (Entrée pour ajouter)"></textarea>
+    </details>
+  </aside>
+</div>
 
 <dialog id="link-dialog">
   <h3 id="dialog-title">Nouveau lien</h3>
@@ -172,6 +396,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <input type="hidden" name="id">
     <label>Nom<input type="text" name="name" required></label>
     <label>Description<input type="text" name="descr"></label>
+    <label>Catégorie
+      <select name="category_id"></select>
+    </label>
     <label>🌐 URL publique<input type="text" name="url_public" placeholder="https://service.domain.tld"></label>
     <label>🔒 URL VPN / locale<input type="text" name="url_local" placeholder="http://192.168.1.x"></label>
     <label>Mémo<textarea name="memo" rows="3" placeholder="Notes, identifiants, rappels..."></textarea></label>
@@ -182,11 +409,43 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </form>
 </dialog>
 
-<script>
-const state = { links: [] };
+<dialog id="settings-dialog">
+  <h3>⚙ Paramètres</h3>
+  <div class="settings-section">
+    <h4>SAUVEGARDE</h4>
+    <div class="settings-row">
+      <button id="export-btn" title="Télécharge liens, catégories et mémos en JSON">⬇ Export JSON</button>
+      <button id="import-btn" title="Importe un JSON (anciennes sauvegardes acceptées)">⬆ Import JSON</button>
+      <input type="file" id="import-file" accept="application/json,.json" style="display:none">
+    </div>
+    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+      L'export contient les liens, les catégories et les mémos.
+      L'import accepte aussi les anciennes sauvegardes (liens seuls) et ajoute sans remplacer.
+    </p>
+  </div>
+  <div class="settings-section">
+    <h4>CATÉGORIES</h4>
+    <div id="cat-manage"></div>
+  </div>
+  <div class="settings-section">
+    <h4>STATUTS</h4>
+    <button id="refresh-status">↻ Rafraîchir les statuts</button>
+  </div>
+  <div class="actions">
+    <button id="settings-close" class="primary">Fermer</button>
+  </div>
+</dialog>
 
-const dialog = document.getElementById('link-dialog');
-const form = document.getElementById('link-form');
+<script>
+const state = {
+  links: [],
+  categories: [],
+  memos: [],
+  filterCat: 'all',
+  search: '',
+};
+
+const CAT_EMOJIS = ['📁', '🎬', '🏠', '🔧', '📄', '🎮', '💾', '🌐'];
 
 function el(tag, opts = {}, ...children) {
   const e = document.createElement(tag);
@@ -199,20 +458,234 @@ function el(tag, opts = {}, ...children) {
 }
 
 async function api(path, opts = {}) {
-  const r = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   if (r.status === 204) return null;
   return r.json();
 }
 
-async function loadLinks() {
-  state.links = await api('/api/links');
-  render();
+async function loadAll() {
+  [state.links, state.categories, state.memos] = await Promise.all([
+    api('/api/links'), api('/api/categories'), api('/api/memos'),
+  ]);
+  if (state.filterCat !== 'all' && state.filterCat !== 'none'
+      && !state.categories.some(c => c.id === state.filterCat)) {
+    state.filterCat = 'all';
+  }
+  renderAll();
   loadStatus();
 }
+
+function renderAll() {
+  renderSidebar();
+  renderLinks();
+  renderMemos();
+}
+
+/* ------------------------------------------------ sidebar */
+
+function catEmoji(idx) { return CAT_EMOJIS[(idx + 1) % CAT_EMOJIS.length]; }
+
+function renderSidebar() {
+  const nav = document.getElementById('sidebar');
+  nav.innerHTML = '';
+  const uncat = state.links.filter(l => !l.category_id).length;
+
+  const mkItem = (key, emoji, label, count) => {
+    const item = el('div', {
+      class: 'cat-item' + (state.filterCat === key ? ' active' : ''),
+      on: { click: () => { state.filterCat = key; renderAll(); } },
+    });
+    item.appendChild(el('span', { class: 'emoji', text: emoji }));
+    item.appendChild(el('span', { text: label }));
+    item.appendChild(el('span', { class: 'count', text: String(count) }));
+    return item;
+  };
+
+  nav.appendChild(mkItem('all', '🗂', 'Tous', state.links.length));
+
+  state.categories.forEach((cat, idx) => {
+    const item = mkItem(cat.id, catEmoji(idx), cat.name, cat.link_count);
+    item.addEventListener('dragover', (e) => {
+      if (!dragLinkId) return;
+      e.preventDefault();
+      item.classList.add('drop-target');
+    });
+    item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+    item.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      item.classList.remove('drop-target');
+      if (!dragLinkId) return;
+      await api(`/api/links/${dragLinkId}`, {
+        method: 'PUT', body: JSON.stringify({ category_id: cat.id }),
+      });
+      await loadAll();
+    });
+    nav.appendChild(item);
+  });
+
+  if (uncat > 0 && state.categories.length > 0) {
+    const item = mkItem('none', '📦', 'Sans catégorie', uncat);
+    item.addEventListener('dragover', (e) => { if (dragLinkId) { e.preventDefault(); item.classList.add('drop-target'); } });
+    item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+    item.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      item.classList.remove('drop-target');
+      if (!dragLinkId) return;
+      await api(`/api/links/${dragLinkId}`, { method: 'PUT', body: JSON.stringify({ category_id: null }) });
+      await loadAll();
+    });
+    nav.appendChild(item);
+  }
+
+  nav.appendChild(el('div', {
+    attrs: { id: 'add-cat' }, text: '+ Catégorie',
+    on: { click: addCategory },
+  }));
+}
+
+async function addCategory() {
+  const name = prompt('Nom de la nouvelle catégorie :');
+  if (!name || !name.trim()) return;
+  try {
+    await api('/api/categories', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+    await loadAll();
+  } catch (e) { alert('Erreur : ' + e.message); }
+}
+
+/* ------------------------------------------------ links */
+
+function visibleLinks() {
+  let links = state.links;
+  const q = state.search.trim().toLowerCase();
+  if (q) {
+    return links.filter(l =>
+      (l.name || '').toLowerCase().includes(q) ||
+      (l.descr || '').toLowerCase().includes(q) ||
+      (l.memo || '').toLowerCase().includes(q) ||
+      (l.url_public || '').toLowerCase().includes(q) ||
+      (l.url_local || '').toLowerCase().includes(q)
+    );
+  }
+  if (state.filterCat === 'all') return links;
+  if (state.filterCat === 'none') return links.filter(l => !l.category_id);
+  return links.filter(l => l.category_id === state.filterCat);
+}
+
+function faviconEl(link) {
+  const letter = el('span', { class: 'favicon-letter', text: (link.name || '?')[0].toUpperCase() });
+  const sources = [`/api/favicon/${link.id}`];
+  let host = '';
+  try { host = new URL(link.url_public || '').hostname; } catch (_) {}
+  if (host && host.includes('.') && !/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    sources.push(`https://icons.duckduckgo.com/ip3/${host}.ico`);
+  }
+  const img = el('img', {
+    class: 'favicon',
+    attrs: { src: sources[0], alt: '', loading: 'lazy' },
+  });
+  let idx = 0;
+  img.addEventListener('error', () => {
+    idx += 1;
+    if (idx < sources.length) img.src = sources[idx];
+    else img.replaceWith(letter);
+  });
+  return img;
+}
+
+function urlLink(href, emoji, kind) {
+  const wrap = el('a', {
+    class: 'url-link',
+    attrs: { href, target: '_blank', rel: 'noopener noreferrer', title: href, 'data-kind': kind },
+  });
+  wrap.appendChild(el('span', { class: 'status-dot status-checking' }));
+  wrap.appendChild(el('span', { text: emoji }));
+  return wrap;
+}
+
+let dragLinkId = null;
+
+function renderLinks() {
+  const ul = document.getElementById('links');
+  ul.innerHTML = '';
+  const links = visibleLinks();
+  if (links.length === 0) {
+    const msg = state.search
+      ? 'Aucun résultat.'
+      : 'Aucun lien ici. Clique sur « + Ajouter » pour commencer.';
+    ul.appendChild(el('li', { class: 'empty', text: msg }));
+    return;
+  }
+  const catNames = Object.fromEntries(state.categories.map(c => [c.id, c.name]));
+  links.forEach((link) => {
+    const card = el('li', { class: 'card', attrs: { 'data-id': link.id, draggable: 'true' } });
+
+    const titleRow = el('div', { class: 'title-row' });
+    titleRow.appendChild(faviconEl(link));
+    titleRow.appendChild(el('span', { class: 'name', text: link.name }));
+    if (state.filterCat === 'all' && link.category_id && catNames[link.category_id]) {
+      titleRow.appendChild(el('span', { class: 'cat-tag', text: catNames[link.category_id] }));
+    }
+    card.appendChild(titleRow);
+
+    if (link.descr) card.appendChild(el('div', { class: 'descr', text: link.descr }));
+    if (link.memo) card.appendChild(el('div', { class: 'memo', text: link.memo }));
+
+    const urls = el('div', { class: 'url-links' });
+    if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
+    if (link.url_local) urls.appendChild(urlLink(link.url_local, '🔒', 'local'));
+    card.appendChild(urls);
+
+    const actions = el('div', { class: 'actions' });
+    actions.appendChild(el('button', { text: '✎', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
+    actions.appendChild(el('button', { text: '×', attrs: { title: 'Supprimer' }, on: { click: () => deleteLink(link.id) } }));
+    card.appendChild(actions);
+
+    card.addEventListener('dragstart', (e) => {
+      dragLinkId = link.id;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', () => {
+      dragLinkId = null;
+      card.classList.remove('dragging');
+    });
+    card.addEventListener('dragover', (e) => {
+      if (!dragLinkId || dragLinkId === link.id) return;
+      e.preventDefault();
+      const dragging = ul.querySelector('.card.dragging');
+      if (!dragging) return;
+      const rect = card.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      ul.insertBefore(dragging, before ? card : card.nextSibling);
+    });
+
+    ul.appendChild(card);
+  });
+}
+
+document.getElementById('links').addEventListener('drop', onLinksDrop);
+document.getElementById('links').addEventListener('dragover', (e) => { if (dragLinkId) e.preventDefault(); });
+
+async function onLinksDrop(e) {
+  e.preventDefault();
+  if (!dragLinkId) return;
+  const visibleIds = [...document.querySelectorAll('#links .card')].map(c => Number(c.dataset.id));
+  const globalIds = state.links.map(l => l.id);
+  const visibleSet = new Set(visibleIds);
+  let vi = 0;
+  const merged = globalIds.map(id => visibleSet.has(id) ? visibleIds[vi++] : id);
+  await api('/api/links/reorder', { method: 'POST', body: JSON.stringify({ ids: merged }) });
+  await loadAll();
+}
+
+async function deleteLink(id) {
+  if (!confirm('Supprimer ce lien ?')) return;
+  await api(`/api/links/${id}`, { method: 'DELETE' });
+  await loadAll();
+}
+
+/* ------------------------------------------------ status */
 
 async function loadStatus() {
   try {
@@ -225,90 +698,187 @@ async function loadStatus() {
         if (dot) dot.className = `status-dot status-${st}`;
       }
     }
-  } catch (e) {
-    console.error('status check failed', e);
+  } catch (e) { console.error('status check failed', e); }
+}
+
+/* ------------------------------------------------ memos */
+
+let dragMemoId = null;
+
+function visibleMemos() {
+  const q = state.search.trim().toLowerCase();
+  if (!q) return state.memos;
+  return state.memos.filter(m => m.content.toLowerCase().includes(q));
+}
+
+function renderMemos() {
+  const wrap = document.getElementById('memos');
+  wrap.innerHTML = '';
+  const memos = visibleMemos();
+  document.getElementById('memo-count').textContent = state.memos.length ? `(${state.memos.length})` : '';
+  memos.forEach((memo) => {
+    const note = el('div', { class: 'memo-note', attrs: { 'data-memo-id': memo.id, draggable: 'true', title: 'Cliquer pour éditer' } });
+    note.appendChild(el('span', { text: memo.content }));
+    note.appendChild(el('button', {
+      class: 'memo-del', text: '×', attrs: { title: 'Supprimer' },
+      on: { click: async (e) => {
+        e.stopPropagation();
+        if (!confirm('Supprimer ce mémo ?')) return;
+        await api(`/api/memos/${memo.id}`, { method: 'DELETE' });
+        await loadAll();
+      } },
+    }));
+    note.addEventListener('click', () => editMemoInline(note, memo));
+
+    note.addEventListener('dragstart', (e) => {
+      dragMemoId = memo.id;
+      note.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    note.addEventListener('dragend', () => { dragMemoId = null; note.classList.remove('dragging'); });
+    note.addEventListener('dragover', (e) => {
+      if (!dragMemoId || dragMemoId === memo.id) return;
+      e.preventDefault();
+      const dragging = wrap.querySelector('.memo-note.dragging');
+      if (!dragging) return;
+      const rect = note.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      wrap.insertBefore(dragging, before ? note : note.nextSibling);
+    });
+    wrap.appendChild(note);
+  });
+}
+
+document.getElementById('memos').addEventListener('drop', async (e) => {
+  e.preventDefault();
+  if (!dragMemoId) return;
+  const ids = [...document.querySelectorAll('#memos .memo-note')].map(n => Number(n.dataset.memoId));
+  await api('/api/memos/reorder', { method: 'POST', body: JSON.stringify({ ids }) });
+  await loadAll();
+});
+document.getElementById('memos').addEventListener('dragover', (e) => { if (dragMemoId) e.preventDefault(); });
+
+function editMemoInline(note, memo) {
+  if (note.querySelector('textarea')) return;
+  note.innerHTML = '';
+  const ta = el('textarea', { attrs: { rows: '3' } });
+  ta.value = memo.content;
+  note.appendChild(ta);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+  const save = async () => {
+    const content = ta.value.trim();
+    if (!content || content === memo.content) { renderMemos(); return; }
+    await api(`/api/memos/${memo.id}`, { method: 'PUT', body: JSON.stringify({ content }) });
+    await loadAll();
+  };
+  ta.addEventListener('blur', save);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+    if (e.key === 'Escape') { ta.removeEventListener('blur', save); renderMemos(); }
+  });
+}
+
+const memoQuick = document.getElementById('memo-quick');
+memoQuick.addEventListener('keydown', async (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    const content = memoQuick.value.trim();
+    if (!content) return;
+    await api('/api/memos', { method: 'POST', body: JSON.stringify({ content }) });
+    memoQuick.value = '';
+    await loadAll();
   }
-}
+});
 
-function urlLink(href, emoji, kind) {
-  const wrap = el('a', {
-    class: 'url-link',
-    attrs: {
-      href: href,
-      target: '_blank',
-      rel: 'noopener noreferrer',
-      title: href,
-      'data-kind': kind,
-    },
-  });
-  wrap.appendChild(el('span', { class: 'status-dot status-checking' }));
-  wrap.appendChild(el('span', { text: emoji }));
-  return wrap;
-}
+/* ------------------------------------------------ search */
 
-function render() {
-  const ul = document.getElementById('links');
-  ul.innerHTML = '';
-  if (state.links.length === 0) {
-    ul.appendChild(el('li', { class: 'empty', text: 'Aucun lien. Clique sur « + Ajouter » pour commencer.' }));
-    return;
+const searchInput = document.getElementById('search');
+searchInput.addEventListener('input', () => {
+  state.search = searchInput.value;
+  renderLinks();
+  renderMemos();
+  loadStatus();
+});
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const first = visibleLinks()[0];
+    if (first) {
+      const url = first.url_public || first.url_local;
+      if (url) window.open(url, '_blank', 'noopener');
+    }
   }
-  state.links.forEach((link) => {
-    const card = el('li', { class: 'card', attrs: { 'data-id': link.id } });
-    card.appendChild(el('div', { class: 'name', text: link.name }));
-    if (link.descr) card.appendChild(el('div', { class: 'descr', text: link.descr }));
-    if (link.memo) card.appendChild(el('div', { class: 'memo', text: link.memo }));
+  if (e.key === 'Escape') {
+    searchInput.value = '';
+    state.search = '';
+    renderLinks();
+    renderMemos();
+    searchInput.blur();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+    e.preventDefault();
+    searchInput.focus();
+  }
+});
 
-    const urls = el('div', { class: 'url-links' });
-    if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
-    if (link.url_local) urls.appendChild(urlLink(link.url_local, '🔒', 'local'));
-    card.appendChild(urls);
+/* ------------------------------------------------ clock + weather */
 
-    const actions = el('div', { class: 'actions' });
-    actions.appendChild(el('button', {
-      text: '↑', attrs: { title: 'Monter' },
-      on: { click: () => move(link.id, -1) },
-    }));
-    actions.appendChild(el('button', {
-      text: '↓', attrs: { title: 'Descendre' },
-      on: { click: () => move(link.id, +1) },
-    }));
-    actions.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Éditer' },
-      on: { click: () => openDialog(link) },
-    }));
-    actions.appendChild(el('button', {
-      text: '×', attrs: { title: 'Supprimer' },
-      on: { click: () => deleteLink(link.id) },
-    }));
-    card.appendChild(actions);
-
-    ul.appendChild(card);
-  });
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  document.getElementById('clock-date').textContent =
+    now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 }
+updateClock();
+setInterval(updateClock, 15000);
 
-async function move(id, delta) {
-  const orderedIds = state.links.map(l => l.id);
-  const idx = orderedIds.indexOf(id);
-  const targetIdx = idx + delta;
-  if (targetIdx < 0 || targetIdx >= orderedIds.length) return;
-  [orderedIds[idx], orderedIds[targetIdx]] = [orderedIds[targetIdx], orderedIds[idx]];
-  await api('/api/links/reorder', {
-    method: 'POST',
-    body: JSON.stringify({ ids: orderedIds }),
-  });
-  await loadLinks();
+const WEATHER_ICONS = [
+  [0, '☀️'], [1, '🌤️'], [2, '⛅'], [3, '☁️'], [45, '🌫️'], [48, '🌫️'],
+  [51, '🌦️'], [61, '🌧️'], [71, '🌨️'], [80, '🌧️'], [95, '⛈️'],
+];
+function weatherIcon(code) {
+  let icon = '☁️';
+  for (const [c, i] of WEATHER_ICONS) if (code >= c) icon = i;
+  return icon;
 }
+async function loadWeather() {
+  try {
+    const r = await fetch(
+      'https://api.open-meteo.com/v1/forecast?latitude=43.4929&longitude=-1.4748&current=temperature_2m,weather_code'
+    );
+    const data = await r.json();
+    const t = Math.round(data.current.temperature_2m);
+    document.getElementById('weather').textContent =
+      `${weatherIcon(data.current.weather_code)} ${t}°C`;
+  } catch (e) { console.error('weather failed', e); }
+}
+loadWeather();
+setInterval(loadWeather, 30 * 60 * 1000);
 
-async function deleteLink(id) {
-  if (!confirm('Supprimer ce lien ?')) return;
-  await api(`/api/links/${id}`, { method: 'DELETE' });
-  await loadLinks();
+/* ------------------------------------------------ link dialog */
+
+const dialog = document.getElementById('link-dialog');
+const form = document.getElementById('link-form');
+
+function fillCategorySelect(selected) {
+  const sel = form.elements.category_id;
+  sel.innerHTML = '';
+  sel.appendChild(el('option', { attrs: { value: '' }, text: 'Sans catégorie' }));
+  state.categories.forEach(c => {
+    const opt = el('option', { attrs: { value: c.id }, text: c.name });
+    if (selected === c.id) opt.selected = true;
+    sel.appendChild(opt);
+  });
 }
 
 function openDialog(link = null) {
   document.getElementById('dialog-title').textContent = link ? 'Éditer le lien' : 'Nouveau lien';
   form.reset();
+  const defaultCat = (state.filterCat !== 'all' && state.filterCat !== 'none') ? state.filterCat : null;
+  fillCategorySelect(link ? link.category_id : defaultCat);
   if (link) {
     form.elements.id.value = link.id;
     form.elements.name.value = link.name;
@@ -330,6 +900,7 @@ form.addEventListener('submit', async (e) => {
     url_public: form.elements.url_public.value.trim(),
     url_local: form.elements.url_local.value.trim(),
     memo: form.elements.memo.value,
+    category_id: form.elements.category_id.value ? Number(form.elements.category_id.value) : null,
   };
   const id = form.elements.id.value;
   if (id) {
@@ -338,12 +909,57 @@ form.addEventListener('submit', async (e) => {
     await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
   }
   dialog.close();
-  await loadLinks();
+  await loadAll();
 });
 
 document.getElementById('cancel').addEventListener('click', () => dialog.close());
 document.getElementById('add-link').addEventListener('click', () => openDialog());
+
+/* ------------------------------------------------ settings */
+
+const settingsDialog = document.getElementById('settings-dialog');
+document.getElementById('settings-btn').addEventListener('click', () => {
+  renderCatManage();
+  settingsDialog.showModal();
+});
+document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
 document.getElementById('refresh-status').addEventListener('click', loadStatus);
+
+function renderCatManage() {
+  const wrap = document.getElementById('cat-manage');
+  wrap.innerHTML = '';
+  if (state.categories.length === 0) {
+    wrap.appendChild(el('div', { class: 'empty', text: 'Aucune catégorie.' }));
+  }
+  state.categories.forEach((cat, idx) => {
+    const row = el('div', { class: 'cat-manage-row' });
+    row.appendChild(el('span', { text: catEmoji(idx) }));
+    row.appendChild(el('span', { class: 'grow', text: `${cat.name} (${cat.link_count})` }));
+    row.appendChild(el('button', {
+      text: '✎', attrs: { title: 'Renommer' },
+      on: { click: async () => {
+        const name = prompt('Nouveau nom :', cat.name);
+        if (!name || !name.trim() || name.trim() === cat.name) return;
+        await api(`/api/categories/${cat.id}`, { method: 'PUT', body: JSON.stringify({ name: name.trim() }) });
+        await loadAll();
+        renderCatManage();
+      } },
+    }));
+    row.appendChild(el('button', {
+      text: '×', attrs: { title: 'Supprimer (les liens deviennent sans catégorie)' },
+      on: { click: async () => {
+        if (!confirm(`Supprimer la catégorie « ${cat.name} » ? Les liens ne seront pas supprimés.`)) return;
+        await api(`/api/categories/${cat.id}`, { method: 'DELETE' });
+        await loadAll();
+        renderCatManage();
+      } },
+    }));
+    wrap.appendChild(row);
+  });
+  const addBtn = el('button', { text: '+ Catégorie', on: { click: async () => { await addCategory(); renderCatManage(); } } });
+  addBtn.style.marginTop = '0.5rem';
+  wrap.appendChild(addBtn);
+}
 
 document.getElementById('export-btn').addEventListener('click', async () => {
   const data = await api('/api/export');
@@ -366,12 +982,21 @@ importFile.addEventListener('change', async (e) => {
   try {
     const text = await file.text();
     const data = JSON.parse(text);
-    const n = Array.isArray(data.links) ? data.links.length : 0;
-    if (!n) { alert('Aucun lien trouvé dans le fichier.'); return; }
-    if (!confirm(`Importer ${n} lien${n > 1 ? 's' : ''} ? (ajoutés à la suite des liens existants)`)) return;
+    const nLinks = Array.isArray(data.links) ? data.links.length : 0;
+    const nMemos = Array.isArray(data.memos) ? data.memos.length : 0;
+    if (!nLinks && !nMemos) { alert('Aucun lien ni mémo trouvé dans le fichier.'); return; }
+    const parts = [];
+    if (nLinks) parts.push(`${nLinks} lien${nLinks > 1 ? 's' : ''}`);
+    if (nMemos) parts.push(`${nMemos} mémo${nMemos > 1 ? 's' : ''}`);
+    if (!confirm(`Importer ${parts.join(' et ')} ? (doublons ignorés, éléments connus mis à jour si plus récents)`)) return;
     const result = await api('/api/import', { method: 'POST', body: JSON.stringify(data) });
-    alert(`${result.imported} lien${result.imported > 1 ? 's' : ''} importé${result.imported > 1 ? 's' : ''}.`);
-    await loadLinks();
+    const updated = (result.updated || 0) + (result.updated_memos || 0);
+    const skipped = (result.skipped || 0) + (result.skipped_memos || 0);
+    let msg = `Import terminé : ${result.imported} lien(s), ${result.imported_memos} mémo(s) ajoutés`;
+    if (updated) msg += `, ${updated} mis à jour`;
+    if (skipped) msg += `, ${skipped} doublon(s) ignoré(s)`;
+    alert(msg + '.');
+    await loadAll();
   } catch (err) {
     alert("Erreur d'import : " + err.message);
   } finally {
@@ -379,7 +1004,15 @@ importFile.addEventListener('change', async (e) => {
   }
 });
 
-loadLinks();
+/* ------------------------------------------------ responsive memos */
+
+const memoDetails = document.getElementById('memo-details');
+const mq = window.matchMedia('(max-width: 900px)');
+function adaptMemoPanel() { memoDetails.open = !mq.matches; }
+adaptMemoPanel();
+mq.addEventListener('change', adaptMemoPanel);
+
+loadAll();
 </script>
 </body>
 </html>
