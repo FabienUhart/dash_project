@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>Partage — Dashboard</title>
+<link rel="stylesheet" href="/share/assets/quill.snow.css">
+<script src="/share/assets/quill.min.js" defer></script>
 <style>
 :root {
   --bg: #0f1419; --panel: #1a2129; --panel-2: #232c36; --text: #e6edf3;
@@ -29,7 +31,38 @@ header {
 header h1 { margin: 0; font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
 header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
 .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
-main { max-width: 680px; margin: 0 auto; padding: 1.25rem; }
+#layout { display: flex; min-height: calc(100vh - 54px); }
+#snav {
+  width: 190px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 0.75rem 0.5rem;
+}
+#snav[hidden] { display: none; }
+.sitem {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 2px;
+  user-select: none;
+}
+.sitem:hover { background: var(--panel-2); color: var(--text); }
+.sitem.active { background: var(--panel-2); color: var(--accent); }
+.sitem.droptarget { outline: 1px dashed var(--accent); color: var(--accent); }
+.sitem .cnt { margin-left: auto; font-size: 0.72rem; opacity: 0.7; }
+.sdot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem; }
+@media (max-width: 800px) {
+  #layout { flex-direction: column; }
+  #snav { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; gap: 0.3rem; }
+  .sitem { flex-shrink: 0; margin-bottom: 0; }
+}
 .task {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -152,8 +185,39 @@ main { max-width: 680px; margin: 0 auto; padding: 1.25rem; }
   background: var(--accent); color: #001; border: none; border-radius: 6px;
   padding: 0.5rem 1rem; font: inherit; cursor: pointer;
 }
-#add-bar { display: flex; gap: 0.5rem; margin: 1rem 0; }
-#add-bar[hidden], #guest-banner[hidden] { display: none; }
+#add-bar, #proj-bar { display: flex; gap: 0.5rem; margin: 1rem 0; }
+#proj-bar { margin-top: 0.4rem; }
+#add-bar[hidden], #proj-bar[hidden], #guest-banner[hidden], #tiles[hidden] { display: none; }
+#add-bar select {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 0.85rem; padding: 0.4rem 0.5rem; max-width: 11rem;
+}
+#proj-bar input {
+  flex: 1; background: var(--panel); border: 1px dashed var(--border); border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 0.85rem; padding: 0.45rem 0.8rem; outline: none;
+}
+#proj-bar input:focus { border-style: solid; border-color: var(--accent); }
+#proj-bar button {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.45rem 0.9rem; font: inherit; cursor: pointer;
+}
+#tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
+  gap: 0.45rem;
+  margin: 0 0 1rem;
+}
+.tile {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  user-select: none;
+}
+.tile .tn { font-weight: 700; float: right; }
+.tile .tl { font-size: 0.7rem; font-weight: 600; display: block; }
+.tile.active { border-color: var(--accent); background: #15232e; }
 #add-bar input {
   flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); font: inherit; padding: 0.55rem 0.8rem; outline: none;
@@ -168,6 +232,41 @@ footer { text-align: center; color: var(--muted); font-size: 0.72rem; padding: 1
 dialog { background: transparent; border: none; padding: 0; max-width: 94vw; max-height: 94vh; }
 dialog::backdrop { background: rgba(0,0,0,0.85); }
 dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom-out; }
+#edit-dialog {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  width: min(620px, 94vw);
+  color: var(--text);
+}
+#edit-dialog h3 { margin: 0 0 0.8rem; font-size: 1rem; }
+.dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.8rem; }
+.dlg-actions button {
+  border-radius: 6px; padding: 0.45rem 0.9rem; font: inherit; cursor: pointer;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+}
+.dlg-actions button.primary { background: var(--accent); color: #001; border-color: var(--accent); }
+#q-wrap .ql-toolbar { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px 6px 0 0; }
+#q-wrap .ql-container {
+  border: 1px solid var(--border); border-top: none; border-radius: 0 0 6px 6px;
+  background: var(--bg); color: var(--text); font-family: inherit; font-size: 0.95rem;
+  min-height: 180px; max-height: 50vh; overflow-y: auto;
+}
+#q-wrap .ql-editor { min-height: 180px; }
+#q-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
+.ql-snow .ql-stroke { stroke: var(--muted); }
+.ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--muted); }
+.ql-snow .ql-picker { color: var(--muted); }
+.ql-snow .ql-picker-options { background: var(--panel); border-color: var(--border) !important; }
+.ql-snow .ql-toolbar button:hover .ql-stroke, .ql-snow.ql-toolbar button:hover .ql-stroke,
+.ql-snow .ql-toolbar button.ql-active .ql-stroke, .ql-snow.ql-toolbar button.ql-active .ql-stroke,
+.ql-snow .ql-picker-label:hover .ql-stroke { stroke: var(--accent); }
+.ql-snow .ql-toolbar button:hover .ql-fill, .ql-snow.ql-toolbar button:hover .ql-fill,
+.ql-snow .ql-toolbar button.ql-active .ql-fill, .ql-snow.ql-toolbar button.ql-active .ql-fill { fill: var(--accent); }
+.ql-snow .ql-picker-label:hover, .ql-snow .ql-picker-label.ql-active,
+.ql-snow .ql-picker-item:hover, .ql-snow .ql-picker-item.ql-selected { color: var(--accent); }
+.ql-snow a { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -175,16 +274,53 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <h1 id="title">…</h1>
   <span class="mode" id="mode"></span>
 </header>
+<div id="layout">
+<nav id="snav" hidden></nav>
 <main>
   <div id="guest-banner" hidden></div>
+  <div id="tiles" hidden></div>
   <div id="add-bar" hidden>
     <input id="add-input" type="text" placeholder="+ Ajouter un élément… (Entrée)">
+    <select id="add-project" hidden></select>
     <button id="add-btn">Ajouter</button>
+  </div>
+  <div id="proj-bar" hidden>
+    <input id="proj-input" type="text" placeholder="+ Nouveau sous-projet… (Entrée)">
+    <button id="proj-btn">Créer</button>
   </div>
   <div id="list"></div>
 </main>
-<footer>Page de partage — les modifications sont visibles par le propriétaire du dashboard.</footer>
+</div>
+<footer>Page de partage — les modifications sont visibles par le propriétaire.<br>Dashboard v{{ version }} · créé par Fabien U.</footer>
 <dialog id="lightbox"><img alt=""></dialog>
+
+<dialog id="proj-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:1.25rem;width:min(380px,94vw);color:var(--text)">
+  <h3 style="margin:0 0 0.8rem;font-size:1rem">📁 Modifier le projet</h3>
+  <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem">Nom
+    <input id="pd-name" type="text" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit">
+  </label>
+  <div style="display:flex;gap:0.8rem;margin-bottom:0.4rem">
+    <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted);flex:1">Emoji
+      <input id="pd-emoji" type="text" maxlength="4" placeholder="ex. 🛒" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit;text-align:center">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted);flex:1">Couleur
+      <input id="pd-color" type="color" style="height:2.3rem;padding:0.15rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer">
+    </label>
+  </div>
+  <div class="dlg-actions">
+    <button type="button" id="pd-cancel">Annuler</button>
+    <button type="button" id="pd-save" class="primary">Enregistrer</button>
+  </div>
+</dialog>
+
+<dialog id="edit-dialog">
+  <h3>✏️ Modifier le mémo</h3>
+  <div id="q-wrap"><div id="q-editor"></div></div>
+  <div class="dlg-actions">
+    <button type="button" id="edit-cancel">Annuler</button>
+    <button type="button" id="edit-save" class="primary">Enregistrer</button>
+  </div>
+</dialog>
 
 <script>
 const TOKEN = location.pathname.split('/')[2];
@@ -307,6 +443,73 @@ function linkifyText(text) {
   return frag;
 }
 
+let sQuill = null;
+let editingId = null;
+const editDialog = document.getElementById('edit-dialog');
+
+function getShareQuill() {
+  if (typeof Quill === 'undefined') return null;
+  if (!sQuill) {
+    sQuill = new Quill('#q-editor', {
+      theme: 'snow',
+      placeholder: 'Contenu du mémo…',
+      modules: {
+        toolbar: [
+          [{ header: [1, 2, 3, false] }],
+          ['bold', 'italic', 'underline', 'strike'],
+          [{ color: [] }, { background: [] }],
+          [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
+          ['link', 'blockquote'],
+          ['clean'],
+        ],
+      },
+    });
+  }
+  return sQuill;
+}
+
+function openEditor(memo, contentEl, taskEl) {
+  const q = getShareQuill();
+  if (!q) {
+    if (taskEl.querySelector('.edit-ta')) return;
+    const ta = document.createElement('textarea');
+    ta.className = 'edit-ta';
+    ta.rows = 4;
+    ta.value = memo.content;
+    contentEl.replaceWith(ta);
+    ta.focus();
+    const save = () => {
+      const v = ta.value.trim();
+      if (v && v !== memo.content) put(memo.id, { content: v });
+      else load();
+    };
+    ta.addEventListener('blur', save);
+    ta.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); ta.blur(); }
+      if (ev.key === 'Escape') { ta.removeEventListener('blur', save); load(); }
+    });
+    return;
+  }
+  editingId = memo.id;
+  q.setContents([]);
+  if (isRich(memo.content)) q.clipboard.dangerouslyPasteHTML(0, memo.content);
+  else q.setText(memo.content);
+  editDialog.showModal();
+  q.focus();
+}
+
+document.getElementById('edit-cancel').addEventListener('click', () => editDialog.close());
+document.getElementById('edit-save').addEventListener('click', async () => {
+  const q = getShareQuill();
+  if (!q || editingId == null) return;
+  const text = q.getText().trim();
+  if (!text) { alert('Le mémo ne peut pas être vide.'); return; }
+  const html = q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ');
+  editDialog.close();
+  await put(editingId, { content: html });
+  editingId = null;
+});
+
 async function put(memoId, body) {
   const r = await fetch(API + '/memo/' + memoId, {
     method: 'PUT',
@@ -315,6 +518,183 @@ async function put(memoId, body) {
   });
   if (r.ok) await load();
   else if (r.status === 403) await load();
+}
+
+let FILTER = 'all';
+let PFILTER = 'all';
+let dragShareMemo = null;
+let dragShareProj = null;
+
+function projChildren(pid) { return (DATA.projects || []).filter(p => p.parent_id === pid); }
+function projDescendants(pid) {
+  const out = [];
+  const walk = (id) => projChildren(id).forEach(c => { out.push(c.id); walk(c.id); });
+  walk(pid);
+  return out;
+}
+
+function scopedMemos() {
+  if (PFILTER === 'all') return DATA.memos;
+  const set = new Set([PFILTER, ...projDescendants(PFILTER)]);
+  return DATA.memos.filter(m => set.has(m.project_id));
+}
+
+async function guestPut(url, body) {
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    if (err.error) alert(err.error);
+  }
+  await load();
+}
+
+let editingProj = null;
+const projDialog = document.getElementById('proj-dialog');
+
+function openProjEditor(p) {
+  editingProj = p;
+  document.getElementById('pd-name').value = p.name;
+  document.getElementById('pd-emoji').value = p.emoji || '';
+  document.getElementById('pd-color').value = p.color || '#607d8b';
+  projDialog.showModal();
+}
+
+document.getElementById('pd-cancel').addEventListener('click', () => projDialog.close());
+document.getElementById('pd-save').addEventListener('click', async () => {
+  if (!editingProj) return;
+  const name = document.getElementById('pd-name').value.trim();
+  if (!name) return;
+  projDialog.close();
+  await guestPut(API + '/project/' + editingProj.id, {
+    name,
+    emoji: document.getElementById('pd-emoji').value.trim(),
+    color: document.getElementById('pd-color').value,
+  });
+  editingProj = null;
+});
+
+function renderSidebar() {
+  const nav = document.getElementById('snav');
+  const show = DATA.kind === 'project' && (DATA.projects || []).length > 0;
+  nav.hidden = !show;
+  if (!show) return;
+  nav.innerHTML = '';
+
+  const mkItem = (label, icon, count, key, depth, proj) => {
+    const item = el('div', 'sitem' + (PFILTER === key ? ' active' : ''));
+    item.style.paddingLeft = (0.6 + (depth || 0) * 0.9) + 'rem';
+    if (icon) item.appendChild(icon);
+    item.appendChild(el('span', '', label));
+    item.appendChild(el('span', 'cnt', String(count)));
+    const select = () => { PFILTER = key; render(); };
+    if (proj && canEditNow()) {
+      let timer = null;
+      item.addEventListener('click', () => {
+        if (timer) { clearTimeout(timer); timer = null; openProjEditor(proj); return; }
+        timer = setTimeout(() => { timer = null; select(); }, 250);
+      });
+      item.addEventListener('contextmenu', (e) => { e.preventDefault(); openProjEditor(proj); });
+      item.title = 'Double-clic ou clic droit pour modifier';
+    } else {
+      item.addEventListener('click', select);
+    }
+    return item;
+  };
+
+  const pendingAll = DATA.memos.filter(m => !m.done).length;
+  nav.appendChild(mkItem('Tous', el('span', '', '🗂'), pendingAll, 'all', 0));
+
+  const renderTree = (p, depth) => {
+    const icon = el('span', '');
+    icon.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0';
+    if (p.emoji) icon.appendChild(el('span', '', p.emoji));
+    if (p.color) {
+      const d = el('span', 'sdot');
+      d.style.background = p.color;
+      if (p.emoji) { d.style.width = '0.4rem'; d.style.height = '0.4rem'; }
+      icon.appendChild(d);
+    }
+    if (!p.emoji && !p.color) {
+      const d = el('span', 'sdot');
+      d.style.background = 'var(--gray)';
+      icon.appendChild(d);
+    }
+    const count = DATA.memos.filter(m => m.project_id === p.id && !m.done).length;
+    const item = mkItem(p.name, icon, count, p.id, depth, p);
+
+    if (canEditNow()) {
+      if (p.id !== DATA.root_id) {
+        item.draggable = true;
+        item.title = 'Double-clic ou clic droit pour modifier · glisser pour déplacer';
+        item.addEventListener('dragstart', (e) => { dragShareProj = p.id; e.dataTransfer.effectAllowed = 'move'; });
+        item.addEventListener('dragend', () => { dragShareProj = null; });
+      }
+      item.addEventListener('dragover', (e) => {
+        if (!dragShareMemo && !dragShareProj) return;
+        if (dragShareProj && (dragShareProj === p.id || projDescendants(dragShareProj).includes(p.id))) return;
+        e.preventDefault();
+        item.classList.add('droptarget');
+      });
+      item.addEventListener('dragleave', () => item.classList.remove('droptarget'));
+      item.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        item.classList.remove('droptarget');
+        if (dragShareMemo) {
+          await guestPut(API + '/memo/' + dragShareMemo, { project_id: p.id });
+        } else if (dragShareProj && dragShareProj !== p.id) {
+          await guestPut(API + '/project/' + dragShareProj, { parent_id: p.id });
+        }
+      });
+    }
+    nav.appendChild(item);
+    projChildren(p.id).forEach(c => renderTree(c, depth + 1));
+  };
+  const root = (DATA.projects || []).find(p => p.id === DATA.root_id);
+  if (root) renderTree(root, 0);
+}
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function renderTiles() {
+  const t = todayStr();
+  const ms = scopedMemos();
+  const defs = [
+    ['all', 'En cours', '#4fc3f7', ms.filter(m => !m.done).length],
+    ['today', "Aujourd'hui", '#4caf50', ms.filter(m => !m.done && m.due_date === t).length],
+    ['sched', 'Planifiés', '#b39ddb', ms.filter(m => !m.done && m.due_date > t).length],
+    ['late', 'En retard', '#ff8a80', ms.filter(m => !m.done && m.due_date && m.due_date < t).length],
+    ['done', 'Terminés', '#ffb74d', ms.filter(m => m.done).length],
+  ];
+  const tiles = document.getElementById('tiles');
+  tiles.hidden = false;
+  tiles.innerHTML = '';
+  defs.forEach(([key, label, color, count]) => {
+    const tile = el('div', 'tile' + (FILTER === key ? ' active' : ''));
+    tile.appendChild(el('span', 'tn', String(count)));
+    const l = el('span', 'tl', label);
+    l.style.color = color;
+    tile.appendChild(l);
+    tile.addEventListener('click', () => { FILTER = key; render(); });
+    tiles.appendChild(tile);
+  });
+}
+
+function visibleShareMemos() {
+  const t = todayStr();
+  return scopedMemos().filter(m => {
+    if (FILTER === 'all') return !m.done;
+    if (FILTER === 'today') return !m.done && m.due_date === t;
+    if (FILTER === 'sched') return !m.done && m.due_date > t;
+    if (FILTER === 'late') return !m.done && m.due_date && m.due_date < t;
+    return m.done;
+  });
 }
 
 function render() {
@@ -328,17 +708,43 @@ function render() {
   h.appendChild(document.createTextNode(DATA.title));
   document.getElementById('mode').textContent = canEditNow() ? '✏️ modifiable' : (DATA.can_edit ? '✏️ sur validation' : '👁 lecture seule');
   document.getElementById('add-bar').hidden = !(canEditNow() && DATA.kind === 'project');
+  document.getElementById('proj-bar').hidden = !(canEditNow() && DATA.kind === 'project');
+  const projSel = document.getElementById('add-project');
+  if (canEditNow() && DATA.kind === 'project' && (DATA.projects || []).length > 1) {
+    projSel.hidden = false;
+    const prev = projSel.value;
+    projSel.innerHTML = '';
+    DATA.projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      projSel.appendChild(opt);
+    });
+    if (prev) projSel.value = prev;
+  } else {
+    projSel.hidden = true;
+  }
   renderGuestBanner();
+  renderSidebar();
+  renderTiles();
+
+  if (!projSel.hidden && PFILTER !== 'all') projSel.value = String(PFILTER);
 
   const list = document.getElementById('list');
   list.innerHTML = '';
-  if (!DATA.memos.length) {
-    list.appendChild(el('div', 'empty', 'Rien à afficher pour le moment.'));
+  const visible = visibleShareMemos();
+  if (!visible.length) {
+    list.appendChild(el('div', 'empty', 'Rien dans cette vue. 🎉'));
     return;
   }
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
-  DATA.memos.forEach(memo => {
+  visible.forEach(memo => {
     const t = el('div', 'task' + (memo.done ? ' done' : ''));
+    if (canEditNow() && DATA.kind === 'project') {
+      t.draggable = true;
+      t.addEventListener('dragstart', (e) => { dragShareMemo = memo.id; e.dataTransfer.effectAllowed = 'move'; });
+      t.addEventListener('dragend', () => { dragShareMemo = null; });
+    }
     const prio = prios[memo.priority];
     if (prio && prio.color && !memo.done) t.style.borderLeftColor = prio.color;
 
@@ -350,6 +756,11 @@ function render() {
     row.appendChild(check);
 
     const content = el('div', 'task-content');
+    if (memo.emoji) {
+      const em = el('span', '', memo.emoji);
+      em.style.marginRight = '0.35rem';
+      content.appendChild(em);
+    }
     if (isRich(memo.content)) content.appendChild(sanitize(memo.content));
     else content.appendChild(linkifyText(memo.content));
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
@@ -367,6 +778,7 @@ function render() {
     });
     row.appendChild(content);
 
+    if (memo.project) row.appendChild(el('span', 'badge', memo.project));
     if (memo.due_date) row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })));
     t.appendChild(row);
 
@@ -385,7 +797,7 @@ function render() {
       t.appendChild(s);
     });
 
-    if (canEditNow()) {
+    const makeItemAdd = () => {
       const addItem = document.createElement('input');
       addItem.className = 'item-add';
       addItem.placeholder = '+ Ajouter un article… (Entrée)';
@@ -410,7 +822,11 @@ function render() {
         target.appendChild(li);
         put(memo.id, { content: tpl.innerHTML });
       });
-      t.appendChild(addItem);
+      return addItem;
+    };
+    const hasChecklist = !!content.querySelector('li[data-list]');
+    if (canEditNow() && hasChecklist) {
+      t.appendChild(makeItemAdd());
     }
 
     if ((memo.images || []).length) {
@@ -499,31 +915,26 @@ function render() {
       tools.appendChild(photoBtn);
       tools.appendChild(fileIn);
 
-      if (!isRich(memo.content)) {
-        const eBtn = document.createElement('button');
-        eBtn.className = 'tool-btn';
-        eBtn.textContent = '✎ Texte';
-        eBtn.addEventListener('click', () => {
-          if (t.querySelector('.edit-ta')) return;
-          const ta = document.createElement('textarea');
-          ta.className = 'edit-ta';
-          ta.rows = 3;
-          ta.value = memo.content;
-          content.replaceWith(ta);
-          ta.focus();
-          const save = () => {
-            const v = ta.value.trim();
-            if (v && v !== memo.content) put(memo.id, { content: v });
-            else load();
-          };
-          ta.addEventListener('blur', save);
-          ta.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); ta.blur(); }
-            if (ev.key === 'Escape') { ta.removeEventListener('blur', save); load(); }
-          });
+      if (!hasChecklist) {
+        const listBtn = document.createElement('button');
+        listBtn.className = 'tool-btn';
+        listBtn.textContent = '☑ Liste';
+        listBtn.title = 'Démarrer une liste à cocher dans ce mémo';
+        listBtn.addEventListener('click', () => {
+          if (t.querySelector('.item-add')) { t.querySelector('.item-add').focus(); return; }
+          const input = makeItemAdd();
+          tools.before(input);
+          input.focus();
         });
-        tools.appendChild(eBtn);
+        tools.appendChild(listBtn);
       }
+
+      const eBtn = document.createElement('button');
+      eBtn.className = 'tool-btn';
+      eBtn.textContent = '✎ Modifier';
+      eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
+      eBtn.addEventListener('click', () => openEditor(memo, content, t));
+      tools.appendChild(eBtn);
       t.appendChild(tools);
     }
     list.appendChild(t);
@@ -549,15 +960,36 @@ const addInput = document.getElementById('add-input');
 async function addMemo() {
   const content = addInput.value.trim();
   if (!content) return;
+  const projSel = document.getElementById('add-project');
+  const body = { content };
+  if (!projSel.hidden && projSel.value) body.project_id = Number(projSel.value);
   const r = await fetch(API + '/memos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   });
   if (r.ok) { addInput.value = ''; await load(); }
 }
 addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemo(); });
 document.getElementById('add-btn').addEventListener('click', addMemo);
+
+const projInput = document.getElementById('proj-input');
+async function addSubProject() {
+  const name = projInput.value.trim();
+  if (!name) return;
+  const r = await fetch(API + '/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: JSON.stringify({ name }),
+  });
+  if (r.ok) { projInput.value = ''; await load(); }
+  else {
+    const err = await r.json().catch(() => ({}));
+    alert(err.error || 'Création impossible');
+  }
+}
+projInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addSubProject(); });
+document.getElementById('proj-btn').addEventListener('click', addSubProject);
 
 load();
 setInterval(load, 15000);

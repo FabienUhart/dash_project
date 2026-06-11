@@ -3,6 +3,8 @@ import json
 import os
 import secrets
 import sqlite3
+import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -24,8 +26,11 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+APP_VERSION = "12"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
+BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
+BACKUP_KEEP_DAYS = int(os.environ.get("BACKUP_KEEP_DAYS", "7"))
 ALLOWED_IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
 SAFE_IMG_NAME = re.compile(r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp)$")
 
@@ -230,9 +235,17 @@ def init_db():
     ccols = {r[1] for r in conn.execute("PRAGMA table_info(categories)").fetchall()}
     if "color" not in ccols:
         conn.execute("ALTER TABLE categories ADD COLUMN color TEXT DEFAULT ''")
+    if "emoji" not in ccols:
+        conn.execute("ALTER TABLE categories ADD COLUMN emoji TEXT DEFAULT ''")
     pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
     if "tags" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN tags TEXT DEFAULT ''")
+    if "emoji" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN emoji TEXT DEFAULT ''")
+    if "parent_id" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN parent_id INTEGER")
+    if "emoji" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN emoji TEXT DEFAULT ''")
     scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
     if "pin" not in scols:
         conn.execute("ALTER TABLE shares ADD COLUMN pin TEXT DEFAULT ''")
@@ -260,7 +273,7 @@ def init_db():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", version=APP_VERSION)
 
 
 # ---------------------------------------------------------------- links
@@ -269,6 +282,10 @@ LINK_FIELDS = (
     "id, name, descr, url_public, url_local, memo, position, category_id, "
     "uid, created_at, updated_at, tags"
 )
+
+
+def _clean_emoji(value):
+    return (str(value or "")).strip()[:8]
 
 
 def _normalize_tags(value):
@@ -394,7 +411,7 @@ def list_categories():
     rows = (
         get_db()
         .execute(
-            "SELECT c.id, c.name, c.position, c.color, COUNT(l.id) AS link_count "
+            "SELECT c.id, c.name, c.position, c.color, c.emoji, COUNT(l.id) AS link_count "
             "FROM categories c LEFT JOIN links l ON l.category_id = c.id "
             "GROUP BY c.id ORDER BY c.position, c.id"
         )
@@ -416,14 +433,15 @@ def create_category():
         "SELECT COALESCE(MAX(position), -1) FROM categories"
     ).fetchone()[0]
     color = (data.get("color") or "").strip()
+    emoji = _clean_emoji(data.get("emoji"))
     cur = db.execute(
-        "INSERT INTO categories (name, position, color) VALUES (?, ?, ?)",
-        (name, max_pos + 1, color),
+        "INSERT INTO categories (name, position, color, emoji) VALUES (?, ?, ?, ?)",
+        (name, max_pos + 1, color, emoji),
     )
     db.commit()
     return (
         jsonify(
-            {"id": cur.lastrowid, "name": name, "position": max_pos + 1, "color": color}
+            {"id": cur.lastrowid, "name": name, "position": max_pos + 1, "color": color, "emoji": emoji}
         ),
         201,
     )
@@ -442,11 +460,13 @@ def update_category(cat_id):
     if not name:
         return jsonify({"error": "name required"}), 400
     color = (data.get("color", existing["color"]) or "").strip()
+    emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
     db.execute(
-        "UPDATE categories SET name = ?, color = ? WHERE id = ?", (name, color, cat_id)
+        "UPDATE categories SET name = ?, color = ?, emoji = ? WHERE id = ?",
+        (name, color, emoji, cat_id),
     )
     db.commit()
-    return jsonify({"id": cat_id, "name": name, "color": color})
+    return jsonify({"id": cat_id, "name": name, "color": color, "emoji": emoji})
 
 
 @app.route("/api/categories/<int:cat_id>", methods=["DELETE"])
@@ -477,7 +497,7 @@ def list_projects():
     rows = (
         get_db()
         .execute(
-            "SELECT p.id, p.name, p.color, p.position, p.tags, "
+            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, "
             "COUNT(CASE WHEN m.done = 0 THEN m.id END) AS memo_count "
             "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
             "GROUP BY p.id ORDER BY p.position, p.id"
@@ -501,14 +521,15 @@ def create_project():
     ).fetchone()[0]
     color = (data.get("color") or "").strip()
     tags = _normalize_tags(data.get("tags", ""))
+    emoji = _clean_emoji(data.get("emoji"))
     cur = db.execute(
-        "INSERT INTO projects (name, color, position, tags) VALUES (?, ?, ?, ?)",
-        (name, color, max_pos + 1, tags),
+        "INSERT INTO projects (name, color, position, tags, emoji) VALUES (?, ?, ?, ?, ?)",
+        (name, color, max_pos + 1, tags, emoji),
     )
     db.commit()
     return (
         jsonify(
-            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags}
+            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags, "emoji": emoji}
         ),
         201,
     )
@@ -532,18 +553,26 @@ def update_project(project_id):
         if "tags" in data
         else (existing["tags"] or "")
     )
+    emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
+    if "parent_id" in data:
+        parent_id, err = _resolve_parent(db, project_id, data.get("parent_id"))
+        if err:
+            return jsonify({"error": err}), 400
+    else:
+        parent_id = existing["parent_id"]
     db.execute(
-        "UPDATE projects SET name = ?, color = ?, tags = ? WHERE id = ?",
-        (name, color, tags, project_id),
+        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ? WHERE id = ?",
+        (name, color, tags, emoji, parent_id, project_id),
     )
     db.commit()
-    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags})
+    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id})
 
 
 @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
 def delete_project(project_id):
     db = get_db()
     db.execute("UPDATE memos SET project_id = NULL WHERE project_id = ?", (project_id,))
+    db.execute("UPDATE projects SET parent_id = NULL WHERE parent_id = ?", (project_id,))
     db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     db.execute(
         "DELETE FROM shares WHERE kind = 'project' AND target_id = ?", (project_id,)
@@ -568,6 +597,38 @@ def _valid_project_id(db, project_id):
         return None
     row = db.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
     return row["id"] if row else None
+
+
+def _project_descendants(db, root_id):
+    ids = [root_id]
+    seen = {root_id}
+    queue = [root_id]
+    while queue:
+        pid = queue.pop()
+        for r in db.execute(
+            "SELECT id FROM projects WHERE parent_id = ?", (pid,)
+        ).fetchall():
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                ids.append(r["id"])
+                queue.append(r["id"])
+    return ids
+
+
+def _resolve_parent(db, project_id, parent_value):
+    if parent_value in (None, "", 0):
+        return None, None
+    try:
+        pid = int(parent_value)
+    except (TypeError, ValueError):
+        return None, "parent invalide"
+    if pid == project_id:
+        return None, "un projet ne peut pas être son propre parent"
+    if not db.execute("SELECT 1 FROM projects WHERE id = ?", (pid,)).fetchone():
+        return None, "projet parent introuvable"
+    if project_id is not None and pid in _project_descendants(db, project_id):
+        return None, "impossible : le parent choisi est un sous-projet de ce projet"
+    return pid, None
 
 
 def _valid_priority(db, value):
@@ -788,8 +849,8 @@ def create_memo():
     uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, priority, subtasks, project_id, recurrence) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "done, due_date, priority, subtasks, project_id, recurrence, emoji) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -802,6 +863,7 @@ def create_memo():
             _subtasks_json(data.get("subtasks")),
             _valid_project_id(db, data.get("project_id")),
             _valid_recurrence(data.get("recurrence")),
+            _clean_emoji(data.get("emoji")),
         ),
     )
     db.commit()
@@ -896,9 +958,10 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
     after = _memo_snapshot(content, done, due_date, priority, subtasks, recurrence)
     _log_revision(db, existing, after, editor, share_id)
 
+    emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
     db.execute(
         "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
-        "project_id=?, recurrence=?, updated_at=? WHERE id=?",
+        "project_id=?, recurrence=?, emoji=?, updated_at=? WHERE id=?",
         (
             content,
             done,
@@ -907,6 +970,7 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             subtasks,
             project_id,
             recurrence,
+            emoji,
             now,
             memo_id,
         ),
@@ -1143,6 +1207,8 @@ def _share_memo_dict(row):
         "subtasks": d["subtasks"],
         "images": d["images"],
         "recurrence": d["recurrence"],
+        "emoji": d.get("emoji", ""),
+        "project_id": d.get("project_id"),
     }
 
 
@@ -1152,9 +1218,11 @@ def _share_scope_memos(db, share):
             "SELECT * FROM memos WHERE id = ?", (share["target_id"],)
         ).fetchone()
         return [row] if row else []
+    ids = _project_descendants(db, share["target_id"])
+    placeholders = ",".join("?" * len(ids))
     return db.execute(
-        "SELECT * FROM memos WHERE project_id = ? ORDER BY position, id",
-        (share["target_id"],),
+        f"SELECT * FROM memos WHERE project_id IN ({placeholders}) ORDER BY position, id",
+        ids,
     ).fetchall()
 
 
@@ -1280,7 +1348,7 @@ def _set_state(db, key, value):
 def list_guests():
     db = get_db()
     rows = db.execute(
-        "SELECT g.*, s.kind, s.target_id FROM share_guests g "
+        "SELECT g.*, s.kind, s.target_id, s.can_edit, s.token FROM share_guests g "
         "JOIN shares s ON s.id = g.share_id ORDER BY g.id DESC"
     ).fetchall()
     out = []
@@ -1436,11 +1504,21 @@ def memo_restore(memo_id):
     return jsonify(_memo_dict(row))
 
 
+SHARE_ASSETS = {"quill.min.js", "quill.snow.css"}
+
+
+@app.route("/share/assets/<name>")
+def share_assets(name):
+    if name not in SHARE_ASSETS:
+        return "", 404
+    return send_from_directory(app.static_folder, name, max_age=86400)
+
+
 @app.route("/share/<token>")
 def share_page(token):
     if not _share_by_token(get_db(), token):
         return "Lien de partage invalide ou révoqué.", 404
-    return render_template("share.html")
+    return render_template("share.html", version=APP_VERSION)
 
 
 @app.route("/share/<token>/data")
@@ -1449,8 +1527,41 @@ def share_data(token):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    memos = [_share_memo_dict(r) for r in _share_scope_memos(db, share)]
+    rows = _share_scope_memos(db, share)
+    memos = []
+    proj_names = {}
+    scope_projects = []
+    if share["kind"] == "project":
+        all_p = {
+            r["id"]: r
+            for r in db.execute(
+                "SELECT id, name, emoji, color, parent_id FROM projects"
+            ).fetchall()
+        }
+        proj_names = {
+            pid: ((p["emoji"] + " ") if p["emoji"] else "") + p["name"]
+            for pid, p in all_p.items()
+        }
+        for pid in _project_descendants(db, share["target_id"]):
+            p = all_p.get(pid)
+            if p:
+                scope_projects.append(
+                    {
+                        "id": p["id"],
+                        "name": p["name"],
+                        "emoji": p["emoji"],
+                        "color": p["color"],
+                        "parent_id": p["parent_id"],
+                    }
+                )
+    for r in rows:
+        d = _share_memo_dict(r)
+        if share["kind"] == "project" and r["project_id"] != share["target_id"]:
+            d["project"] = proj_names.get(r["project_id"], "")
+        memos.append(d)
     payload = {
+        "projects": scope_projects,
+        "root_id": share["target_id"] if share["kind"] == "project" else None,
         "kind": share["kind"],
         "can_edit": bool(share["can_edit"]),
         "memos": memos,
@@ -1463,11 +1574,11 @@ def share_data(token):
     }
     if share["kind"] == "project":
         proj = db.execute(
-            "SELECT name, color FROM projects WHERE id = ?", (share["target_id"],)
+            "SELECT name, color, emoji FROM projects WHERE id = ?", (share["target_id"],)
         ).fetchone()
         if not proj:
             return jsonify({"error": "invalid"}), 404
-        payload["title"] = proj["name"]
+        payload["title"] = (proj["emoji"] + " " if proj["emoji"] else "") + proj["name"]
         payload["color"] = proj["color"]
     else:
         payload["title"] = "Mémo partagé"
@@ -1563,6 +1674,13 @@ def share_update_memo(token, memo_id):
         for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence")
         if k in raw
     }
+    if "project_id" in raw and share["kind"] == "project":
+        try:
+            wanted = int(raw["project_id"])
+        except (TypeError, ValueError):
+            wanted = None
+        if wanted in _project_descendants(db, share["target_id"]):
+            data["project_id"] = wanted
     editor = guest["name"] or guest["email"]
     payload, status = _perform_memo_update(
         db, existing, data, editor=f"{editor} <{guest['email']}>", share_id=share["id"]
@@ -1655,6 +1773,8 @@ def _share_memo_dict_from_payload(d):
         "subtasks": d["subtasks"],
         "images": d["images"],
         "recurrence": d["recurrence"],
+        "emoji": d.get("emoji", ""),
+        "project_id": d.get("project_id"),
     }
 
 
@@ -1673,6 +1793,14 @@ def share_add_memo(token):
     content = (data.get("content") or "").strip()
     if not content:
         return jsonify({"error": "content required"}), 400
+    target_project = share["target_id"]
+    if data.get("project_id"):
+        try:
+            wanted = int(data["project_id"])
+        except (TypeError, ValueError):
+            wanted = None
+        if wanted in _project_descendants(db, share["target_id"]):
+            target_project = wanted
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
     now = datetime.now(timezone.utc).isoformat()
     new_uid = str(uuid.uuid4())
@@ -1680,7 +1808,7 @@ def share_add_memo(token):
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
         "done, due_date, priority, subtasks, project_id, recurrence) "
         "VALUES (?, ?, ?, ?, ?, 0, '', 0, '[]', ?, '')",
-        (content, max_pos + 1, now, new_uid, now, share["target_id"]),
+        (content, max_pos + 1, now, new_uid, now, target_project),
     )
     editor = guest["name"] or guest["email"]
     db.execute(
@@ -1698,6 +1826,142 @@ def share_add_memo(token):
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (cur.lastrowid,)).fetchone()
     return jsonify(_share_memo_dict(row)), 201
+
+
+@app.route("/share/<token>/projects", methods=["POST"])
+def share_add_project(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"] or share["kind"] != "project":
+        return jsonify({"error": "non autorisé"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    if db.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
+        return jsonify({"error": "un projet porte déjà ce nom"}), 409
+    parent_id = share["target_id"]
+    if data.get("parent_id"):
+        try:
+            wanted = int(data["parent_id"])
+        except (TypeError, ValueError):
+            wanted = None
+        if wanted in _project_descendants(db, share["target_id"]):
+            parent_id = wanted
+    max_pos = db.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM projects"
+    ).fetchone()[0]
+    cur = db.execute(
+        "INSERT INTO projects (name, color, position, tags, emoji, parent_id) "
+        "VALUES (?, '', ?, '', ?, ?)",
+        (name, max_pos + 1, _clean_emoji(data.get("emoji")), parent_id),
+    )
+    editor = guest["name"] or guest["email"]
+    parent_name = db.execute(
+        "SELECT name FROM projects WHERE id = ?", (parent_id,)
+    ).fetchone()["name"]
+    db.execute(
+        "INSERT INTO memo_revisions (memo_id, memo_uid, editor, share_id, before, after, edited_at) "
+        "VALUES (0, '', ?, ?, NULL, ?, ?)",
+        (
+            f"{editor} <{guest['email']}>",
+            share["id"],
+            json.dumps(
+                {"content": f"📁 Projet « {name} » créé dans « {parent_name} »",
+                 "done": False, "due_date": "", "priority": 0, "subtasks": [], "recurrence": ""},
+                ensure_ascii=False,
+            ),
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    db.commit()
+    return jsonify({"id": cur.lastrowid, "name": name, "parent_id": parent_id}), 201
+
+
+@app.route("/share/<token>/project/<int:proj_id>", methods=["PUT"])
+def share_update_project(token, proj_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"] or share["kind"] != "project":
+        return jsonify({"error": "non autorisé"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    scope = set(_project_descendants(db, share["target_id"]))
+    if proj_id not in scope:
+        return jsonify({"error": "projet hors du partage"}), 404
+    existing = db.execute(
+        "SELECT * FROM projects WHERE id = ?", (proj_id,)
+    ).fetchone()
+    if not existing:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    updates = {}
+
+    if "parent_id" in data:
+        if proj_id == share["target_id"]:
+            return jsonify({"error": "la racine du partage ne peut pas être déplacée"}), 400
+        try:
+            parent_id = int(data.get("parent_id"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "parent invalide"}), 400
+        if parent_id not in scope:
+            return jsonify({"error": "parent hors du partage"}), 400
+        resolved, err = _resolve_parent(db, proj_id, parent_id)
+        if err:
+            return jsonify({"error": err}), 400
+        updates["parent_id"] = resolved
+
+    renamed_from = None
+    if "name" in data:
+        name = (data.get("name") or "").strip()
+        if not name:
+            return jsonify({"error": "name required"}), 400
+        if name != existing["name"]:
+            if db.execute(
+                "SELECT 1 FROM projects WHERE name = ? AND id != ?", (name, proj_id)
+            ).fetchone():
+                return jsonify({"error": "un projet porte déjà ce nom"}), 409
+            renamed_from = existing["name"]
+            updates["name"] = name
+    if "emoji" in data:
+        updates["emoji"] = _clean_emoji(data.get("emoji"))
+    if "color" in data:
+        updates["color"] = (data.get("color") or "").strip()
+
+    if not updates:
+        return jsonify({"error": "rien à modifier"}), 400
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    db.execute(
+        f"UPDATE projects SET {set_clause} WHERE id = ?",
+        (*updates.values(), proj_id),
+    )
+    if renamed_from:
+        editor = guest["name"] or guest["email"]
+        db.execute(
+            "INSERT INTO memo_revisions (memo_id, memo_uid, editor, share_id, before, after, edited_at) "
+            "VALUES (0, '', ?, ?, NULL, ?, ?)",
+            (
+                f"{editor} <{guest['email']}>",
+                share["id"],
+                json.dumps(
+                    {"content": f"📁 Projet « {renamed_from} » renommé en « {updates['name']} »",
+                     "done": False, "due_date": "", "priority": 0, "subtasks": [], "recurrence": ""},
+                    ensure_ascii=False,
+                ),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+    db.commit()
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (proj_id,)).fetchone()
+    return jsonify({"id": proj_id, "name": row["name"], "emoji": row["emoji"], "color": row["color"], "parent_id": row["parent_id"]})
 
 
 @app.route("/share/<token>/image/<name>")
@@ -1723,7 +1987,10 @@ def share_image(token, name):
 
 @app.route("/api/export", methods=["GET"])
 def export_links():
-    db = get_db()
+    return jsonify(_build_export(get_db()))
+
+
+def _build_export(db):
     cats = {
         r["id"]: r["name"]
         for r in db.execute("SELECT id, name FROM categories").fetchall()
@@ -1733,10 +2000,10 @@ def export_links():
     ).fetchall()
     memos = db.execute("SELECT * FROM memos ORDER BY position, id").fetchall()
     categories = db.execute(
-        "SELECT name, position, color FROM categories ORDER BY position, id"
+        "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
     projects = db.execute(
-        "SELECT id, name, position, color, tags FROM projects ORDER BY position, id"
+        "SELECT id, name, position, color, tags, emoji, parent_id FROM projects ORDER BY position, id"
     ).fetchall()
     proj_names = {r["id"]: r["name"] for r in projects}
     out_links = []
@@ -1752,7 +2019,14 @@ def export_links():
         d["project"] = proj_names.get(d.pop("project_id", None), "")
         out_memos.append(d)
     out_projects = [
-        {"name": r["name"], "position": r["position"], "color": r["color"], "tags": r["tags"]}
+        {
+            "name": r["name"],
+            "position": r["position"],
+            "color": r["color"],
+            "tags": r["tags"],
+            "emoji": r["emoji"],
+            "parent": proj_names.get(r["parent_id"], ""),
+        }
         for r in projects
     ]
     history = db.execute(
@@ -1762,18 +2036,88 @@ def export_links():
     priorities = db.execute(
         "SELECT id, name, color, position FROM priorities ORDER BY position, id"
     ).fetchall()
-    return jsonify(
-        {
-            "version": 10,
-            "exported_at": datetime.now(timezone.utc).isoformat(),
-            "categories": [dict(r) for r in categories],
-            "projects": out_projects,
-            "priorities": [dict(r) for r in priorities],
-            "links": out_links,
-            "memos": out_memos,
-            "history": [dict(r) for r in history],
-        }
-    )
+    return {
+        "version": 12,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "categories": [dict(r) for r in categories],
+        "projects": out_projects,
+        "priorities": [dict(r) for r in priorities],
+        "links": out_links,
+        "memos": out_memos,
+        "history": [dict(r) for r in history],
+    }
+
+
+def _rotate_backups():
+    cutoff = time.time() - BACKUP_KEEP_DAYS * 86400
+    for name in os.listdir(BACKUP_DIR):
+        p = os.path.join(BACKUP_DIR, name)
+        try:
+            if os.path.isfile(p) and os.path.getmtime(p) < cutoff:
+                os.remove(p)
+        except OSError:
+            pass
+
+
+def _create_backup():
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        data = _build_export(conn)
+        day = date.today().isoformat()
+        json_path = os.path.join(BACKUP_DIR, f"export-{day}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        db_copy = os.path.join(BACKUP_DIR, f"dashboard-{day}.db")
+        dest = sqlite3.connect(db_copy)
+        with dest:
+            conn.backup(dest)
+        dest.close()
+        _rotate_backups()
+        return [os.path.basename(json_path), os.path.basename(db_copy)]
+    finally:
+        conn.close()
+
+
+def _maybe_backup():
+    day = date.today().isoformat()
+    if not os.path.exists(os.path.join(BACKUP_DIR, f"export-{day}.json")):
+        _create_backup()
+
+
+def _backup_loop():
+    time.sleep(15)
+    while True:
+        try:
+            _maybe_backup()
+        except Exception:
+            pass
+        time.sleep(3600)
+
+
+@app.route("/api/backups", methods=["GET"])
+def list_backups():
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    out = []
+    for name in sorted(os.listdir(BACKUP_DIR), reverse=True):
+        p = os.path.join(BACKUP_DIR, name)
+        if os.path.isfile(p):
+            out.append(
+                {
+                    "name": name,
+                    "size": os.path.getsize(p),
+                    "mtime": datetime.fromtimestamp(
+                        os.path.getmtime(p), tz=timezone.utc
+                    ).isoformat(),
+                }
+            )
+    return jsonify({"backups": out, "keep_days": BACKUP_KEEP_DAYS})
+
+
+@app.route("/api/backups", methods=["POST"])
+def create_backup_now():
+    return jsonify({"created": _create_backup()}), 201
 
 
 @app.route("/api/import", methods=["POST"])
@@ -1791,14 +2135,14 @@ def import_links():
 
     cat_ids = {}
 
-    def ensure_category(name, color=""):
+    def ensure_category(name, color="", emoji=""):
         name = (name or "").strip()
         if not name:
             return None
         if name in cat_ids:
             return cat_ids[name]
         row = db.execute(
-            "SELECT id, color FROM categories WHERE name = ?", (name,)
+            "SELECT id, color, emoji FROM categories WHERE name = ?", (name,)
         ).fetchone()
         if row:
             cat_ids[name] = row["id"]
@@ -1806,33 +2150,42 @@ def import_links():
                 db.execute(
                     "UPDATE categories SET color = ? WHERE id = ?", (color, row["id"])
                 )
+            if emoji and not (row["emoji"] or "").strip():
+                db.execute(
+                    "UPDATE categories SET emoji = ? WHERE id = ?",
+                    (_clean_emoji(emoji), row["id"]),
+                )
         else:
             max_pos = db.execute(
                 "SELECT COALESCE(MAX(position), -1) FROM categories"
             ).fetchone()[0]
             cur = db.execute(
-                "INSERT INTO categories (name, position, color) VALUES (?, ?, ?)",
-                (name, max_pos + 1, color or ""),
+                "INSERT INTO categories (name, position, color, emoji) VALUES (?, ?, ?, ?)",
+                (name, max_pos + 1, color or "", _clean_emoji(emoji)),
             )
             cat_ids[name] = cur.lastrowid
         return cat_ids[name]
 
     for cat in categories:
         if isinstance(cat, dict):
-            ensure_category(cat.get("name"), (cat.get("color") or "").strip())
+            ensure_category(
+                cat.get("name"),
+                (cat.get("color") or "").strip(),
+                cat.get("emoji") or "",
+            )
         else:
             ensure_category(cat)
 
     proj_ids = {}
 
-    def ensure_project(name, color="", tags=""):
+    def ensure_project(name, color="", tags="", emoji=""):
         name = (name or "").strip()
         if not name:
             return None
         if name in proj_ids:
             return proj_ids[name]
         row = db.execute(
-            "SELECT id, color, tags FROM projects WHERE name = ?", (name,)
+            "SELECT id, color, tags, emoji FROM projects WHERE name = ?", (name,)
         ).fetchone()
         if row:
             proj_ids[name] = row["id"]
@@ -1845,13 +2198,18 @@ def import_links():
                     "UPDATE projects SET tags = ? WHERE id = ?",
                     (_normalize_tags(tags), row["id"]),
                 )
+            if emoji and not (row["emoji"] or "").strip():
+                db.execute(
+                    "UPDATE projects SET emoji = ? WHERE id = ?",
+                    (_clean_emoji(emoji), row["id"]),
+                )
         else:
             max_pos = db.execute(
                 "SELECT COALESCE(MAX(position), -1) FROM projects"
             ).fetchone()[0]
             cur = db.execute(
-                "INSERT INTO projects (name, color, position, tags) VALUES (?, ?, ?, ?)",
-                (name, color or "", max_pos + 1, _normalize_tags(tags)),
+                "INSERT INTO projects (name, color, position, tags, emoji) VALUES (?, ?, ?, ?, ?)",
+                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji)),
             )
             proj_ids[name] = cur.lastrowid
         return proj_ids[name]
@@ -1862,9 +2220,33 @@ def import_links():
                 proj.get("name"),
                 (proj.get("color") or "").strip(),
                 proj.get("tags") or "",
+                proj.get("emoji") or "",
             )
         else:
             ensure_project(proj)
+
+    for proj in data.get("projects") or []:
+        if not isinstance(proj, dict):
+            continue
+        parent_name = (proj.get("parent") or "").strip()
+        child_id = proj_ids.get((proj.get("name") or "").strip())
+        if not parent_name or not child_id:
+            continue
+        parent_id = proj_ids.get(parent_name) or (
+            lambda r: r["id"] if r else None
+        )(db.execute("SELECT id FROM projects WHERE name = ?", (parent_name,)).fetchone())
+        if not parent_id:
+            continue
+        row = db.execute(
+            "SELECT parent_id FROM projects WHERE id = ?", (child_id,)
+        ).fetchone()
+        if row and row["parent_id"] is None:
+            resolved, err = _resolve_parent(db, child_id, parent_id)
+            if not err:
+                db.execute(
+                    "UPDATE projects SET parent_id = ? WHERE id = ?",
+                    (resolved, child_id),
+                )
 
     prio_map = {}
     for pr in data.get("priorities") or []:
@@ -2022,6 +2404,7 @@ def import_links():
             project_id = ensure_project(memo.get("project", ""))
             images = _images_json(memo.get("images"), check_files=True)
             recurrence = _valid_recurrence(memo.get("recurrence"))
+            memo_emoji = _clean_emoji(memo.get("emoji"))
         else:
             content = str(memo).strip()
             uid = ""
@@ -2034,6 +2417,7 @@ def import_links():
             project_id = None
             images = "[]"
             recurrence = ""
+            memo_emoji = ""
         if not content:
             continue
 
@@ -2043,8 +2427,8 @@ def import_links():
                 merged_images = images if images != "[]" else (existing["images"] or "[]")
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, priority=?, "
-                    "subtasks=?, project_id=?, images=?, recurrence=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, updated, existing["id"]),
+                    "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, updated_at=? WHERE id=?",
+                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -2059,9 +2443,9 @@ def import_links():
         new_uid = uid or str(uuid.uuid4())
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-            "done, due_date, priority, subtasks, project_id, images, recurrence) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence),
+            "done, due_date, priority, subtasks, project_id, images, recurrence, emoji) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence, memo_emoji),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
@@ -2106,3 +2490,4 @@ def import_links():
 
 
 init_db()
+threading.Thread(target=_backup_loop, daemon=True).start()

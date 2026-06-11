@@ -43,7 +43,7 @@ Table `links` :
 | `updated_at`  | TEXT    | Dernière modification (ISO, UTC)       |
 | `tags`        | TEXT    | Tags normalisés (minuscules, sans #, séparés par espaces) |
 
-Table `categories` : `id`, `name` (unique), `position`, `color` (hex, optionnel).
+Table `categories` : `id`, `name` (unique), `position`, `color` (hex, optionnel), `emoji` (optionnel — catégories, projets et mémos ont chacun un champ `emoji`, réglable via la pop-in d'édition ou le détail du mémo, affiché dans la sidebar, les cards et la page partagée).
 
 Table `memos` : `id`, `content`, `position`, `created_at`, `uid`, `updated_at`, `done` (0/1), `due_date` (YYYY-MM-DD), `priority` (0 = aucune, 1-3 = P1-P3), `subtasks` (JSON `[{content, done}]`), `project_id` (FK vers `projects`, NULL = Inbox), `images` (JSON, noms de fichiers dans `data/uploads/`), `recurrence` ('' ou daily/weekly/monthly/quarterly/yearly).
 
@@ -53,7 +53,7 @@ Table `priorities` : `id`, `name` (unique), `color`, `position`. Seedée au prem
 
 **Récurrence** : cocher un mémo récurrent ne le termine pas — il est journalisé dans l'historique et sa `due_date` avance d'une période **calée sur l'échéance prévue** (pas sur le jour du cochage) ; s'il était très en retard, l'échéance saute jusqu'à la prochaine date future.
 
-Table `projects` : `id`, `name` (unique), `color`, `position`, `tags` (même normalisation que les liens). Les projets organisent les mémos (façon Planify), indépendamment des catégories de liens.
+Table `projects` : `id`, `name` (unique), `color`, `position`, `tags` (même normalisation que les liens), `emoji`, `parent_id` (hiérarchie parent/enfants, anti-cycle). Les projets organisent les mémos (façon Planify), indépendamment des catégories de liens. **Hiérarchie** : glisser un projet sur un autre dans la sidebar l'imbrique (le déposer sur "Mémos" le remet à la racine) ; l'arbre est indenté ; ouvrir un parent affiche aussi les mémos de ses descendants (badge du sous-projet) ; **partager un parent partage tout l'arbre** — un avertissement liste les sous-projets concernés à la création du lien. Supprimer un parent rend ses enfants racines.
 
 Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La migration des anciennes bases est automatique au démarrage (`init_db`).
 
@@ -92,7 +92,7 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | DELETE  | `/api/memos/<id>/images/<nom>` | Supprime l'image (fichier inclus)          |
 | GET     | `/uploads/<nom>`           | Sert une image uploadée                        |
 | GET     | `/api/favicon/<id>`        | Favicon du service, récupéré côté serveur (cache mémoire) |
-| GET     | `/api/export`              | Sauvegarde JSON v10 (liens + catégories + projets + priorités + mémos + historique) |
+| GET     | `/api/export`              | Sauvegarde JSON v12 (liens + catégories + projets hiérarchisés + priorités + mémos + historique) |
 | POST    | `/api/import`              | Réimporte une sauvegarde (voir Backup / restore) |
 
 Le check de statut est fait côté Flask pour éviter le CORS. Renvoie `online` / `offline` / `unknown` (URL vide) par URL renseignée.
@@ -109,7 +109,9 @@ Table `shares` : `id`, `token` (unique, `secrets.token_urlsafe(24)`), `kind` (`m
 
 **Page 🔗 Partages** (sidebar ou cloche du header) : vue dédiée regroupant les demandes en attente, tous les liens de partage (cible, droits, **PIN éditable**, URL à copier, invités du lien avec leurs statuts, révocation) et les **modifications groupées par invité** — chaque entrée dépliable en Avant/Après avec annulation et accès aux versions.
 
-Un invité validé peut tout faire sur les mémos du partage : cocher/décocher (mémo, sous-tâches, cases des listes), ajouter des articles aux listes, éditer le texte, changer échéance et priorité, ajouter/supprimer des **photos** — limitées à JPG/PNG avec **vérification de la signature binaire** côté serveur (un zip renommé en .png est rejeté ; gif/webp restent réservés au propriétaire). Tout est journalisé et attribué.
+Un invité validé peut tout faire sur les mémos du partage : cocher/décocher (mémo, sous-tâches, cases des listes), ajouter des articles aux listes, éditer le texte, changer échéance et priorité, ajouter/supprimer des **photos** — limitées à JPG/PNG avec **vérification de la signature binaire** côté serveur (un zip renommé en .png est rejeté ; gif/webp restent réservés au propriétaire). Sur un projet partagé, il peut aussi **créer des mémos dans n'importe quel projet du scope** (sélecteur) et **créer des sous-projets** (`POST /share/<token>/projects`, parent forcé dans le scope, journalisé dans le fil). Tout est journalisé et attribué.
+
+La page partagée d'un projet affiche une **sidebar** avec l'arborescence des projets du partage (indentée, compteurs, navigation par clic — "Tous" + chaque projet/sous-projet) et des **tuiles de filtres** (En cours / Aujourd'hui / Planifiés / En retard / Terminés) calculées sur la sélection. Les invités validés y gèrent la hiérarchie : **glisser un mémo sur un projet** le déplace, **glisser un sous-projet sur un autre** le réorganise, et **double-clic / clic droit sur un projet** ouvre la pop-in d'édition (nom, emoji, couleur — renommages journalisés dans le fil). La racine du partage est éditable mais indéplaçable ; parents et déplacements strictement limités au périmètre du partage, anti-cycle, noms uniques. Côté propriétaire, un **récap des invités connectés** (✏️ Marie en modification, 👁 ... en lecture) s'affiche sous le titre d'un projet partagé et dans le détail d'un mémo partagé. Le pied de page des deux interfaces affiche la version (`APP_VERSION` dans `app.py`, alignée sur la version d'export).
 
 **Attribution & versions** : chaque modification (propriétaire ou invité) est journalisée dans `memo_revisions` (états avant/après en JSON, auteur, date). Le fil 🔔 Activité montre qui a fait quoi ; le bouton "🕘 Versions" dans le détail d'un mémo liste l'historique et permet — côté propriétaire uniquement, derrière Authelia — de **restaurer** n'importe quelle version (y compris l'état d'origine). La restauration est elle-même journalisée, donc réversible.
 
@@ -167,6 +169,10 @@ curl -X POST http://localhost:8099/api/import -H 'Content-Type: application/json
 ```
 
 Les fichiers `backup*.json` sont gitignorés (potentiellement des infos perso) — transfère-les manuellement (scp, drag&drop, etc.).
+
+## Sauvegardes automatiques
+
+Un thread interne crée chaque jour dans `data/backups/` : un **export JSON v12** complet et une **copie de la base SQLite** (via l'API backup, cohérente même à chaud). Rotation automatique (`BACKUP_KEEP_DAYS`, 7 jours par défaut). Bouton "💾 Sauvegarder maintenant" + liste des sauvegardes dans ⚙ Paramètres ; API : `GET/POST /api/backups`. Idempotent entre les workers gunicorn (une sauvegarde par jour). Les images de `data/uploads/` ne sont pas dupliquées — pour un backup externe complet, copier le dossier `data/`. Restauration : réimporter le JSON, ou remplacer `data/dashboard.db` par une copie.
 
 ## Persistance
 

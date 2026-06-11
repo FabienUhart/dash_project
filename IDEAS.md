@@ -21,6 +21,10 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Partage externe par lien à jeton + code PIN 4 chiffres, invités identifiés par e-mail
 - [x] Page 🔗 Partages : gestion des liens/PIN/invités, modifications par invité (avant/après, annulation)
 - [x] Versions des mémos avec restauration owner-only, rechargement auto 15 s
+- [x] Projets imbriqués (parents/enfants, drag & drop, partage récursif avec avertissement)
+- [x] Page partagée = mini-dashboard invité : sidebar hiérarchique, tuiles, Quill, créations (mémos/sous-projets), éditions de projets, drag & drop — scopé au partage
+- [x] Vue Invités par personne (tous les accès, hiérarchie dépliée, droits, retrait ciblé)
+- [x] Sauvegardes automatiques quotidiennes (JSON + SQLite, rotation 7 j, bouton manuel)
 
 ## Quick wins
 
@@ -39,7 +43,8 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 ## Plus ambitieux
 
-- **PWA** : manifest + service worker → installable sur mobile, icône sur l'écran d'accueil, cache hors-ligne de la dernière vue.
+- **PWA** : manifest + service worker → installable sur mobile, icône sur l'écran d'accueil, cache hors-ligne de la dernière vue. **Important (demande Fabien)** : gérer le hors-ligne en écriture — file d'attente locale (outbox IndexedDB) des modifications faites sans réseau, synchronisées automatiquement au retour de la connexion (cocher des courses dans un magasin sans 4G).
+- **Audios sur les mémos** : bouton 🎤 (MediaRecorder), upload validé par signature comme les images, lecteur sur la card. Sans transcription (Zimaboard trop léger pour Whisper) — pièce jointe vocale simple.
 - **Widgets de services** : pour certains services connus, afficher une info en plus du statut (espace disque du NAS, nombre de téléchargements en cours, capteurs Home Assistant via leurs APIs).
 - **Multi-profils** : page d'accueil différente par navigateur/contexte (perso / boulot) via un paramètre `?profile=`.
 - **Backup automatique planifié** : un cron dans le conteneur qui poste l'export JSON quotidien dans un dossier `data/backups/` avec rotation (7 jours), pour ne plus dépendre de l'export manuel.

@@ -132,7 +132,9 @@ button.icon { padding: 0.45rem 0.6rem; }
 }
 .guest-row:last-child, .rev-row:last-child { border-bottom: none; }
 .guest-row .grow, .rev-row .grow { flex: 1; min-width: 0; }
-.rev-row .rev-meta { font-size: 0.72rem; color: var(--muted); display: block; }
+.rev-row .rev-meta, .guest-row .rev-meta { font-size: 0.72rem; color: var(--muted); display: block; }
+.guest-row .access-title { display: block; word-break: break-word; }
+.guest-row .access-tree { font-size: 0.74rem; color: var(--muted); display: block; padding-left: 0.2rem; }
 .rev-row .rev-excerpt { word-break: break-word; }
 .guest-row button, .rev-row button { padding: 0.15rem 0.5rem; font-size: 0.78rem; flex-shrink: 0; }
 .guest-row .g-approve { border-color: var(--green); color: var(--green); }
@@ -804,6 +806,18 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 }
 .cat-manage-row .grow { flex: 1; }
 .cat-manage-row button { padding: 0.15rem 0.45rem; font-size: 0.78rem; }
+#emoji-suggest { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.4rem; }
+#emoji-suggest button {
+  padding: 0.2rem 0.4rem;
+  font-size: 1.05rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  line-height: 1;
+}
+#emoji-suggest button:hover { border-color: var(--accent); background: var(--panel-2); }
+.memo-emoji { margin-right: 0.35rem; font-style: normal; }
 .cat-manage-row input[type="color"] {
   width: 1.6rem;
   height: 1.6rem;
@@ -813,6 +827,29 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   background: none;
   cursor: pointer;
 }
+
+#app-footer {
+  text-align: center;
+  color: var(--gray);
+  font-size: 0.72rem;
+  padding: 0.7rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+.guest-recap { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; margin: 0.2rem 0 0.8rem; }
+.guest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  color: var(--muted);
+}
+.guest-chip.rw { border-color: var(--green); color: var(--green); }
+.guest-chip.ro { border-color: var(--gray); }
 
 /* ---------- mobile ---------- */
 @media (max-width: 900px) {
@@ -884,6 +921,8 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </aside>
 </div>
 
+<footer id="app-footer">Dashboard v{{ version }} · créé par Fabien U.</footer>
+
 <dialog id="link-dialog">
   <h3 id="dialog-title">Nouveau lien</h3>
   <form id="link-form">
@@ -916,6 +955,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 
 <dialog id="share-dialog">
   <h3 id="share-title">🔗 Partager</h3>
+  <p id="share-warning" hidden style="background:#38301a;border:1px solid var(--yellow);border-radius:6px;color:var(--yellow);font-size:0.82rem;padding:0.5rem 0.7rem;margin:0 0 0.75rem"></p>
   <div id="share-list"></div>
   <div class="settings-row" style="margin-top:0.75rem">
     <button id="share-add-ro">+ Lien lecture seule</button>
@@ -951,6 +991,10 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <h3 id="create-title">Nouveau projet</h3>
   <form id="create-form">
     <label>Nom<input type="text" name="name" required autocomplete="off"></label>
+    <label id="create-emoji-label">Emoji
+      <input type="text" name="emoji" maxlength="4" autocomplete="off" placeholder="ex. 🛒 — tape ou choisis ci-dessous">
+      <div id="emoji-suggest"></div>
+    </label>
     <label>Couleur<input type="color" name="color" value="#4fc3f7" style="height:2.4rem;padding:0.2rem;cursor:pointer"></label>
     <label id="create-tags-label"># Tags<input type="text" name="tags" autocomplete="off" placeholder="#docker #infra — retrouvables via la recherche p#"></label>
     <div class="actions">
@@ -982,6 +1026,17 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
       L'export contient les liens, les catégories et les mémos.
       L'import accepte aussi les anciennes sauvegardes, met à jour les éléments connus et ignore les doublons.
+    </p>
+  </div>
+  <div class="settings-section">
+    <h4>SAUVEGARDES AUTOMATIQUES</h4>
+    <div class="settings-row">
+      <button id="backup-now">💾 Sauvegarder maintenant</button>
+    </div>
+    <div id="backup-list" style="margin-top:0.5rem;font-size:0.8rem"></div>
+    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+      Chaque jour : export JSON + copie de la base dans <code>data/backups/</code> (conservés 7 jours).
+      Les images de <code>data/uploads/</code> ne sont pas dupliquées — sauvegarde le dossier <code>data/</code> complet pour un backup externe.
     </p>
   </div>
   <div class="settings-section">
@@ -1123,8 +1178,8 @@ async function api(path, opts = {}) {
 }
 
 async function loadAll() {
-  [state.links, state.categories, state.memos, state.projects, state.history, state.priorities] = await Promise.all([
-    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'), api('/api/history'), api('/api/priorities'),
+  [state.links, state.categories, state.memos, state.projects, state.history, state.priorities, state.shares] = await Promise.all([
+    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'), api('/api/history'), api('/api/priorities'), api('/api/shares'),
   ]);
   if (state.filterCat !== 'all' && state.filterCat !== 'none'
       && !state.categories.some(c => c.id === state.filterCat)) {
@@ -1200,14 +1255,7 @@ function renderSidebar() {
     return item;
   };
   const emojiIcon = (em) => el('span', { class: 'emoji', text: em });
-  const catIcon = (cat, idx) => {
-    if (cat.color) {
-      const dot = el('span', { class: 'cat-dot' });
-      dot.style.background = cat.color;
-      return dot;
-    }
-    return emojiIcon(catEmoji(idx));
-  };
+  const catIcon = (cat, idx) => comboIcon(cat.emoji, cat.color, catEmoji(idx));
 
   nav.appendChild(mkItem('all', emojiIcon('🗂'), 'Tous', state.links.length));
 
@@ -1253,6 +1301,19 @@ function renderSidebar() {
   memoItem.appendChild(emojiIcon('📝'));
   memoItem.appendChild(el('span', { text: 'Mémos' }));
   memoItem.appendChild(el('span', { class: 'count', text: String(pendingMemoCount) }));
+  memoItem.addEventListener('dragover', (e) => {
+    if (!dragProjId) return;
+    e.preventDefault();
+    memoItem.classList.add('drop-target');
+  });
+  memoItem.addEventListener('dragleave', () => memoItem.classList.remove('drop-target'));
+  memoItem.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    memoItem.classList.remove('drop-target');
+    if (!dragProjId) return;
+    await api(`/api/projects/${dragProjId}`, { method: 'PUT', body: JSON.stringify({ parent_id: null }) });
+    await loadAll();
+  });
   nav.appendChild(memoItem);
 
   const inboxCount = state.memos.filter(m => !m.done && !m.project_id).length;
@@ -1276,7 +1337,8 @@ function renderSidebar() {
     item.appendChild(el('span', { text: label }));
     item.appendChild(el('span', { class: 'count', text: String(count) }));
     item.addEventListener('dragover', (e) => {
-      if (!dragMemoId) return;
+      if (!dragMemoId && !dragProjId) return;
+      if (dragProjId && (dragProjId === projId || (projId && projectDescendants(dragProjId).includes(projId)))) return;
       e.preventDefault();
       item.classList.add('drop-target');
     });
@@ -1284,21 +1346,41 @@ function renderSidebar() {
     item.addEventListener('drop', async (e) => {
       e.preventDefault();
       item.classList.remove('drop-target');
-      if (!dragMemoId) return;
-      await api(`/api/memos/${dragMemoId}`, {
-        method: 'PUT', body: JSON.stringify({ project_id: projId }),
-      });
-      await loadAll();
+      if (dragMemoId) {
+        await api(`/api/memos/${dragMemoId}`, {
+          method: 'PUT', body: JSON.stringify({ project_id: projId }),
+        });
+        await loadAll();
+      } else if (dragProjId && dragProjId !== projId) {
+        const r = await fetch(`/api/projects/${dragProjId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parent_id: projId }),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          await notify(err.error || 'Déplacement impossible', { error: true });
+        }
+        await loadAll();
+      }
     });
     return item;
   };
 
   nav.appendChild(mkProjItem('inbox', emojiIcon('📥'), 'Inbox', inboxCount, null));
-  state.projects.forEach(p => {
-    const dot = el('span', { class: 'cat-dot' });
-    dot.style.background = p.color || 'var(--gray)';
-    nav.appendChild(mkProjItem(p.id, dot, p.name, p.memo_count, p.id, () => openCreateDialog('project', p)));
-  });
+  const renderProjTree = (p, depth) => {
+    const icon = comboIcon(p.emoji, p.color, null);
+    const item = mkProjItem(p.id, icon, p.name, p.memo_count, p.id, () => openCreateDialog('project', p));
+    item.style.paddingLeft = (2 + depth * 0.9) + 'rem';
+    item.setAttribute('draggable', 'true');
+    item.addEventListener('dragstart', (e) => {
+      dragProjId = p.id;
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    item.addEventListener('dragend', () => { dragProjId = null; });
+    nav.appendChild(item);
+    projectChildren(p.id).forEach(c => renderProjTree(c, depth + 1));
+  };
+  state.projects.filter(p => !p.parent_id).forEach(p => renderProjTree(p, 0));
   nav.appendChild(el('div', {
     attrs: { id: 'add-proj' }, text: '+ Projet',
     on: { click: addProject },
@@ -1327,11 +1409,22 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-title').textContent = titles[kind];
   document.getElementById('create-submit').textContent = item ? 'Enregistrer' : 'Créer';
   document.getElementById('create-tags-label').style.display = kind === 'project' ? '' : 'none';
+  document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-delete').style.display = item ? '' : 'none';
+  const suggest = document.getElementById('emoji-suggest');
+  if (!suggest.childElementCount) {
+    ['📁','🏠','🛒','💼','🎬','🎮','🎵','📚','✈️','🍽️','🐱','💡','🔧','💰','🎁','📷','💪','🌱'].forEach(em => {
+      suggest.appendChild(el('button', {
+        attrs: { type: 'button' }, text: em,
+        on: { click: () => { createForm.elements.emoji.value = em; } },
+      }));
+    });
+  }
   createForm.reset();
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
+    createForm.elements.emoji.value = item.emoji || '';
     createForm.elements.tags.value = (item.tags || '').split(/\s+/).filter(Boolean).map(t => '#' + t).join(' ');
   } else if (kind === 'priority') {
     createForm.elements.name.value = 'P' + (state.priorities.length + 1);
@@ -1370,6 +1463,7 @@ createForm.addEventListener('submit', async (e) => {
   const bases = { project: '/api/projects', category: '/api/categories', priority: '/api/priorities' };
   const base = bases[createKind];
   const payload = { name, color: createForm.elements.color.value };
+  if (createKind !== 'priority') payload.emoji = createForm.elements.emoji.value.trim();
   if (createKind === 'project') payload.tags = createForm.elements.tags.value.trim();
   const body = JSON.stringify(payload);
   try {
@@ -1447,6 +1541,58 @@ function urlLink(href, emoji, kind) {
 }
 
 let dragLinkId = null;
+let dragProjId = null;
+
+function comboIcon(emoji, color, fallback) {
+  const wrap = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0' } });
+  if (emoji) wrap.appendChild(el('span', { text: emoji }));
+  if (color) {
+    const dot = el('span', { class: 'cat-dot' });
+    dot.style.background = color;
+    if (emoji) { dot.style.width = '0.45rem'; dot.style.height = '0.45rem'; }
+    wrap.appendChild(dot);
+  }
+  if (!emoji && !color) {
+    if (fallback) wrap.appendChild(el('span', { class: 'emoji', text: fallback }));
+    else {
+      const dot = el('span', { class: 'cat-dot' });
+      dot.style.background = 'var(--gray)';
+      wrap.appendChild(dot);
+    }
+  }
+  return wrap;
+}
+
+function guestRecapEl(kind, targetId) {
+  const shares = (state.shares || []).filter(s => s.kind === kind && s.target_id === targetId);
+  if (!shares.length) return null;
+  const wrap = el('div', { class: 'guest-recap' });
+  wrap.appendChild(el('span', { class: 'guest-chip', text: '🔗 ' + shares.length + ' lien' + (shares.length > 1 ? 's' : '') }));
+  let any = false;
+  shares.forEach(s => {
+    (s.guests || []).filter(g => g.status === 'approved').forEach(g => {
+      any = true;
+      wrap.appendChild(el('span', {
+        class: 'guest-chip ' + (s.can_edit ? 'rw' : 'ro'),
+        text: (s.can_edit ? '✏️ ' : '👁 ') + (g.name || g.email) + (s.can_edit ? ' en modification' : ' en lecture'),
+        attrs: { title: g.email + (s.can_edit ? ' — lien modifiable' : ' — lien lecture seule') },
+      }));
+    });
+  });
+  if (!any) wrap.appendChild(el('span', { class: 'guest-chip', text: 'aucun invité connecté' }));
+  return wrap;
+}
+
+function projectChildren(pid) {
+  return state.projects.filter(p => p.parent_id === pid);
+}
+
+function projectDescendants(pid) {
+  const out = [];
+  const walk = (id) => projectChildren(id).forEach(c => { out.push(c.id); walk(c.id); });
+  walk(pid);
+  return out;
+}
 
 function renderLinks() {
   const ul = document.getElementById('links');
@@ -1468,7 +1614,7 @@ function renderLinks() {
     titleRow.appendChild(el('span', { class: 'name', text: link.name }));
     if (state.filterCat === 'all' && link.category_id && catById[link.category_id]) {
       const cat = catById[link.category_id];
-      const tag = el('span', { class: 'cat-tag', text: cat.name });
+      const tag = el('span', { class: 'cat-tag', text: (cat.emoji ? cat.emoji + ' ' : '') + cat.name });
       if (cat.color) tag.style.color = cat.color;
       titleRow.appendChild(tag);
     }
@@ -1807,7 +1953,7 @@ function guestRowEl(g, onChange) {
 function revRowEl(r, onChange) {
   const row = el('div', { class: 'rev-row expandable', attrs: { title: 'Cliquer pour voir le mémo en entier' } });
   const info = el('span', { class: 'grow' });
-  info.appendChild(el('span', { class: 'rev-excerpt', text: (r.created ? '➕ a ajouté : ' : '✏️ a modifié : ') + stripHTML(r.memo_content || '(mémo supprimé)').slice(0, 70) }));
+  info.appendChild(el('span', { class: 'rev-excerpt', text: (r.created ? '➕ a ajouté : ' : '✏️ a modifié : ') + stripHTML(r.memo_content || (r.after && r.after.content) || '(mémo supprimé)').slice(0, 70) }));
   info.appendChild(el('span', { class: 'rev-meta', text: r.editor + ' — ' + fmtWhen(r.edited_at) }));
   row.appendChild(info);
   row.appendChild(el('span', { class: 'rev-meta', text: '▸' }));
@@ -1879,6 +2025,81 @@ async function renderShares() {
     pending.forEach(g => sec.appendChild(guestRowEl(g, rerender)));
     board.appendChild(sec);
   }
+
+  const byEmail = new Map();
+  guests.forEach(g => {
+    if (!byEmail.has(g.email)) byEmail.set(g.email, []);
+    byEmail.get(g.email).push(g);
+  });
+  const secU = el('div', { class: 'memo-section' });
+  secU.appendChild(el('h2', { text: `INVITÉS (${byEmail.size} personne${byEmail.size > 1 ? 's' : ''})` }));
+  if (!byEmail.size) secU.appendChild(el('div', { class: 'empty', text: 'Personne ne s\'est encore connecté à un lien.' }));
+  byEmail.forEach((accs, email) => {
+    const card = el('div', { class: 'share-card' });
+    const head = el('div', { class: 'share-row' });
+    head.appendChild(el('span', { text: '👤' }));
+    const dispName = (accs.find(a => a.name) || {}).name || email;
+    head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: dispName + (dispName !== email ? ' — ' + email : '') }));
+    head.appendChild(el('span', { class: 'rev-meta', text: accs.length + ' accès' }));
+    card.appendChild(head);
+    accs.forEach(g => {
+      const row = el('div', { class: 'guest-row' });
+      row.appendChild(el('span', { text: g.kind === 'memo' ? '📝' : '📁' }));
+      const info = el('span', { class: 'grow' });
+      info.appendChild(el('span', { class: 'access-title', text: stripHTML(g.target || '?').slice(0, 60) }));
+      if (g.kind === 'project') {
+        const renderDesc = (pid, depth) => {
+          projectChildren(pid).forEach(c => {
+            const line = el('span', {
+              class: 'access-tree',
+              text: '\u21b3 ' + (c.emoji ? c.emoji + ' ' : '') + c.name,
+            });
+            line.style.paddingLeft = (depth * 0.8) + 'rem';
+            info.appendChild(line);
+            renderDesc(c.id, depth + 1);
+          });
+        };
+        renderDesc(g.target_id, 1);
+      }
+      info.appendChild(el('span', { class: 'rev-meta', text: 'depuis le ' + fmtWhen(g.created_at) }));
+      row.appendChild(info);
+      row.appendChild(el('span', { class: 'status-pill ' + (g.can_edit ? 'approved' : ''), text: g.can_edit ? '✏️ modification' : '👁 lecture' }));
+      row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { pending: 'en attente', approved: 'validé', rejected: 'refusé' }[g.status] || g.status }));
+      row.appendChild(el('button', {
+        text: '📋', attrs: { title: 'Copier le lien de cet accès' },
+        on: { click: async (e) => {
+          try {
+            await navigator.clipboard.writeText(location.origin + '/share/' + g.token);
+            e.target.textContent = '✓';
+            setTimeout(() => { e.target.textContent = '📋'; }, 1200);
+          } catch (_) {}
+        } },
+      }));
+      if (g.status === 'pending') {
+        row.appendChild(el('button', {
+          class: 'g-approve', text: '✓',  attrs: { title: 'Valider' },
+          on: { click: async () => { await api(`/api/guests/${g.id}`, { method: 'PUT', body: JSON.stringify({ status: 'approved' }) }); rerender(); } },
+        }));
+      }
+      if (g.status !== 'rejected') {
+        row.appendChild(el('button', {
+          class: 'g-reject', text: '✕', attrs: { title: 'Refuser cet accès' },
+          on: { click: async () => { await api(`/api/guests/${g.id}`, { method: 'PUT', body: JSON.stringify({ status: 'rejected' }) }); rerender(); } },
+        }));
+      }
+      row.appendChild(el('button', {
+        text: '×', attrs: { title: 'Supprimer cet accès' },
+        on: { click: async () => {
+          if (!(await confirmPopin(`Retirer l'accès de ${email} à « ${stripHTML(g.target || '?').slice(0, 40)} » ?`))) return;
+          await api(`/api/guests/${g.id}`, { method: 'DELETE' });
+          rerender();
+        } },
+      }));
+      card.appendChild(row);
+    });
+    secU.appendChild(card);
+  });
+  board.appendChild(secU);
 
   const secL = el('div', { class: 'memo-section' });
   secL.appendChild(el('h2', { text: `LIENS DE PARTAGE (${shares.length})` }));
@@ -2026,8 +2247,28 @@ let shareCtx = null;
 async function openShareDialog(kind, targetId, title) {
   shareCtx = { kind, targetId };
   document.getElementById('share-title').textContent = '🔗 Partager — ' + title;
+  const warn = document.getElementById('share-warning');
+  shareCtx.children = kind === 'project'
+    ? projectDescendants(targetId).map(id => (state.projects.find(p => p.id === id) || {}).name).filter(Boolean)
+    : [];
+  if (shareCtx.children.length) {
+    warn.hidden = false;
+    warn.textContent = '⚠️ Ce projet contient ' + shareCtx.children.length + ' sous-projet' + (shareCtx.children.length > 1 ? 's' : '')
+      + ' (' + shareCtx.children.join(', ') + ') — leurs mémos seront partagés aussi.';
+  } else {
+    warn.hidden = true;
+  }
   await renderShareList();
   shareDialog.showModal();
+}
+
+async function confirmShareCreation() {
+  if (!shareCtx.children || !shareCtx.children.length) return true;
+  return confirmPopin(
+    'Ce projet contient ' + shareCtx.children.length + ' sous-projet' + (shareCtx.children.length > 1 ? 's' : '')
+    + ' :\n' + shareCtx.children.join(', ') + '\n\nLeurs mémos seront visibles (et modifiables selon le lien) par les invités. Continuer ?',
+    { title: '⚠️ Partage d\'un projet parent', okLabel: 'Créer le lien', danger: false }
+  );
 }
 
 async function renderShareList() {
@@ -2076,10 +2317,12 @@ async function renderShareList() {
 
 document.getElementById('share-close').addEventListener('click', () => shareDialog.close());
 document.getElementById('share-add-ro').addEventListener('click', async () => {
+  if (!(await confirmShareCreation())) return;
   await api('/api/shares', { method: 'POST', body: JSON.stringify({ kind: shareCtx.kind, target_id: shareCtx.targetId, can_edit: false }) });
   await renderShareList();
 });
 document.getElementById('share-add-rw').addEventListener('click', async () => {
+  if (!(await confirmShareCreation())) return;
   await api('/api/shares', { method: 'POST', body: JSON.stringify({ kind: shareCtx.kind, target_id: shareCtx.targetId, can_edit: true }) });
   await renderShareList();
 });
@@ -2214,6 +2457,7 @@ function taskEl(memo) {
   row.appendChild(check);
 
   const content = el('div', { class: 'task-content', attrs: { title: 'Cliquer pour éditer' } });
+  if (memo.emoji) content.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
   content.appendChild(contentNode(memo.content));
   wireChecklist(content, memo);
   content.addEventListener('click', () => {
@@ -2246,15 +2490,11 @@ function taskEl(memo) {
       },
     }));
   }
-  if (state.memoProject === 'all' && memo.project_id) {
+  if (memo.project_id && (state.memoProject === 'all' || memo.project_id !== state.memoProject)) {
     const proj = state.projects.find(p => p.id === memo.project_id);
     if (proj) {
       const pb = el('span', { class: 'proj-badge' });
-      const dot = el('span', { class: 'cat-dot' });
-      dot.style.width = '0.5rem';
-      dot.style.height = '0.5rem';
-      dot.style.background = proj.color || 'var(--gray)';
-      pb.appendChild(dot);
+      pb.appendChild(comboIcon(proj.emoji, proj.color, null));
       pb.appendChild(el('span', { text: proj.name }));
       badges.appendChild(pb);
     }
@@ -2318,6 +2558,9 @@ function taskEl(memo) {
 function taskDetailEl(memo) {
   const detail = el('div', { class: 'task-detail' });
 
+  const recap = guestRecapEl('memo', memo.id);
+  if (recap) detail.appendChild(recap);
+
   const row1 = el('div', { class: 'detail-row' });
   row1.appendChild(el('span', { text: '📅' }));
   const dateIn = el('input', { attrs: { type: 'date' } });
@@ -2348,6 +2591,13 @@ function taskDetailEl(memo) {
     }
     row1.appendChild(btn);
   });
+  const emojiIn = el('input', {
+    attrs: { type: 'text', maxlength: '4', title: 'Emoji du mémo', placeholder: '😀' },
+  });
+  emojiIn.style.cssText = 'width:2.6rem;text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.95rem;padding:0.15rem';
+  emojiIn.value = memo.emoji || '';
+  emojiIn.addEventListener('change', () => patchMemo(memo.id, { emoji: emojiIn.value.trim() }));
+  row1.appendChild(emojiIn);
   row1.appendChild(el('span', { text: '🔁' }));
   const recurSel = el('select');
   RECUR_OPTIONS.forEach(([v, label]) => {
@@ -2362,7 +2612,7 @@ function taskDetailEl(memo) {
   const projSel = el('select');
   projSel.appendChild(el('option', { attrs: { value: '' }, text: 'Inbox' }));
   state.projects.forEach(p => {
-    const opt = el('option', { attrs: { value: p.id }, text: p.name });
+    const opt = el('option', { attrs: { value: p.id }, text: (p.emoji ? p.emoji + ' ' : '') + p.name });
     if (memo.project_id === p.id) opt.selected = true;
     projSel.appendChild(opt);
   });
@@ -2447,11 +2697,14 @@ function renderBoard() {
   board.innerHTML = '';
 
   const searchActive = !!parseSearch().q;
+  const projScope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
+    ? new Set([state.memoProject, ...projectDescendants(state.memoProject)])
+    : null;
   const allMemos = visibleMemos().filter(m => {
     if (searchActive) return true;
     if (state.memoProject === 'all') return true;
     if (state.memoProject === 'inbox') return !m.project_id;
-    return m.project_id === state.memoProject;
+    return projScope.has(m.project_id);
   });
   const todayD = dateStr(new Date());
 
@@ -2463,9 +2716,7 @@ function renderBoard() {
   } else {
     const proj = state.projects.find(p => p.id === state.memoProject);
     if (proj) {
-      const dot = el('span', { class: 'cat-dot' });
-      dot.style.background = proj.color || 'var(--gray)';
-      title.appendChild(dot);
+      title.appendChild(comboIcon(proj.emoji, proj.color, null));
       title.appendChild(el('span', { text: proj.name }));
       title.appendChild(el('button', {
         class: 'prio-btn', text: '🔗 Partager',
@@ -2475,6 +2726,11 @@ function renderBoard() {
     }
   }
   board.appendChild(title);
+
+  if (state.memoProject !== 'all' && state.memoProject !== 'inbox') {
+    const recap = guestRecapEl('project', state.memoProject);
+    if (recap) board.appendChild(recap);
+  }
 
   const { scope: sScope, q: sQ } = parseSearch();
   if (sQ && sScope !== 'links') {
@@ -2590,7 +2846,7 @@ function renderBoard() {
   const projSel = el('select', { attrs: { title: 'Projet' } });
   projSel.appendChild(el('option', { attrs: { value: '' }, text: '📥 Inbox' }));
   state.projects.forEach(p => {
-    const opt = el('option', { attrs: { value: p.id }, text: p.name });
+    const opt = el('option', { attrs: { value: p.id }, text: (p.emoji ? p.emoji + ' ' : '') + p.name });
     if (state.memoProject === p.id) opt.selected = true;
     projSel.appendChild(opt);
   });
@@ -2785,7 +3041,7 @@ function renderMemos() {
     });
     const prio = prioOf(memo.priority);
     if (prio && prio.color) note.style.borderLeftColor = prio.color;
-    const plain = stripHTML(memo.content);
+    const plain = (memo.emoji ? memo.emoji + ' ' : '') + stripHTML(memo.content);
     note.appendChild(el('span', { text: plain.length > 120 ? plain.slice(0, 118) + '…' : plain }));
     const due = dueInfo(memo.due_date);
     const extras = [];
@@ -2985,7 +3241,35 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   renderCatManage();
   renderProjManage();
   renderPrioManage();
+  renderBackups();
   settingsDialog.showModal();
+});
+
+async function renderBackups() {
+  const wrap = document.getElementById('backup-list');
+  try {
+    const data = await api('/api/backups');
+    wrap.innerHTML = '';
+    if (!data.backups.length) {
+      wrap.appendChild(el('div', { class: 'empty', text: 'Aucune sauvegarde pour le moment (la première se fait au démarrage).' }));
+      return;
+    }
+    data.backups.slice(0, 8).forEach(b => {
+      const row = el('div', { class: 'cat-manage-row' });
+      row.appendChild(el('span', { text: b.name.endsWith('.json') ? '📄' : '🗃' }));
+      row.appendChild(el('span', { class: 'grow', text: b.name }));
+      row.appendChild(el('span', { attrs: { style: 'color:var(--muted);font-size:0.75rem' }, text: (b.size / 1024).toFixed(0) + ' Ko' }));
+      wrap.appendChild(row);
+    });
+  } catch (_) {
+    wrap.textContent = '';
+  }
+}
+
+document.getElementById('backup-now').addEventListener('click', async () => {
+  const r = await api('/api/backups', { method: 'POST' });
+  await renderBackups();
+  await notify('Sauvegarde créée : ' + r.created.join(' + '), { title: '💾 Sauvegarde' });
 });
 document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
 document.getElementById('refresh-status').addEventListener('click', loadStatus);
