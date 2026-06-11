@@ -107,6 +107,103 @@ button.primary:hover { background: #6fcef9; }
 button.danger { background: var(--red); color: #fff; border-color: var(--red); }
 button.danger:hover { background: #d32f2f; }
 button.icon { padding: 0.45rem 0.6rem; }
+#activity-btn { position: relative; }
+#activity-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.05rem 0.3rem;
+  min-width: 1rem;
+  text-align: center;
+  display: none;
+}
+.guest-row, .rev-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.guest-row:last-child, .rev-row:last-child { border-bottom: none; }
+.guest-row .grow, .rev-row .grow { flex: 1; min-width: 0; }
+.rev-row .rev-meta { font-size: 0.72rem; color: var(--muted); display: block; }
+.rev-row .rev-excerpt { word-break: break-word; }
+.guest-row button, .rev-row button { padding: 0.15rem 0.5rem; font-size: 0.78rem; flex-shrink: 0; }
+.guest-row .g-approve { border-color: var(--green); color: var(--green); }
+.guest-row .g-approve:hover { background: var(--green); color: #fff; }
+.guest-row .g-reject { border-color: var(--red); color: var(--red); }
+.guest-row .g-reject:hover { background: var(--red); color: #fff; }
+.status-pill { font-size: 0.68rem; padding: 0.08rem 0.4rem; border-radius: 4px; background: var(--panel-2); color: var(--muted); flex-shrink: 0; }
+.status-pill.approved { color: var(--green); }
+.status-pill.pending { color: var(--yellow); }
+.status-pill.rejected { color: var(--red); }
+.rev-row.expandable { cursor: pointer; }
+.rev-row.expandable:hover { background: var(--panel-2); }
+.rev-detail {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.7rem;
+  flex-wrap: wrap;
+}
+.snap-box {
+  flex: 1;
+  min-width: 200px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.85rem;
+}
+.snap-box.snap-after { border-color: var(--accent); }
+.snap-label { font-size: 0.68rem; color: var(--muted); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+.snap-box .snap-meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
+.snap-box .stline { font-size: 0.8rem; margin-top: 0.15rem; }
+.snap-box .stline.stdone { text-decoration: line-through; color: var(--muted); }
+.rev-actions { display: flex; gap: 0.4rem; width: 100%; }
+.rev-actions button { padding: 0.2rem 0.6rem; font-size: 0.78rem; }
+#shares-board { max-width: 760px; margin: 0 auto; }
+.share-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.share-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.share-target { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pin-wrap { display: inline-flex; align-items: center; gap: 0.3rem; flex-shrink: 0; }
+.pin-input {
+  width: 4.2rem;
+  text-align: center;
+  letter-spacing: 0.35em;
+  font-weight: 700;
+  font-size: 0.95rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--yellow);
+  padding: 0.2rem 0.1rem 0.2rem 0.4rem;
+  font-family: inherit;
+}
+.pin-input:focus { outline: none; border-color: var(--accent); }
+.share-url {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  padding: 0.3rem 0.4rem;
+}
+.share-row button { padding: 0.15rem 0.5rem; font-size: 0.8rem; flex-shrink: 0; }
 
 /* ---------- layout ---------- */
 .layout { display: flex; min-height: calc(100vh - 57px); }
@@ -318,6 +415,22 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .mfilter.f-scheduled .mf-label, .mfilter.f-scheduled .mf-icon { color: #b39ddb; }
 .mfilter.f-overdue .mf-label, .mfilter.f-overdue .mf-icon { color: #ff8a80; }
 .mfilter.f-done .mf-label, .mfilter.f-done .mf-icon { color: var(--orange); }
+.mfilter.f-history .mf-label, .mfilter.f-history .mf-icon { color: #f06292; }
+.mfilter.active.f-history { border-color: #f06292; background: #2c1a22; }
+.hist-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.35rem;
+  font-size: 0.88rem;
+}
+.hist-row .hist-time { color: var(--muted); font-size: 0.75rem; flex-shrink: 0; min-width: 2.6rem; }
+.hist-row .hist-content { flex: 1; word-break: break-word; }
+.hist-row .hist-proj { font-size: 0.72rem; color: var(--muted); flex-shrink: 0; display: inline-flex; align-items: center; gap: 0.3rem; }
 .mfilter.active.f-inbox { border-color: var(--accent); background: #15232e; }
 .mfilter.active.f-today { border-color: var(--green); background: #16271a; }
 .mfilter.active.f-scheduled { border-color: #b39ddb; background: #221f2e; }
@@ -365,9 +478,6 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   margin-bottom: 0.45rem;
   cursor: grab;
 }
-.task.p1 { border-left-color: var(--red); }
-.task.p2 { border-left-color: var(--orange); }
-.task.p3 { border-left-color: var(--accent); }
 .task.dragging { opacity: 0.4; }
 .task .task-row { display: flex; align-items: flex-start; gap: 0.6rem; }
 .task-check {
@@ -384,9 +494,6 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   line-height: 1;
   color: transparent;
 }
-.task.p1 .task-check { border-color: var(--red); }
-.task.p2 .task-check { border-color: var(--orange); }
-.task.p3 .task-check { border-color: var(--accent); }
 .task-check:hover { background: var(--panel-2); color: var(--muted); }
 .task.done-task .task-check { background: var(--green); border-color: var(--green); color: #fff; }
 .task .task-content { flex: 1; font-size: 0.92rem; white-space: pre-wrap; word-break: break-word; cursor: text; min-width: 0; }
@@ -425,10 +532,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   padding: 0.2rem 0.35rem;
 }
 .prio-btn { padding: 0.12rem 0.5rem; font-size: 0.78rem; border-radius: 4px; }
-.prio-btn.sel-p0 { background: var(--panel-2); border-color: var(--muted); }
-.prio-btn.sel-p1 { background: var(--red); color: #fff; border-color: var(--red); }
-.prio-btn.sel-p2 { background: var(--orange); color: #221500; border-color: var(--orange); }
-.prio-btn.sel-p3 { background: var(--accent); color: #001; border-color: var(--accent); }
+.prio-btn.sel-none { background: var(--panel-2); border-color: var(--muted); }
 .subtask { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; }
 .subtask input[type="checkbox"] { accent-color: var(--green); cursor: pointer; }
 .subtask.stdone span { text-decoration: line-through; color: var(--muted); }
@@ -553,9 +657,6 @@ aside#memo-panel {
   cursor: pointer;
   word-break: break-word;
 }
-.memo-note.mp1 { border-left-color: var(--red); }
-.memo-note.mp2 { border-left-color: var(--orange); }
-.memo-note.mp3 { border-left-color: var(--accent); }
 .memo-note .mini-due { display: block; font-size: 0.7rem; margin-top: 0.2rem; }
 .memo-note .mini-due.due-late { color: #ff8a80; }
 .memo-note .mini-due.due-today { color: var(--yellow); }
@@ -597,6 +698,42 @@ aside#memo-panel {
   white-space: pre-wrap;
 }
 .task-content code { background: var(--panel-2); padding: 0.05rem 0.3rem; border-radius: 3px; font-size: 0.88em; }
+.task-content .ql-ui { display: none; }
+.task-content li[data-list="checked"], .task-content li[data-list="unchecked"] {
+  list-style: none;
+  position: relative;
+  padding-left: 1.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-left: -1.3rem;
+}
+.task-content li[data-list="checked"]:hover, .task-content li[data-list="unchecked"]:hover { background: var(--panel-2); }
+.task-content li[data-list="unchecked"]::before {
+  content: '';
+  position: absolute;
+  left: 0.25rem;
+  top: 0.3em;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid var(--muted);
+  border-radius: 4px;
+}
+.task-content li[data-list="checked"]::before {
+  content: '✓';
+  position: absolute;
+  left: 0.25rem;
+  top: 0.05em;
+  width: 0.85em;
+  height: 0.85em;
+  background: var(--green);
+  border: 2px solid var(--green);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.8em;
+  line-height: 1.1;
+  text-align: center;
+}
+.task-content li[data-list="checked"] { text-decoration: line-through; color: var(--muted); }
 
 /* ---------- éditeur Quill (thème sombre) ---------- */
 #memo-edit-dialog { width: min(640px, 94vw); }
@@ -726,6 +863,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div id="clock-date"></div>
   </div>
   <div id="weather" title="Météo Bayonne"></div>
+  <button id="activity-btn" class="icon" title="Activité des invités">🔔<span id="activity-badge"></span></button>
   <button id="settings-btn" class="icon" title="Paramètres">⚙</button>
   <button id="add-link" class="primary">+ Ajouter</button>
 </header>
@@ -735,6 +873,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <main>
     <ul id="links" class="cards"></ul>
     <div id="memo-board" hidden></div>
+    <div id="shares-board" hidden></div>
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
@@ -767,6 +906,30 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 
 <dialog id="lightbox"><img alt=""></dialog>
 
+<dialog id="revisions-dialog">
+  <h3 id="revisions-title">🕘 Versions</h3>
+  <div id="revisions-list" style="max-height:55vh;overflow-y:auto"></div>
+  <div class="actions">
+    <button type="button" id="revisions-close" class="primary">Fermer</button>
+  </div>
+</dialog>
+
+<dialog id="share-dialog">
+  <h3 id="share-title">🔗 Partager</h3>
+  <div id="share-list"></div>
+  <div class="settings-row" style="margin-top:0.75rem">
+    <button id="share-add-ro">+ Lien lecture seule</button>
+    <button id="share-add-rw">+ Lien modifiable</button>
+  </div>
+  <p style="font-size:0.78rem;color:var(--muted);margin:0.75rem 0 0">
+    Toute personne ayant le lien y accède sans compte (la page passe Authelia).
+    Révoque un lien à tout moment avec ×.
+  </p>
+  <div class="actions">
+    <button type="button" id="share-close" class="primary">Fermer</button>
+  </div>
+</dialog>
+
 <dialog id="confirm-dialog">
   <h3 id="confirm-title">Confirmer la suppression</h3>
   <p id="confirm-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
@@ -791,6 +954,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <label>Couleur<input type="color" name="color" value="#4fc3f7" style="height:2.4rem;padding:0.2rem;cursor:pointer"></label>
     <label id="create-tags-label"># Tags<input type="text" name="tags" autocomplete="off" placeholder="#docker #infra — retrouvables via la recherche p#"></label>
     <div class="actions">
+      <button type="button" id="create-delete" class="danger" style="margin-right:auto;display:none">Supprimer</button>
       <button type="button" id="create-cancel">Annuler</button>
       <button type="submit" class="primary" id="create-submit">Créer</button>
     </div>
@@ -829,6 +993,17 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div id="proj-manage"></div>
   </div>
   <div class="settings-section">
+    <h4>PRIORITÉS</h4>
+    <div id="prio-manage"></div>
+  </div>
+  <div class="settings-section">
+    <h4>HISTORIQUE</h4>
+    <button id="purge-history">🗑 Vider l'historique</button>
+    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+      L'historique des tâches effectuées est conservé sans limite. Cette action le vide définitivement.
+    </p>
+  </div>
+  <div class="settings-section">
     <h4>STATUTS</h4>
     <button id="refresh-status">↻ Rafraîchir les statuts</button>
   </div>
@@ -838,11 +1013,28 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <script>
+const RECUR_OPTIONS = [
+  ['', '🔁 Récurrence'], ['daily', 'Quotidienne'], ['weekly', 'Hebdomadaire'],
+  ['monthly', 'Mensuelle'], ['quarterly', 'Trimestrielle'], ['yearly', 'Annuelle'],
+];
+const RECUR_SHORT = { daily: 'jour', weekly: 'hebdo', monthly: 'mois', quarterly: 'trim.', yearly: 'an' };
+
+function prioOf(id) { return state.priorities.find(p => p.id === id) || null; }
+
+function textOn(hex) {
+  const c = (hex || '').replace('#', '');
+  if (c.length < 6) return '#fff';
+  const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#15191e' : '#fff';
+}
+
 const state = {
   links: [],
   categories: [],
   memos: [],
   projects: [],
+  priorities: [],
+  history: [],
   filterCat: 'all',
   search: '',
   view: 'links',
@@ -874,7 +1066,6 @@ function matchingProjects(q) {
 }
 
 const CAT_EMOJIS = ['📁', '🎬', '🏠', '🔧', '📄', '🎮', '💾', '🌐'];
-const PRIO_LABELS = ['Aucune', 'P1', 'P2', 'P3'];
 
 function el(tag, opts = {}, ...children) {
   const e = document.createElement(tag);
@@ -932,8 +1123,8 @@ async function api(path, opts = {}) {
 }
 
 async function loadAll() {
-  [state.links, state.categories, state.memos, state.projects] = await Promise.all([
-    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'),
+  [state.links, state.categories, state.memos, state.projects, state.history, state.priorities] = await Promise.all([
+    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'), api('/api/history'), api('/api/priorities'),
   ]);
   if (state.filterCat !== 'all' && state.filterCat !== 'none'
       && !state.categories.some(c => c.id === state.filterCat)) {
@@ -949,11 +1140,14 @@ async function loadAll() {
 
 function renderAll() {
   renderSidebar();
-  const memosView = state.view === 'memos';
-  document.getElementById('links').style.display = memosView ? 'none' : '';
-  document.getElementById('memo-board').hidden = !memosView;
-  document.getElementById('memo-panel').style.display = memosView ? 'none' : '';
-  if (memosView) renderBoard(); else renderLinks();
+  const v = state.view;
+  document.getElementById('links').style.display = v === 'links' ? '' : 'none';
+  document.getElementById('memo-board').hidden = v !== 'memos';
+  document.getElementById('shares-board').hidden = v !== 'shares';
+  document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
+  if (v === 'memos') renderBoard();
+  else if (v === 'shares') renderShares();
+  else renderLinks();
   renderMemos();
 }
 
@@ -967,12 +1161,39 @@ function renderSidebar() {
   const uncat = state.links.filter(l => !l.category_id).length;
   const pendingMemoCount = state.memos.filter(m => !m.done).length;
 
-  const mkItem = (key, icon, label, count) => {
+  const actCount = state.activity
+    ? (state.activity.pending_guests || 0) + (state.activity.unseen || 0)
+    : 0;
+  const actItem = el('div', {
+    class: 'cat-item' + (state.view === 'shares' ? ' active' : ''),
+    attrs: { title: 'Liens de partage, invités et modifications' },
+    on: { click: () => openSharesView() },
+  });
+  actItem.appendChild(el('span', { class: 'emoji', text: '🔗' }));
+  actItem.appendChild(el('span', { text: 'Partages' }));
+  const actBadge = el('span', { class: 'count', text: String(actCount) });
+  if (actCount > 0) {
+    actBadge.style.cssText = 'background:var(--red);color:#fff;border-radius:999px;padding:0.05rem 0.4rem;opacity:1;font-weight:700';
+  }
+  actItem.appendChild(actBadge);
+  nav.appendChild(actItem);
+  nav.appendChild(el('div', { class: 'sidebar-sep' }));
+
+  const mkItem = (key, icon, label, count, editFn) => {
     const active = state.view === 'links' && state.filterCat === key;
-    const item = el('div', {
-      class: 'cat-item' + (active ? ' active' : ''),
-      on: { click: () => { state.view = 'links'; state.filterCat = key; renderAll(); } },
-    });
+    const item = el('div', { class: 'cat-item' + (active ? ' active' : '') });
+    const select = () => { state.view = 'links'; state.filterCat = key; renderAll(); };
+    if (editFn) {
+      let timer = null;
+      item.addEventListener('click', () => {
+        if (timer) { clearTimeout(timer); timer = null; editFn(); return; }
+        timer = setTimeout(() => { timer = null; select(); }, 250);
+      });
+      item.addEventListener('contextmenu', (e) => { e.preventDefault(); editFn(); });
+      item.title = 'Double-clic ou clic droit pour modifier';
+    } else {
+      item.addEventListener('click', select);
+    }
     item.appendChild(icon);
     item.appendChild(el('span', { text: label }));
     item.appendChild(el('span', { class: 'count', text: String(count) }));
@@ -991,9 +1212,7 @@ function renderSidebar() {
   nav.appendChild(mkItem('all', emojiIcon('🗂'), 'Tous', state.links.length));
 
   state.categories.forEach((cat, idx) => {
-    const item = mkItem(cat.id, catIcon(cat, idx), cat.name, cat.link_count);
-    item.title = 'Double-clic pour modifier';
-    item.addEventListener('dblclick', () => openCreateDialog('category', cat));
+    const item = mkItem(cat.id, catIcon(cat, idx), cat.name, cat.link_count, () => openCreateDialog('category', cat));
     item.addEventListener('dragover', (e) => {
       if (!dragLinkId) return;
       e.preventDefault();
@@ -1037,11 +1256,22 @@ function renderSidebar() {
   nav.appendChild(memoItem);
 
   const inboxCount = state.memos.filter(m => !m.done && !m.project_id).length;
-  const mkProjItem = (key, icon, label, count, projId) => {
+  const mkProjItem = (key, icon, label, count, projId, editFn) => {
     const item = el('div', {
       class: 'cat-item sub' + (state.view === 'memos' && state.memoProject === key ? ' active' : ''),
-      on: { click: () => { state.view = 'memos'; state.memoProject = key; renderAll(); } },
     });
+    const select = () => { state.view = 'memos'; state.memoProject = key; renderAll(); };
+    if (editFn) {
+      let timer = null;
+      item.addEventListener('click', () => {
+        if (timer) { clearTimeout(timer); timer = null; editFn(); return; }
+        timer = setTimeout(() => { timer = null; select(); }, 250);
+      });
+      item.addEventListener('contextmenu', (e) => { e.preventDefault(); editFn(); });
+      item.title = 'Double-clic ou clic droit pour modifier';
+    } else {
+      item.addEventListener('click', select);
+    }
     item.appendChild(icon);
     item.appendChild(el('span', { text: label }));
     item.appendChild(el('span', { class: 'count', text: String(count) }));
@@ -1067,10 +1297,7 @@ function renderSidebar() {
   state.projects.forEach(p => {
     const dot = el('span', { class: 'cat-dot' });
     dot.style.background = p.color || 'var(--gray)';
-    const item = mkProjItem(p.id, dot, p.name, p.memo_count, p.id);
-    item.title = 'Double-clic pour modifier';
-    item.addEventListener('dblclick', () => openCreateDialog('project', p));
-    nav.appendChild(item);
+    nav.appendChild(mkProjItem(p.id, dot, p.name, p.memo_count, p.id, () => openCreateDialog('project', p)));
   });
   nav.appendChild(el('div', {
     attrs: { id: 'add-proj' }, text: '+ Projet',
@@ -1095,15 +1322,20 @@ function openCreateDialog(kind, item = null) {
   const titles = {
     project: item ? '📁 Modifier le projet' : '📁 Nouveau projet',
     category: item ? '🗂 Modifier la catégorie' : '🗂 Nouvelle catégorie',
+    priority: item ? '⚑ Modifier la priorité' : '⚑ Nouvelle priorité',
   };
   document.getElementById('create-title').textContent = titles[kind];
   document.getElementById('create-submit').textContent = item ? 'Enregistrer' : 'Créer';
   document.getElementById('create-tags-label').style.display = kind === 'project' ? '' : 'none';
+  document.getElementById('create-delete').style.display = item ? '' : 'none';
   createForm.reset();
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
     createForm.elements.tags.value = (item.tags || '').split(/\s+/).filter(Boolean).map(t => '#' + t).join(' ');
+  } else if (kind === 'priority') {
+    createForm.elements.name.value = 'P' + (state.priorities.length + 1);
+    createForm.elements.color.value = '#9575cd';
   } else {
     createForm.elements.color.value =
       PROJ_COLORS[(kind === 'project' ? state.projects.length : state.categories.length) % PROJ_COLORS.length];
@@ -1116,11 +1348,27 @@ function addCategory() { openCreateDialog('category'); }
 function addProject() { openCreateDialog('project'); }
 
 document.getElementById('create-cancel').addEventListener('click', () => createDialog.close());
+document.getElementById('create-delete').addEventListener('click', async () => {
+  if (!editingItem) return;
+  const messages = {
+    project: `Supprimer le projet « ${editingItem.name} » ?\nLes mémos retournent dans l'Inbox.`,
+    category: `Supprimer la catégorie « ${editingItem.name} » ?\nLes liens ne seront pas supprimés.`,
+    priority: `Supprimer la priorité « ${editingItem.name} » ?\nLes mémos concernés repassent sans priorité.`,
+  };
+  if (!(await confirmPopin(messages[createKind]))) return;
+  const bases = { project: '/api/projects', category: '/api/categories', priority: '/api/priorities' };
+  await api(`${bases[createKind]}/${editingItem.id}`, { method: 'DELETE' });
+  createDialog.close();
+  editingItem = null;
+  await loadAll();
+  if (settingsDialog.open) { renderCatManage(); renderProjManage(); renderPrioManage(); }
+});
 createForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = createForm.elements.name.value.trim();
   if (!name) return;
-  const base = createKind === 'project' ? '/api/projects' : '/api/categories';
+  const bases = { project: '/api/projects', category: '/api/categories', priority: '/api/priorities' };
+  const base = bases[createKind];
   const payload = { name, color: createForm.elements.color.value };
   if (createKind === 'project') payload.tags = createForm.elements.tags.value.trim();
   const body = JSON.stringify(payload);
@@ -1133,7 +1381,7 @@ createForm.addEventListener('submit', async (e) => {
     createDialog.close();
     editingItem = null;
     await loadAll();
-    if (settingsDialog.open) { renderCatManage(); renderProjManage(); }
+    if (settingsDialog.open) { renderCatManage(); renderProjManage(); renderPrioManage(); }
   } catch (err) { await notify('Erreur : ' + err.message, { error: true }); }
 });
 
@@ -1379,6 +1627,26 @@ async function patchMemo(id, body) {
   await loadAll();
 }
 
+function toggleCheckItem(memo, idx) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = memo.content;
+  const items = tpl.content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]');
+  const li = items[idx];
+  if (!li) return;
+  li.setAttribute('data-list', li.getAttribute('data-list') === 'checked' ? 'unchecked' : 'checked');
+  patchMemo(memo.id, { content: tpl.innerHTML });
+}
+
+function wireChecklist(container, memo) {
+  container.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
+    li.setAttribute('title', 'Cliquer pour cocher / décocher');
+    li.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleCheckItem(memo, i);
+    });
+  });
+}
+
 function isRichHTML(content) {
   return /<(p|div|ul|ol|li|br|strong|em|u|s|a|h[1-6]|blockquote|pre|code|span)[\s>/]/i.test(content || '');
 }
@@ -1456,6 +1724,366 @@ function contentNode(content) {
   return div;
 }
 
+/* ------------------------------------------------ activité + invités */
+
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' +
+    d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+let lastActivityKey = null;
+
+function uiBusy() {
+  if (document.querySelector('dialog[open]')) return true;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return true;
+  return false;
+}
+
+async function refreshActivityBadge() {
+  try {
+    const a = await api('/api/activity');
+    state.activity = a;
+    const badge = document.getElementById('activity-badge');
+    const n = (a.pending_guests || 0) + (a.unseen || 0);
+    badge.textContent = String(n);
+    badge.style.display = n > 0 ? 'block' : 'none';
+    const key = a.revisions.length
+      ? a.revisions[0].edited_at + '|' + a.revisions[0].id + '|' + a.pending_guests
+      : '|' + a.pending_guests;
+    if (lastActivityKey !== null && key !== lastActivityKey && !uiBusy()) {
+      await loadAll();
+    } else if (lastActivityKey !== null && key !== lastActivityKey) {
+      renderSidebar();
+    }
+    lastActivityKey = key;
+  } catch (_) {}
+}
+
+document.getElementById('activity-btn').addEventListener('click', () => openSharesView());
+
+async function openSharesView() {
+  state.view = 'shares';
+  renderAll();
+  await api('/api/activity/seen', { method: 'POST' });
+  await refreshActivityBadge();
+  renderSidebar();
+}
+
+function guestRowEl(g, onChange) {
+  const row = el('div', { class: 'guest-row' });
+  const info = el('span', { class: 'grow' });
+  info.appendChild(el('span', { text: (g.name ? g.name + ' — ' : '') + g.email }));
+  if (g.target !== undefined) {
+    info.appendChild(el('span', { class: 'rev-meta', text: (g.kind === 'memo' ? 'Mémo : ' : 'Projet : ') + stripHTML(g.target || '?') }));
+  }
+  row.appendChild(info);
+  row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { pending: 'en attente', approved: 'validé', rejected: 'refusé' }[g.status] || g.status }));
+  if (g.status !== 'approved') {
+    row.appendChild(el('button', {
+      class: 'g-approve', text: '✓ Valider',
+      on: { click: async () => { await api(`/api/guests/${g.id}`, { method: 'PUT', body: JSON.stringify({ status: 'approved' }) }); await onChange(); } },
+    }));
+  }
+  if (g.status !== 'rejected') {
+    row.appendChild(el('button', {
+      class: 'g-reject', text: '✕ Refuser',
+      on: { click: async () => { await api(`/api/guests/${g.id}`, { method: 'PUT', body: JSON.stringify({ status: 'rejected' }) }); await onChange(); } },
+    }));
+  }
+  row.appendChild(el('button', {
+    text: '×', attrs: { title: 'Supprimer cet invité' },
+    on: { click: async () => {
+      if (!(await confirmPopin(`Supprimer l'invité ${g.email} ?`))) return;
+      await api(`/api/guests/${g.id}`, { method: 'DELETE' });
+      await onChange();
+    } },
+  }));
+  return row;
+}
+
+function revRowEl(r, onChange) {
+  const row = el('div', { class: 'rev-row expandable', attrs: { title: 'Cliquer pour voir le mémo en entier' } });
+  const info = el('span', { class: 'grow' });
+  info.appendChild(el('span', { class: 'rev-excerpt', text: (r.created ? '➕ a ajouté : ' : '✏️ a modifié : ') + stripHTML(r.memo_content || '(mémo supprimé)').slice(0, 70) }));
+  info.appendChild(el('span', { class: 'rev-meta', text: r.editor + ' — ' + fmtWhen(r.edited_at) }));
+  row.appendChild(info);
+  row.appendChild(el('span', { class: 'rev-meta', text: '▸' }));
+
+  const frag = document.createDocumentFragment();
+  frag.appendChild(row);
+  let detail = null;
+  row.addEventListener('click', async () => {
+    if (detail) { detail.remove(); detail = null; row.lastChild.textContent = '▸'; return; }
+    row.lastChild.textContent = '▾';
+    detail = el('div', { class: 'rev-detail' });
+    if (r.before) detail.appendChild(snapBox('AVANT', r.before, false));
+    detail.appendChild(snapBox(r.created ? 'NOUVEAU MÉMO' : 'APRÈS', r.after, true));
+    const actions = el('div', { class: 'rev-actions' });
+    if (r.before && state.memos.some(m => m.id === r.memo_id)) {
+      actions.appendChild(el('button', {
+        text: '↩ Annuler cette modification',
+        attrs: { title: 'Restaurer l\'état d\'avant cette modification' },
+        on: { click: async (e) => {
+          e.stopPropagation();
+          if (!(await confirmPopin('Annuler la modification de ' + r.editor + ' et revenir à l\'état d\'avant ?', { okLabel: 'Restaurer', danger: false }))) return;
+          await api(`/api/memos/${r.memo_id}/restore`, { method: 'POST', body: JSON.stringify({ revision_id: r.id, which: 'before' }) });
+          await loadAll();
+          await onChange();
+        } },
+      }));
+    }
+    if (r.memo_id && state.memos.some(m => m.id === r.memo_id)) {
+      actions.appendChild(el('button', {
+        text: '📝 Ouvrir le mémo',
+        on: { click: (e) => {
+          e.stopPropagation();
+          state.view = 'memos';
+          state.memoFilter = 'all';
+          state.memoProject = 'all';
+          expandedMemos.add(r.memo_id);
+          renderAll();
+        } },
+      }));
+      actions.appendChild(el('button', {
+        text: '🕘 Toutes les versions',
+        on: { click: (e) => { e.stopPropagation(); openRevisions(state.memos.find(m => m.id === r.memo_id)); } },
+      }));
+    }
+    detail.appendChild(actions);
+    detail.addEventListener('click', (e) => e.stopPropagation());
+    row.after(detail);
+  });
+  return frag;
+}
+
+async function renderShares() {
+  const board = document.getElementById('shares-board');
+  board.innerHTML = '';
+  const title = el('div', { attrs: { id: 'board-title' } });
+  title.appendChild(el('span', { text: '🔗 Partages & activité' }));
+  board.appendChild(title);
+
+  const [shares, guests, activity] = await Promise.all([
+    api('/api/shares'), api('/api/guests'), api('/api/activity'),
+  ]);
+  const rerender = () => { renderShares(); refreshActivityBadge(); };
+
+  const pending = guests.filter(g => g.status === 'pending');
+  if (pending.length) {
+    const sec = el('div', { class: 'memo-section sec-overdue' });
+    const h = el('h2', { text: `DEMANDES EN ATTENTE (${pending.length})` });
+    sec.appendChild(h);
+    pending.forEach(g => sec.appendChild(guestRowEl(g, rerender)));
+    board.appendChild(sec);
+  }
+
+  const secL = el('div', { class: 'memo-section' });
+  secL.appendChild(el('h2', { text: `LIENS DE PARTAGE (${shares.length})` }));
+  if (!shares.length) secL.appendChild(el('div', { class: 'empty', text: 'Aucun lien. Crée-en un via 🔗 Partager sur un mémo ou un projet.' }));
+  shares.forEach(s => {
+    const card = el('div', { class: 'share-card' });
+    const r1 = el('div', { class: 'share-row' });
+    r1.appendChild(el('span', { text: s.kind === 'memo' ? '📝' : '📁' }));
+    r1.appendChild(el('span', { class: 'grow share-target', text: s.target || '(supprimé)' }));
+    r1.appendChild(el('span', { class: 'status-pill', text: s.can_edit ? '✏️ modifiable' : '👁 lecture' }));
+    const pinWrap = el('span', { class: 'pin-wrap', attrs: { title: 'Code à 4 chiffres que l\'invité doit saisir — modifiable' } });
+    pinWrap.appendChild(el('span', { class: 'rev-meta', text: 'Code ' }));
+    const pinIn = el('input', { class: 'pin-input', attrs: { type: 'text', maxlength: '4', inputmode: 'numeric' } });
+    pinIn.value = s.pin || '';
+    pinIn.addEventListener('change', async () => {
+      if (!/^\d{4}$/.test(pinIn.value.trim())) { await notify('Le code doit faire exactement 4 chiffres.', { error: true }); pinIn.value = s.pin; return; }
+      await api(`/api/shares/${s.id}`, { method: 'PUT', body: JSON.stringify({ pin: pinIn.value.trim() }) });
+      pinIn.style.borderColor = 'var(--green)';
+      setTimeout(() => { pinIn.style.borderColor = ''; }, 1200);
+    });
+    pinWrap.appendChild(pinIn);
+    r1.appendChild(pinWrap);
+    const url = location.origin + '/share/' + s.token;
+    r1.appendChild(el('button', {
+      text: '📋', attrs: { title: 'Copier le lien' },
+      on: { click: async (e) => {
+        try { await navigator.clipboard.writeText(url); e.target.textContent = '✓'; setTimeout(() => { e.target.textContent = '📋'; }, 1200); } catch (_) {}
+      } },
+    }));
+    r1.appendChild(el('button', {
+      text: '×', attrs: { title: 'Révoquer ce lien' },
+      on: { click: async () => {
+        if (!(await confirmPopin('Révoquer ce lien de partage ?\nSes invités perdront l\'accès.', { okLabel: 'Révoquer' }))) return;
+        await api(`/api/shares/${s.id}`, { method: 'DELETE' });
+        rerender();
+      } },
+    }));
+    card.appendChild(r1);
+    const urlRow = el('input', { class: 'share-url', attrs: { type: 'text', readonly: '' } });
+    urlRow.value = url;
+    urlRow.addEventListener('focus', () => urlRow.select());
+    card.appendChild(urlRow);
+    (s.guests || []).forEach(g => card.appendChild(guestRowEl(g, rerender)));
+    secL.appendChild(card);
+  });
+  board.appendChild(secL);
+
+  const byEditor = new Map();
+  activity.revisions.forEach(r => {
+    if (!byEditor.has(r.editor)) byEditor.set(r.editor, []);
+    byEditor.get(r.editor).push(r);
+  });
+  const secA = el('div', { class: 'memo-section' });
+  secA.appendChild(el('h2', { text: `MODIFICATIONS PAR INVITÉ (${activity.revisions.length})` }));
+  if (!byEditor.size) secA.appendChild(el('div', { class: 'empty', text: 'Aucune modification d\'invité pour le moment.' }));
+  byEditor.forEach((revs, editor) => {
+    const userCard = el('div', { class: 'share-card' });
+    const head = el('div', { class: 'share-row' });
+    head.appendChild(el('span', { text: '👤' }));
+    head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: editor }));
+    head.appendChild(el('span', { class: 'rev-meta', text: revs.length + ' modification' + (revs.length > 1 ? 's' : '') }));
+    userCard.appendChild(head);
+    revs.forEach(r => userCard.appendChild(revRowEl(r, rerender)));
+    secA.appendChild(userCard);
+  });
+  board.appendChild(secA);
+}
+
+function snapBox(label, snap, isAfter) {
+  const box = el('div', { class: 'snap-box' + (isAfter ? ' snap-after' : '') });
+  box.appendChild(el('div', { class: 'snap-label', text: label }));
+  if (!snap) {
+    box.appendChild(el('div', { class: 'empty', text: '—' }));
+    return box;
+  }
+  const content = el('div', { class: 'task-content' });
+  content.appendChild(contentNode(snap.content));
+  box.appendChild(content);
+  (snap.subtasks || []).forEach(st => {
+    box.appendChild(el('div', { class: 'stline' + (st.done ? ' stdone' : ''), text: (st.done ? '☑ ' : '☐ ') + st.content }));
+  });
+  const metaParts = [snap.done ? '✅ terminé' : '⭕ en cours'];
+  if (snap.due_date) metaParts.push('📅 ' + snap.due_date);
+  const prio = prioOf(snap.priority);
+  if (prio) metaParts.push('⚑ ' + prio.name);
+  box.appendChild(el('div', { class: 'snap-meta', text: metaParts.join('  ·  ') }));
+  return box;
+}
+
+/* ------------------------------------------------ versions / restauration */
+
+const revisionsDialog = document.getElementById('revisions-dialog');
+document.getElementById('revisions-close').addEventListener('click', () => revisionsDialog.close());
+
+async function openRevisions(memo) {
+  const revs = await api(`/api/memos/${memo.id}/revisions`);
+  document.getElementById('revisions-title').textContent = '🕘 Versions — ' + stripHTML(memo.content).slice(0, 40);
+  const wrap = document.getElementById('revisions-list');
+  wrap.innerHTML = '';
+  if (!revs.length) {
+    wrap.appendChild(el('div', { class: 'empty', text: 'Aucune modification enregistrée pour ce mémo.' }));
+  }
+  const restore = async (revisionId, which, label) => {
+    if (!(await confirmPopin(`Restaurer ${label} ?\nL'état actuel sera lui-même conservé dans les versions.`, { okLabel: 'Restaurer', danger: false }))) return;
+    await api(`/api/memos/${memo.id}/restore`, { method: 'POST', body: JSON.stringify({ revision_id: revisionId, which }) });
+    revisionsDialog.close();
+    await loadAll();
+  };
+  revs.forEach(r => {
+    const row = el('div', { class: 'rev-row' });
+    const info = el('span', { class: 'grow' });
+    const snap = r.after || r.before;
+    info.appendChild(el('span', { class: 'rev-excerpt', text: (snap ? stripHTML(snap.content).slice(0, 70) : '—') + (snap && snap.done ? ' ✅' : '') }));
+    info.appendChild(el('span', { class: 'rev-meta', text: r.editor + ' — ' + fmtWhen(r.edited_at) }));
+    row.appendChild(info);
+    if (r.after) {
+      row.appendChild(el('button', {
+        text: '↩', attrs: { title: 'Revenir à cette version' },
+        on: { click: () => restore(r.id, 'after', 'cette version (' + fmtWhen(r.edited_at) + ')') },
+      }));
+    }
+    wrap.appendChild(row);
+  });
+  const oldest = revs[revs.length - 1];
+  if (oldest && oldest.before) {
+    const row = el('div', { class: 'rev-row' });
+    const info = el('span', { class: 'grow' });
+    info.appendChild(el('span', { class: 'rev-excerpt', text: stripHTML(oldest.before.content).slice(0, 70) }));
+    info.appendChild(el('span', { class: 'rev-meta', text: 'État d\'origine (avant la première modification)' }));
+    row.appendChild(info);
+    row.appendChild(el('button', {
+      text: '↩', attrs: { title: 'Revenir à l\'état d\'origine' },
+      on: { click: () => restore(oldest.id, 'before', 'l\'état d\'origine') },
+    }));
+    wrap.appendChild(row);
+  }
+  revisionsDialog.showModal();
+}
+
+/* ------------------------------------------------ partage par lien */
+
+const shareDialog = document.getElementById('share-dialog');
+let shareCtx = null;
+
+async function openShareDialog(kind, targetId, title) {
+  shareCtx = { kind, targetId };
+  document.getElementById('share-title').textContent = '🔗 Partager — ' + title;
+  await renderShareList();
+  shareDialog.showModal();
+}
+
+async function renderShareList() {
+  const all = await api('/api/shares');
+  const mine = all.filter(s => s.kind === shareCtx.kind && s.target_id === shareCtx.targetId);
+  const wrap = document.getElementById('share-list');
+  wrap.innerHTML = '';
+  if (!mine.length) {
+    wrap.appendChild(el('div', { class: 'empty', text: 'Aucun lien de partage pour le moment.' }));
+    return;
+  }
+  mine.forEach(s => {
+    const row = el('div', { class: 'cat-manage-row' });
+    row.appendChild(el('span', { text: s.can_edit ? '✏️' : '👁', attrs: { title: s.can_edit ? 'Modifiable' : 'Lecture seule' } }));
+    row.appendChild(el('span', {
+      class: 'pin-input',
+      text: s.pin || '----',
+      attrs: { title: 'Code à donner à l\'invité (modifiable dans la page 🔗 Partages)', style: 'width:auto;padding:0.1rem 0.4rem;cursor:default' },
+    }));
+    const url = location.origin + '/share/' + s.token;
+    const input = el('input', { attrs: { type: 'text', readonly: '' } });
+    input.value = url;
+    input.style.cssText = 'flex:1;min-width:0;font-size:0.72rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--muted);padding:0.3rem 0.4rem';
+    input.addEventListener('focus', () => input.select());
+    row.appendChild(input);
+    const copyBtn = el('button', { text: '📋', attrs: { title: 'Copier le lien' } });
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      } catch (_) { input.focus(); input.select(); }
+    });
+    row.appendChild(copyBtn);
+    row.appendChild(el('button', {
+      text: '×', attrs: { title: 'Révoquer ce lien' },
+      on: { click: async () => {
+        if (!(await confirmPopin('Révoquer ce lien de partage ?\nLes personnes qui l\'ont ne pourront plus accéder.', { okLabel: 'Révoquer' }))) return;
+        await api(`/api/shares/${s.id}`, { method: 'DELETE' });
+        await renderShareList();
+      } },
+    }));
+    wrap.appendChild(row);
+  });
+}
+
+document.getElementById('share-close').addEventListener('click', () => shareDialog.close());
+document.getElementById('share-add-ro').addEventListener('click', async () => {
+  await api('/api/shares', { method: 'POST', body: JSON.stringify({ kind: shareCtx.kind, target_id: shareCtx.targetId, can_edit: false }) });
+  await renderShareList();
+});
+document.getElementById('share-add-rw').addEventListener('click', async () => {
+  await api('/api/shares', { method: 'POST', body: JSON.stringify({ kind: shareCtx.kind, target_id: shareCtx.targetId, can_edit: true }) });
+  await renderShareList();
+});
+
 /* ------------------------------------------------ éditeur riche */
 
 const memoEditDialog = document.getElementById('memo-edit-dialog');
@@ -1473,7 +2101,7 @@ function getQuill() {
           [{ header: [1, 2, 3, false] }],
           ['bold', 'italic', 'underline', 'strike'],
           [{ color: [] }, { background: [] }],
-          [{ list: 'ordered' }, { list: 'bullet' }],
+          [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
           ['link', 'blockquote', 'code-block'],
           ['clean'],
         ],
@@ -1569,21 +2197,25 @@ async function deleteMemo(id, skipConfirm = false) {
 /* ------------------------------------------------ mémos : vue board */
 
 function taskEl(memo) {
-  const prioCls = memo.priority >= 1 && memo.priority <= 3 ? ` p${memo.priority}` : '';
   const task = el('div', {
-    class: 'task' + prioCls + (memo.done ? ' done-task' : ''),
+    class: 'task' + (memo.done ? ' done-task' : ''),
     attrs: { 'data-memo-id': memo.id, draggable: 'true' },
   });
+  const prio = prioOf(memo.priority);
+  if (prio && prio.color && !memo.done) task.style.borderLeftColor = prio.color;
 
   const row = el('div', { class: 'task-row' });
-  row.appendChild(el('button', {
+  const check = el('button', {
     class: 'task-check', text: '✓',
-    attrs: { title: memo.done ? 'Rouvrir' : 'Terminer' },
+    attrs: { title: memo.done ? 'Rouvrir' : (memo.recurrence ? 'Fait — sera replanifié' : 'Terminer') },
     on: { click: () => patchMemo(memo.id, { done: !memo.done }) },
-  }));
+  });
+  if (prio && prio.color && !memo.done) check.style.borderColor = prio.color;
+  row.appendChild(check);
 
   const content = el('div', { class: 'task-content', attrs: { title: 'Cliquer pour éditer' } });
   content.appendChild(contentNode(memo.content));
+  wireChecklist(content, memo);
   content.addEventListener('click', () => {
     if (!openMemoEditor(memo)) editTaskInline(task, content, memo);
   });
@@ -1592,11 +2224,26 @@ function taskEl(memo) {
   const badges = el('div', { class: 'task-badges' });
   const due = dueInfo(memo.due_date);
   if (due && !memo.done) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label }));
+  if (memo.recurrence && !memo.done) {
+    badges.appendChild(el('span', { class: 'badge', text: '🔁 ' + (RECUR_SHORT[memo.recurrence] || memo.recurrence), attrs: { title: 'Tâche récurrente — replanifiée automatiquement quand cochée' } }));
+  }
   const subs = memo.subtasks || [];
   if (subs.length) {
     badges.appendChild(el('span', {
       class: 'badge',
       text: `☑ ${subs.filter(s => s.done).length}/${subs.length}`,
+    }));
+  }
+  if (memo.guest_editor) {
+    const gname = memo.guest_editor.replace(/\s*<[^>]*>/, '');
+    badges.appendChild(el('span', {
+      class: 'badge',
+      text: '👤 ' + gname,
+      attrs: {
+        title: (memo.guest_action === 'created' ? 'Ajouté par ' : 'Dernière modification par ')
+          + memo.guest_editor + ' via un lien de partage, le ' + fmtWhen(memo.guest_at),
+        style: 'color:#b39ddb',
+      },
     }));
   }
   if (state.memoProject === 'all' && memo.project_id) {
@@ -1683,15 +2330,34 @@ function taskDetailEl(memo) {
       on: { click: () => patchMemo(memo.id, { due_date: '' }) },
     }));
   }
-  row1.appendChild(el('span', { text: '🚩' }));
-  PRIO_LABELS.forEach((label, p) => {
-    const btn = el('button', {
-      class: 'prio-btn' + (memo.priority === p ? ` sel-p${p}` : ''),
-      text: label,
-      on: { click: () => patchMemo(memo.id, { priority: p }) },
-    });
+  row1.appendChild(el('span', { text: '⚑' }));
+  const noneBtn = el('button', {
+    class: 'prio-btn' + (memo.priority === 0 ? ' sel-none' : ''),
+    text: 'Aucune',
+    on: { click: () => patchMemo(memo.id, { priority: 0 }) },
+  });
+  row1.appendChild(noneBtn);
+  state.priorities.forEach(p => {
+    const btn = el('button', { class: 'prio-btn', text: p.name, on: { click: () => patchMemo(memo.id, { priority: p.id }) } });
+    if (memo.priority === p.id && p.color) {
+      btn.style.background = p.color;
+      btn.style.borderColor = p.color;
+      btn.style.color = textOn(p.color);
+    } else if (p.color) {
+      btn.style.color = p.color;
+    }
     row1.appendChild(btn);
   });
+  row1.appendChild(el('span', { text: '🔁' }));
+  const recurSel = el('select');
+  RECUR_OPTIONS.forEach(([v, label]) => {
+    const opt = el('option', { attrs: { value: v }, text: v === '' ? 'Aucune' : label });
+    if ((memo.recurrence || '') === v) opt.selected = true;
+    recurSel.appendChild(opt);
+  });
+  recurSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.18rem 0.3rem';
+  recurSel.addEventListener('change', () => patchMemo(memo.id, { recurrence: recurSel.value }));
+  row1.appendChild(recurSel);
   row1.appendChild(el('span', { text: '📁' }));
   const projSel = el('select');
   projSel.appendChild(el('option', { attrs: { value: '' }, text: 'Inbox' }));
@@ -1712,6 +2378,16 @@ function taskDetailEl(memo) {
     on: { click: () => fileIn.click() },
   }));
   row1.appendChild(fileIn);
+  row1.appendChild(el('button', {
+    class: 'prio-btn', text: '🔗 Partager',
+    attrs: { title: 'Partager ce mémo par lien (sans compte)' },
+    on: { click: () => openShareDialog('memo', memo.id, stripHTML(memo.content).slice(0, 40)) },
+  }));
+  row1.appendChild(el('button', {
+    class: 'prio-btn', text: '🕘 Versions',
+    attrs: { title: 'Historique des modifications et restauration' },
+    on: { click: () => openRevisions(memo) },
+  }));
   detail.appendChild(row1);
 
   const subs = memo.subtasks || [];
@@ -1791,6 +2467,11 @@ function renderBoard() {
       dot.style.background = proj.color || 'var(--gray)';
       title.appendChild(dot);
       title.appendChild(el('span', { text: proj.name }));
+      title.appendChild(el('button', {
+        class: 'prio-btn', text: '🔗 Partager',
+        attrs: { title: 'Partager ce projet par lien (sans compte)' },
+        on: { click: () => openShareDialog('project', proj.id, proj.name) },
+      }));
     }
   }
   board.appendChild(title);
@@ -1853,6 +2534,7 @@ function renderBoard() {
     today: allMemos.filter(m => !m.done && m.due_date === todayD).length,
     scheduled: allMemos.filter(m => !m.done && m.due_date && m.due_date > todayD).length,
     done: allMemos.filter(m => m.done).length,
+    history: visibleHistory().length,
   };
   const filters = el('div', { attrs: { id: 'memo-filters' } });
   [
@@ -1861,6 +2543,7 @@ function renderBoard() {
     ['scheduled', 'f-scheduled', '📅', 'Planifiés'],
     ['overdue', 'f-overdue', '⚠️', 'En retard'],
     ['done', 'f-done', '✅', 'Terminés'],
+    ['history', 'f-history', '📜', 'Historique'],
   ].forEach(([key, cls, icon, label]) => {
     const tile = el('div', {
       class: 'mfilter ' + cls + (state.memoFilter === key ? ' active' : ''),
@@ -1875,12 +2558,34 @@ function renderBoard() {
   });
   board.appendChild(filters);
 
+  if (state.memoFilter === 'history') {
+    renderHistory(board);
+    return;
+  }
+
   const addBar = el('div', { attrs: { id: 'memo-add-bar' } });
   const txt = el('input', { attrs: { type: 'text', placeholder: '+ Nouveau mémo… (Entrée pour ajouter)' } });
   const dateIn = el('input', { attrs: { type: 'date', title: 'Échéance (optionnelle)' } });
-  const prioSel = el('select', { attrs: { title: 'Priorité' } });
-  ['Priorité', '🚩 P1', '🚩 P2', '🚩 P3'].forEach((label, p) => {
-    prioSel.appendChild(el('option', { attrs: { value: p }, text: label }));
+  let addPrio = 0;
+  const prioBtn = el('button', { attrs: { type: 'button', title: 'Priorité — cliquer pour changer' } });
+  const refreshPrioBtn = () => {
+    const p = prioOf(addPrio);
+    prioBtn.textContent = p ? '⚑ ' + p.name : '⚑ Priorité';
+    if (p && p.color) {
+      prioBtn.style.background = p.color;
+      prioBtn.style.borderColor = p.color;
+      prioBtn.style.color = textOn(p.color);
+    } else {
+      prioBtn.style.background = '';
+      prioBtn.style.borderColor = '';
+      prioBtn.style.color = '';
+    }
+  };
+  refreshPrioBtn();
+  prioBtn.addEventListener('click', () => {
+    const ids = [0, ...state.priorities.map(p => p.id)];
+    addPrio = ids[(ids.indexOf(addPrio) + 1) % ids.length];
+    refreshPrioBtn();
   });
   const projSel = el('select', { attrs: { title: 'Projet' } });
   projSel.appendChild(el('option', { attrs: { value: '' }, text: '📥 Inbox' }));
@@ -1889,6 +2594,8 @@ function renderBoard() {
     if (state.memoProject === p.id) opt.selected = true;
     projSel.appendChild(opt);
   });
+  const recurSel = el('select', { attrs: { title: 'Récurrence (replanifié automatiquement quand coché)' } });
+  RECUR_OPTIONS.forEach(([v, label]) => recurSel.appendChild(el('option', { attrs: { value: v }, text: label })));
   const addBtn = el('button', { class: 'primary', text: 'Ajouter' });
   const submit = async () => {
     const content = txt.value.trim();
@@ -1898,19 +2605,21 @@ function renderBoard() {
       body: JSON.stringify({
         content,
         due_date: dateIn.value,
-        priority: Number(prioSel.value),
+        priority: addPrio,
         project_id: projSel.value ? Number(projSel.value) : null,
+        recurrence: recurSel.value,
       }),
     });
-    txt.value = ''; dateIn.value = ''; prioSel.value = '0';
+    txt.value = ''; dateIn.value = ''; addPrio = 0; refreshPrioBtn(); recurSel.value = '';
     await loadAll();
   };
   txt.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
   addBtn.addEventListener('click', submit);
   addBar.appendChild(txt);
   addBar.appendChild(dateIn);
-  addBar.appendChild(prioSel);
+  addBar.appendChild(prioBtn);
   addBar.appendChild(projSel);
+  addBar.appendChild(recurSel);
   addBar.appendChild(addBtn);
   board.appendChild(addBar);
 
@@ -2004,6 +2713,63 @@ document.getElementById('memo-board').addEventListener('drop', async (e) => {
 });
 document.getElementById('memo-board').addEventListener('dragover', (e) => { if (dragMemoId) e.preventDefault(); });
 
+function visibleHistory() {
+  const { q } = parseSearch();
+  if (!q) return state.history;
+  const needle = q.replace(/^#/, '');
+  return state.history.filter(h =>
+    (h.content || '').toLowerCase().includes(needle) ||
+    (h.project || '').toLowerCase().includes(needle)
+  );
+}
+
+function renderHistory(board) {
+  const entries = visibleHistory();
+  if (!entries.length) {
+    board.appendChild(el('div', { class: 'empty', text: 'Aucune tâche effectuée pour le moment. Coche un mémo et il apparaîtra ici.' }));
+    return;
+  }
+  const today = dateStr(new Date());
+  const yesterday = dateStr(new Date(Date.now() - 86400000));
+  const groups = new Map();
+  entries.forEach(h => {
+    const d = new Date(h.done_at);
+    const day = isNaN(d) ? (h.done_at || '').slice(0, 10) : dateStr(d);
+    if (!groups.has(day)) groups.set(day, []);
+    groups.get(day).push(h);
+  });
+  groups.forEach((items, day) => {
+    const wrap = el('div', { class: 'memo-section' });
+    let label = day;
+    if (day === today) label = "AUJOURD'HUI";
+    else if (day === yesterday) label = 'HIER';
+    else if (day) label = new Date(day + 'T00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase();
+    const h2 = el('h2', { text: label + ' ' });
+    h2.appendChild(el('span', { class: 'sec-count', text: `(${items.length})` }));
+    wrap.appendChild(h2);
+    items.forEach(h => {
+      const row = el('div', { class: 'hist-row' });
+      const t = new Date(h.done_at);
+      const timeLabel = isNaN(t) ? '' : t.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      row.appendChild(el('span', { class: 'hist-time', text: '✅ ' + timeLabel }));
+      row.appendChild(el('span', { class: 'hist-content', text: stripHTML(h.content) }));
+      if (h.project) {
+        const proj = state.projects.find(p => p.name === h.project);
+        const pr = el('span', { class: 'hist-proj' });
+        const dot = el('span', { class: 'cat-dot' });
+        dot.style.width = '0.5rem';
+        dot.style.height = '0.5rem';
+        dot.style.background = (proj && proj.color) || 'var(--gray)';
+        pr.appendChild(dot);
+        pr.appendChild(el('span', { text: h.project }));
+        row.appendChild(pr);
+      }
+      wrap.appendChild(row);
+    });
+    board.appendChild(wrap);
+  });
+}
+
 /* ------------------------------------------------ mémos : colonne résumé */
 
 function renderMemos() {
@@ -2013,17 +2779,19 @@ function renderMemos() {
   const doneCount = state.memos.filter(m => m.done).length;
   document.getElementById('memo-count').textContent = pending.length ? `(${pending.length})` : '';
   pending.forEach((memo) => {
-    const prioCls = memo.priority >= 1 && memo.priority <= 3 ? ` mp${memo.priority}` : '';
     const note = el('div', {
-      class: 'memo-note' + prioCls,
+      class: 'memo-note',
       attrs: { 'data-memo-id': memo.id, title: 'Ouvrir dans la vue Mémos' },
     });
+    const prio = prioOf(memo.priority);
+    if (prio && prio.color) note.style.borderLeftColor = prio.color;
     const plain = stripHTML(memo.content);
     note.appendChild(el('span', { text: plain.length > 120 ? plain.slice(0, 118) + '…' : plain }));
     const due = dueInfo(memo.due_date);
     const extras = [];
     if (due) extras.push('📅 ' + due.label);
     if ((memo.images || []).length) extras.push('📎 ' + memo.images.length);
+    if (memo.guest_editor) extras.push('👤 ' + memo.guest_editor.replace(/\s*<[^>]*>/, ''));
     if (extras.length) note.appendChild(el('span', { class: 'mini-due ' + (due ? due.cls : 'due-future'), text: extras.join('  ') }));
     note.addEventListener('click', () => {
       state.view = 'memos';
@@ -2216,10 +2984,17 @@ const settingsDialog = document.getElementById('settings-dialog');
 document.getElementById('settings-btn').addEventListener('click', () => {
   renderCatManage();
   renderProjManage();
+  renderPrioManage();
   settingsDialog.showModal();
 });
 document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
 document.getElementById('refresh-status').addEventListener('click', loadStatus);
+document.getElementById('purge-history').addEventListener('click', async () => {
+  if (!state.history.length) { await notify("L'historique est déjà vide."); return; }
+  if (!(await confirmPopin(`Vider l'historique (${state.history.length} entrée${state.history.length > 1 ? 's' : ''}) ?\nCette action est définitive.`, { okLabel: 'Vider' }))) return;
+  await api('/api/history', { method: 'DELETE' });
+  await loadAll();
+});
 
 function renderCatManage() {
   const wrap = document.getElementById('cat-manage');
@@ -2295,6 +3070,43 @@ function renderProjManage() {
   wrap.appendChild(addBtn);
 }
 
+function renderPrioManage() {
+  const wrap = document.getElementById('prio-manage');
+  wrap.innerHTML = '';
+  if (state.priorities.length === 0) {
+    wrap.appendChild(el('div', { class: 'empty', text: 'Aucune priorité.' }));
+  }
+  state.priorities.forEach((prio) => {
+    const row = el('div', { class: 'cat-manage-row' });
+    const colorIn = el('input', { attrs: { type: 'color', title: 'Couleur de la priorité' } });
+    colorIn.value = prio.color || '#607d8b';
+    colorIn.addEventListener('change', async () => {
+      await api(`/api/priorities/${prio.id}`, { method: 'PUT', body: JSON.stringify({ color: colorIn.value }) });
+      await loadAll();
+      renderPrioManage();
+    });
+    row.appendChild(colorIn);
+    row.appendChild(el('span', { class: 'grow', text: `${prio.name} (${prio.memo_count} mémo${prio.memo_count > 1 ? 's' : ''})` }));
+    row.appendChild(el('button', {
+      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      on: { click: () => openCreateDialog('priority', prio) },
+    }));
+    row.appendChild(el('button', {
+      text: '×', attrs: { title: 'Supprimer (les mémos repassent sans priorité)' },
+      on: { click: async () => {
+        if (!(await confirmPopin(`Supprimer la priorité « ${prio.name} » ?\nLes mémos concernés repassent sans priorité.`))) return;
+        await api(`/api/priorities/${prio.id}`, { method: 'DELETE' });
+        await loadAll();
+        renderPrioManage();
+      } },
+    }));
+    wrap.appendChild(row);
+  });
+  const addBtn = el('button', { text: '+ Priorité', on: { click: () => openCreateDialog('priority') } });
+  addBtn.style.marginTop = '0.5rem';
+  wrap.appendChild(addBtn);
+}
+
 document.getElementById('export-btn').addEventListener('click', async () => {
   const data = await api('/api/export');
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2350,6 +3162,8 @@ adaptMemoPanel();
 mq.addEventListener('change', adaptMemoPanel);
 
 loadAll();
+refreshActivityBadge();
+setInterval(refreshActivityBadge, 15 * 1000);
 </script>
 </body>
 </html>

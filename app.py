@@ -1,9 +1,11 @@
+import calendar
 import json
 import os
+import secrets
 import sqlite3
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import re
@@ -26,6 +28,32 @@ DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 ALLOWED_IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
 SAFE_IMG_NAME = re.compile(r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp)$")
+
+
+def _looks_like_image(head, ext):
+    if ext in ("jpg", "jpeg"):
+        return head[:3] == b"\xff\xd8\xff"
+    if ext == "png":
+        return head[:8] == b"\x89PNG\r\n\x1a\n"
+    if ext == "gif":
+        return head[:6] in (b"GIF87a", b"GIF89a")
+    if ext == "webp":
+        return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    return False
+
+
+def _save_uploaded_image(f, allowed_ext):
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in allowed_ext:
+        return None, "format non supporté (" + ", ".join(sorted(allowed_ext)) + ")"
+    head = f.stream.read(12)
+    f.stream.seek(0)
+    if not _looks_like_image(head, ext):
+        return None, "le fichier n'est pas une vraie image " + ext.upper()
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.{ext}"
+    f.save(os.path.join(UPLOAD_DIR, name))
+    return name, None
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
@@ -93,6 +121,84 @@ def init_db():
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS priorities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT DEFAULT '',
+            position INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    if conn.execute("SELECT COUNT(*) FROM priorities").fetchone()[0] == 0:
+        conn.executemany(
+            "INSERT INTO priorities (id, name, color, position) VALUES (?, ?, ?, ?)",
+            [
+                (1, "P1", "#f44336", 0),
+                (2, "P2", "#ffc107", 1),
+                (3, "P3", "#4caf50", 2),
+            ],
+        )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS shares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT NOT NULL UNIQUE,
+            kind TEXT NOT NULL,
+            target_id INTEGER NOT NULL,
+            can_edit INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS share_guests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            share_id INTEGER NOT NULL,
+            email TEXT NOT NULL,
+            name TEXT DEFAULT '',
+            guest_token TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT DEFAULT '',
+            approved_at TEXT DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memo_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memo_id INTEGER NOT NULL,
+            memo_uid TEXT DEFAULT '',
+            editor TEXT NOT NULL,
+            share_id INTEGER,
+            before TEXT,
+            after TEXT,
+            edited_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_state (
+            key TEXT PRIMARY KEY,
+            value TEXT DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memo_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memo_uid TEXT DEFAULT '',
+            content TEXT NOT NULL,
+            project TEXT DEFAULT '',
+            done_at TEXT NOT NULL
+        )
+        """
+    )
     cols = {r[1] for r in conn.execute("PRAGMA table_info(links)").fetchall()}
     if "memo" not in cols:
         conn.execute("ALTER TABLE links ADD COLUMN memo TEXT DEFAULT ''")
@@ -119,12 +225,24 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN project_id INTEGER")
     if "images" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN images TEXT DEFAULT '[]'")
+    if "recurrence" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN recurrence TEXT DEFAULT ''")
     ccols = {r[1] for r in conn.execute("PRAGMA table_info(categories)").fetchall()}
     if "color" not in ccols:
         conn.execute("ALTER TABLE categories ADD COLUMN color TEXT DEFAULT ''")
     pcols = {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}
     if "tags" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN tags TEXT DEFAULT ''")
+    scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
+    if "pin" not in scols:
+        conn.execute("ALTER TABLE shares ADD COLUMN pin TEXT DEFAULT ''")
+    for row in conn.execute(
+        "SELECT id FROM shares WHERE pin = '' OR pin IS NULL"
+    ).fetchall():
+        conn.execute(
+            "UPDATE shares SET pin = ? WHERE id = ?",
+            (f"{secrets.randbelow(10000):04d}", row[0]),
+        )
     now = datetime.now(timezone.utc).isoformat()
     for row in conn.execute("SELECT id FROM links WHERE uid = '' OR uid IS NULL").fetchall():
         conn.execute(
@@ -427,6 +545,9 @@ def delete_project(project_id):
     db = get_db()
     db.execute("UPDATE memos SET project_id = NULL WHERE project_id = ?", (project_id,))
     db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    db.execute(
+        "DELETE FROM shares WHERE kind = 'project' AND target_id = ?", (project_id,)
+    )
     db.commit()
     return "", 204
 
@@ -449,7 +570,132 @@ def _valid_project_id(db, project_id):
     return row["id"] if row else None
 
 
+def _valid_priority(db, value):
+    try:
+        p = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    if p <= 0:
+        return 0
+    row = db.execute("SELECT 1 FROM priorities WHERE id = ?", (p,)).fetchone()
+    return p if row else 0
+
+
+# ------------------------------------------------------------ priorities
+
+
+@app.route("/api/priorities", methods=["GET"])
+def list_priorities():
+    rows = (
+        get_db()
+        .execute(
+            "SELECT p.id, p.name, p.color, p.position, COUNT(m.id) AS memo_count "
+            "FROM priorities p LEFT JOIN memos m ON m.priority = p.id "
+            "GROUP BY p.id ORDER BY p.position, p.id"
+        )
+        .fetchall()
+    )
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/priorities", methods=["POST"])
+def create_priority():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    db = get_db()
+    if db.execute("SELECT 1 FROM priorities WHERE name = ?", (name,)).fetchone():
+        return jsonify({"error": "priority already exists"}), 409
+    max_pos = db.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM priorities"
+    ).fetchone()[0]
+    color = (data.get("color") or "").strip()
+    cur = db.execute(
+        "INSERT INTO priorities (name, color, position) VALUES (?, ?, ?)",
+        (name, color, max_pos + 1),
+    )
+    db.commit()
+    return (
+        jsonify(
+            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1}
+        ),
+        201,
+    )
+
+
+@app.route("/api/priorities/<int:prio_id>", methods=["PUT"])
+def update_priority(prio_id):
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    existing = db.execute(
+        "SELECT * FROM priorities WHERE id = ?", (prio_id,)
+    ).fetchone()
+    if not existing:
+        return jsonify({"error": "not found"}), 404
+    name = (data.get("name", existing["name"]) or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    color = (data.get("color", existing["color"]) or "").strip()
+    db.execute(
+        "UPDATE priorities SET name = ?, color = ? WHERE id = ?",
+        (name, color, prio_id),
+    )
+    db.commit()
+    return jsonify({"id": prio_id, "name": name, "color": color})
+
+
+@app.route("/api/priorities/<int:prio_id>", methods=["DELETE"])
+def delete_priority(prio_id):
+    db = get_db()
+    db.execute("UPDATE memos SET priority = 0 WHERE priority = ?", (prio_id,))
+    db.execute("DELETE FROM priorities WHERE id = ?", (prio_id,))
+    db.commit()
+    return "", 204
+
+
 # ---------------------------------------------------------------- memos
+
+
+RECURRENCES = {"daily", "weekly", "monthly", "quarterly", "yearly"}
+
+
+def _valid_recurrence(value):
+    value = (value or "").strip().lower()
+    return value if value in RECURRENCES else ""
+
+
+def _add_months(d, n):
+    m = d.month - 1 + n
+    y = d.year + m // 12
+    m = m % 12 + 1
+    return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
+
+
+def _next_due(due_str, recurrence):
+    today = date.today()
+    try:
+        d = date.fromisoformat(due_str) if due_str else today
+    except ValueError:
+        d = today
+
+    def step(x):
+        if recurrence == "daily":
+            return x + timedelta(days=1)
+        if recurrence == "weekly":
+            return x + timedelta(weeks=1)
+        if recurrence == "monthly":
+            return _add_months(x, 1)
+        if recurrence == "quarterly":
+            return _add_months(x, 3)
+        if recurrence == "yearly":
+            return _add_months(x, 12)
+        return x
+
+    nxt = step(d)
+    while nxt <= today:
+        nxt = step(nxt)
+    return nxt.isoformat()
 
 
 def _memo_dict(row):
@@ -508,8 +754,26 @@ def _subtasks_json(value):
 
 @app.route("/api/memos", methods=["GET"])
 def list_memos():
-    rows = get_db().execute("SELECT * FROM memos ORDER BY position, id").fetchall()
-    return jsonify([_memo_dict(r) for r in rows])
+    db = get_db()
+    rows = db.execute("SELECT * FROM memos ORDER BY position, id").fetchall()
+    guest_last = {}
+    for r in db.execute(
+        "SELECT memo_id, editor, before IS NULL AS created, edited_at "
+        "FROM memo_revisions WHERE share_id IS NOT NULL "
+        "ORDER BY edited_at DESC, id DESC"
+    ).fetchall():
+        if r["memo_id"] not in guest_last:
+            guest_last[r["memo_id"]] = r
+    out = []
+    for row in rows:
+        d = _memo_dict(row)
+        g = guest_last.get(d["id"])
+        if g:
+            d["guest_editor"] = g["editor"]
+            d["guest_action"] = "created" if g["created"] else "edited"
+            d["guest_at"] = g["edited_at"]
+        out.append(d)
+    return jsonify(out)
 
 
 @app.route("/api/memos", methods=["POST"])
@@ -524,8 +788,8 @@ def create_memo():
     uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, priority, subtasks, project_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "done, due_date, priority, subtasks, project_id, recurrence) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -534,9 +798,10 @@ def create_memo():
             now,
             1 if data.get("done") else 0,
             (data.get("due_date") or "").strip(),
-            int(data.get("priority") or 0),
+            _valid_priority(db, data.get("priority")),
             _subtasks_json(data.get("subtasks")),
             _valid_project_id(db, data.get("project_id")),
+            _valid_recurrence(data.get("recurrence")),
         ),
     )
     db.commit()
@@ -544,19 +809,51 @@ def create_memo():
     return jsonify(_memo_dict(row)), 201
 
 
-@app.route("/api/memos/<int:memo_id>", methods=["PUT"])
-def update_memo(memo_id):
-    data = request.get_json(silent=True) or {}
-    db = get_db()
-    existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
-    if not existing:
-        return jsonify({"error": "not found"}), 404
+def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence):
+    try:
+        subs = json.loads(subtasks_json or "[]")
+    except Exception:
+        subs = []
+    return {
+        "content": content,
+        "done": bool(done),
+        "due_date": due_date or "",
+        "priority": priority or 0,
+        "subtasks": subs,
+        "recurrence": recurrence or "",
+    }
+
+
+def _log_revision(db, memo_row, after, editor, share_id=None):
+    before = _memo_snapshot(
+        memo_row["content"], memo_row["done"], memo_row["due_date"],
+        memo_row["priority"], memo_row["subtasks"], memo_row["recurrence"],
+    )
+    if before == after:
+        return
+    db.execute(
+        "INSERT INTO memo_revisions (memo_id, memo_uid, editor, share_id, before, after, edited_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            memo_row["id"],
+            memo_row["uid"] or "",
+            editor,
+            share_id,
+            json.dumps(before, ensure_ascii=False),
+            json.dumps(after, ensure_ascii=False),
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+
+
+def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
+    memo_id = existing["id"]
     content = (data.get("content", existing["content"]) or "").strip()
     if not content:
-        return jsonify({"error": "content required"}), 400
+        return {"error": "content required"}, 400
     done = 1 if data.get("done", existing["done"]) else 0
     due_date = (data.get("due_date", existing["due_date"]) or "").strip()
-    priority = int(data.get("priority", existing["priority"]) or 0)
+    priority = _valid_priority(db, data.get("priority", existing["priority"]))
     if "subtasks" in data:
         subtasks = _subtasks_json(data.get("subtasks"))
     else:
@@ -566,9 +863,42 @@ def update_memo(memo_id):
         if "project_id" in data
         else existing["project_id"]
     )
+    recurrence = (
+        _valid_recurrence(data.get("recurrence"))
+        if "recurrence" in data
+        else (existing["recurrence"] or "")
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    was_done = bool(existing["done"])
+    if done and not was_done:
+        proj = None
+        if project_id:
+            proj = db.execute(
+                "SELECT name FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
+        db.execute(
+            "INSERT INTO memo_history (memo_uid, content, project, done_at) "
+            "VALUES (?, ?, ?, ?)",
+            (existing["uid"] or "", content, proj["name"] if proj else "", now),
+        )
+        if recurrence:
+            done = 0
+            due_date = _next_due(due_date, recurrence)
+    elif was_done and not done:
+        db.execute(
+            "DELETE FROM memo_history WHERE id = ("
+            "SELECT id FROM memo_history WHERE memo_uid = ? "
+            "ORDER BY done_at DESC, id DESC LIMIT 1)",
+            (existing["uid"] or "",),
+        )
+
+    after = _memo_snapshot(content, done, due_date, priority, subtasks, recurrence)
+    _log_revision(db, existing, after, editor, share_id)
+
     db.execute(
         "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
-        "project_id=?, updated_at=? WHERE id=?",
+        "project_id=?, recurrence=?, updated_at=? WHERE id=?",
         (
             content,
             done,
@@ -576,13 +906,25 @@ def update_memo(memo_id):
             priority,
             subtasks,
             project_id,
-            datetime.now(timezone.utc).isoformat(),
+            recurrence,
+            now,
             memo_id,
         ),
     )
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
-    return jsonify(_memo_dict(row))
+    return _memo_dict(row), 200
+
+
+@app.route("/api/memos/<int:memo_id>", methods=["PUT"])
+def update_memo(memo_id):
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "not found"}), 404
+    payload, status = _perform_memo_update(db, existing, data)
+    return jsonify(payload), status
 
 
 @app.route("/api/memos/<int:memo_id>", methods=["DELETE"])
@@ -592,6 +934,7 @@ def delete_memo(memo_id):
     if row:
         _delete_image_files(row["images"])
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
+    db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
     db.commit()
     return "", 204
 
@@ -613,12 +956,9 @@ def add_memo_image(memo_id):
     f = request.files.get("image")
     if not f or not f.filename:
         return jsonify({"error": "image file required"}), 400
-    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
-    if ext not in ALLOWED_IMG_EXT:
-        return jsonify({"error": "format non supporté (png, jpg, gif, webp)"}), 400
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    name = f"{uuid.uuid4().hex}.{ext}"
-    f.save(os.path.join(UPLOAD_DIR, name))
+    name, err = _save_uploaded_image(f, ALLOWED_IMG_EXT)
+    if err:
+        return jsonify({"error": err}), 400
     try:
         images = json.loads(existing["images"] or "[]")
     except Exception:
@@ -659,6 +999,28 @@ def delete_memo_image(memo_id, name):
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
     return jsonify(_memo_dict(row))
+
+
+@app.route("/api/history", methods=["GET"])
+def list_history():
+    rows = (
+        get_db()
+        .execute(
+            "SELECT id, memo_uid, content, project, done_at FROM memo_history "
+            "ORDER BY done_at DESC, id DESC"
+        )
+        .fetchall()
+    )
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/history", methods=["DELETE"])
+def purge_history():
+    db = get_db()
+    count = db.execute("SELECT COUNT(*) FROM memo_history").fetchone()[0]
+    db.execute("DELETE FROM memo_history")
+    db.commit()
+    return jsonify({"purged": count})
 
 
 @app.route("/api/memos/reorder", methods=["POST"])
@@ -755,6 +1117,607 @@ def links_status():
     return jsonify(result)
 
 
+# ---------------------------------------------------------------- shares
+
+
+def _text_excerpt(html, n=80):
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:n]
+
+
+def _share_by_token(db, token):
+    if not token or len(token) < 16:
+        return None
+    return db.execute("SELECT * FROM shares WHERE token = ?", (token,)).fetchone()
+
+
+def _share_memo_dict(row):
+    d = _memo_dict(row)
+    return {
+        "id": d["id"],
+        "content": d["content"],
+        "done": d["done"],
+        "due_date": d["due_date"],
+        "priority": d["priority"],
+        "subtasks": d["subtasks"],
+        "images": d["images"],
+        "recurrence": d["recurrence"],
+    }
+
+
+def _share_scope_memos(db, share):
+    if share["kind"] == "memo":
+        row = db.execute(
+            "SELECT * FROM memos WHERE id = ?", (share["target_id"],)
+        ).fetchone()
+        return [row] if row else []
+    return db.execute(
+        "SELECT * FROM memos WHERE project_id = ? ORDER BY position, id",
+        (share["target_id"],),
+    ).fetchall()
+
+
+@app.route("/api/shares", methods=["GET"])
+def list_shares():
+    db = get_db()
+    rows = db.execute("SELECT * FROM shares ORDER BY id").fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if r["kind"] == "memo":
+            t = db.execute(
+                "SELECT content FROM memos WHERE id = ?", (r["target_id"],)
+            ).fetchone()
+            d["target"] = _text_excerpt(t["content"]) if t else None
+        else:
+            t = db.execute(
+                "SELECT name FROM projects WHERE id = ?", (r["target_id"],)
+            ).fetchone()
+            d["target"] = t["name"] if t else None
+        d["guests"] = [
+            {
+                "id": g["id"],
+                "email": g["email"],
+                "name": g["name"],
+                "status": g["status"],
+            }
+            for g in db.execute(
+                "SELECT * FROM share_guests WHERE share_id = ? ORDER BY id",
+                (r["id"],),
+            ).fetchall()
+        ]
+        out.append(d)
+    return jsonify(out)
+
+
+@app.route("/api/shares", methods=["POST"])
+def create_share():
+    data = request.get_json(silent=True) or {}
+    kind = (data.get("kind") or "").strip()
+    if kind not in ("memo", "project"):
+        return jsonify({"error": "kind must be memo or project"}), 400
+    try:
+        target_id = int(data.get("target_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "target_id required"}), 400
+    db = get_db()
+    table = "memos" if kind == "memo" else "projects"
+    if not db.execute(f"SELECT 1 FROM {table} WHERE id = ?", (target_id,)).fetchone():
+        return jsonify({"error": "target not found"}), 404
+    token = secrets.token_urlsafe(24)
+    pin = f"{secrets.randbelow(10000):04d}"
+    cur = db.execute(
+        "INSERT INTO shares (token, kind, target_id, can_edit, created_at, pin) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            token,
+            kind,
+            target_id,
+            1 if data.get("can_edit") else 0,
+            datetime.now(timezone.utc).isoformat(),
+            pin,
+        ),
+    )
+    db.commit()
+    return (
+        jsonify(
+            {
+                "id": cur.lastrowid,
+                "token": token,
+                "kind": kind,
+                "target_id": target_id,
+                "can_edit": bool(data.get("can_edit")),
+                "pin": pin,
+            }
+        ),
+        201,
+    )
+
+
+@app.route("/api/shares/<int:share_id>", methods=["PUT"])
+def update_share(share_id):
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    existing = db.execute("SELECT * FROM shares WHERE id = ?", (share_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "not found"}), 404
+    pin = (str(data.get("pin", existing["pin"])) or "").strip()
+    if not re.match(r"^\d{4}$", pin):
+        return jsonify({"error": "le code doit faire 4 chiffres"}), 400
+    can_edit = 1 if data.get("can_edit", existing["can_edit"]) else 0
+    db.execute(
+        "UPDATE shares SET pin = ?, can_edit = ? WHERE id = ?",
+        (pin, can_edit, share_id),
+    )
+    db.commit()
+    return jsonify({"id": share_id, "pin": pin, "can_edit": bool(can_edit)})
+
+
+@app.route("/api/shares/<int:share_id>", methods=["DELETE"])
+def delete_share(share_id):
+    db = get_db()
+    db.execute("DELETE FROM share_guests WHERE share_id = ?", (share_id,))
+    db.execute("DELETE FROM shares WHERE id = ?", (share_id,))
+    db.commit()
+    return "", 204
+
+
+def _get_state(db, key, default=""):
+    row = db.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def _set_state(db, key, value):
+    db.execute(
+        "INSERT INTO app_state (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
+@app.route("/api/guests", methods=["GET"])
+def list_guests():
+    db = get_db()
+    rows = db.execute(
+        "SELECT g.*, s.kind, s.target_id FROM share_guests g "
+        "JOIN shares s ON s.id = g.share_id ORDER BY g.id DESC"
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d.pop("guest_token", None)
+        if r["kind"] == "memo":
+            t = db.execute(
+                "SELECT content FROM memos WHERE id = ?", (r["target_id"],)
+            ).fetchone()
+            d["target"] = (_text_excerpt(t["content"], 60) if t else "(supprimé)")
+        else:
+            t = db.execute(
+                "SELECT name FROM projects WHERE id = ?", (r["target_id"],)
+            ).fetchone()
+            d["target"] = (t["name"] if t else "(supprimé)")
+        out.append(d)
+    return jsonify(out)
+
+
+@app.route("/api/guests/<int:guest_id>", methods=["PUT"])
+def update_guest(guest_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get("status") or "").strip()
+    if status not in ("approved", "rejected", "pending"):
+        return jsonify({"error": "status invalide"}), 400
+    db = get_db()
+    if not db.execute("SELECT 1 FROM share_guests WHERE id = ?", (guest_id,)).fetchone():
+        return jsonify({"error": "not found"}), 404
+    db.execute(
+        "UPDATE share_guests SET status = ?, approved_at = ? WHERE id = ?",
+        (
+            status,
+            datetime.now(timezone.utc).isoformat() if status == "approved" else "",
+            guest_id,
+        ),
+    )
+    db.commit()
+    return jsonify({"id": guest_id, "status": status})
+
+
+@app.route("/api/guests/<int:guest_id>", methods=["DELETE"])
+def delete_guest(guest_id):
+    db = get_db()
+    db.execute("DELETE FROM share_guests WHERE id = ?", (guest_id,))
+    db.commit()
+    return "", 204
+
+
+@app.route("/api/activity", methods=["GET"])
+def activity():
+    db = get_db()
+    pending = db.execute(
+        "SELECT COUNT(*) FROM share_guests WHERE status = 'pending'"
+    ).fetchone()[0]
+    revisions = db.execute(
+        "SELECT r.*, m.content AS memo_content FROM memo_revisions r "
+        "LEFT JOIN memos m ON m.id = r.memo_id "
+        "WHERE r.share_id IS NOT NULL ORDER BY r.edited_at DESC, r.id DESC LIMIT 50"
+    ).fetchall()
+    seen_at = _get_state(db, "activity_seen_at", "")
+    out_rev = []
+    unseen = 0
+    for r in revisions:
+        d = {
+            "id": r["id"],
+            "memo_id": r["memo_id"],
+            "editor": r["editor"],
+            "edited_at": r["edited_at"],
+            "memo_content": r["memo_content"],
+            "created": r["before"] is None,
+            "before": json.loads(r["before"]) if r["before"] else None,
+            "after": json.loads(r["after"]) if r["after"] else None,
+        }
+        if r["edited_at"] > seen_at:
+            unseen += 1
+        out_rev.append(d)
+    return jsonify({"pending_guests": pending, "unseen": unseen, "revisions": out_rev})
+
+
+@app.route("/api/activity/seen", methods=["POST"])
+def activity_seen():
+    db = get_db()
+    _set_state(db, "activity_seen_at", datetime.now(timezone.utc).isoformat())
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/memos/<int:memo_id>/revisions", methods=["GET"])
+def memo_revisions(memo_id):
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM memo_revisions WHERE memo_id = ? ORDER BY edited_at DESC, id DESC LIMIT 100",
+        (memo_id,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "id": r["id"],
+                "editor": r["editor"],
+                "edited_at": r["edited_at"],
+                "before": json.loads(r["before"]) if r["before"] else None,
+                "after": json.loads(r["after"]) if r["after"] else None,
+            }
+        )
+    return jsonify(out)
+
+
+@app.route("/api/memos/<int:memo_id>/restore", methods=["POST"])
+def memo_restore(memo_id):
+    data = request.get_json(silent=True) or {}
+    db = get_db()
+    existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "not found"}), 404
+    rev = db.execute(
+        "SELECT * FROM memo_revisions WHERE id = ? AND memo_id = ?",
+        (data.get("revision_id"), memo_id),
+    ).fetchone()
+    if not rev:
+        return jsonify({"error": "revision not found"}), 404
+    which = "before" if data.get("which") == "before" else "after"
+    snap_raw = rev[which]
+    if not snap_raw:
+        return jsonify({"error": "pas d'état pour cette version"}), 400
+    snap = json.loads(snap_raw)
+    after = _memo_snapshot(
+        snap.get("content", ""),
+        1 if snap.get("done") else 0,
+        snap.get("due_date", ""),
+        snap.get("priority", 0),
+        json.dumps(snap.get("subtasks") or []),
+        snap.get("recurrence", ""),
+    )
+    _log_revision(db, existing, after, "moi (restauration)")
+    db.execute(
+        "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
+        "recurrence=?, updated_at=? WHERE id=?",
+        (
+            after["content"],
+            1 if after["done"] else 0,
+            after["due_date"],
+            after["priority"],
+            json.dumps(after["subtasks"], ensure_ascii=False),
+            after["recurrence"],
+            datetime.now(timezone.utc).isoformat(),
+            memo_id,
+        ),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    return jsonify(_memo_dict(row))
+
+
+@app.route("/share/<token>")
+def share_page(token):
+    if not _share_by_token(get_db(), token):
+        return "Lien de partage invalide ou révoqué.", 404
+    return render_template("share.html")
+
+
+@app.route("/share/<token>/data")
+def share_data(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    memos = [_share_memo_dict(r) for r in _share_scope_memos(db, share)]
+    payload = {
+        "kind": share["kind"],
+        "can_edit": bool(share["can_edit"]),
+        "memos": memos,
+        "priorities": [
+            dict(r)
+            for r in db.execute(
+                "SELECT id, name, color FROM priorities ORDER BY position, id"
+            ).fetchall()
+        ],
+    }
+    if share["kind"] == "project":
+        proj = db.execute(
+            "SELECT name, color FROM projects WHERE id = ?", (share["target_id"],)
+        ).fetchone()
+        if not proj:
+            return jsonify({"error": "invalid"}), 404
+        payload["title"] = proj["name"]
+        payload["color"] = proj["color"]
+    else:
+        payload["title"] = "Mémo partagé"
+        payload["color"] = ""
+    return jsonify(payload)
+
+
+def _guest_from_request(db, share):
+    token = (request.headers.get("X-Guest-Token") or "").strip()
+    if not token:
+        return None
+    return db.execute(
+        "SELECT * FROM share_guests WHERE guest_token = ? AND share_id = ?",
+        (token, share["id"]),
+    ).fetchone()
+
+
+@app.route("/share/<token>/register", methods=["POST"])
+def share_register(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share or not share["can_edit"]:
+        return jsonify({"error": "invalid"}), 404
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    name = (data.get("name") or "").strip()[:60]
+    pin = (str(data.get("pin") or "")).strip()
+    if not email or "@" not in email or len(email) > 120:
+        return jsonify({"error": "e-mail invalide"}), 400
+    if pin != (share["pin"] or ""):
+        return jsonify({"error": "code invalide — demande le code à 4 chiffres au propriétaire"}), 403
+    now = datetime.now(timezone.utc).isoformat()
+    existing = db.execute(
+        "SELECT * FROM share_guests WHERE share_id = ? AND email = ?",
+        (share["id"], email),
+    ).fetchone()
+    if existing:
+        if existing["status"] != "approved":
+            db.execute(
+                "UPDATE share_guests SET status = 'approved', approved_at = ? WHERE id = ?",
+                (now, existing["id"]),
+            )
+            db.commit()
+        return jsonify(
+            {"guest_token": existing["guest_token"], "status": "approved", "email": email}
+        )
+    if db.execute(
+        "SELECT COUNT(*) FROM share_guests WHERE share_id = ?", (share["id"],)
+    ).fetchone()[0] >= 30:
+        return jsonify({"error": "trop de demandes pour ce lien"}), 429
+    gtoken = secrets.token_urlsafe(24)
+    db.execute(
+        "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at) "
+        "VALUES (?, ?, ?, ?, 'approved', ?, ?)",
+        (share["id"], email, name, gtoken, now, now),
+    )
+    db.commit()
+    return jsonify({"guest_token": gtoken, "status": "approved", "email": email}), 201
+
+
+@app.route("/share/<token>/me")
+def share_me(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest:
+        return jsonify({"status": "anonymous"})
+    return jsonify(
+        {"status": guest["status"], "email": guest["email"], "name": guest["name"]}
+    )
+
+
+@app.route("/share/<token>/memo/<int:memo_id>", methods=["PUT"])
+def share_update_memo(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"]:
+        return jsonify({"error": "lecture seule"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
+    if memo_id not in allowed_ids:
+        return jsonify({"error": "not found"}), 404
+    existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    raw = request.get_json(silent=True) or {}
+    data = {
+        k: raw[k]
+        for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence")
+        if k in raw
+    }
+    editor = guest["name"] or guest["email"]
+    payload, status = _perform_memo_update(
+        db, existing, data, editor=f"{editor} <{guest['email']}>", share_id=share["id"]
+    )
+    if status == 200:
+        payload = _share_memo_dict_from_payload(payload)
+    return jsonify(payload), status
+
+
+GUEST_IMG_EXT = {"png", "jpg", "jpeg"}
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/images", methods=["POST"])
+def share_add_image(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"]:
+        return jsonify({"error": "lecture seule"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
+    if memo_id not in allowed_ids:
+        return jsonify({"error": "not found"}), 404
+    f = request.files.get("image")
+    if not f or not f.filename:
+        return jsonify({"error": "image file required"}), 400
+    name, err = _save_uploaded_image(f, GUEST_IMG_EXT)
+    if err:
+        return jsonify({"error": err}), 400
+    existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    try:
+        images = json.loads(existing["images"] or "[]")
+    except Exception:
+        images = []
+    images.append(name)
+    db.execute(
+        "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    return jsonify(_share_memo_dict(row)), 201
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/images/<name>", methods=["DELETE"])
+def share_delete_image(token, memo_id, name):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share or not share["can_edit"]:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
+    if memo_id not in allowed_ids:
+        return jsonify({"error": "not found"}), 404
+    name = os.path.basename(name)
+    existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    try:
+        images = json.loads(existing["images"] or "[]")
+    except Exception:
+        images = []
+    if name not in images:
+        return jsonify({"error": "image not found"}), 404
+    images = [n for n in images if n != name]
+    if SAFE_IMG_NAME.match(name):
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, name))
+        except OSError:
+            pass
+    db.execute(
+        "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    return jsonify(_share_memo_dict(row))
+
+
+def _share_memo_dict_from_payload(d):
+    return {
+        "id": d["id"],
+        "content": d["content"],
+        "done": d["done"],
+        "due_date": d["due_date"],
+        "priority": d["priority"],
+        "subtasks": d["subtasks"],
+        "images": d["images"],
+        "recurrence": d["recurrence"],
+    }
+
+
+@app.route("/share/<token>/memos", methods=["POST"])
+def share_add_memo(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"] or share["kind"] != "project":
+        return jsonify({"error": "non autorisé"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    data = request.get_json(silent=True) or {}
+    content = (data.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "content required"}), 400
+    max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
+    now = datetime.now(timezone.utc).isoformat()
+    new_uid = str(uuid.uuid4())
+    cur = db.execute(
+        "INSERT INTO memos (content, position, created_at, uid, updated_at, "
+        "done, due_date, priority, subtasks, project_id, recurrence) "
+        "VALUES (?, ?, ?, ?, ?, 0, '', 0, '[]', ?, '')",
+        (content, max_pos + 1, now, new_uid, now, share["target_id"]),
+    )
+    editor = guest["name"] or guest["email"]
+    db.execute(
+        "INSERT INTO memo_revisions (memo_id, memo_uid, editor, share_id, before, after, edited_at) "
+        "VALUES (?, ?, ?, ?, NULL, ?, ?)",
+        (
+            cur.lastrowid,
+            new_uid,
+            f"{editor} <{guest['email']}>",
+            share["id"],
+            json.dumps(_memo_snapshot(content, 0, "", 0, "[]", ""), ensure_ascii=False),
+            now,
+        ),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return jsonify(_share_memo_dict(row)), 201
+
+
+@app.route("/share/<token>/image/<name>")
+def share_image(token, name):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return "", 404
+    name = os.path.basename(name)
+    if not SAFE_IMG_NAME.match(name):
+        return "", 404
+    for row in _share_scope_memos(db, share):
+        try:
+            if name in json.loads(row["images"] or "[]"):
+                return send_from_directory(UPLOAD_DIR, name, max_age=3600)
+        except Exception:
+            continue
+    return "", 404
+
+
 # -------------------------------------------------------- export/import
 
 
@@ -792,14 +1755,23 @@ def export_links():
         {"name": r["name"], "position": r["position"], "color": r["color"], "tags": r["tags"]}
         for r in projects
     ]
+    history = db.execute(
+        "SELECT memo_uid, content, project, done_at FROM memo_history "
+        "ORDER BY done_at, id"
+    ).fetchall()
+    priorities = db.execute(
+        "SELECT id, name, color, position FROM priorities ORDER BY position, id"
+    ).fetchall()
     return jsonify(
         {
-            "version": 8,
+            "version": 10,
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "categories": [dict(r) for r in categories],
             "projects": out_projects,
+            "priorities": [dict(r) for r in priorities],
             "links": out_links,
             "memos": out_memos,
+            "history": [dict(r) for r in history],
         }
     )
 
@@ -893,6 +1865,41 @@ def import_links():
             )
         else:
             ensure_project(proj)
+
+    prio_map = {}
+    for pr in data.get("priorities") or []:
+        if not isinstance(pr, dict):
+            continue
+        pr_name = (pr.get("name") or "").strip()
+        if not pr_name:
+            continue
+        row = db.execute(
+            "SELECT id FROM priorities WHERE name = ?", (pr_name,)
+        ).fetchone()
+        if row:
+            local_id = row["id"]
+        else:
+            max_pos = db.execute(
+                "SELECT COALESCE(MAX(position), -1) FROM priorities"
+            ).fetchone()[0]
+            cur = db.execute(
+                "INSERT INTO priorities (name, color, position) VALUES (?, ?, ?)",
+                (pr_name, (pr.get("color") or "").strip(), max_pos + 1),
+            )
+            local_id = cur.lastrowid
+        try:
+            prio_map[int(pr.get("id"))] = local_id
+        except (TypeError, ValueError):
+            pass
+
+    def map_priority(value):
+        try:
+            p = int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+        if p <= 0:
+            return 0
+        return _valid_priority(db, prio_map.get(p, p))
 
     now = datetime.now(timezone.utc).isoformat()
 
@@ -1010,10 +2017,11 @@ def import_links():
             updated = memo.get("updated_at") or ""
             done = 1 if memo.get("done") else 0
             due_date = (memo.get("due_date") or "").strip()
-            priority = int(memo.get("priority") or 0)
+            priority = map_priority(memo.get("priority"))
             subtasks = _subtasks_json(memo.get("subtasks"))
             project_id = ensure_project(memo.get("project", ""))
             images = _images_json(memo.get("images"), check_files=True)
+            recurrence = _valid_recurrence(memo.get("recurrence"))
         else:
             content = str(memo).strip()
             uid = ""
@@ -1025,6 +2033,7 @@ def import_links():
             subtasks = "[]"
             project_id = None
             images = "[]"
+            recurrence = ""
         if not content:
             continue
 
@@ -1034,8 +2043,8 @@ def import_links():
                 merged_images = images if images != "[]" else (existing["images"] or "[]")
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, priority=?, "
-                    "subtasks=?, project_id=?, images=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, priority, subtasks, project_id, merged_images, updated, existing["id"]),
+                    "subtasks=?, project_id=?, images=?, recurrence=?, updated_at=? WHERE id=?",
+                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -1050,14 +2059,37 @@ def import_links():
         new_uid = uid or str(uuid.uuid4())
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-            "done, due_date, priority, subtasks, project_id, images) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images),
+            "done, due_date, priority, subtasks, project_id, images, recurrence) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
         ).fetchone()
         imported_memos += 1
+
+    existing_hist = {
+        (r["memo_uid"], r["done_at"])
+        for r in db.execute("SELECT memo_uid, done_at FROM memo_history").fetchall()
+    }
+    imported_history = 0
+    for h in data.get("history") or []:
+        if not isinstance(h, dict):
+            continue
+        h_content = (h.get("content") or "").strip()
+        h_done_at = (h.get("done_at") or "").strip()
+        if not h_content or not h_done_at:
+            continue
+        key = ((h.get("memo_uid") or "").strip(), h_done_at)
+        if key in existing_hist:
+            continue
+        db.execute(
+            "INSERT INTO memo_history (memo_uid, content, project, done_at) "
+            "VALUES (?, ?, ?, ?)",
+            (key[0], h_content, (h.get("project") or "").strip(), h_done_at),
+        )
+        existing_hist.add(key)
+        imported_history += 1
 
     db.commit()
     return jsonify(
@@ -1068,6 +2100,7 @@ def import_links():
             "imported_memos": imported_memos,
             "updated_memos": updated_memos,
             "skipped_memos": skipped_memos,
+            "imported_history": imported_history,
         }
     )
 

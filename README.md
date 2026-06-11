@@ -19,7 +19,7 @@ UI : http://localhost:8099
 - **Sidebar gauche** : catégories avec compteurs ("Tous", catégories custom, "Sans catégorie"). Drag & drop d'une card vers une catégorie pour la déplacer. Sur mobile, devient une rangée de puces horizontales.
 - **Centre** : cards des liens (favicon auto, description, mémo du lien, chips 🌐/🔒 avec statut). Drag & drop pour réordonner.
 - **Colonne droite** : résumé des mémos en cours (post-its avec priorité et échéance). Ajout rapide (Entrée). Un clic ouvre la vue Mémos complète.
-- **Vue Mémos** (sidebar → 📝 Mémos) : gestion de tâches façon Planify. Tuiles de filtres (En cours / Aujourd'hui / Planifiés / En retard / Terminés), sections par échéance, cases à cocher, priorités P1-P3 (bordure rouge/orange/bleue), sous-tâches avec progression, liens web cliquables, édition au clic. **Projets** : sous "Mémos" dans la sidebar (Inbox + projets colorés), drag & drop d'un mémo vers un projet, sélecteur de projet à l'ajout et dans le détail. **Images** : bouton 📎 dans le détail d'un mémo ou glisser-déposer un fichier image sur le mémo ; miniatures cliquables (visionneuse plein écran), suppression au survol en mode détail. **Texte riche** : cliquer sur le texte d'un mémo ouvre un éditeur WYSIWYG (Quill 2, auto-hébergé dans `static/`) — titres, gras/italique, couleurs, listes, liens, citations, code. Le HTML est sanitizé au rendu ; si `static/quill.min.js` manque, l'édition retombe sur une textarea simple.
+- **Vue Mémos** (sidebar → 📝 Mémos) : gestion de tâches façon Planify. Tuiles de filtres (En cours / Aujourd'hui / Planifiés / En retard / Terminés), sections par échéance, cases à cocher, priorités P1-P3 (bordure rouge/orange/bleue), sous-tâches avec progression, liens web cliquables, édition au clic. **Projets** : sous "Mémos" dans la sidebar (Inbox + projets colorés), drag & drop d'un mémo vers un projet, sélecteur de projet à l'ajout et dans le détail. **Images** : bouton 📎 dans le détail d'un mémo ou glisser-déposer un fichier image sur le mémo ; miniatures cliquables (visionneuse plein écran), suppression au survol en mode détail. **Texte riche** : cliquer sur le texte d'un mémo ouvre un éditeur WYSIWYG (Quill 2, auto-hébergé dans `static/`) — titres, gras/italique, couleurs, listes (puces, numérotées, **à cocher**), liens, citations, code. Les listes à cocher sont **cliquables directement sur la card** (et sur la page partagée) sans ouvrir l'éditeur — idéal listes de courses. Le HTML est sanitizé au rendu ; si `static/quill.min.js` manque, l'édition retombe sur une textarea simple.
 - **Recherche** : `/` pour focus, filtre liens + mémos en tapant, Entrée ouvre le premier résultat, Échap efface. Taper `#tag` filtre par tag exact. **Portée** : sélecteur Tout / Liens / Mémos / Projets dans la barre, ou préfixes clavier `p#`, `l#`, `m#` (ex. `p#docker` cherche dans les projets et bascule le sélecteur). Une recherche qui matche des projets (nom ou tags) affiche une section "Projets" cliquable en haut de la vue Mémos, et inclut les mémos de ces projets dans les résultats.
 - **Tags `#`** : champ tags sur les liens (chips cliquables sur les cards) et `#tags` libres dans le texte des mémos (rendus cliquables). Cliquer un tag ouvre la vue Mémos filtrée sur ce tag, avec un bandeau pour basculer vers les liens qui le portent — liens ↔ mémos reliés par leurs # communs.
 - **⚙ Paramètres** : export/import JSON, gestion des catégories et projets (pop-in nom + couleur via ✎, suppression), refresh des statuts. Un **double-clic** sur un projet ou une catégorie dans la sidebar ouvre directement la pop-in de modification.
@@ -45,7 +45,13 @@ Table `links` :
 
 Table `categories` : `id`, `name` (unique), `position`, `color` (hex, optionnel).
 
-Table `memos` : `id`, `content`, `position`, `created_at`, `uid`, `updated_at`, `done` (0/1), `due_date` (YYYY-MM-DD), `priority` (0 = aucune, 1-3 = P1-P3), `subtasks` (JSON `[{content, done}]`), `project_id` (FK vers `projects`, NULL = Inbox), `images` (JSON, noms de fichiers dans `data/uploads/`).
+Table `memos` : `id`, `content`, `position`, `created_at`, `uid`, `updated_at`, `done` (0/1), `due_date` (YYYY-MM-DD), `priority` (0 = aucune, 1-3 = P1-P3), `subtasks` (JSON `[{content, done}]`), `project_id` (FK vers `projects`, NULL = Inbox), `images` (JSON, noms de fichiers dans `data/uploads/`), `recurrence` ('' ou daily/weekly/monthly/quarterly/yearly).
+
+Table `memo_history` : `id`, `memo_uid`, `content`, `project` (nom), `done_at` (ISO UTC). Une entrée par tâche cochée ; décocher retire l'entrée la plus récente du mémo. Conservé sans limite (purge manuelle dans Paramètres).
+
+Table `priorities` : `id`, `name` (unique), `color`, `position`. Seedée au premier démarrage avec P1 rouge / P2 jaune / P3 vert, entièrement configurable dans Paramètres (ajout, renommage, couleur, suppression — les mémos repassent alors sans priorité). `memos.priority` référence `priorities.id` (0 = aucune).
+
+**Récurrence** : cocher un mémo récurrent ne le termine pas — il est journalisé dans l'historique et sa `due_date` avance d'une période **calée sur l'échéance prévue** (pas sur le jour du cochage) ; s'il était très en retard, l'échéance saute jusqu'à la prochaine date future.
 
 Table `projects` : `id`, `name` (unique), `color`, `position`, `tags` (même normalisation que les liens). Les projets organisent les mémos (façon Planify), indépendamment des catégories de liens.
 
@@ -76,20 +82,72 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | PUT     | `/api/projects/<id>`       | Renomme / change la couleur                    |
 | DELETE  | `/api/projects/<id>`       | Supprime (les mémos retournent dans l'Inbox)   |
 | POST    | `/api/projects/reorder`    | `{ids: [...]}`                                 |
+| GET     | `/api/priorities`          | Liste avec `memo_count`                        |
+| POST    | `/api/priorities`          | Crée une priorité (`{name, color}`)            |
+| PUT     | `/api/priorities/<id>`     | Renomme / change la couleur                    |
+| DELETE  | `/api/priorities/<id>`     | Supprime (les mémos repassent sans priorité)   |
+| GET     | `/api/history`             | Historique des tâches effectuées (récent d'abord) |
+| DELETE  | `/api/history`             | Vide l'historique                              |
 | POST    | `/api/memos/<id>/images`   | Upload multipart (`image`) — png/jpg/gif/webp, 16 Mo max |
 | DELETE  | `/api/memos/<id>/images/<nom>` | Supprime l'image (fichier inclus)          |
 | GET     | `/uploads/<nom>`           | Sert une image uploadée                        |
 | GET     | `/api/favicon/<id>`        | Favicon du service, récupéré côté serveur (cache mémoire) |
-| GET     | `/api/export`              | Sauvegarde JSON v8 (liens + catégories + projets + mémos, tags inclus) |
+| GET     | `/api/export`              | Sauvegarde JSON v10 (liens + catégories + projets + priorités + mémos + historique) |
 | POST    | `/api/import`              | Réimporte une sauvegarde (voir Backup / restore) |
 
 Le check de statut est fait côté Flask pour éviter le CORS. Renvoie `online` / `offline` / `unknown` (URL vide) par URL renseignée.
 
 La météo est récupérée côté client depuis open-meteo.com (Bayonne, gratuit, sans clé). Les favicons sont récupérés par Flask via l'URL locale du service (ce qui contourne Authelia), avec fallback `icons.duckduckgo.com` puis initiale du nom.
 
+## Partage par lien
+
+Un mémo (bouton 🔗 dans son détail) ou un projet entier (bouton 🔗 à côté du titre du projet) peut être partagé avec des personnes **sans compte**, via un lien à jeton : `https://dash…/share/<token>`. À la création tu choisis **lecture seule** (👁) ou **modifiable** (✏️ — cocher, éditer le texte, cocher les sous-tâches ; sur un projet : ajouter des mémos). Les liens sont listés et révocables dans la même pop-in ; supprimer le mémo/projet révoque ses liens. La page partagée est minimale, scopée à la ressource (images comprises, servies par `/share/<token>/image/…`), `noindex`, et se rafraîchit toutes les 30 s.
+
+Table `shares` : `id`, `token` (unique, `secrets.token_urlsafe(24)`), `kind` (`memo`/`project`), `target_id`, `can_edit`, `created_at`. Les liens de partage ne sont **pas** inclus dans l'export JSON.
+
+**Invités identifiés** : sur un lien modifiable, la consultation est libre mais **modifier exige de se connecter** : e-mail + prénom + **code PIN à 4 chiffres**. Le code est propre à chaque lien, visible et modifiable par le propriétaire (pop-in 🔗 et page Partages) — le transmettre à la personne vaut validation : code correct = invité validé d'office. Table `share_guests` (e-mail, `guest_token`, statut). Le propriétaire peut toujours refuser/supprimer un invité après coup.
+
+**Page 🔗 Partages** (sidebar ou cloche du header) : vue dédiée regroupant les demandes en attente, tous les liens de partage (cible, droits, **PIN éditable**, URL à copier, invités du lien avec leurs statuts, révocation) et les **modifications groupées par invité** — chaque entrée dépliable en Avant/Après avec annulation et accès aux versions.
+
+Un invité validé peut tout faire sur les mémos du partage : cocher/décocher (mémo, sous-tâches, cases des listes), ajouter des articles aux listes, éditer le texte, changer échéance et priorité, ajouter/supprimer des **photos** — limitées à JPG/PNG avec **vérification de la signature binaire** côté serveur (un zip renommé en .png est rejeté ; gif/webp restent réservés au propriétaire). Tout est journalisé et attribué.
+
+**Attribution & versions** : chaque modification (propriétaire ou invité) est journalisée dans `memo_revisions` (états avant/après en JSON, auteur, date). Le fil 🔔 Activité montre qui a fait quoi ; le bouton "🕘 Versions" dans le détail d'un mémo liste l'historique et permet — côté propriétaire uniquement, derrière Authelia — de **restaurer** n'importe quelle version (y compris l'état d'origine). La restauration est elle-même journalisée, donc réversible.
+
+⚠️ **Authelia** : les routes `/share/*` doivent passer sans authentification. Ajouter dans `configuration.yml` d'Authelia, **avant** la règle générale du domaine :
+
+```yaml
+access_control:
+  rules:
+    - domain: dash.homebayonne.duckdns.org
+      resources:
+        - '^/share/.*$'
+      policy: bypass
+    # ... règle existante (one_factor/two_factor) ensuite
+```
+
+| Méthode | Endpoint                        | Description                              |
+|---------|---------------------------------|------------------------------------------|
+| GET     | `/api/shares`                   | Liste des liens de partage               |
+| POST    | `/api/shares`                   | Crée un lien (`{kind, target_id, can_edit}`) |
+| DELETE  | `/api/shares/<id>`              | Révoque                                  |
+| GET     | `/share/<token>`                | Page publique                            |
+| GET     | `/share/<token>/data`           | Données scopées (JSON)                   |
+| PUT     | `/share/<token>/memo/<id>`      | Édition limitée (content/done/subtasks) si `can_edit` |
+| POST    | `/share/<token>/memos`          | Ajout d'un mémo (projet + `can_edit`)    |
+| GET     | `/share/<token>/image/<nom>`    | Image d'un mémo du partage               |
+| POST    | `/share/<token>/register`       | Demande d'accès invité (`{email, name}`) |
+| GET     | `/share/<token>/me`             | Statut de l'invité (header `X-Guest-Token`) |
+| GET     | `/api/guests`                   | Invités (toutes demandes)                |
+| PUT     | `/api/guests/<id>`              | `{status: approved/rejected/pending}`    |
+| DELETE  | `/api/guests/<id>`              | Supprime un invité                       |
+| GET     | `/api/activity`                 | Fil d'activité + compteur non-lus        |
+| POST    | `/api/activity/seen`            | Marque l'activité comme lue              |
+| GET     | `/api/memos/<id>/revisions`     | Versions d'un mémo (avant/après, auteur) |
+| POST    | `/api/memos/<id>/restore`       | Restaure (`{revision_id, which}`)        |
+
 ## Backup / restore
 
-Depuis l'UI : **⚙ Paramètres → Export JSON / Import JSON**. L'export (v7) contient liens (avec tags), catégories, projets (avec couleurs) et mémos (avec done/échéance/priorité/sous-tâches/projet/images), chacun avec son `uid` et ses dates. À l'import :
+Depuis l'UI : **⚙ Paramètres → Export JSON / Import JSON**. L'export (v9) contient liens (avec tags), catégories, projets (couleurs + tags), mémos (done/échéance/priorité/sous-tâches/projet/images/récurrence) et l'historique des tâches effectuées, chacun avec son `uid` et ses dates. À l'import :
 
 1. **Même `uid` déjà en base** : si la version du fichier est plus récente (`updated_at`), le lien/mémo existant est **mis à jour** (c'est une évolution du même élément) ; sinon il est ignoré.
 2. **Pas de `uid`** (anciennes sauvegardes v1/v2) : correspondance par nom + URLs pour un lien, contenu identique pour un mémo. Un lien correspondant **enrichit** les champs vides du lien existant (description, mémo, catégorie) au lieu d'être ignoré ; il n'écrase jamais un champ déjà rempli.

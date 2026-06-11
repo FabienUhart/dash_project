@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Partage — Dashboard</title>
+<style>
+:root {
+  --bg: #0f1419; --panel: #1a2129; --panel-2: #232c36; --text: #e6edf3;
+  --muted: #8a96a3; --accent: #4fc3f7; --green: #4caf50; --border: #2d3742;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.8rem 1.25rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+header h1 { margin: 0; font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
+header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
+.dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
+main { max-width: 680px; margin: 0 auto; padding: 1.25rem; }
+.task {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.5rem;
+}
+.task-row { display: flex; align-items: flex-start; gap: 0.6rem; }
+.task-check {
+  width: 1.15rem; height: 1.15rem; border-radius: 50%;
+  border: 2px solid var(--muted); background: none; flex-shrink: 0;
+  cursor: pointer; margin-top: 0.1rem; padding: 0; font-size: 0.7rem; line-height: 1; color: transparent;
+}
+.task-check:disabled { cursor: default; opacity: 0.6; }
+.task.done .task-check { background: var(--green); border-color: var(--green); color: #fff; }
+.task-content { flex: 1; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
+.task.done .task-content { text-decoration: line-through; color: var(--muted); }
+.task-content a { color: var(--accent); }
+.task-content p { margin: 0 0 0.15rem; }
+.task-content ul, .task-content ol { margin: 0.15rem 0; padding-left: 1.3rem; }
+.task-content .ql-ui { display: none; }
+.task-content li[data-list="checked"], .task-content li[data-list="unchecked"] {
+  list-style: none;
+  position: relative;
+  padding-left: 1.5rem;
+  margin-left: -1.3rem;
+  border-radius: 4px;
+}
+.task-content li.cl-edit:hover { background: var(--panel-2); cursor: pointer; }
+.task-content li[data-list="unchecked"]::before {
+  content: '';
+  position: absolute;
+  left: 0.25rem;
+  top: 0.3em;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid var(--muted);
+  border-radius: 4px;
+}
+.task-content li[data-list="checked"]::before {
+  content: '✓';
+  position: absolute;
+  left: 0.25rem;
+  top: 0.05em;
+  width: 0.85em;
+  height: 0.85em;
+  background: var(--green);
+  border: 2px solid var(--green);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.8em;
+  line-height: 1.1;
+  text-align: center;
+}
+.task-content li[data-list="checked"] { text-decoration: line-through; color: var(--muted); }
+.badge { font-size: 0.72rem; padding: 0.12rem 0.45rem; border-radius: 4px; background: var(--panel-2); color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+.subtask { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; margin: 0.25rem 0 0 1.75rem; }
+.subtask input { accent-color: var(--green); }
+.subtask.stdone span { text-decoration: line-through; color: var(--muted); }
+.item-add {
+  display: block;
+  width: calc(100% - 1.75rem);
+  margin: 0.45rem 0 0.1rem 1.75rem;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.6rem;
+  outline: none;
+  box-sizing: border-box;
+}
+.item-add:focus { border-style: solid; border-color: var(--accent); }
+.thumbs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.5rem 0 0.1rem 1.75rem; }
+.thumbs img { height: 72px; max-width: 140px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: zoom-in; }
+.thumb-wrap { position: relative; }
+.thumb-del {
+  position: absolute; top: -6px; right: -6px;
+  width: 1.2rem; height: 1.2rem; padding: 0;
+  font-size: 0.75rem; line-height: 1; border-radius: 50%;
+  background: #f44336; color: #fff; border: none; cursor: pointer;
+}
+.memo-tools { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0 0 1.75rem; }
+.tool-btn {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 0.78rem; padding: 0.25rem 0.6rem; cursor: pointer;
+}
+.tool-btn:hover { border-color: var(--accent); }
+.memo-tools input[type="date"] {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 0.78rem; padding: 0.2rem 0.4rem;
+}
+.edit-ta {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg); border: 1px solid var(--accent); border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 0.9rem; padding: 0.4rem; resize: vertical;
+}
+#guest-banner {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+#guest-banner.pending { border-color: #ffc107; }
+#guest-banner.approved { border-color: var(--green); font-size: 0.8rem; color: var(--muted); padding: 0.5rem 0.8rem; }
+#guest-banner.rejected { border-color: #f44336; }
+#guest-banner h2 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+#guest-banner p { margin: 0.3rem 0; color: var(--muted); font-size: 0.82rem; }
+#guest-form { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
+#guest-form input {
+  flex: 1; min-width: 160px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font: inherit; padding: 0.5rem 0.7rem; outline: none;
+}
+#guest-form input:focus { border-color: var(--accent); }
+#guest-form button {
+  background: var(--accent); color: #001; border: none; border-radius: 6px;
+  padding: 0.5rem 1rem; font: inherit; cursor: pointer;
+}
+#add-bar { display: flex; gap: 0.5rem; margin: 1rem 0; }
+#add-bar[hidden], #guest-banner[hidden] { display: none; }
+#add-bar input {
+  flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font: inherit; padding: 0.55rem 0.8rem; outline: none;
+}
+#add-bar input:focus { border-color: var(--accent); }
+#add-bar button {
+  background: var(--accent); color: #001; border: none; border-radius: 6px;
+  padding: 0.5rem 1rem; font: inherit; cursor: pointer;
+}
+.empty { color: var(--muted); font-style: italic; padding: 1rem 0; text-align: center; }
+footer { text-align: center; color: var(--muted); font-size: 0.72rem; padding: 1.5rem; }
+dialog { background: transparent; border: none; padding: 0; max-width: 94vw; max-height: 94vh; }
+dialog::backdrop { background: rgba(0,0,0,0.85); }
+dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom-out; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">…</h1>
+  <span class="mode" id="mode"></span>
+</header>
+<main>
+  <div id="guest-banner" hidden></div>
+  <div id="add-bar" hidden>
+    <input id="add-input" type="text" placeholder="+ Ajouter un élément… (Entrée)">
+    <button id="add-btn">Ajouter</button>
+  </div>
+  <div id="list"></div>
+</main>
+<footer>Page de partage — les modifications sont visibles par le propriétaire du dashboard.</footer>
+<dialog id="lightbox"><img alt=""></dialog>
+
+<script>
+const TOKEN = location.pathname.split('/')[2];
+const API = '/share/' + TOKEN;
+let DATA = null;
+let GUEST = { status: 'anonymous', email: '', name: '' };
+
+function guestToken() { return localStorage.getItem('dashguest:' + TOKEN) || ''; }
+function canEditNow() { return DATA && DATA.can_edit && GUEST.status === 'approved'; }
+
+async function refreshGuest() {
+  if (!DATA || !DATA.can_edit) return;
+  const t = guestToken();
+  if (!t) { GUEST = { status: 'anonymous' }; return; }
+  try {
+    const r = await fetch(API + '/me', { headers: { 'X-Guest-Token': t } });
+    GUEST = r.ok ? await r.json() : { status: 'anonymous' };
+  } catch (_) { GUEST = { status: 'anonymous' }; }
+}
+
+function renderGuestBanner() {
+  const b = document.getElementById('guest-banner');
+  b.hidden = !DATA.can_edit;
+  if (!DATA.can_edit) return;
+  b.innerHTML = '';
+  b.className = '';
+  if (GUEST.status === 'approved') {
+    b.className = 'approved';
+    b.textContent = '✅ Connecté·e en tant que ' + (GUEST.name || GUEST.email) + ' — tes modifications sont signées.';
+    return;
+  }
+  if (GUEST.status === 'pending') {
+    b.className = 'pending';
+    b.innerHTML = '<h2>⏳ Demande envoyée</h2><p>Le propriétaire doit valider ton accès (' + GUEST.email + '). Cette page se met à jour automatiquement.</p>';
+    return;
+  }
+  if (GUEST.status === 'rejected') {
+    b.className = 'rejected';
+    b.innerHTML = '<h2>🚫 Accès refusé</h2><p>Le propriétaire n\'a pas validé cette adresse. Tu peux consulter, mais pas modifier.</p>';
+    return;
+  }
+  b.innerHTML = '<h2>✏️ Pour modifier, présente-toi</h2><p>Ton e-mail signe tes modifications. Le code à 4 chiffres t\'a été donné par le propriétaire.</p>';
+  const form = el('div', '');
+  form.id = 'guest-form';
+  const nameIn = document.createElement('input');
+  nameIn.placeholder = 'Prénom (optionnel)';
+  const emailIn = document.createElement('input');
+  emailIn.type = 'email';
+  emailIn.placeholder = 'ton@email.fr';
+  const pinIn = document.createElement('input');
+  pinIn.type = 'text';
+  pinIn.inputMode = 'numeric';
+  pinIn.maxLength = 4;
+  pinIn.placeholder = 'Code';
+  pinIn.style.cssText = 'flex:0 0 5.5rem;min-width:5.5rem;text-align:center;letter-spacing:0.3em';
+  const btn = document.createElement('button');
+  btn.textContent = 'Se connecter';
+  btn.addEventListener('click', async () => {
+    const email = emailIn.value.trim();
+    if (!email || !email.includes('@')) { emailIn.focus(); return; }
+    if (!/^\d{4}$/.test(pinIn.value.trim())) { pinIn.focus(); return; }
+    const r = await fetch(API + '/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name: nameIn.value.trim(), pin: pinIn.value.trim() }),
+    });
+    if (r.ok) {
+      const d = await r.json();
+      localStorage.setItem('dashguest:' + TOKEN, d.guest_token);
+      GUEST = d;
+      renderGuestBanner();
+      await load();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert(err.error || 'Connexion impossible');
+    }
+  });
+  form.appendChild(nameIn);
+  form.appendChild(emailIn);
+  form.appendChild(pinIn);
+  form.appendChild(btn);
+  b.appendChild(form);
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function sanitize(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll('script,style,iframe,object,embed,link,meta,form').forEach(n => n.remove());
+  tpl.content.querySelectorAll('*').forEach(n => {
+    [...n.attributes].forEach(a => {
+      if (/^on/i.test(a.name)) n.removeAttribute(a.name);
+      if ((a.name === 'href' || a.name === 'src') && /^\s*javascript:/i.test(a.value)) n.removeAttribute(a.name);
+    });
+    if (n.tagName === 'A') { n.setAttribute('target', '_blank'); n.setAttribute('rel', 'noopener noreferrer'); }
+  });
+  return tpl.content;
+}
+
+function isRich(c) { return /<(p|div|ul|ol|li|br|strong|em|u|s|a|h[1-6]|blockquote|pre|code|span)[\s>/]/i.test(c || ''); }
+
+function linkifyText(text) {
+  const frag = document.createDocumentFragment();
+  const re = /https?:\/\/[^\s<>"]+/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const a = el('a', '', m[0].replace(/^https?:\/\//, ''));
+    a.href = m[0]; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    frag.appendChild(a);
+    last = m.index + m[0].length;
+  }
+  frag.appendChild(document.createTextNode(text.slice(last)));
+  return frag;
+}
+
+async function put(memoId, body) {
+  const r = await fetch(API + '/memo/' + memoId, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: JSON.stringify(body),
+  });
+  if (r.ok) await load();
+  else if (r.status === 403) await load();
+}
+
+function render() {
+  document.getElementById('title').innerHTML = '';
+  const h = document.getElementById('title');
+  if (DATA.color) {
+    const d = el('span', 'dot');
+    d.style.background = DATA.color;
+    h.appendChild(d);
+  }
+  h.appendChild(document.createTextNode(DATA.title));
+  document.getElementById('mode').textContent = canEditNow() ? '✏️ modifiable' : (DATA.can_edit ? '✏️ sur validation' : '👁 lecture seule');
+  document.getElementById('add-bar').hidden = !(canEditNow() && DATA.kind === 'project');
+  renderGuestBanner();
+
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  if (!DATA.memos.length) {
+    list.appendChild(el('div', 'empty', 'Rien à afficher pour le moment.'));
+    return;
+  }
+  const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
+  DATA.memos.forEach(memo => {
+    const t = el('div', 'task' + (memo.done ? ' done' : ''));
+    const prio = prios[memo.priority];
+    if (prio && prio.color && !memo.done) t.style.borderLeftColor = prio.color;
+
+    const row = el('div', 'task-row');
+    const check = el('button', 'task-check', '✓');
+    check.disabled = !canEditNow();
+    check.title = canEditNow() ? (memo.done ? 'Rouvrir' : 'Terminer') : 'Identification requise pour modifier';
+    check.addEventListener('click', () => { if (canEditNow()) put(memo.id, { done: !memo.done }); });
+    row.appendChild(check);
+
+    const content = el('div', 'task-content');
+    if (isRich(memo.content)) content.appendChild(sanitize(memo.content));
+    else content.appendChild(linkifyText(memo.content));
+    content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
+      if (!canEditNow()) return;
+      li.classList.add('cl-edit');
+      li.title = 'Cliquer pour cocher / décocher';
+      li.addEventListener('click', () => {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = memo.content;
+        const items = tpl.content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]');
+        if (!items[i]) return;
+        items[i].setAttribute('data-list', items[i].getAttribute('data-list') === 'checked' ? 'unchecked' : 'checked');
+        put(memo.id, { content: tpl.innerHTML });
+      });
+    });
+    row.appendChild(content);
+
+    if (memo.due_date) row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })));
+    t.appendChild(row);
+
+    (memo.subtasks || []).forEach((st, i) => {
+      const s = el('div', 'subtask' + (st.done ? ' stdone' : ''));
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!st.done;
+      cb.disabled = !canEditNow();
+      cb.addEventListener('change', () => {
+        const next = memo.subtasks.map((x, j) => j === i ? { ...x, done: cb.checked } : x);
+        put(memo.id, { subtasks: next });
+      });
+      s.appendChild(cb);
+      s.appendChild(el('span', '', st.content));
+      t.appendChild(s);
+    });
+
+    if (canEditNow()) {
+      const addItem = document.createElement('input');
+      addItem.className = 'item-add';
+      addItem.placeholder = '+ Ajouter un article… (Entrée)';
+      addItem.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        const val = addItem.value.trim();
+        if (!val) return;
+        const tpl = document.createElement('template');
+        tpl.innerHTML = memo.content || '';
+        let target = null;
+        [...tpl.content.querySelectorAll('ul, ol')].reverse().some(l => {
+          if (l.querySelector('li[data-list="checked"], li[data-list="unchecked"]')) { target = l; return true; }
+          return false;
+        });
+        if (!target) {
+          target = document.createElement('ul');
+          tpl.content.appendChild(target);
+        }
+        const li = document.createElement('li');
+        li.setAttribute('data-list', 'unchecked');
+        li.textContent = val;
+        target.appendChild(li);
+        put(memo.id, { content: tpl.innerHTML });
+      });
+      t.appendChild(addItem);
+    }
+
+    if ((memo.images || []).length) {
+      const th = el('div', 'thumbs');
+      memo.images.forEach(name => {
+        const wrap = el('span', 'thumb-wrap');
+        const img = document.createElement('img');
+        img.src = API + '/image/' + name;
+        img.loading = 'lazy';
+        img.addEventListener('click', () => {
+          const lb = document.getElementById('lightbox');
+          lb.querySelector('img').src = img.src;
+          lb.showModal();
+        });
+        wrap.appendChild(img);
+        if (canEditNow()) {
+          const del = document.createElement('button');
+          del.className = 'thumb-del';
+          del.textContent = '×';
+          del.title = 'Supprimer cette image';
+          del.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const r = await fetch(API + '/memo/' + memo.id + '/images/' + name, {
+              method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
+            });
+            if (r.ok) await load();
+          });
+          wrap.appendChild(del);
+        }
+        th.appendChild(wrap);
+      });
+      t.appendChild(th);
+    }
+
+    if (canEditNow()) {
+      const tools = el('div', 'memo-tools');
+      const dateIn = document.createElement('input');
+      dateIn.type = 'date';
+      dateIn.value = memo.due_date || '';
+      dateIn.title = 'Échéance';
+      dateIn.addEventListener('change', () => put(memo.id, { due_date: dateIn.value }));
+      tools.appendChild(dateIn);
+
+      const prios = DATA.priorities || [];
+      const pBtn = document.createElement('button');
+      pBtn.className = 'tool-btn';
+      pBtn.title = 'Priorité — cliquer pour changer';
+      const cur = prios.find(x => x.id === memo.priority);
+      pBtn.textContent = cur ? '⚑ ' + cur.name : '⚑ Priorité';
+      if (cur && cur.color) {
+        pBtn.style.background = cur.color;
+        pBtn.style.borderColor = cur.color;
+        pBtn.style.color = '#10141a';
+      }
+      pBtn.addEventListener('click', () => {
+        const ids = [0, ...prios.map(p => p.id)];
+        const next = ids[(ids.indexOf(memo.priority || 0) + 1) % ids.length];
+        put(memo.id, { priority: next });
+      });
+      tools.appendChild(pBtn);
+
+      const fileIn = document.createElement('input');
+      fileIn.type = 'file';
+      fileIn.accept = 'image/png,image/jpeg';
+      fileIn.multiple = true;
+      fileIn.hidden = true;
+      fileIn.addEventListener('change', async () => {
+        for (const f of fileIn.files) {
+          const fd = new FormData();
+          fd.append('image', f);
+          const r = await fetch(API + '/memo/' + memo.id + '/images', {
+            method: 'POST', headers: { 'X-Guest-Token': guestToken() }, body: fd,
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            alert('Image refusée : ' + (err.error || r.statusText));
+          }
+        }
+        await load();
+      });
+      const photoBtn = document.createElement('button');
+      photoBtn.className = 'tool-btn';
+      photoBtn.textContent = '📷 Photo';
+      photoBtn.title = 'Ajouter une photo (JPG ou PNG uniquement)';
+      photoBtn.addEventListener('click', () => fileIn.click());
+      tools.appendChild(photoBtn);
+      tools.appendChild(fileIn);
+
+      if (!isRich(memo.content)) {
+        const eBtn = document.createElement('button');
+        eBtn.className = 'tool-btn';
+        eBtn.textContent = '✎ Texte';
+        eBtn.addEventListener('click', () => {
+          if (t.querySelector('.edit-ta')) return;
+          const ta = document.createElement('textarea');
+          ta.className = 'edit-ta';
+          ta.rows = 3;
+          ta.value = memo.content;
+          content.replaceWith(ta);
+          ta.focus();
+          const save = () => {
+            const v = ta.value.trim();
+            if (v && v !== memo.content) put(memo.id, { content: v });
+            else load();
+          };
+          ta.addEventListener('blur', save);
+          ta.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); ta.blur(); }
+            if (ev.key === 'Escape') { ta.removeEventListener('blur', save); load(); }
+          });
+        });
+        tools.appendChild(eBtn);
+      }
+      t.appendChild(tools);
+    }
+    list.appendChild(t);
+  });
+}
+
+async function load() {
+  const r = await fetch(API + '/data');
+  if (!r.ok) {
+    document.getElementById('title').textContent = 'Lien invalide ou révoqué';
+    document.getElementById('list').innerHTML = '';
+    document.getElementById('guest-banner').hidden = true;
+    document.getElementById('add-bar').hidden = true;
+    return;
+  }
+  DATA = await r.json();
+  await refreshGuest();
+  render();
+}
+
+document.getElementById('lightbox').addEventListener('click', () => document.getElementById('lightbox').close());
+const addInput = document.getElementById('add-input');
+async function addMemo() {
+  const content = addInput.value.trim();
+  if (!content) return;
+  const r = await fetch(API + '/memos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: JSON.stringify({ content }),
+  });
+  if (r.ok) { addInput.value = ''; await load(); }
+}
+addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemo(); });
+document.getElementById('add-btn').addEventListener('click', addMemo);
+
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
