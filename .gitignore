@@ -1,5 +1,6 @@
 data/
 backup*.json
+.claude/
 __pycache__/
 *.pyc
 *.pyo

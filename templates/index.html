@@ -6,6 +6,8 @@
 <title>Dashboard</title>
 <link rel="stylesheet" href="/static/quill.snow.css">
 <script src="/static/quill.min.js" defer></script>
+<link rel="stylesheet" href="/static/leaflet.css">
+<script src="/static/leaflet.js" defer></script>
 <style>
 :root {
   --bg: #0f1419;
@@ -90,6 +92,7 @@ header .spacer { flex: 1; }
 #clock-wrap { text-align: right; line-height: 1.2; }
 #clock { font-size: 1.05rem; font-weight: 600; }
 #clock-date { font-size: 0.72rem; color: var(--muted); }
+#clock-extra { font-size: 0.72rem; color: var(--accent); white-space: nowrap; }
 #weather { font-size: 0.72rem; color: var(--muted); }
 
 button {
@@ -232,7 +235,8 @@ nav#sidebar {
 .cat-item:hover { background: var(--panel-2); color: var(--text); }
 .cat-item.active { background: var(--panel-2); color: var(--accent); }
 .cat-item.drop-target { outline: 1px dashed var(--accent); color: var(--accent); }
-.cat-item .count { margin-left: auto; font-size: 0.75rem; opacity: 0.7; }
+.cat-item .count { margin-left: auto; font-size: 0.75rem; opacity: 0.7; flex-shrink: 0; }
+.cat-item .cat-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .cat-item .emoji { width: 1.1rem; text-align: center; }
 .cat-dot {
   width: 0.7rem;
@@ -271,12 +275,11 @@ nav#sidebar {
   margin: 0 0 1rem;
 }
 #add-cat {
-  margin-top: 0.6rem;
-  padding: 0.4rem 0.6rem;
+  margin-top: 0.2rem;
+  padding: 0.3rem 0.6rem;
   font-size: 0.8rem;
   color: var(--gray);
   cursor: pointer;
-  border-top: 1px solid var(--border);
 }
 #add-cat:hover { color: var(--accent); }
 
@@ -499,6 +502,13 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .task-check:hover { background: var(--panel-2); color: var(--muted); }
 .task.done-task .task-check { background: var(--green); border-color: var(--green); color: #fff; }
 .task .task-content { flex: 1; font-size: 0.92rem; white-space: pre-wrap; word-break: break-word; cursor: text; min-width: 0; }
+.task .task-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.15rem; }
+.task.done-task .task-title { text-decoration: line-through; color: var(--muted); }
+.comment-row { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.84rem; padding: 0.35rem 0.5rem; background: var(--bg); border-radius: 6px; margin-top: 0.35rem; }
+.comment-row .c-author { font-weight: 600; flex-shrink: 0; }
+.comment-row .c-body { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-row .c-when { color: var(--muted); font-size: 0.72rem; flex-shrink: 0; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: #80cbc4; }
 .task.done-task .task-content { text-decoration: line-through; color: var(--muted); }
 .task .task-content a { color: var(--accent); word-break: break-all; }
 .task .task-badges { display: flex; gap: 0.35rem; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
@@ -509,7 +519,11 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   background: var(--panel-2);
   color: var(--muted);
   white-space: nowrap;
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.task .task-badges { max-width: 55%; }
 .badge.due-late { background: #3a1f1f; color: #ff8a80; }
 .badge.due-today { background: #38301a; color: var(--yellow); }
 .task .task-actions { display: flex; gap: 0.15rem; opacity: 0; transition: opacity 0.15s; }
@@ -875,7 +889,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   }
   #memo-details summary::before { content: "▸ "; }
   #memo-details[open] summary::before { content: "▾ "; }
-  #clock-date, #weather { display: none; }
+  #clock-date { display: none; }
   main { padding: 0.75rem; }
 }
 </style>
@@ -898,6 +912,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <div id="clock-wrap">
     <div id="clock">--:--</div>
     <div id="clock-date"></div>
+    <div id="clock-extra"></div>
   </div>
   <div id="weather" title="Météo Bayonne"></div>
   <button id="activity-btn" class="icon" title="Activité des invités">🔔<span id="activity-badge"></span></button>
@@ -970,6 +985,25 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
 </dialog>
 
+<dialog id="geo-dialog">
+  <h3>📍 Quelle adresse ?</h3>
+  <div id="geo-results"></div>
+  <div class="actions">
+    <button type="button" id="geo-cancel">Annuler</button>
+  </div>
+</dialog>
+
+<dialog id="map-dialog" style="width:min(920px,96vw);padding:0.9rem">
+  <h3 id="map-title" style="margin:0 0 0.6rem">🗺 Carte</h3>
+  <div style="display:flex;gap:0.6rem;flex-wrap:wrap">
+    <div id="map-el" style="flex:1;min-width:260px;height:min(60vh,480px);border-radius:8px;background:var(--panel-2)"></div>
+    <div id="map-list" style="width:230px;max-height:min(60vh,480px);overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem"></div>
+  </div>
+  <div class="actions" style="margin-top:0.6rem">
+    <button type="button" id="map-close" class="primary">Fermer</button>
+  </div>
+</dialog>
+
 <dialog id="confirm-dialog">
   <h3 id="confirm-title">Confirmer la suppression</h3>
   <p id="confirm-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
@@ -997,6 +1031,15 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     </label>
     <label>Couleur<input type="color" name="color" value="#4fc3f7" style="height:2.4rem;padding:0.2rem;cursor:pointer"></label>
     <label id="create-tags-label"># Tags<input type="text" name="tags" autocomplete="off" placeholder="#docker #infra — retrouvables via la recherche p#"></label>
+    <label id="create-desc-label">Description<textarea name="description" rows="2" placeholder="Quelques mots sur le projet — affichés en tête de la vue" style="resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.4rem 0.5rem"></textarea></label>
+    <label id="create-loc-label">📍 Position
+      <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        <button type="button" id="create-loc-set" style="padding:0.35rem 0.7rem;font-size:0.82rem">📍 Ma position</button>
+        <input type="text" id="create-loc-addr" placeholder="ou une adresse… (Entrée)" style="flex:1;min-width:9rem;padding:0.35rem 0.5rem;font-size:0.82rem">
+        <button type="button" id="create-loc-clear" style="padding:0.2rem 0.5rem;font-size:0.82rem;display:none">×</button>
+      </div>
+      <span id="create-loc-info" style="font-size:0.78rem;color:var(--muted);margin-top:0.25rem">aucune</span>
+    </label>
     <div class="actions">
       <button type="button" id="create-delete" class="danger" style="margin-right:auto;display:none">Supprimer</button>
       <button type="button" id="create-cancel">Annuler</button>
@@ -1007,7 +1050,11 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 
 <dialog id="memo-edit-dialog">
   <h3>Éditer le mémo</h3>
+  <input id="me-title" type="text" placeholder="🏷 Titre (optionnel)" maxlength="200" autocomplete="off"
+         style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem">
   <div id="quill-wrap"><div id="quill-editor"></div></div>
+  <div id="me-people" style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem"></div>
+  <div id="me-comments" style="margin-top:0.5rem;max-height:9rem;overflow-y:auto"></div>
   <div class="actions">
     <button type="button" id="memo-edit-cancel">Annuler</button>
     <button type="button" id="memo-edit-save" class="primary">Sauver</button>
@@ -1056,6 +1103,16 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <button id="purge-history">🗑 Vider l'historique</button>
     <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
       L'historique des tâches effectuées est conservé sans limite. Cette action le vide définitivement.
+    </p>
+  </div>
+  <div class="settings-section">
+    <h4>HORLOGES</h4>
+    <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted)">Fuseau horaire supplémentaire
+      <select id="tz-select" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit"></select>
+    </label>
+    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+      L'heure française s'affiche automatiquement quand l'appareil n'est pas sur le fuseau de Paris.
+      Le fuseau choisi ici s'ajoute en plus (réglage propre à cet appareil).
     </p>
   </div>
   <div class="settings-section">
@@ -1225,7 +1282,7 @@ function renderSidebar() {
     on: { click: () => openSharesView() },
   });
   actItem.appendChild(el('span', { class: 'emoji', text: '🔗' }));
-  actItem.appendChild(el('span', { text: 'Partages' }));
+  actItem.appendChild(el('span', { class: 'cat-label', text: 'Partages' }));
   const actBadge = el('span', { class: 'count', text: String(actCount) });
   if (actCount > 0) {
     actBadge.style.cssText = 'background:var(--red);color:#fff;border-radius:999px;padding:0.05rem 0.4rem;opacity:1;font-weight:700';
@@ -1250,7 +1307,7 @@ function renderSidebar() {
       item.addEventListener('click', select);
     }
     item.appendChild(icon);
-    item.appendChild(el('span', { text: label }));
+    item.appendChild(el('span', { class: 'cat-label', text: label }));
     item.appendChild(el('span', { class: 'count', text: String(count) }));
     return item;
   };
@@ -1293,13 +1350,18 @@ function renderSidebar() {
     nav.appendChild(item);
   }
 
+  nav.appendChild(el('div', {
+    attrs: { id: 'add-cat' }, text: '+ Catégorie',
+    on: { click: addCategory },
+  }));
+
   nav.appendChild(el('div', { class: 'sidebar-sep' }));
   const memoItem = el('div', {
     class: 'cat-item' + (state.view === 'memos' && state.memoProject === 'all' ? ' active' : ''),
     on: { click: () => { state.view = 'memos'; state.memoProject = 'all'; renderAll(); } },
   });
   memoItem.appendChild(emojiIcon('📝'));
-  memoItem.appendChild(el('span', { text: 'Mémos' }));
+  memoItem.appendChild(el('span', { class: 'cat-label', text: 'Mémos' }));
   memoItem.appendChild(el('span', { class: 'count', text: String(pendingMemoCount) }));
   memoItem.addEventListener('dragover', (e) => {
     if (!dragProjId) return;
@@ -1334,7 +1396,7 @@ function renderSidebar() {
       item.addEventListener('click', select);
     }
     item.appendChild(icon);
-    item.appendChild(el('span', { text: label }));
+    item.appendChild(el('span', { class: 'cat-label', text: label }));
     item.appendChild(el('span', { class: 'count', text: String(count) }));
     item.addEventListener('dragover', (e) => {
       if (!dragMemoId && !dragProjId) return;
@@ -1385,11 +1447,6 @@ function renderSidebar() {
     attrs: { id: 'add-proj' }, text: '+ Projet',
     on: { click: addProject },
   }));
-
-  nav.appendChild(el('div', {
-    attrs: { id: 'add-cat' }, text: '+ Catégorie',
-    on: { click: addCategory },
-  }));
 }
 
 const PROJ_COLORS = ['#4fc3f7', '#81c784', '#ffb74d', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
@@ -1397,6 +1454,27 @@ const createDialog = document.getElementById('create-dialog');
 const createForm = document.getElementById('create-form');
 let createKind = 'project';
 let editingItem = null;
+let createLoc = null;
+
+function refreshCreateLoc() {
+  document.getElementById('create-loc-info').textContent = createLoc
+    ? '📍 ' + (createLoc.label || createLoc.lat.toFixed(4) + ', ' + createLoc.lng.toFixed(4))
+    : 'aucune';
+  document.getElementById('create-loc-clear').style.display = createLoc ? '' : 'none';
+}
+document.getElementById('create-loc-set').addEventListener('click', () => {
+  capturePosition((loc) => { createLoc = loc; refreshCreateLoc(); });
+});
+document.getElementById('create-loc-addr').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const loc = await geocodeAddress(e.target.value);
+  if (loc) { createLoc = loc; e.target.value = ''; refreshCreateLoc(); }
+});
+document.getElementById('create-loc-clear').addEventListener('click', () => {
+  createLoc = null;
+  refreshCreateLoc();
+});
 
 function openCreateDialog(kind, item = null) {
   createKind = kind;
@@ -1409,8 +1487,12 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-title').textContent = titles[kind];
   document.getElementById('create-submit').textContent = item ? 'Enregistrer' : 'Créer';
   document.getElementById('create-tags-label').style.display = kind === 'project' ? '' : 'none';
+  document.getElementById('create-desc-label').style.display = kind === 'project' ? '' : 'none';
+  document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-delete').style.display = item ? '' : 'none';
+  createLoc = item ? parseLoc(item.location) : null;
+  refreshCreateLoc();
   const suggest = document.getElementById('emoji-suggest');
   if (!suggest.childElementCount) {
     ['📁','🏠','🛒','💼','🎬','🎮','🎵','📚','✈️','🍽️','🐱','💡','🔧','💰','🎁','📷','💪','🌱'].forEach(em => {
@@ -1426,6 +1508,7 @@ function openCreateDialog(kind, item = null) {
     createForm.elements.color.value = item.color || '#4fc3f7';
     createForm.elements.emoji.value = item.emoji || '';
     createForm.elements.tags.value = (item.tags || '').split(/\s+/).filter(Boolean).map(t => '#' + t).join(' ');
+    createForm.elements.description.value = item.description || '';
   } else if (kind === 'priority') {
     createForm.elements.name.value = 'P' + (state.priorities.length + 1);
     createForm.elements.color.value = '#9575cd';
@@ -1464,7 +1547,11 @@ createForm.addEventListener('submit', async (e) => {
   const base = bases[createKind];
   const payload = { name, color: createForm.elements.color.value };
   if (createKind !== 'priority') payload.emoji = createForm.elements.emoji.value.trim();
-  if (createKind === 'project') payload.tags = createForm.elements.tags.value.trim();
+  if (createKind === 'project') {
+    payload.tags = createForm.elements.tags.value.trim();
+    payload.location = createLoc;
+    payload.description = createForm.elements.description.value.trim();
+  }
   const body = JSON.stringify(payload);
   try {
     if (editingItem) {
@@ -1542,6 +1629,161 @@ function urlLink(href, emoji, kind) {
 
 let dragLinkId = null;
 let dragProjId = null;
+
+function parseLoc(value) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch (_) { return null; }
+}
+
+function osmUrl(loc) {
+  return 'https://www.openstreetmap.org/?mlat=' + loc.lat + '&mlon=' + loc.lng + '#map=17/' + loc.lat + '/' + loc.lng;
+}
+
+function locBadgeEl(loc) {
+  const a = el('a', {
+    class: 'badge',
+    text: '📍' + (loc.label ? ' ' + loc.label : ''),
+    attrs: {
+      href: osmUrl(loc), target: '_blank', rel: 'noopener noreferrer',
+      title: 'Voir sur la carte (' + loc.lat + ', ' + loc.lng + ')',
+      style: 'text-decoration:none;color:var(--accent)',
+    },
+  });
+  a.addEventListener('click', (e) => e.stopPropagation());
+  return a;
+}
+
+const geoDialog = document.getElementById('geo-dialog');
+let geoResolve = null;
+document.getElementById('geo-cancel').addEventListener('click', () => {
+  geoDialog.close();
+  if (geoResolve) { geoResolve(null); geoResolve = null; }
+});
+
+function chooseGeo(results) {
+  return new Promise((resolve) => {
+    if (results.length === 1) { resolve(results[0]); return; }
+    geoResolve = resolve;
+    const wrap = document.getElementById('geo-results');
+    wrap.innerHTML = '';
+    results.forEach(r => {
+      const btn = el('button', {
+        text: '📍 ' + (r.full || r.label),
+        attrs: { type: 'button', style: 'display:block;width:100%;text-align:left;margin-bottom:0.35rem;font-size:0.85rem' },
+        on: { click: () => { geoDialog.close(); geoResolve = null; resolve(r); } },
+      });
+      wrap.appendChild(btn);
+    });
+    geoDialog.showModal();
+  });
+}
+
+async function geocodeAddress(q) {
+  if (!q || q.trim().length < 3) return null;
+  const data = await api('/api/geocode?q=' + encodeURIComponent(q.trim()));
+  if (!data.results.length) {
+    await notify('Adresse introuvable : « ' + q.trim() + ' »', { error: true });
+    return null;
+  }
+  return chooseGeo(data.results);
+}
+
+let activeMap = null;
+const mapDialog = document.getElementById('map-dialog');
+document.getElementById('map-close').addEventListener('click', () => mapDialog.close());
+
+function openMapDialog(title, points) {
+  if (typeof L === 'undefined') {
+    notify('Carte non disponible : fichiers Leaflet manquants dans static/ (voir README).', { error: true });
+    return;
+  }
+  if (!points.length) {
+    notify('Aucun élément géolocalisé dans cette vue.');
+    return;
+  }
+  document.getElementById('map-title').textContent = '🗺 ' + title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
+  mapDialog.showModal();
+  if (activeMap) { activeMap.remove(); activeMap = null; }
+  activeMap = L.map('map-el');
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap',
+    maxZoom: 19,
+  }).addTo(activeMap);
+  const latlngs = [];
+  const listEl = document.getElementById('map-list');
+  listEl.innerHTML = '';
+  points.forEach(p => {
+    const ll = [p.lat, p.lng];
+    latlngs.push(ll);
+    const marker = L.circleMarker(ll, {
+      radius: 9,
+      color: p.color || '#4fc3f7',
+      weight: 2,
+      fillColor: p.color || '#4fc3f7',
+      fillOpacity: 0.55,
+    }).addTo(activeMap).bindPopup(
+      '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' +
+      (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
+    );
+    const row = el('button', {
+      attrs: {
+        type: 'button',
+        style: 'display:flex;align-items:flex-start;gap:0.4rem;text-align:left;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%',
+      },
+      on: { click: () => { activeMap.setView(ll, 16); marker.openPopup(); } },
+    });
+    row.appendChild(el('span', { attrs: { style: 'width:10px;height:10px;border-radius:50%;background:' + (p.color || '#4fc3f7') + ';flex-shrink:0;margin-top:0.25rem' } }));
+    const txt = el('span', { attrs: { style: 'min-width:0;overflow-wrap:anywhere' } });
+    txt.appendChild(el('strong', { text: p.title || '' }));
+    if (p.sub) txt.appendChild(el('div', { text: p.sub, attrs: { style: 'color:var(--muted);font-size:0.72rem' } }));
+    row.appendChild(txt);
+    listEl.appendChild(row);
+  });
+  setTimeout(() => {
+    activeMap.invalidateSize();
+    if (latlngs.length === 1) activeMap.setView(latlngs[0], 15);
+    else activeMap.fitBounds(latlngs, { padding: [30, 30] });
+  }, 60);
+}
+
+function boardMapPoints() {
+  const scope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
+    ? new Set([state.memoProject, ...projectDescendants(state.memoProject)])
+    : null;
+  const points = [];
+  state.memos.forEach(m => {
+    if (!m.location) return;
+    if (state.memoProject === 'inbox' && m.project_id) return;
+    if (scope && !scope.has(m.project_id)) return;
+    const proj = state.projects.find(p => p.id === m.project_id);
+    points.push({
+      lat: m.location.lat,
+      lng: m.location.lng,
+      title: (m.emoji ? m.emoji + ' ' : '') + stripHTML(m.content).slice(0, 60),
+      sub: (m.location.label || '') + (proj ? ' — ' + proj.name : ''),
+      color: (prioOf(m.priority) || {}).color || '#4fc3f7',
+    });
+  });
+  if (scope) {
+    const proj = state.projects.find(p => p.id === state.memoProject);
+    const pl = proj && parseLoc(proj.location);
+    if (pl) points.push({ lat: pl.lat, lng: pl.lng, title: '📁 ' + proj.name, sub: pl.label || '', color: proj.color || '#81c784' });
+  }
+  return points;
+}
+
+function capturePosition(cb) {
+  if (!navigator.geolocation) {
+    notify('Géolocalisation non disponible sur cet appareil.', { error: true });
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => cb({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    () => notify('Position refusée ou indisponible (vérifie les autorisations du navigateur).', { error: true }),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
 
 function comboIcon(emoji, color, fallback) {
   const wrap = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0' } });
@@ -1728,6 +1970,8 @@ function visibleMemos() {
   }
   return state.memos.filter(m =>
     stripHTML(m.content).toLowerCase().includes(q) ||
+    (m.title || '').toLowerCase().includes(q) ||
+    (m.assignees || []).some(a => a.toLowerCase().includes(q)) ||
     (m.subtasks || []).some(st => st.content.toLowerCase().includes(q))
   );
 }
@@ -2354,10 +2598,56 @@ function getQuill() {
   return quillInstance;
 }
 
+let editingAssignees = [];
+
+function renderMePeople() {
+  const wrap = document.getElementById('me-people');
+  wrap.innerHTML = '';
+  wrap.appendChild(el('span', { text: '👤', attrs: { title: 'Personnes rattachées à ce mémo' } }));
+  editingAssignees.forEach(a => {
+    const chip = el('span', { class: 'assignee-chip' });
+    chip.appendChild(el('span', { text: '@' + a }));
+    chip.appendChild(el('button', {
+      text: '×',
+      attrs: { type: 'button', title: 'Retirer ' + a, style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.85rem' },
+      on: { click: () => { editingAssignees = editingAssignees.filter(x => x !== a); renderMePeople(); } },
+    }));
+    wrap.appendChild(chip);
+  });
+  const input = el('input', {
+    attrs: { type: 'text', placeholder: '+ @personne (Entrée)', list: 'assignee-list', title: 'Rattacher une personne — invitée ou non' },
+  });
+  input.style.cssText = 'width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
+  let dl = document.getElementById('assignee-list');
+  if (!dl) {
+    dl = el('datalist', { attrs: { id: 'assignee-list' } });
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = '';
+  assigneeSuggestions().forEach(n => dl.appendChild(el('option', { attrs: { value: n } })));
+  const addPerson = () => {
+    const name = input.value.replace(/^@/, '').trim();
+    if (!name) return;
+    if (!editingAssignees.some(x => x.toLowerCase() === name.toLowerCase())) editingAssignees.push(name);
+    input.value = '';
+    renderMePeople();
+    document.getElementById('me-people').querySelector('input').focus();
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addPerson(); } });
+  input.addEventListener('change', () => { if (assigneeSuggestions().includes(input.value.trim())) addPerson(); });
+  wrap.appendChild(input);
+}
+
 function openMemoEditor(memo) {
   const q = getQuill();
   if (!q) return false;
   editingMemoId = memo.id;
+  document.getElementById('me-title').value = memo.title || '';
+  editingAssignees = [...(memo.assignees || [])];
+  renderMePeople();
+  const mc = document.getElementById('me-comments');
+  mc.innerHTML = '';
+  mc.appendChild(commentsBlockEl(memo));
   q.setContents([]);
   if (isRichHTML(memo.content)) {
     q.clipboard.dangerouslyPasteHTML(0, memo.content);
@@ -2374,10 +2664,11 @@ document.getElementById('memo-edit-save').addEventListener('click', async () => 
   const q = getQuill();
   if (!q || editingMemoId == null) return;
   const text = q.getText().trim();
-  if (!text) { await notify('Le mémo ne peut pas être vide.', { error: true }); return; }
-  let html = q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ');
+  const title = document.getElementById('me-title').value.trim();
+  if (!text && !title) { await notify('Le mémo doit avoir un titre ou un contenu.', { error: true }); return; }
+  let html = text ? q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ') : '';
   memoEditDialog.close();
-  await patchMemo(editingMemoId, { content: html });
+  await patchMemo(editingMemoId, { content: html, title, assignees: editingAssignees });
   editingMemoId = null;
 });
 
@@ -2430,7 +2721,7 @@ function thumbsEl(memo, editable) {
 async function deleteMemo(id, skipConfirm = false) {
   if (!skipConfirm) {
     const memo = state.memos.find(m => m.id === id);
-    const excerpt = memo ? stripHTML(memo.content).slice(0, 60) : '';
+    const excerpt = memo ? (memo.title || stripHTML(memo.content).slice(0, 60)) : '';
     if (!(await confirmPopin(`Supprimer le mémo « ${excerpt}${excerpt.length >= 60 ? '…' : ''} » ?`))) return;
   }
   await api(`/api/memos/${id}`, { method: 'DELETE' });
@@ -2457,8 +2748,15 @@ function taskEl(memo) {
   row.appendChild(check);
 
   const content = el('div', { class: 'task-content', attrs: { title: 'Cliquer pour éditer' } });
-  if (memo.emoji) content.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
-  content.appendChild(contentNode(memo.content));
+  if (memo.title) {
+    const tl = el('div', { class: 'task-title' });
+    if (memo.emoji) tl.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
+    tl.appendChild(el('span', { text: memo.title }));
+    content.appendChild(tl);
+  } else if (memo.emoji) {
+    content.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
+  }
+  if (memo.content) content.appendChild(contentNode(memo.content));
   wireChecklist(content, memo);
   content.addEventListener('click', () => {
     if (!openMemoEditor(memo)) editTaskInline(task, content, memo);
@@ -2470,6 +2768,27 @@ function taskEl(memo) {
   if (due && !memo.done) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label }));
   if (memo.recurrence && !memo.done) {
     badges.appendChild(el('span', { class: 'badge', text: '🔁 ' + (RECUR_SHORT[memo.recurrence] || memo.recurrence), attrs: { title: 'Tâche récurrente — replanifiée automatiquement quand cochée' } }));
+  }
+  if (memo.location) badges.appendChild(locBadgeEl(memo.location));
+  (memo.assignees || []).forEach(a => {
+    badges.appendChild(el('span', {
+      class: 'badge',
+      text: '@' + a.replace(/@.*$/, ''),
+      attrs: { title: 'Assigné à ' + a, style: 'color:#80cbc4' },
+    }));
+  });
+  if (memo.comment_count) {
+    const cb = el('span', {
+      class: 'badge',
+      text: '💬 ' + memo.comment_count,
+      attrs: { title: 'Commentaires — cliquer pour les voir', style: 'cursor:pointer;color:#ffcc80' },
+    });
+    cb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandedMemos.add(memo.id);
+      renderBoard();
+    });
+    badges.appendChild(cb);
   }
   const subs = memo.subtasks || [];
   if (subs.length) {
@@ -2555,11 +2874,117 @@ function taskEl(memo) {
   return task;
 }
 
+function assigneeSuggestions() {
+  const names = new Set(['Fabien']);
+  (state.shares || []).forEach(s => (s.guests || []).forEach(g => {
+    if (g.status === 'approved') names.add(g.name || g.email);
+  }));
+  state.memos.forEach(m => (m.assignees || []).forEach(a => names.add(a)));
+  return [...names].filter(Boolean);
+}
+
+function assigneeRowEl(memo) {
+  const row = el('div', { class: 'detail-row', attrs: { style: 'flex-wrap:wrap' } });
+  row.appendChild(el('span', { text: '👤', attrs: { title: 'Personnes rattachées à cette tâche' } }));
+  (memo.assignees || []).forEach(a => {
+    const chip = el('span', { class: 'assignee-chip' });
+    chip.appendChild(el('span', { text: '@' + a }));
+    chip.appendChild(el('button', {
+      text: '×',
+      attrs: { type: 'button', title: 'Retirer ' + a, style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.85rem' },
+      on: { click: () => patchMemo(memo.id, { assignees: (memo.assignees || []).filter(x => x !== a) }) },
+    }));
+    row.appendChild(chip);
+  });
+  const input = el('input', {
+    attrs: { type: 'text', placeholder: '+ @personne (Entrée)', list: 'assignee-list', title: 'Rattacher une personne — invitée ou non (tu pourras l\'affilier plus tard)' },
+  });
+  input.style.cssText = 'width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
+  let dl = document.getElementById('assignee-list');
+  if (!dl) {
+    dl = el('datalist', { attrs: { id: 'assignee-list' } });
+    document.body.appendChild(dl);
+  }
+  dl.innerHTML = '';
+  assigneeSuggestions().forEach(n => dl.appendChild(el('option', { attrs: { value: n } })));
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const name = input.value.replace(/^@/, '').trim();
+    if (!name) return;
+    patchMemo(memo.id, { assignees: [...(memo.assignees || []), name] });
+  });
+  input.addEventListener('change', () => {
+    const name = input.value.replace(/^@/, '').trim();
+    if (!name || !assigneeSuggestions().includes(name)) return;
+    patchMemo(memo.id, { assignees: [...(memo.assignees || []), name] });
+  });
+  row.appendChild(input);
+  return row;
+}
+
+function commentsBlockEl(memo) {
+  const wrap = el('div', { attrs: { style: 'margin-top:0.5rem' } });
+  const list = el('div');
+  wrap.appendChild(list);
+  const renderComments = (comments) => {
+    list.innerHTML = '';
+    comments.forEach(c => {
+      const r = el('div', { class: 'comment-row' });
+      const author = (c.author || '').replace(/\s*<[^>]*>/, '');
+      const a = el('span', { class: 'c-author', text: (c.guest ? '👤 ' : '') + author });
+      if (c.guest) a.style.color = '#b39ddb';
+      a.title = c.author;
+      r.appendChild(a);
+      r.appendChild(el('span', { class: 'c-body', text: c.body }));
+      r.appendChild(el('span', { class: 'c-when', text: fmtWhen(c.created_at) }));
+      r.appendChild(el('button', {
+        text: '×',
+        attrs: { type: 'button', title: 'Supprimer ce commentaire', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0' },
+        on: { click: async () => {
+          if (!(await confirmPopin('Supprimer ce commentaire ?'))) return;
+          await api(`/api/comments/${c.id}`, { method: 'DELETE' });
+          loadComments();
+        } },
+      }));
+      list.appendChild(r);
+    });
+  };
+  const loadComments = async () => {
+    try { renderComments(await api(`/api/memos/${memo.id}/comments`)); } catch (e) { /* silencieux */ }
+  };
+  if (memo.comment_count) loadComments();
+  const input = el('input', { attrs: { type: 'text', placeholder: '💬 Commenter… (Entrée)', maxlength: '2000' } });
+  input.style.cssText = 'width:100%;margin-top:0.35rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.84rem;padding:0.3rem 0.5rem';
+  input.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    e.preventDefault();
+    await api(`/api/memos/${memo.id}/comments`, { method: 'POST', body: JSON.stringify({ body: input.value.trim() }) });
+    input.value = '';
+    memo.comment_count = (memo.comment_count || 0) + 1;
+    loadComments();
+  });
+  wrap.appendChild(input);
+  return wrap;
+}
+
 function taskDetailEl(memo) {
   const detail = el('div', { class: 'task-detail' });
 
   const recap = guestRecapEl('memo', memo.id);
   if (recap) detail.appendChild(recap);
+
+  const titleRow = el('div', { class: 'detail-row' });
+  titleRow.appendChild(el('span', { text: '🏷', attrs: { title: 'Titre du mémo' } }));
+  const titleIn = el('input', { attrs: { type: 'text', placeholder: 'Titre (optionnel)', maxlength: '200' } });
+  titleIn.style.cssText = 'flex:1;min-width:10rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.88rem;font-weight:600;padding:0.25rem 0.45rem';
+  titleIn.value = memo.title || '';
+  titleIn.addEventListener('change', () => patchMemo(memo.id, { title: titleIn.value.trim() }));
+  titleIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); titleIn.blur(); } });
+  titleRow.appendChild(titleIn);
+  detail.appendChild(titleRow);
+
+  detail.appendChild(assigneeRowEl(memo));
 
   const row1 = el('div', { class: 'detail-row' });
   row1.appendChild(el('span', { text: '📅' }));
@@ -2638,6 +3063,29 @@ function taskDetailEl(memo) {
     attrs: { title: 'Historique des modifications et restauration' },
     on: { click: () => openRevisions(memo) },
   }));
+  row1.appendChild(el('button', {
+    class: 'prio-btn', text: '📍 Ma position',
+    attrs: { title: 'Attacher ta position GPS actuelle à ce mémo' },
+    on: { click: () => capturePosition((loc) => patchMemo(memo.id, { location: loc })) },
+  }));
+  const addrIn = el('input', {
+    attrs: { type: 'text', placeholder: '📍 Adresse… (Entrée)', title: 'Chercher une adresse et l\'attacher au mémo' },
+  });
+  addrIn.style.cssText = 'width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
+  addrIn.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const loc = await geocodeAddress(addrIn.value);
+    if (loc) await patchMemo(memo.id, { location: loc });
+  });
+  row1.appendChild(addrIn);
+  if (memo.location) {
+    row1.appendChild(el('button', {
+      class: 'prio-btn', text: '× 📍',
+      attrs: { title: 'Retirer la position' },
+      on: { click: () => patchMemo(memo.id, { location: null }) },
+    }));
+  }
   detail.appendChild(row1);
 
   const subs = memo.subtasks || [];
@@ -2669,6 +3117,8 @@ function taskDetailEl(memo) {
     }
   });
   detail.appendChild(stAdd);
+
+  detail.appendChild(commentsBlockEl(memo));
 
   return detail;
 }
@@ -2718,6 +3168,8 @@ function renderBoard() {
     if (proj) {
       title.appendChild(comboIcon(proj.emoji, proj.color, null));
       title.appendChild(el('span', { text: proj.name }));
+      const pLoc = parseLoc(proj.location);
+      if (pLoc) title.appendChild(locBadgeEl(pLoc));
       title.appendChild(el('button', {
         class: 'prio-btn', text: '🔗 Partager',
         attrs: { title: 'Partager ce projet par lien (sans compte)' },
@@ -2725,9 +3177,50 @@ function renderBoard() {
       }));
     }
   }
+  const mapPoints = boardMapPoints();
+  if (mapPoints.length) {
+    title.appendChild(el('button', {
+      class: 'prio-btn', text: '🗺 Carte (' + mapPoints.length + ')',
+      attrs: { title: 'Voir tous les points géolocalisés de cette vue sur une carte' },
+      on: { click: () => openMapDialog(document.getElementById('board-title').textContent.replace(/🗺.*$/, '').trim() || 'Carte', boardMapPoints()) },
+    }));
+  }
   board.appendChild(title);
 
   if (state.memoProject !== 'all' && state.memoProject !== 'inbox') {
+    const proj = state.projects.find(p => p.id === state.memoProject);
+    if (proj) {
+      const desc = el('div', {
+        attrs: {
+          id: 'proj-desc',
+          title: 'Cliquer pour modifier la description',
+          style: 'color:var(--muted);font-size:0.85rem;margin:-0.4rem 0 0.8rem;cursor:text;white-space:pre-wrap;max-width:60rem',
+        },
+        text: proj.description || '+ Ajouter une description…',
+      });
+      if (!proj.description) desc.style.opacity = '0.55';
+      desc.addEventListener('click', () => {
+        if (desc.querySelector('textarea')) return;
+        const ta = el('textarea', { attrs: { rows: '2', placeholder: 'Description du projet…' } });
+        ta.style.cssText = 'width:100%;max-width:60rem;resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.4rem 0.5rem';
+        ta.value = proj.description || '';
+        desc.textContent = '';
+        desc.appendChild(ta);
+        ta.focus();
+        const save = async () => {
+          const v = ta.value.trim();
+          if (v === (proj.description || '')) { renderBoard(); return; }
+          await api(`/api/projects/${proj.id}`, { method: 'PUT', body: JSON.stringify({ description: v }) });
+          await loadAll();
+        };
+        ta.addEventListener('blur', save);
+        ta.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+          if (e.key === 'Escape') { ta.removeEventListener('blur', save); renderBoard(); }
+        });
+      });
+      board.appendChild(desc);
+    }
     const recap = guestRecapEl('project', state.memoProject);
     if (recap) board.appendChild(recap);
   }
@@ -3041,12 +3534,14 @@ function renderMemos() {
     });
     const prio = prioOf(memo.priority);
     if (prio && prio.color) note.style.borderLeftColor = prio.color;
-    const plain = (memo.emoji ? memo.emoji + ' ' : '') + stripHTML(memo.content);
+    const plain = (memo.emoji ? memo.emoji + ' ' : '') + (memo.title ? memo.title + (memo.content ? ' — ' : '') : '') + stripHTML(memo.content);
     note.appendChild(el('span', { text: plain.length > 120 ? plain.slice(0, 118) + '…' : plain }));
     const due = dueInfo(memo.due_date);
     const extras = [];
     if (due) extras.push('📅 ' + due.label);
     if ((memo.images || []).length) extras.push('📎 ' + memo.images.length);
+    if (memo.comment_count) extras.push('💬 ' + memo.comment_count);
+    if ((memo.assignees || []).length) extras.push('@' + memo.assignees.map(a => a.replace(/@.*$/, '')).join(' @'));
     if (memo.guest_editor) extras.push('👤 ' + memo.guest_editor.replace(/\s*<[^>]*>/, ''));
     if (extras.length) note.appendChild(el('span', { class: 'mini-due ' + (due ? due.cls : 'due-future'), text: extras.join('  ') }));
     note.addEventListener('click', () => {
@@ -3142,12 +3637,54 @@ document.addEventListener('keydown', (e) => {
 
 /* ------------------------------------------------ clock + weather */
 
+const TZ_CHOICES = [
+  ['', 'Aucun'],
+  ['Asia/Tokyo', '🇯🇵 Tokyo'],
+  ['Europe/Paris', '🇫🇷 Paris'],
+  ['Europe/London', '🇬🇧 Londres'],
+  ['America/New_York', '🇺🇸 New York'],
+  ['America/Los_Angeles', '🇺🇸 Los Angeles'],
+  ['America/Montreal', '🇨🇦 Montréal'],
+  ['Asia/Dubai', '🇦🇪 Dubaï'],
+  ['Asia/Bangkok', '🇹🇭 Bangkok'],
+  ['Asia/Shanghai', '🇨🇳 Shanghai'],
+  ['Australia/Sydney', '🇦🇺 Sydney'],
+  ['Pacific/Noumea', '🇳🇨 Nouméa'],
+  ['Indian/Reunion', '🇷🇪 La Réunion'],
+];
+
+function tzTime(tz) {
+  try {
+    return new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: tz }).format(new Date());
+  } catch (_) { return null; }
+}
+
+function tzLabel(tz) {
+  const found = TZ_CHOICES.find(([v]) => v === tz);
+  return found ? found[1] : tz.split('/').pop().replace(/_/g, ' ');
+}
+
 function updateClock() {
   const now = new Date();
   document.getElementById('clock').textContent =
     now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   document.getElementById('clock-date').textContent =
     now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  const parts = [];
+  const deviceTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (deviceTZ !== 'Europe/Paris') {
+    const t = tzTime('Europe/Paris');
+    if (t) parts.push('🇫🇷 ' + t);
+  }
+  const extra = localStorage.getItem('extraTZ') || '';
+  if (extra && extra !== deviceTZ) {
+    const t = tzTime(extra);
+    if (t) parts.push(tzLabel(extra) + ' ' + t);
+  }
+  const extraEl = document.getElementById('clock-extra');
+  extraEl.textContent = parts.join('  ·  ');
+  extraEl.style.display = parts.length ? '' : 'none';
 }
 updateClock();
 setInterval(updateClock, 15000);
@@ -3273,6 +3810,14 @@ document.getElementById('backup-now').addEventListener('click', async () => {
 });
 document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
 document.getElementById('refresh-status').addEventListener('click', loadStatus);
+
+const tzSelect = document.getElementById('tz-select');
+TZ_CHOICES.forEach(([v, label]) => tzSelect.appendChild(el('option', { attrs: { value: v }, text: label })));
+tzSelect.value = localStorage.getItem('extraTZ') || '';
+tzSelect.addEventListener('change', () => {
+  localStorage.setItem('extraTZ', tzSelect.value);
+  updateClock();
+});
 document.getElementById('purge-history').addEventListener('click', async () => {
   if (!state.history.length) { await notify("L'historique est déjà vide."); return; }
   if (!(await confirmPopin(`Vider l'historique (${state.history.length} entrée${state.history.length > 1 ? 's' : ''}) ?\nCette action est définitive.`, { okLabel: 'Vider' }))) return;

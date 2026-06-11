@@ -26,7 +26,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "12"
+APP_VERSION = "14"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
@@ -246,6 +246,29 @@ def init_db():
         conn.execute("ALTER TABLE projects ADD COLUMN parent_id INTEGER")
     if "emoji" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN emoji TEXT DEFAULT ''")
+    if "location" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN location TEXT DEFAULT ''")
+    if "location" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN location TEXT DEFAULT ''")
+    if "title" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN title TEXT DEFAULT ''")
+    if "assignees" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN assignees TEXT DEFAULT '[]'")
+    if "description" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN description TEXT DEFAULT ''")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memo_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memo_id INTEGER NOT NULL,
+            memo_uid TEXT DEFAULT '',
+            author TEXT NOT NULL DEFAULT 'moi',
+            share_id INTEGER,
+            body TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
     scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
     if "pin" not in scols:
         conn.execute("ALTER TABLE shares ADD COLUMN pin TEXT DEFAULT ''")
@@ -286,6 +309,138 @@ LINK_FIELDS = (
 
 def _clean_emoji(value):
     return (str(value or "")).strip()[:8]
+
+
+def _clean_location(value):
+    if not value:
+        return ""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            return ""
+    if not isinstance(value, dict):
+        return ""
+    try:
+        lat = float(value.get("lat"))
+        lng = float(value.get("lng"))
+    except (TypeError, ValueError):
+        return ""
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return ""
+    label = str(value.get("label") or "").strip()[:80]
+    return json.dumps({"lat": round(lat, 6), "lng": round(lng, 6), "label": label}, ensure_ascii=False)
+
+
+def _parse_location(raw):
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def _reverse_geocode(lat, lng):
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={
+                "format": "jsonv2",
+                "lat": lat,
+                "lon": lng,
+                "zoom": 16,
+                "accept-language": "fr",
+            },
+            headers={"User-Agent": f"dash-perso/{APP_VERSION}"},
+            timeout=4,
+        )
+        if not r.ok:
+            return ""
+        data = r.json() or {}
+        a = data.get("address") or {}
+        place = (
+            a.get("amenity")
+            or a.get("suburb")
+            or a.get("neighbourhood")
+            or a.get("road")
+            or ""
+        )
+        city = (
+            a.get("city")
+            or a.get("town")
+            or a.get("village")
+            or a.get("municipality")
+            or ""
+        )
+        label = ", ".join(p for p in (place, city) if p) or (data.get("name") or "")
+        return str(label)[:80]
+    except Exception:
+        return ""
+
+
+def _geocode_search(q):
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "q": q,
+                "format": "jsonv2",
+                "limit": 5,
+                "accept-language": "fr",
+                "addressdetails": 1,
+            },
+            headers={"User-Agent": f"dash-perso/{APP_VERSION}"},
+            timeout=5,
+        )
+        if not r.ok:
+            return []
+        out = []
+        for item in r.json() or []:
+            try:
+                a = item.get("address") or {}
+                name = (
+                    item.get("name")
+                    or a.get("amenity")
+                    or a.get("shop")
+                    or a.get("tourism")
+                    or a.get("road")
+                    or ""
+                )
+                city = (
+                    a.get("city")
+                    or a.get("town")
+                    or a.get("village")
+                    or a.get("municipality")
+                    or ""
+                )
+                short = ", ".join(p for p in (name, city) if p) or str(
+                    item.get("display_name") or ""
+                )[:60]
+                out.append(
+                    {
+                        "label": short[:60],
+                        "full": str(item.get("display_name") or "")[:160],
+                        "lat": float(item["lat"]),
+                        "lng": float(item["lon"]),
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+    except Exception:
+        return []
+
+
+def _enrich_location(loc_json):
+    loc = _parse_location(loc_json)
+    if not loc or (loc.get("label") or "").strip():
+        return loc_json
+    label = _reverse_geocode(loc["lat"], loc["lng"])
+    if label:
+        loc["label"] = label
+        return json.dumps(loc, ensure_ascii=False)
+    return loc_json
 
 
 def _normalize_tags(value):
@@ -497,7 +652,7 @@ def list_projects():
     rows = (
         get_db()
         .execute(
-            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, "
+            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, "
             "COUNT(CASE WHEN m.done = 0 THEN m.id END) AS memo_count "
             "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
             "GROUP BY p.id ORDER BY p.position, p.id"
@@ -522,14 +677,15 @@ def create_project():
     color = (data.get("color") or "").strip()
     tags = _normalize_tags(data.get("tags", ""))
     emoji = _clean_emoji(data.get("emoji"))
+    description = _clean_description(data.get("description"))
     cur = db.execute(
-        "INSERT INTO projects (name, color, position, tags, emoji) VALUES (?, ?, ?, ?, ?)",
-        (name, color, max_pos + 1, tags, emoji),
+        "INSERT INTO projects (name, color, position, tags, emoji, description) VALUES (?, ?, ?, ?, ?, ?)",
+        (name, color, max_pos + 1, tags, emoji, description),
     )
     db.commit()
     return (
         jsonify(
-            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags, "emoji": emoji}
+            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags, "emoji": emoji, "description": description}
         ),
         201,
     )
@@ -554,6 +710,16 @@ def update_project(project_id):
         else (existing["tags"] or "")
     )
     emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
+    location = (
+        _enrich_location(_clean_location(data.get("location")))
+        if "location" in data
+        else (existing["location"] or "")
+    )
+    description = (
+        _clean_description(data.get("description"))
+        if "description" in data
+        else _row_get(existing, "description")
+    )
     if "parent_id" in data:
         parent_id, err = _resolve_parent(db, project_id, data.get("parent_id"))
         if err:
@@ -561,11 +727,11 @@ def update_project(project_id):
     else:
         parent_id = existing["parent_id"]
     db.execute(
-        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ? WHERE id = ?",
-        (name, color, tags, emoji, parent_id, project_id),
+        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ? WHERE id = ?",
+        (name, color, tags, emoji, parent_id, location, description, project_id),
     )
     db.commit()
-    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id})
+    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description})
 
 
 @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
@@ -769,6 +935,11 @@ def _memo_dict(row):
         d["images"] = json.loads(d.get("images") or "[]")
     except Exception:
         d["images"] = []
+    try:
+        d["assignees"] = json.loads(d.get("assignees") or "[]")
+    except Exception:
+        d["assignees"] = []
+    d["location"] = _parse_location(d.get("location"))
     d["done"] = bool(d.get("done"))
     return d
 
@@ -813,6 +984,33 @@ def _subtasks_json(value):
     return json.dumps(clean, ensure_ascii=False)
 
 
+def _assignees_json(value):
+    """Liste de personnes (noms ou e-mails, saisie libre), nettoyée et dédupliquée."""
+    if not isinstance(value, list):
+        return "[]"
+    clean, seen = [], set()
+    for a in value:
+        name = re.sub(r"[<>&\"']", "", str(a or "")).strip()[:60]
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append(name)
+        if len(clean) >= 20:
+            break
+    return json.dumps(clean, ensure_ascii=False)
+
+
+def _clean_title(value):
+    return re.sub(r"[<>]", "", str(value or "")).strip()[:200]
+
+
+def _clean_description(value):
+    return re.sub(r"[<>]", "", str(value or "")).strip()[:1000]
+
+
 @app.route("/api/memos", methods=["GET"])
 def list_memos():
     db = get_db()
@@ -825,6 +1023,12 @@ def list_memos():
     ).fetchall():
         if r["memo_id"] not in guest_last:
             guest_last[r["memo_id"]] = r
+    ccounts = {
+        r["memo_id"]: r["n"]
+        for r in db.execute(
+            "SELECT memo_id, COUNT(*) AS n FROM memo_comments GROUP BY memo_id"
+        ).fetchall()
+    }
     out = []
     for row in rows:
         d = _memo_dict(row)
@@ -833,6 +1037,7 @@ def list_memos():
             d["guest_editor"] = g["editor"]
             d["guest_action"] = "created" if g["created"] else "edited"
             d["guest_at"] = g["edited_at"]
+        d["comment_count"] = ccounts.get(d["id"], 0)
         out.append(d)
     return jsonify(out)
 
@@ -841,7 +1046,8 @@ def list_memos():
 def create_memo():
     data = request.get_json(silent=True) or {}
     content = (data.get("content") or "").strip()
-    if not content:
+    title = _clean_title(data.get("title"))
+    if not content and not title:
         return jsonify({"error": "content required"}), 400
     db = get_db()
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
@@ -849,8 +1055,9 @@ def create_memo():
     uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, priority, subtasks, project_id, recurrence, emoji) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "done, due_date, priority, subtasks, project_id, recurrence, emoji, location, "
+        "title, assignees) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -864,6 +1071,9 @@ def create_memo():
             _valid_project_id(db, data.get("project_id")),
             _valid_recurrence(data.get("recurrence")),
             _clean_emoji(data.get("emoji")),
+            _enrich_location(_clean_location(data.get("location"))),
+            title,
+            _assignees_json(data.get("assignees")),
         ),
     )
     db.commit()
@@ -871,11 +1081,16 @@ def create_memo():
     return jsonify(_memo_dict(row)), 201
 
 
-def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence):
+def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
+                   title="", assignees_json="[]"):
     try:
         subs = json.loads(subtasks_json or "[]")
     except Exception:
         subs = []
+    try:
+        assignees = json.loads(assignees_json or "[]")
+    except Exception:
+        assignees = []
     return {
         "content": content,
         "done": bool(done),
@@ -883,13 +1098,23 @@ def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence)
         "priority": priority or 0,
         "subtasks": subs,
         "recurrence": recurrence or "",
+        "title": title or "",
+        "assignees": assignees,
     }
+
+
+def _row_get(row, key, default=""):
+    try:
+        return row[key] if row[key] is not None else default
+    except (KeyError, IndexError):
+        return default
 
 
 def _log_revision(db, memo_row, after, editor, share_id=None):
     before = _memo_snapshot(
         memo_row["content"], memo_row["done"], memo_row["due_date"],
         memo_row["priority"], memo_row["subtasks"], memo_row["recurrence"],
+        _row_get(memo_row, "title"), _row_get(memo_row, "assignees", "[]"),
     )
     if before == after:
         return
@@ -911,8 +1136,18 @@ def _log_revision(db, memo_row, after, editor, share_id=None):
 def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
     memo_id = existing["id"]
     content = (data.get("content", existing["content"]) or "").strip()
-    if not content:
+    title = (
+        _clean_title(data.get("title"))
+        if "title" in data
+        else _row_get(existing, "title")
+    )
+    if not content and not title:
         return {"error": "content required"}, 400
+    assignees = (
+        _assignees_json(data.get("assignees"))
+        if "assignees" in data
+        else (_row_get(existing, "assignees", "[]") or "[]")
+    )
     done = 1 if data.get("done", existing["done"]) else 0
     due_date = (data.get("due_date", existing["due_date"]) or "").strip()
     priority = _valid_priority(db, data.get("priority", existing["priority"]))
@@ -955,13 +1190,20 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             (existing["uid"] or "",),
         )
 
-    after = _memo_snapshot(content, done, due_date, priority, subtasks, recurrence)
+    after = _memo_snapshot(content, done, due_date, priority, subtasks, recurrence,
+                           title, assignees)
     _log_revision(db, existing, after, editor, share_id)
 
     emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
+    location = (
+        _enrich_location(_clean_location(data.get("location")))
+        if "location" in data
+        else (existing["location"] or "")
+    )
     db.execute(
         "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
-        "project_id=?, recurrence=?, emoji=?, updated_at=? WHERE id=?",
+        "project_id=?, recurrence=?, emoji=?, location=?, title=?, assignees=?, "
+        "updated_at=? WHERE id=?",
         (
             content,
             done,
@@ -971,6 +1213,9 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             project_id,
             recurrence,
             emoji,
+            location,
+            title,
+            assignees,
             now,
             memo_id,
         ),
@@ -1209,6 +1454,9 @@ def _share_memo_dict(row):
         "recurrence": d["recurrence"],
         "emoji": d.get("emoji", ""),
         "project_id": d.get("project_id"),
+        "location": d.get("location"),
+        "title": d.get("title", "") or "",
+        "assignees": d.get("assignees", []),
     }
 
 
@@ -1235,9 +1483,11 @@ def list_shares():
         d = dict(r)
         if r["kind"] == "memo":
             t = db.execute(
-                "SELECT content FROM memos WHERE id = ?", (r["target_id"],)
+                "SELECT content, title FROM memos WHERE id = ?", (r["target_id"],)
             ).fetchone()
-            d["target"] = _text_excerpt(t["content"]) if t else None
+            d["target"] = (
+                (_row_get(t, "title") or _text_excerpt(t["content"])) if t else None
+            )
         else:
             t = db.execute(
                 "SELECT name FROM projects WHERE id = ?", (r["target_id"],)
@@ -1357,9 +1607,12 @@ def list_guests():
         d.pop("guest_token", None)
         if r["kind"] == "memo":
             t = db.execute(
-                "SELECT content FROM memos WHERE id = ?", (r["target_id"],)
+                "SELECT content, title FROM memos WHERE id = ?", (r["target_id"],)
             ).fetchone()
-            d["target"] = (_text_excerpt(t["content"], 60) if t else "(supprimé)")
+            d["target"] = (
+                (_row_get(t, "title") or _text_excerpt(t["content"], 60))
+                if t else "(supprimé)"
+            )
         else:
             t = db.execute(
                 "SELECT name FROM projects WHERE id = ?", (r["target_id"],)
@@ -1426,6 +1679,10 @@ def activity():
         if r["edited_at"] > seen_at:
             unseen += 1
         out_rev.append(d)
+    unseen += db.execute(
+        "SELECT COUNT(*) FROM memo_comments WHERE share_id IS NOT NULL AND created_at > ?",
+        (seen_at,),
+    ).fetchone()[0]
     return jsonify({"pending_guests": pending, "unseen": unseen, "revisions": out_rev})
 
 
@@ -1483,11 +1740,15 @@ def memo_restore(memo_id):
         snap.get("priority", 0),
         json.dumps(snap.get("subtasks") or []),
         snap.get("recurrence", ""),
+        _clean_title(snap.get("title", _row_get(existing, "title"))),
+        json.dumps(snap.get("assignees") if snap.get("assignees") is not None
+                   else json.loads(_row_get(existing, "assignees", "[]") or "[]"),
+                   ensure_ascii=False),
     )
     _log_revision(db, existing, after, "moi (restauration)")
     db.execute(
         "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
-        "recurrence=?, updated_at=? WHERE id=?",
+        "recurrence=?, title=?, assignees=?, updated_at=? WHERE id=?",
         (
             after["content"],
             1 if after["done"] else 0,
@@ -1495,6 +1756,8 @@ def memo_restore(memo_id):
             after["priority"],
             json.dumps(after["subtasks"], ensure_ascii=False),
             after["recurrence"],
+            after["title"],
+            json.dumps(after["assignees"], ensure_ascii=False),
             datetime.now(timezone.utc).isoformat(),
             memo_id,
         ),
@@ -1504,7 +1767,74 @@ def memo_restore(memo_id):
     return jsonify(_memo_dict(row))
 
 
-SHARE_ASSETS = {"quill.min.js", "quill.snow.css"}
+def _comment_dict(r):
+    return {
+        "id": r["id"],
+        "memo_id": r["memo_id"],
+        "author": r["author"],
+        "body": r["body"],
+        "created_at": r["created_at"],
+        "guest": r["share_id"] is not None,
+    }
+
+
+def _clean_comment_body(value):
+    return re.sub(r"[<>]", "", str(value or "")).strip()[:2000]
+
+
+def _insert_comment(db, memo_row, body, author, share_id=None):
+    now = datetime.now(timezone.utc).isoformat()
+    cur = db.execute(
+        "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (memo_row["id"], memo_row["uid"] or "", author, share_id, body, now),
+    )
+    return db.execute(
+        "SELECT * FROM memo_comments WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+
+
+@app.route("/api/memos/<int:memo_id>/comments", methods=["GET"])
+def list_comments(memo_id):
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM memo_comments WHERE memo_id = ? ORDER BY created_at, id",
+        (memo_id,),
+    ).fetchall()
+    return jsonify([_comment_dict(r) for r in rows])
+
+
+@app.route("/api/memos/<int:memo_id>/comments", methods=["POST"])
+def add_comment(memo_id):
+    db = get_db()
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not memo:
+        return jsonify({"error": "not found"}), 404
+    body = _clean_comment_body((request.get_json(silent=True) or {}).get("body"))
+    if not body:
+        return jsonify({"error": "body required"}), 400
+    row = _insert_comment(db, memo, body, "moi")
+    db.commit()
+    return jsonify(_comment_dict(row)), 201
+
+
+@app.route("/api/comments/<int:comment_id>", methods=["DELETE"])
+def delete_comment(comment_id):
+    db = get_db()
+    db.execute("DELETE FROM memo_comments WHERE id = ?", (comment_id,))
+    db.commit()
+    return "", 204
+
+
+SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css"}
+
+
+@app.route("/api/geocode")
+def geocode():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 3:
+        return jsonify({"results": []})
+    return jsonify({"results": _geocode_search(q)})
 
 
 @app.route("/share/assets/<name>")
@@ -1535,7 +1865,7 @@ def share_data(token):
         all_p = {
             r["id"]: r
             for r in db.execute(
-                "SELECT id, name, emoji, color, parent_id FROM projects"
+                "SELECT id, name, emoji, color, parent_id, location, description FROM projects"
             ).fetchall()
         }
         proj_names = {
@@ -1552,12 +1882,24 @@ def share_data(token):
                         "emoji": p["emoji"],
                         "color": p["color"],
                         "parent_id": p["parent_id"],
+                        "location": _parse_location(p["location"]),
+                        "description": _row_get(p, "description"),
                     }
                 )
+    memo_ids = [r["id"] for r in rows]
+    comments_by_memo = {}
+    if memo_ids:
+        ph = ",".join("?" * len(memo_ids))
+        for c in db.execute(
+            f"SELECT * FROM memo_comments WHERE memo_id IN ({ph}) ORDER BY created_at, id",
+            memo_ids,
+        ).fetchall():
+            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c))
     for r in rows:
         d = _share_memo_dict(r)
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
             d["project"] = proj_names.get(r["project_id"], "")
+        d["comments"] = comments_by_memo.get(r["id"], [])
         memos.append(d)
     payload = {
         "projects": scope_projects,
@@ -1574,15 +1916,27 @@ def share_data(token):
     }
     if share["kind"] == "project":
         proj = db.execute(
-            "SELECT name, color, emoji FROM projects WHERE id = ?", (share["target_id"],)
+            "SELECT name, color, emoji, description FROM projects WHERE id = ?", (share["target_id"],)
         ).fetchone()
         if not proj:
             return jsonify({"error": "invalid"}), 404
         payload["title"] = (proj["emoji"] + " " if proj["emoji"] else "") + proj["name"]
         payload["color"] = proj["color"]
+        payload["description"] = _row_get(proj, "description")
     else:
         payload["title"] = "Mémo partagé"
         payload["color"] = ""
+        payload["description"] = ""
+    # Personnes du partage (suggestions d'assignés + récap) : propriétaire + invités approuvés
+    members = ["Fabien"]
+    for g in db.execute(
+        "SELECT name, email FROM share_guests WHERE share_id = ? AND status = 'approved' ORDER BY id",
+        (share["id"],),
+    ).fetchall():
+        label = g["name"] or g["email"]
+        if label and label not in members:
+            members.append(label)
+    payload["members"] = members
     return jsonify(payload)
 
 
@@ -1671,7 +2025,7 @@ def share_update_memo(token, memo_id):
     raw = request.get_json(silent=True) or {}
     data = {
         k: raw[k]
-        for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence")
+        for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence", "location", "title", "assignees")
         if k in raw
     }
     if "project_id" in raw and share["kind"] == "project":
@@ -1775,6 +2129,9 @@ def _share_memo_dict_from_payload(d):
         "recurrence": d["recurrence"],
         "emoji": d.get("emoji", ""),
         "project_id": d.get("project_id"),
+        "location": d.get("location"),
+        "title": d.get("title", "") or "",
+        "assignees": d.get("assignees", []),
     }
 
 
@@ -1791,8 +2148,10 @@ def share_add_memo(token):
         return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
     data = request.get_json(silent=True) or {}
     content = (data.get("content") or "").strip()
-    if not content:
+    title = _clean_title(data.get("title"))
+    if not content and not title:
         return jsonify({"error": "content required"}), 400
+    assignees = _assignees_json(data.get("assignees"))
     target_project = share["target_id"]
     if data.get("project_id"):
         try:
@@ -1806,9 +2165,9 @@ def share_add_memo(token):
     new_uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, priority, subtasks, project_id, recurrence) "
-        "VALUES (?, ?, ?, ?, ?, 0, '', 0, '[]', ?, '')",
-        (content, max_pos + 1, now, new_uid, now, target_project),
+        "done, due_date, priority, subtasks, project_id, recurrence, title, assignees) "
+        "VALUES (?, ?, ?, ?, ?, 0, '', 0, '[]', ?, '', ?, ?)",
+        (content, max_pos + 1, now, new_uid, now, target_project, title, assignees),
     )
     editor = guest["name"] or guest["email"]
     db.execute(
@@ -1819,7 +2178,7 @@ def share_add_memo(token):
             new_uid,
             f"{editor} <{guest['email']}>",
             share["id"],
-            json.dumps(_memo_snapshot(content, 0, "", 0, "[]", ""), ensure_ascii=False),
+            json.dumps(_memo_snapshot(content, 0, "", 0, "[]", "", title, assignees), ensure_ascii=False),
             now,
         ),
     )
@@ -1935,6 +2294,10 @@ def share_update_project(token, proj_id):
         updates["emoji"] = _clean_emoji(data.get("emoji"))
     if "color" in data:
         updates["color"] = (data.get("color") or "").strip()
+    if "location" in data:
+        updates["location"] = _enrich_location(_clean_location(data.get("location")))
+    if "description" in data:
+        updates["description"] = _clean_description(data.get("description"))
 
     if not updates:
         return jsonify({"error": "rien à modifier"}), 400
@@ -1961,7 +2324,46 @@ def share_update_project(token, proj_id):
         )
     db.commit()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (proj_id,)).fetchone()
-    return jsonify({"id": proj_id, "name": row["name"], "emoji": row["emoji"], "color": row["color"], "parent_id": row["parent_id"]})
+    return jsonify({"id": proj_id, "name": row["name"], "emoji": row["emoji"], "color": row["color"], "parent_id": row["parent_id"], "description": _row_get(row, "description")})
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/comments", methods=["POST"])
+def share_add_comment(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"]:
+        return jsonify({"error": "lecture seule"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
+    if memo_id not in allowed_ids:
+        return jsonify({"error": "not found"}), 404
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    body = _clean_comment_body((request.get_json(silent=True) or {}).get("body"))
+    if not body:
+        return jsonify({"error": "body required"}), 400
+    author = guest["name"] or guest["email"]
+    row = _insert_comment(db, memo, body, f"{author} <{guest['email']}>", share["id"])
+    db.commit()
+    return jsonify(_comment_dict(row)), 201
+
+
+@app.route("/share/<token>/geocode")
+def share_geocode(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share or not share["can_edit"]:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 3:
+        return jsonify({"results": []})
+    return jsonify({"results": _geocode_search(q)})
 
 
 @app.route("/share/<token>/image/<name>")
@@ -2003,7 +2405,7 @@ def _build_export(db):
         "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
     projects = db.execute(
-        "SELECT id, name, position, color, tags, emoji, parent_id FROM projects ORDER BY position, id"
+        "SELECT id, name, position, color, tags, emoji, parent_id, location, description FROM projects ORDER BY position, id"
     ).fetchall()
     proj_names = {r["id"]: r["name"] for r in projects}
     out_links = []
@@ -2026,6 +2428,8 @@ def _build_export(db):
             "tags": r["tags"],
             "emoji": r["emoji"],
             "parent": proj_names.get(r["parent_id"], ""),
+            "location": _parse_location(r["location"]),
+            "description": _row_get(r, "description"),
         }
         for r in projects
     ]
@@ -2036,8 +2440,12 @@ def _build_export(db):
     priorities = db.execute(
         "SELECT id, name, color, position FROM priorities ORDER BY position, id"
     ).fetchall()
+    comments = db.execute(
+        "SELECT memo_uid, author, body, created_at FROM memo_comments "
+        "WHERE memo_uid != '' ORDER BY created_at, id"
+    ).fetchall()
     return {
-        "version": 12,
+        "version": 14,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -2045,6 +2453,7 @@ def _build_export(db):
         "links": out_links,
         "memos": out_memos,
         "history": [dict(r) for r in history],
+        "comments": [dict(r) for r in comments],
     }
 
 
@@ -2178,14 +2587,14 @@ def import_links():
 
     proj_ids = {}
 
-    def ensure_project(name, color="", tags="", emoji=""):
+    def ensure_project(name, color="", tags="", emoji="", location=None, description=""):
         name = (name or "").strip()
         if not name:
             return None
         if name in proj_ids:
             return proj_ids[name]
         row = db.execute(
-            "SELECT id, color, tags, emoji FROM projects WHERE name = ?", (name,)
+            "SELECT id, color, tags, emoji, location, description FROM projects WHERE name = ?", (name,)
         ).fetchone()
         if row:
             proj_ids[name] = row["id"]
@@ -2203,13 +2612,23 @@ def import_links():
                     "UPDATE projects SET emoji = ? WHERE id = ?",
                     (_clean_emoji(emoji), row["id"]),
                 )
+            if location and not (row["location"] or "").strip():
+                db.execute(
+                    "UPDATE projects SET location = ? WHERE id = ?",
+                    (_clean_location(location), row["id"]),
+                )
+            if description and not (_row_get(row, "description") or "").strip():
+                db.execute(
+                    "UPDATE projects SET description = ? WHERE id = ?",
+                    (_clean_description(description), row["id"]),
+                )
         else:
             max_pos = db.execute(
                 "SELECT COALESCE(MAX(position), -1) FROM projects"
             ).fetchone()[0]
             cur = db.execute(
-                "INSERT INTO projects (name, color, position, tags, emoji) VALUES (?, ?, ?, ?, ?)",
-                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji)),
+                "INSERT INTO projects (name, color, position, tags, emoji, location, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji), _clean_location(location), _clean_description(description)),
             )
             proj_ids[name] = cur.lastrowid
         return proj_ids[name]
@@ -2221,6 +2640,8 @@ def import_links():
                 (proj.get("color") or "").strip(),
                 proj.get("tags") or "",
                 proj.get("emoji") or "",
+                proj.get("location"),
+                proj.get("description") or "",
             )
         else:
             ensure_project(proj)
@@ -2381,10 +2802,10 @@ def import_links():
         ).fetchone()
         imported_links += 1
 
-    existing_memos = {
-        (r["content"] or "").strip()
-        for r in db.execute("SELECT content FROM memos").fetchall()
-    }
+    existing_memos = set()
+    for r in db.execute("SELECT content, title FROM memos").fetchall():
+        c = (r["content"] or "").strip()
+        existing_memos.add(c if c else "\x00title:" + (_row_get(r, "title") or "").strip())
     memos_by_uid = {
         r["uid"]: r
         for r in db.execute("SELECT * FROM memos WHERE uid != ''").fetchall()
@@ -2405,6 +2826,9 @@ def import_links():
             images = _images_json(memo.get("images"), check_files=True)
             recurrence = _valid_recurrence(memo.get("recurrence"))
             memo_emoji = _clean_emoji(memo.get("emoji"))
+            memo_location = _clean_location(memo.get("location"))
+            title = _clean_title(memo.get("title"))
+            assignees = _assignees_json(memo.get("assignees"))
         else:
             content = str(memo).strip()
             uid = ""
@@ -2418,7 +2842,10 @@ def import_links():
             images = "[]"
             recurrence = ""
             memo_emoji = ""
-        if not content:
+            memo_location = ""
+            title = ""
+            assignees = "[]"
+        if not content and not title:
             continue
 
         if uid and uid in memos_by_uid:
@@ -2427,25 +2854,28 @@ def import_links():
                 merged_images = images if images != "[]" else (existing["images"] or "[]")
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, priority=?, "
-                    "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, updated, existing["id"]),
+                    "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
+                    "title=?, assignees=?, updated_at=? WHERE id=?",
+                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
                 skipped_memos += 1
             continue
 
-        if content in existing_memos:
+        dedup_key = content if content else "\x00title:" + title
+        if dedup_key in existing_memos:
             skipped_memos += 1
             continue
-        existing_memos.add(content)
+        existing_memos.add(dedup_key)
         max_mpos += 1
         new_uid = uid or str(uuid.uuid4())
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-            "done, due_date, priority, subtasks, project_id, images, recurrence, emoji) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence, memo_emoji),
+            "done, due_date, priority, subtasks, project_id, images, recurrence, emoji, location, "
+            "title, assignees) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
@@ -2475,6 +2905,36 @@ def import_links():
         existing_hist.add(key)
         imported_history += 1
 
+    existing_comments = {
+        (r["memo_uid"], r["created_at"], r["author"])
+        for r in db.execute(
+            "SELECT memo_uid, created_at, author FROM memo_comments"
+        ).fetchall()
+    }
+    imported_comments = 0
+    for c in data.get("comments") or []:
+        if not isinstance(c, dict):
+            continue
+        c_uid = (c.get("memo_uid") or "").strip()
+        c_body = _clean_comment_body(c.get("body"))
+        c_at = (c.get("created_at") or "").strip()
+        c_author = str(c.get("author") or "moi").strip()[:140] or "moi"
+        if not c_uid or not c_body or not c_at:
+            continue
+        memo_row = memos_by_uid.get(c_uid)
+        if not memo_row:
+            continue
+        key = (c_uid, c_at, c_author)
+        if key in existing_comments:
+            continue
+        db.execute(
+            "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at) "
+            "VALUES (?, ?, ?, NULL, ?, ?)",
+            (memo_row["id"], c_uid, c_author, c_body, c_at),
+        )
+        existing_comments.add(key)
+        imported_comments += 1
+
     db.commit()
     return jsonify(
         {
@@ -2485,6 +2945,7 @@ def import_links():
             "updated_memos": updated_memos,
             "skipped_memos": skipped_memos,
             "imported_history": imported_history,
+            "imported_comments": imported_comments,
         }
     )
 

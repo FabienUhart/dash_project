@@ -10,7 +10,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Favicons automatiques (serveur via URL locale, fallback DuckDuckGo puis lettre)
 - [x] Horloge + météo Bayonne (open-meteo)
 - [x] Drag & drop pour réorganiser liens et mémos
-- [x] Paramètres : export/import JSON v10 (liens, catégories, projets, priorités, mémos, historique)
+- [x] Paramètres : export/import JSON v14 (liens, catégories, projets, priorités, mémos, historique, commentaires)
 - [x] Responsive mobile : catégories en puces horizontales, mémos repliables
 - [x] Vue Mémos façon Planify : tuiles de filtres, sections par échéance, sous-tâches, projets colorés avec Inbox
 - [x] Tags `#` reliant liens, mémos et projets
@@ -25,6 +25,11 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Page partagée = mini-dashboard invité : sidebar hiérarchique, tuiles, Quill, créations (mémos/sous-projets), éditions de projets, drag & drop — scopé au partage
 - [x] Vue Invités par personne (tous les accès, hiérarchie dépliée, droits, retrait ciblé)
 - [x] Sauvegardes automatiques quotidiennes (JSON + SQLite, rotation 7 j, bouton manuel)
+- [x] Horloges multi-fuseaux (🇫🇷 auto à l'étranger + fuseau choisi) et météo visible sur mobile
+- [x] Géolocalisation mémos/projets : GPS + adresses (Nominatim, labels courts), carte Leaflet multi-points avec liste des points cliquable
+- [x] Titres sur les mémos (mémo valide avec titre seul) + descriptions sur les projets
+- [x] Assignés multiples @nom (saisie libre, même non-invités, suggestions) — owner et invités
+- [x] Commentaires signés sous les mémos (💬, invités inclus, comptés dans la cloche 🔔, export v14)
 
 ## Quick wins
 
