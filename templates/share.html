@@ -14,17 +14,38 @@
 <style>
 :root {
   --bg: #0e1217; --panel: #161d25; --panel-2: #212b35; --text: #e8eef5;
-  --muted: #8a96a3; --accent: #4fc3f7; --accent-2: #38aee0; --green: #4caf50; --border: #283340;
+  --muted: #9aa7b4; --accent: #4fc3f7; --accent-2: #38aee0; --green: #4caf50; --border: #283340;
+  --danger: #ff8a80; --warn: #ffb74d; --guest: #b39ddb; --assignee: #80cbc4;
   --bg-elev: #1c2530; --radius: 10px; --radius-sm: 6px;
   --shadow: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
   --shadow-lg: 0 8px 28px rgba(0,0,0,0.4);
   --ring: 0 0 0 3px rgba(79,195,247,0.22);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
+:root[data-theme="light"] {
+  --bg: #eef1f5; --panel: #ffffff; --panel-2: #eef2f7; --text: #1b2531;
+  --muted: #5c6b7a; --accent: #0288d1; --accent-2: #0277bd; --green: #2e7d32; --border: #d3dce5;
+  --danger: #e53935; --warn: #ef6c00; --guest: #6a3fb5; --assignee: #00897b;
+  --bg-elev: #f4f7fa;
+  --shadow: 0 1px 2px rgba(16,30,50,0.08), 0 2px 8px rgba(16,30,50,0.06);
+  --shadow-lg: 0 10px 30px rgba(16,30,50,0.18);
+  --ring: 0 0 0 3px rgba(2,136,209,0.28);
+}
+[data-theme="light"] header { background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.92)), var(--panel); }
+[data-theme="light"] #snav { background: linear-gradient(180deg, var(--panel), #eef2f7); }
 * { box-sizing: border-box; }
+@font-face {
+  font-family: 'Inter';
+  src: url('/share/assets/Inter.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
+.ic { width: 1.1em; height: 1.1em; display: inline-block; vertical-align: -0.15em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.ic-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   background:
     radial-gradient(1200px 600px at 100% -10%, rgba(79,195,247,0.06), transparent 60%),
     radial-gradient(900px 500px at -10% 110%, rgba(79,195,247,0.04), transparent 55%),
@@ -54,11 +75,15 @@ header {
   box-shadow: 0 1px 0 rgba(255,255,255,0.02), var(--shadow);
 }
 header h1 { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
-header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
+header .mode { font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
+header #theme-btn { margin-left: auto; }
+button.icon { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s var(--ease), transform 0.1s var(--ease); }
+button.icon:hover { background: var(--bg-elev); }
+button.icon:active { transform: scale(0.94); }
 .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
-#layout { display: flex; min-height: calc(100vh - 54px); }
+#layout { display: flex; min-height: calc(100dvh - 54px); }
 #snav {
-  width: 190px;
+  width: clamp(170px, 15vw, 230px);
   flex-shrink: 0;
   background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.4));
   border-right: 1px solid var(--border);
@@ -90,7 +115,7 @@ header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); backg
 .sitem .slabel { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .sdot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem; }
-@media (max-width: 800px) {
+@media (max-width: 900px) {
   #layout { flex-direction: column; }
   #snav { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; gap: 0.3rem; }
   .sitem { flex-shrink: 0; margin-bottom: 0; }
@@ -269,6 +294,22 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 #add-bar button:hover { filter: brightness(1.08); }
 .empty { color: var(--muted); font-style: italic; padding: 1rem 0; text-align: center; }
 footer { text-align: center; color: var(--muted); font-size: 0.72rem; padding: 1.5rem; }
+/* ---------- accessibilité (Lot 1+2) ---------- */
+button, .sitem, .tile, .task, a { touch-action: manipulation; }
+.sitem:focus-visible, .tile:focus-visible, button:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none; box-shadow: var(--ring); border-radius: 8px;
+}
+@media (pointer: coarse) {
+  button, .sitem, .tile, .task-check { min-height: 44px; }
+}
+@media (max-width: 900px) {
+  input, select, textarea { font-size: 16px; }
+}
+.tn, .cnt, .c-when { font-variant-numeric: tabular-nums; }
+.sitem:active, .tile:active { transform: scale(0.97); }
+.task:hover { will-change: transform; }
+@media (prefers-reduced-motion: reduce) { .sitem:active, .tile:active { transform: none; } }
 dialog { background: transparent; border: none; padding: 0; max-width: 94vw; max-height: 94vh; }
 dialog::backdrop { background: rgba(6,9,12,0.78); backdrop-filter: blur(3px); }
 /* Entrée des pop-ins en CSS. NE PAS animer le <dialog> via GSAP (transform/visibility) :
@@ -310,14 +351,15 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 #q-wrap .ql-editor { min-height: 180px; }
 #q-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
 /* Mentions @ dans l'éditeur */
-.mention { color: #80cbc4; background: rgba(128,203,196,0.14); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+.mention { color: var(--assignee); background: rgba(128,203,196,0.14); border-radius: 4px; padding: 0 3px; font-weight: 600; }
 .mention-menu { position: fixed; z-index: 10000; min-width: 11rem; max-height: 13rem; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; }
 .mention-item { padding: 0.32rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text); white-space: nowrap; }
 .mention-item.active { background: var(--accent); color: #fff; }
-.assignee-chip.noaccess { color: #ffb74d; border-color: rgba(255,183,77,0.45); }
-.mention.noaccess { color: #ffb74d; background: rgba(255,183,77,0.16); }
-.q-people { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
-.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: #80cbc4; }
+.assignee-chip.noaccess { color: var(--warn); border-color: rgba(255,183,77,0.45); }
+.mention.noaccess { color: var(--warn); background: rgba(255,183,77,0.16); }
+.q-people { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-top: 0.2rem; }
+.me-label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin: 0.5rem 0 0.2rem; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: var(--assignee); }
 .ql-snow .ql-stroke { stroke: var(--muted); }
 .ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--muted); }
 .ql-snow .ql-picker { color: var(--muted); }
@@ -331,10 +373,27 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .ql-snow .ql-picker-item:hover, .ql-snow .ql-picker-item.ql-selected { color: var(--accent); }
 .ql-snow a { color: var(--accent); }
 </style>
+<script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
 <body>
+<svg class="ic-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="ic-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="ic-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="ic-reply" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="ic-map" viewBox="0 0 24 24"><path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3Z"/><path d="M9 3v15"/><path d="M15 6v15"/></symbol>
+  <symbol id="ic-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="ic-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="ic-checklist" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+  <symbol id="ic-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="ic-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="ic-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+</defs></svg>
+<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
   <h1 id="title">…</h1>
+  <button id="theme-btn" class="icon" title="Thème clair / sombre" aria-label="Basculer le thème"><svg class="ic"><use href="#ic-moon"/></svg></button>
   <span class="mode" id="mode"></span>
 </header>
 <div id="layout">
@@ -392,10 +451,13 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 </dialog>
 
 <dialog id="edit-dialog">
-  <h3>✏️ Modifier le mémo</h3>
-  <input id="q-title" type="text" placeholder="🏷 Titre (optionnel)" maxlength="200" autocomplete="off"
+  <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-pencil"/></svg>Modifier le mémo</h3>
+  <label class="me-label" for="q-title">Titre <span style="font-weight:400">(optionnel)</span></label>
+  <input id="q-title" type="text" placeholder="Titre du mémo…" maxlength="200" autocomplete="off"
          style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem;box-sizing:border-box">
+  <label class="me-label">Contenu</label>
   <div id="q-wrap"><div id="q-editor"></div></div>
+  <label class="me-label">Assigné·es</label>
   <div id="q-people" class="q-people"></div>
   <div class="dlg-actions">
     <button type="button" id="edit-cancel">Annuler</button>
@@ -408,6 +470,19 @@ const TOKEN = location.pathname.split('/')[2];
 const API = '/share/' + TOKEN;
 let DATA = null;
 let GUEST = { status: 'anonymous', email: '', name: '' };
+
+// Thème clair / sombre (tokens surchargés sous [data-theme=light], persistant)
+const themeBtn = document.getElementById('theme-btn');
+function setTheme(t) {
+  const light = t === 'light';
+  if (light) document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (e) {}
+  const u = themeBtn && themeBtn.querySelector('use');
+  if (u) u.setAttribute('href', light ? '#ic-sun' : '#ic-moon');
+}
+setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
+if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
 
 function guestToken() { return localStorage.getItem('dashguest:' + TOKEN) || ''; }
 function canEditNow() { return DATA && DATA.can_edit && GUEST.status === 'approved'; }
@@ -492,6 +567,37 @@ function el(tag, cls, text) {
   if (text != null) e.textContent = text;
   return e;
 }
+
+function shareIcon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const s = document.createElementNS(NS, 'svg'); s.setAttribute('class', 'ic');
+  const u = document.createElementNS(NS, 'use'); u.setAttribute('href', '#ic-' + name);
+  s.appendChild(u); return s;
+}
+
+// Désactive un bouton pendant une action async (anti double-clic).
+async function withBusy(btn, fn) {
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.style.opacity = '0.6'; }
+  try { return await fn(); }
+  finally { if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); btn.style.opacity = ''; } }
+}
+
+// Rend les éléments "bouton" (sidebar, tuiles) focusables et activables au clavier.
+function applyA11y() {
+  document.querySelectorAll('.sitem, .tile').forEach(e => {
+    if (!e.hasAttribute('tabindex')) e.tabIndex = 0;
+    if (!e.hasAttribute('role')) e.setAttribute('role', 'button');
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = e.target;
+  if (t.matches && t.matches('.sitem, .tile') && !t.closest('input, textarea, select')) {
+    e.preventDefault();
+    t.click();
+  }
+});
 
 function sanitize(html) {
   const tpl = document.createElement('template');
@@ -641,7 +747,7 @@ function shareNoAccess(name) {
   return !members.has((name || '').toLowerCase().trim());
 }
 
-const COMMENT_PRIO_COL = { 1: '#ff5252', 2: '#ffb74d', 3: '#66bb6a' };
+const COMMENT_PRIO_COL = { 1: '#ff5252', 2: 'var(--warn)', 3: '#66bb6a' };
 const seenMarked = new Set();
 
 function markMemoSeen(memoId) {
@@ -743,7 +849,7 @@ function renderQPeople() {
   const wrap = document.getElementById('q-people');
   if (!wrap) return;
   wrap.innerHTML = '';
-  const ic = el('span', null, '👤'); ic.title = 'Personnes rattachées à ce mémo';
+  const ic = el('span', null); ic.appendChild(shareIcon('user')); ic.title = 'Personnes rattachées à ce mémo';
   wrap.appendChild(ic);
   editAssignees.forEach(a => {
     const noAcc = shareNoAccess(a);
@@ -841,7 +947,7 @@ function openEditor(memo, contentEl, taskEl) {
 }
 
 document.getElementById('edit-cancel').addEventListener('click', () => editDialog.close());
-document.getElementById('edit-save').addEventListener('click', async () => {
+document.getElementById('edit-save').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
   const q = getShareQuill();
   if (!q || editingId == null) return;
   const text = q.getText().trim();
@@ -852,7 +958,14 @@ document.getElementById('edit-save').addEventListener('click', async () => {
   editDialog.close();
   await put(editingId, { content: html, assignees: editAssignees, title: title });
   editingId = null;
-});
+}));
+
+function announce(msg) {
+  const e = document.getElementById('sr-live');
+  if (!e) return;
+  e.textContent = '';
+  setTimeout(() => { e.textContent = msg; }, 40);
+}
 
 async function put(memoId, body) {
   const r = await fetch(API + '/memo/' + memoId, {
@@ -860,7 +973,7 @@ async function put(memoId, body) {
     headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
     body: JSON.stringify(body),
   });
-  if (r.ok) await load();
+  if (r.ok) { await load(); announce('Modification enregistrée.'); }
   else if (r.status === 403) await load();
 }
 
@@ -1085,9 +1198,9 @@ function renderTiles() {
   const defs = [
     ['all', 'En cours', '#4fc3f7', ms.filter(m => !m.done).length],
     ['today', "Aujourd'hui", '#4caf50', ms.filter(m => !m.done && m.due_date === t).length],
-    ['sched', 'Planifiés', '#b39ddb', ms.filter(m => !m.done && m.due_date > t).length],
-    ['late', 'En retard', '#ff8a80', ms.filter(m => !m.done && m.due_date && m.due_date < t).length],
-    ['done', 'Terminés', '#ffb74d', ms.filter(m => m.done).length],
+    ['sched', 'Planifiés', 'var(--guest)', ms.filter(m => !m.done && m.due_date > t).length],
+    ['late', 'En retard', 'var(--danger)', ms.filter(m => !m.done && m.due_date && m.due_date < t).length],
+    ['done', 'Terminés', 'var(--warn)', ms.filter(m => m.done).length],
   ];
   const tiles = document.getElementById('tiles');
   tiles.hidden = false;
@@ -1106,7 +1219,7 @@ function renderTiles() {
   if (located > 0) {
     const tile = el('div', 'tile');
     tile.appendChild(el('span', 'tn', String(located)));
-    const l = el('span', 'tl', '🗺 Carte');
+    const l = el('span', 'tl'); l.append(shareIcon('map'), ' Carte');
     l.style.color = '#4db6ac';
     tile.appendChild(l);
     tile.addEventListener('click', openShareMap);
@@ -1117,7 +1230,7 @@ function renderTiles() {
     const tile = el('div', 'tile' + (FILTER === 'trash' ? ' active' : ''));
     tile.appendChild(el('span', 'tn', String(tn)));
     const l = el('span', 'tl', '🗑 Corbeille');
-    l.style.color = '#ff8a80';
+    l.style.color = 'var(--danger)';
     tile.appendChild(l);
     tile.addEventListener('click', () => { FILTER = 'trash'; render(); });
     tiles.appendChild(tile);
@@ -1175,7 +1288,8 @@ function render() {
     h.appendChild(d);
   }
   h.appendChild(document.createTextNode(DATA.title));
-  document.getElementById('mode').textContent = canEditNow() ? '✏️ modifiable' : (DATA.can_edit ? '✏️ sur validation' : '👁 lecture seule');
+  const modeEl = document.getElementById('mode'); modeEl.textContent = '';
+  modeEl.append(shareIcon(canEditNow() || DATA.can_edit ? 'pencil' : 'eye'), ' ' + (canEditNow() ? 'modifiable' : (DATA.can_edit ? 'sur validation' : 'lecture seule')));
   const pdesc = document.getElementById('pdesc');
   let curDesc = DATA.description || '';
   if (PFILTER !== 'all') {
@@ -1204,6 +1318,7 @@ function render() {
   renderGuestBanner();
   renderSidebar();
   renderTiles();
+  applyA11y();
 
   if (!projSel.hidden && PFILTER !== 'all') projSel.value = String(PFILTER);
 
@@ -1270,7 +1385,7 @@ function render() {
     row.appendChild(content);
 
     if (memo.location) {
-      const la = el('a', 'badge', '📍' + (memo.location.label ? ' ' + memo.location.label : ''));
+      const la = el('a', 'badge'); la.append(shareIcon('map-pin'), memo.location.label ? ' ' + memo.location.label : '');
       la.href = 'https://www.openstreetmap.org/?mlat=' + memo.location.lat + '&mlon=' + memo.location.lng + '#map=17/' + memo.location.lat + '/' + memo.location.lng;
       la.target = '_blank';
       la.rel = 'noopener noreferrer';
@@ -1282,7 +1397,7 @@ function render() {
       const noAcc = shareNoAccess(a);
       const ab = el('span', 'badge', (noAcc ? '⚠ @' : '@') + a.replace(/@.*$/, ''));
       ab.title = noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a);
-      ab.style.color = noAcc ? '#ffb74d' : '#80cbc4';
+      ab.style.color = noAcc ? 'var(--warn)' : 'var(--assignee)';
       row.appendChild(ab);
     });
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
@@ -1350,7 +1465,7 @@ function render() {
         }
         const author = (c.author || '').replace(/\s*<[^>]*>/, '');
         const a = el('span', '', author);
-        a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:#b39ddb' : '');
+        a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:var(--guest)' : '');
         a.title = c.author;
         r.appendChild(a);
         const b = el('span', '', c.body);
@@ -1363,13 +1478,13 @@ function render() {
         const self = (GUEST && (GUEST.name || GUEST.email)) || '';
         const others = (c.seen || []).filter(v => v && v !== author && v !== self);
         if (others.length) {
-          const s = el('span', '', '👁 ' + others.join(', '));
+          const s = el('span', ''); s.append(shareIcon('eye'), ' ' + others.join(', '));
           s.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0;white-space:nowrap';
           s.title = 'Vu par ' + others.join(', ');
           r.appendChild(s);
         }
         if (!isReply && canEditNow()) {
-          const rep = el('span', '', '↩');
+          const rep = el('span', ''); rep.appendChild(shareIcon('reply'));
           rep.style.cssText = 'cursor:pointer;color:var(--muted);flex-shrink:0';
           rep.title = 'Répondre';
           rep.addEventListener('click', () => {
@@ -1439,7 +1554,7 @@ function render() {
       pBtn.className = 'tool-btn';
       pBtn.title = 'Priorité — cliquer pour changer';
       const cur = prios.find(x => x.id === memo.priority);
-      pBtn.textContent = cur ? '⚑ ' + cur.name : '⚑ Priorité';
+      pBtn.textContent = ''; pBtn.append(shareIcon('flag'), ' ' + (cur ? cur.name : 'Priorité'));
       if (cur && cur.color) {
         pBtn.style.background = cur.color;
         pBtn.style.borderColor = cur.color;
@@ -1473,7 +1588,7 @@ function render() {
       });
       const photoBtn = document.createElement('button');
       photoBtn.className = 'tool-btn';
-      photoBtn.textContent = '📷 Photo';
+      photoBtn.append(shareIcon('camera'), ' Photo');
       photoBtn.title = 'Ajouter une photo (JPG ou PNG uniquement)';
       photoBtn.addEventListener('click', () => fileIn.click());
       tools.appendChild(photoBtn);
@@ -1482,7 +1597,7 @@ function render() {
       if (!hasChecklist) {
         const listBtn = document.createElement('button');
         listBtn.className = 'tool-btn';
-        listBtn.textContent = '☑ Liste';
+        listBtn.append(shareIcon('checklist'), ' Liste');
         listBtn.title = 'Démarrer une liste à cocher dans ce mémo';
         listBtn.addEventListener('click', () => {
           if (t.querySelector('.item-add')) { t.querySelector('.item-add').focus(); return; }
@@ -1495,7 +1610,7 @@ function render() {
 
       const locBtn = document.createElement('button');
       locBtn.className = 'tool-btn';
-      locBtn.textContent = memo.location ? '📍 ×' : '📍 Position';
+      locBtn.append(shareIcon('map-pin'), memo.location ? ' ×' : ' Position');
       locBtn.title = memo.location ? 'Retirer la position' : 'Attacher ma position GPS à ce mémo';
       locBtn.addEventListener('click', () => {
         if (memo.location) { put(memo.id, { location: null }); return; }
@@ -1574,14 +1689,14 @@ function render() {
 
       const eBtn = document.createElement('button');
       eBtn.className = 'tool-btn';
-      eBtn.textContent = '✎ Modifier';
+      eBtn.append(shareIcon('pencil'), ' Modifier');
       eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
       eBtn.addEventListener('click', () => openEditor(memo, content, t));
       tools.appendChild(eBtn);
 
       const dBtn = document.createElement('button');
       dBtn.className = 'tool-btn';
-      dBtn.textContent = '🗑';
+      dBtn.appendChild(shareIcon('trash'));
       dBtn.title = 'Mettre ce mémo à la corbeille (restaurable depuis la tuile 🗑)';
       dBtn.addEventListener('click', async () => {
         const r = await fetch(API + '/memo/' + memo.id, {
@@ -1626,7 +1741,7 @@ async function addMemo() {
   if (r.ok) { addInput.value = ''; await load(); }
 }
 addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemo(); });
-document.getElementById('add-btn').addEventListener('click', addMemo);
+document.getElementById('add-btn').addEventListener('click', (e) => withBusy(e.currentTarget, addMemo));
 
 const projInput = document.getElementById('proj-input');
 async function addSubProject() {
@@ -1644,7 +1759,7 @@ async function addSubProject() {
   }
 }
 projInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addSubProject(); });
-document.getElementById('proj-btn').addEventListener('click', addSubProject);
+document.getElementById('proj-btn').addEventListener('click', (e) => withBusy(e.currentTarget, addSubProject));
 
 load();
 setInterval(load, 15000);

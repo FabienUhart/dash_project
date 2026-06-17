@@ -16,7 +16,7 @@
   --panel: #161d25;
   --panel-2: #212b35;
   --text: #e8eef5;
-  --muted: #8a96a3;
+  --muted: #9aa7b4;
   --accent: #4fc3f7;
   --accent-2: #38aee0;
   --green: #4caf50;
@@ -24,6 +24,11 @@
   --orange: #ff9800;
   --yellow: #ffc107;
   --gray: #607d8b;
+  /* couleurs sémantiques (états) */
+  --danger: #ff8a80;     /* rouge doux : retard, alertes */
+  --warn: #ffb74d;       /* ambre : priorité P2, sans accès */
+  --guest: #b39ddb;      /* violet : invités, planifié */
+  --assignee: #80cbc4;   /* teal : assignés / mentions */
   --border: #283340;
   --border-soft: #1f2832;
   --memo-bg: #2e2a1f;
@@ -35,10 +40,31 @@
   --ring: 0 0 0 3px rgba(79,195,247,0.22);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
+/* ---------- thème clair ---------- */
+:root[data-theme="light"] {
+  --bg: #eef1f5; --panel: #ffffff; --panel-2: #eef2f7; --text: #1b2531; --muted: #5c6b7a;
+  --accent: #0288d1; --accent-2: #0277bd;
+  --green: #2e7d32; --red: #d32f2f; --orange: #ef6c00; --yellow: #f9a825;
+  --danger: #e53935; --warn: #ef6c00; --guest: #6a3fb5; --assignee: #00897b;
+  --border: #d3dce5; --border-soft: #e6ecf2; --memo-bg: #fff8e1; --bg-elev: #f4f7fa;
+  --ring: 0 0 0 3px rgba(2,136,209,0.28);
+  --shadow: 0 1px 2px rgba(16,30,50,0.08), 0 2px 8px rgba(16,30,50,0.06);
+  --shadow-lg: 0 10px 30px rgba(16,30,50,0.18);
+}
+[data-theme="light"] header { background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.9)), var(--panel); }
+[data-theme="light"] nav#sidebar, [data-theme="light"] aside#memo-panel { background: linear-gradient(180deg, var(--panel), #eef2f7); }
+[data-theme="light"] .card { background: linear-gradient(180deg, var(--panel), #f4f7fb); }
 * { box-sizing: border-box; }
+/* Police de marque Inter (auto-hébergée) — dégrade sur system-ui si le fichier manque. */
+@font-face {
+  font-family: 'Inter';
+  src: url('/static/Inter.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   background:
     radial-gradient(1200px 600px at 100% -10%, rgba(79,195,247,0.06), transparent 60%),
     radial-gradient(900px 500px at -10% 110%, rgba(79,195,247,0.04), transparent 55%),
@@ -136,6 +162,36 @@ button {
 button:hover { background: var(--bg-elev); border-color: #36465a; }
 button:active { transform: translateY(1px); }
 button:focus-visible { outline: none; box-shadow: var(--ring); }
+/* ---------- accessibilité (Lot 1+2) ---------- */
+button, .card, .cat-item, .sitem, .task, .task-content, .mfilter, .tile, .tag, a { touch-action: manipulation; }
+.card:focus-visible, .cat-item:focus-visible, .sitem:focus-visible, .task-content:focus-visible,
+.mfilter:focus-visible, .tile:focus-visible, .tag:focus-visible,
+dialog input:focus-visible, dialog textarea:focus-visible, dialog select:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none; box-shadow: var(--ring); border-radius: var(--radius, 8px);
+}
+/* Révéler les actions au survol ET au focus clavier */
+.card:focus-within .actions, .task:focus-within .task-actions { opacity: 1; }
+/* Écrans tactiles : actions visibles en permanence + cibles ≥ 44px + pas de zoom iOS */
+@media (pointer: coarse) {
+  .card .actions, .task .task-actions { opacity: 0.85; }
+  button, .task-check, .thumb-del, .cat-item, .sitem, .mfilter, .tile { min-height: 44px; }
+  .card .actions button, .task .task-actions button { min-width: 40px; }
+}
+@media (max-width: 900px) {
+  input, select, textarea, #search { font-size: 16px; }
+}
+/* Finitions : chiffres alignés, retour d'appui, GPU au survol */
+#clock-time, #clock-date, #clock-extra, .count, .mf-count, .mf-num, .pin-input, .c-when { font-variant-numeric: tabular-nums; }
+.cat-item:active, .mfilter:active, .tile:active, .tag:active, .prio-btn:active { transform: scale(0.97); }
+.card:hover, .task:hover { will-change: transform; }
+@media (prefers-reduced-motion: reduce) {
+  .cat-item:active, .mfilter:active, .tile:active, .tag:active { transform: none; }
+}
+/* Icônes SVG système (Lucide) — currentColor, taille relative à la police */
+.ic { width: 1.1em; height: 1.1em; display: inline-block; vertical-align: -0.15em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.ic-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 button.primary { background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #04161f; border-color: transparent; font-weight: 600; box-shadow: 0 2px 10px rgba(79,195,247,0.25); }
 button.primary:hover { background: linear-gradient(180deg, #6fcef9, var(--accent)); }
 button.danger { background: var(--red); color: #fff; border-color: var(--red); }
@@ -148,7 +204,7 @@ button.icon { padding: 0.45rem 0.6rem; }
   right: -5px;
   background: var(--red);
   color: #fff;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   font-weight: 700;
   border-radius: 999px;
   padding: 0.05rem 0.3rem;
@@ -249,10 +305,10 @@ button.icon { padding: 0.45rem 0.6rem; }
 .share-row button { padding: 0.15rem 0.5rem; font-size: 0.8rem; flex-shrink: 0; }
 
 /* ---------- layout ---------- */
-.layout { display: flex; min-height: calc(100vh - 57px); }
+.layout { display: flex; min-height: calc(100dvh - 57px); }
 
 nav#sidebar {
-  width: 200px;
+  width: clamp(180px, 16vw, 240px);
   flex-shrink: 0;
   background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.4));
   border-right: 1px solid var(--border);
@@ -291,6 +347,25 @@ nav#sidebar {
   margin: 0 0.2rem;
 }
 .sidebar-sep { border-top: 1px solid var(--border); margin: 0.6rem 0.3rem; }
+/* toggles barre latérale (eye = masquer, hamburger = rail icônes) */
+nav#sidebar.sb-hidden { width: 0; padding-left: 0; padding-right: 0; overflow: hidden; border-right: none; }
+nav#sidebar.sb-rail { width: 64px; overflow: hidden; }
+nav#sidebar.sb-rail .cat-label,
+nav#sidebar.sb-rail .count,
+nav#sidebar.sb-rail #add-cat,
+nav#sidebar.sb-rail #add-proj,
+nav#sidebar.sb-rail .proj-badge { display: none; }
+nav#sidebar.sb-rail .cat-item {
+  justify-content: center;
+  overflow: hidden;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  padding-left: 0 !important;   /* écrase le padding-left inline des projets imbriqués */
+  padding-right: 0 !important;
+}
+nav#sidebar.sb-rail .cat-item > * { flex-shrink: 0; }
+.icon.toggle-on { color: var(--accent); }
+@media (max-width: 900px) { #sidebar-eye-btn, #sidebar-rail-btn { display: none; } }
 .cat-item.sub { padding-left: 2rem; font-size: 0.85rem; }
 #add-proj {
   padding: 0.3rem 0.6rem 0.3rem 2rem;
@@ -382,7 +457,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .card .name { font-weight: 600; font-size: 1rem; }
 .card .cat-tag {
   margin-left: auto;
-  font-size: 0.65rem;
+  font-size: 0.72rem;
   color: var(--muted);
   background: var(--panel-2);
   padding: 0.1rem 0.4rem;
@@ -472,8 +547,8 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .mfilter .mf-label { font-size: 0.78rem; font-weight: 600; display: block; margin-top: 0.1rem; }
 .mfilter.f-inbox .mf-label, .mfilter.f-inbox .mf-icon { color: var(--accent); }
 .mfilter.f-today .mf-label, .mfilter.f-today .mf-icon { color: var(--green); }
-.mfilter.f-scheduled .mf-label, .mfilter.f-scheduled .mf-icon { color: #b39ddb; }
-.mfilter.f-overdue .mf-label, .mfilter.f-overdue .mf-icon { color: #ff8a80; }
+.mfilter.f-scheduled .mf-label, .mfilter.f-scheduled .mf-icon { color: var(--guest); }
+.mfilter.f-overdue .mf-label, .mfilter.f-overdue .mf-icon { color: var(--danger); }
 .mfilter.f-done .mf-label, .mfilter.f-done .mf-icon { color: var(--orange); }
 .mfilter.f-history .mf-label, .mfilter.f-history .mf-icon { color: #f06292; }
 .mfilter.active.f-history { border-color: #f06292; background: #2c1a22; }
@@ -493,8 +568,8 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .hist-row .hist-proj { font-size: 0.72rem; color: var(--muted); flex-shrink: 0; display: inline-flex; align-items: center; gap: 0.3rem; }
 .mfilter.active.f-inbox { border-color: var(--accent); background: #15232e; }
 .mfilter.active.f-today { border-color: var(--green); background: #16271a; }
-.mfilter.active.f-scheduled { border-color: #b39ddb; background: #221f2e; }
-.mfilter.active.f-overdue { border-color: #ff8a80; background: #2e1a1a; }
+.mfilter.active.f-scheduled { border-color: var(--guest); background: #221f2e; }
+.mfilter.active.f-overdue { border-color: var(--danger); background: #2e1a1a; }
 .mfilter.active.f-done { border-color: var(--orange); background: #2c2113; }
 #memo-add-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
 #memo-add-bar input[type="text"] {
@@ -527,7 +602,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   font-weight: 600;
 }
 .memo-section h2 .sec-count { opacity: 0.7; font-weight: 400; }
-.memo-section.sec-overdue h2 { color: #ff8a80; }
+.memo-section.sec-overdue h2 { color: var(--danger); }
 .memo-section.sec-today h2 { color: var(--yellow); }
 .task {
   background: var(--panel);
@@ -569,9 +644,9 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .comment-row.comment-reply { margin-left: 1.5rem; border-left: 2px solid var(--border); }
 .comment-row .c-prio { flex-shrink: 0; font-size: 0.68rem; font-weight: 700; color: #10141a; border-radius: 4px; padding: 0 0.3rem; line-height: 1.5; }
 .comment-row .c-seen { color: var(--muted); font-size: 0.7rem; flex-shrink: 0; white-space: nowrap; }
-.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: #80cbc4; }
-.assignee-chip.noaccess { color: #ffb74d; border-color: rgba(255,183,77,0.45); }
-.mention.noaccess { color: #ffb74d; background: rgba(255,183,77,0.16); }
+.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: var(--assignee); }
+.assignee-chip.noaccess { color: var(--warn); border-color: rgba(255,183,77,0.45); }
+.mention.noaccess { color: var(--warn); background: rgba(255,183,77,0.16); }
 .task.done-task .task-content { text-decoration: line-through; color: var(--muted); }
 .task .task-content a { color: var(--accent); word-break: break-all; }
 .task .task-badges { display: flex; gap: 0.35rem; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
@@ -587,7 +662,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   text-overflow: ellipsis;
 }
 .task .task-badges { max-width: 55%; }
-.badge.due-late { background: #3a1f1f; color: #ff8a80; }
+.badge.due-late { background: #3a1f1f; color: var(--danger); }
 .badge.due-today { background: #38301a; color: var(--yellow); }
 .task .task-actions { display: flex; gap: 0.15rem; opacity: 0; transition: opacity 0.15s; }
 .task:hover .task-actions { opacity: 1; }
@@ -710,7 +785,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 
 /* ---------- colonne mémos (résumé) ---------- */
 aside#memo-panel {
-  width: 250px;
+  width: clamp(220px, 18vw, 290px);
   flex-shrink: 0;
   background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.4));
   border-left: 1px solid var(--border);
@@ -745,7 +820,7 @@ aside#memo-panel {
   word-break: break-word;
 }
 .memo-note .mini-due { display: block; font-size: 0.7rem; margin-top: 0.2rem; }
-.memo-note .mini-due.due-late { color: #ff8a80; }
+.memo-note .mini-due.due-late { color: var(--danger); }
 .memo-note .mini-due.due-today { color: var(--yellow); }
 .memo-note .mini-due.due-future { color: var(--muted); }
 #memo-quick {
@@ -844,7 +919,7 @@ aside#memo-panel {
 #quill-wrap .ql-editor { min-height: 200px; }
 #quill-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
 /* Mentions @ dans l'éditeur */
-.mention { color: #80cbc4; background: rgba(128,203,196,0.14); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+.mention { color: var(--assignee); background: rgba(128,203,196,0.14); border-radius: 4px; padding: 0 3px; font-weight: 600; }
 .mention-menu { position: fixed; z-index: 10000; min-width: 11rem; max-height: 13rem; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; }
 .mention-item { padding: 0.32rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text); white-space: nowrap; }
 .mention-item.active { background: var(--accent); color: #fff; }
@@ -884,6 +959,8 @@ dialog::backdrop { background: rgba(6,9,12,0.62); backdrop-filter: blur(3px); }
 dialog h3 { margin: 0 0 1rem; }
 dialog form { display: flex; flex-direction: column; gap: 0.75rem; }
 dialog label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+.me-label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin: 0.5rem 0 0.2rem; }
+.me-label:first-child { margin-top: 0; }
 dialog input, dialog textarea, dialog select {
   background: var(--bg);
   color: var(--text);
@@ -988,13 +1065,49 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   main { padding: 0.75rem; }
 }
 </style>
+<script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
 <body>
+<svg class="ic-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="ic-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+  <symbol id="ic-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="ic-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="ic-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="ic-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="ic-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+  <symbol id="ic-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="ic-eye-off" viewBox="0 0 24 24"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M6.61 6.61A18.45 18.45 0 0 0 2 12s3 8 10 8a9.12 9.12 0 0 0 5.39-1.61"/><path d="M2 2l20 20"/></symbol>
+  <symbol id="ic-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+  <symbol id="ic-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="ic-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="ic-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="ic-map" viewBox="0 0 24 24"><path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3Z"/><path d="M9 3v15"/><path d="M15 6v15"/></symbol>
+  <symbol id="ic-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="ic-qr" viewBox="0 0 24 24"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></symbol>
+  <symbol id="ic-reply" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="ic-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="ic-expand" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="ic-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="ic-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="ic-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="ic-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="ic-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+  <symbol id="ic-checklist" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+  <symbol id="ic-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+</defs></svg>
+<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
+  <button id="sidebar-rail-btn" class="icon" title="Replier la barre latérale" aria-label="Replier la barre latérale" aria-expanded="true"><svg class="ic"><use href="#ic-menu"/></svg></button>
+  <button id="sidebar-eye-btn" class="icon" title="Afficher / masquer la barre latérale" aria-label="Afficher / masquer la barre latérale"><svg class="ic"><use href="#ic-eye"/></svg></button>
   <h1>Dashboard</h1>
   <div id="search-wrap">
-    <span style="color:var(--muted)">🔍</span>
-    <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off">
+    <span style="color:var(--muted)"><svg class="ic"><use href="#ic-search"/></svg></span>
+    <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off" aria-label="Rechercher">
     <select id="search-scope" title="Portée de la recherche (raccourcis : p# l# m#)">
       <option value="all">Tout</option>
       <option value="links">Liens</option>
@@ -1010,8 +1123,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div id="clock-extra"></div>
   </div>
   <div id="weather" title="Météo Bayonne"></div>
-  <button id="activity-btn" class="icon" title="Activité des invités">🔔<span id="activity-badge"></span></button>
-  <button id="settings-btn" class="icon" title="Paramètres">⚙</button>
+  <button id="activity-btn" class="icon" title="Activité des invités" aria-label="Activité des invités"><svg class="ic"><use href="#ic-bell"/></svg><span id="activity-badge"></span></button>
+  <button id="theme-btn" class="icon" title="Thème clair / sombre" aria-label="Basculer le thème"><svg class="ic"><use href="#ic-moon"/></svg></button>
+  <button id="settings-btn" class="icon" title="Paramètres" aria-label="Paramètres"><svg class="ic"><use href="#ic-settings"/></svg></button>
   <button id="add-link" class="primary">+ Ajouter</button>
 </header>
 
@@ -1088,7 +1202,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="geo-dialog">
-  <h3>📍 Quelle adresse ?</h3>
+  <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-map-pin"/></svg>Quelle adresse ?</h3>
   <div id="geo-results"></div>
   <div class="actions">
     <button type="button" id="geo-cancel">Annuler</button>
@@ -1124,7 +1238,13 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="create-dialog">
-  <h3 id="create-title">Nouveau projet</h3>
+  <div class="me-head">
+    <h3 id="create-title">Nouveau projet</h3>
+    <button type="button" id="create-menu-btn" class="icon-btn" title="Actions" aria-label="Actions" style="display:none">⋯</button>
+    <div id="create-menu" class="card-menu" hidden>
+      <button type="button" id="create-delete" class="danger-item">🗑 Supprimer</button>
+    </div>
+  </div>
   <form id="create-form">
     <label>Nom<input type="text" name="name" required autocomplete="off"></label>
     <label id="create-emoji-label">Emoji
@@ -1143,7 +1263,6 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <span id="create-loc-info" style="font-size:0.78rem;color:var(--muted);margin-top:0.25rem">aucune</span>
     </label>
     <div class="actions">
-      <button type="button" id="create-delete" class="danger" style="margin-right:auto;display:none">Supprimer</button>
       <button type="button" id="create-cancel">Annuler</button>
       <button type="submit" class="primary" id="create-submit">Créer</button>
     </div>
@@ -1159,11 +1278,15 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <button type="button" id="memo-edit-delete" class="danger-item">🗑 Supprimer</button>
     </div>
   </div>
-  <input id="me-title" type="text" placeholder="🏷 Titre (optionnel)" maxlength="200" autocomplete="off"
+  <label class="me-label" for="me-title">Titre <span style="font-weight:400">(optionnel)</span></label>
+  <input id="me-title" type="text" placeholder="Titre du mémo…" maxlength="200" autocomplete="off"
          style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem">
+  <label class="me-label">Contenu</label>
   <div id="quill-wrap"><div id="quill-editor"></div></div>
-  <div id="me-people" style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem"></div>
-  <div id="me-comments" style="margin-top:0.5rem;max-height:9rem;overflow-y:auto"></div>
+  <label class="me-label">Assigné·es</label>
+  <div id="me-people" style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-top:0.2rem"></div>
+  <label class="me-label">Commentaires</label>
+  <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
   <div class="actions">
     <button type="button" id="memo-edit-cancel">Annuler</button>
     <button type="button" id="memo-edit-save" class="primary">Sauver</button>
@@ -1171,7 +1294,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="settings-dialog">
-  <h3>⚙ Paramètres</h3>
+  <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-settings"/></svg>Paramètres</h3>
   <div class="settings-section">
     <h4>SAUVEGARDE</h4>
     <div class="settings-row">
@@ -1209,7 +1332,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
   <div class="settings-section">
     <h4>HISTORIQUE</h4>
-    <button id="purge-history">🗑 Vider l'historique</button>
+    <button id="purge-history"><svg class="ic" style="margin-right:0.35em"><use href="#ic-trash"/></svg>Vider l'historique</button>
     <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
       L'historique des tâches effectuées est conservé sans limite. Cette action le vide définitivement.
     </p>
@@ -1226,7 +1349,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
   <div class="settings-section">
     <h4>STATUTS</h4>
-    <button id="refresh-status">↻ Rafraîchir les statuts</button>
+    <button id="refresh-status"><svg class="ic" style="margin-right:0.35em"><use href="#ic-refresh"/></svg>Rafraîchir les statuts</button>
   </div>
   <div class="actions">
     <button id="settings-close" class="primary">Fermer</button>
@@ -1294,9 +1417,29 @@ function el(tag, opts = {}, ...children) {
   if (opts.class) e.className = opts.class;
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
   if (opts.text != null) e.textContent = opts.text;
+  if (opts.icon) { const ic = icon(opts.icon); if (opts.text != null) ic.style.marginRight = '0.35em'; e.insertBefore(ic, e.firstChild); }
   if (opts.on) for (const [k, v] of Object.entries(opts.on)) e.addEventListener(k, v);
   for (const c of children) if (c != null) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
   return e;
+}
+
+// Icône SVG système : <svg class="ic"><use href="#ic-NAME"/></svg>
+function icon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'ic');
+  const use = document.createElementNS(NS, 'use');
+  use.setAttribute('href', '#ic-' + name);
+  svg.appendChild(use);
+  return svg;
+}
+
+// Désactive un bouton + opacité pendant une action async (anti double-clic).
+async function withBusy(btn, fn) {
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.style.opacity = '0.6'; }
+  try { return await fn(); }
+  finally { if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); btn.style.opacity = ''; } }
 }
 
 function confirmPopin(message, { title = 'Confirmer la suppression', okLabel = 'Supprimer', danger = true } = {}) {
@@ -1320,7 +1463,16 @@ function confirmPopin(message, { title = 'Confirmer la suppression', okLabel = '
   });
 }
 
+// Annonce polie pour lecteurs d'écran (région aria-live).
+function announce(msg) {
+  const e = document.getElementById('sr-live');
+  if (!e) return;
+  e.textContent = '';
+  setTimeout(() => { e.textContent = msg; }, 40);
+}
+
 function notify(message, { title = 'ℹ️ Info', error = false } = {}) {
+  announce(message);
   return new Promise(resolve => {
     const dlg = document.getElementById('notify-dialog');
     document.getElementById('notify-title').textContent = error ? '⚠️ Erreur' : title;
@@ -1373,7 +1525,24 @@ function renderAll() {
   else if (v === 'trash') renderTrash();
   else renderLinks();
   renderMemos();
+  applyA11y();
 }
+
+// Rend les conteneurs "bouton" (non natifs) focusables et activables au clavier.
+function applyA11y() {
+  document.querySelectorAll('.cat-item, .mfilter, .tag').forEach(e => {
+    if (!e.hasAttribute('tabindex')) e.tabIndex = 0;
+    if (!e.hasAttribute('role')) e.setAttribute('role', 'button');
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = e.target;
+  if (t.matches && t.matches('.cat-item, .mfilter, .tag') && !t.closest('input, textarea, select')) {
+    e.preventDefault();
+    t.click();
+  }
+});
 
 /* ------------------------------------------------ sidebar */
 
@@ -1393,7 +1562,7 @@ function renderSidebar() {
     attrs: { title: 'Liens de partage, invités et modifications' },
     on: { click: () => openSharesView() },
   });
-  actItem.appendChild(el('span', { class: 'emoji', text: '🔗' }));
+  actItem.appendChild(icon('link'));
   actItem.appendChild(el('span', { class: 'cat-label', text: 'Partages' }));
   const actBadge = el('span', { class: 'count', text: String(actCount) });
   if (actCount > 0) {
@@ -1407,7 +1576,7 @@ function renderSidebar() {
     attrs: { title: 'Mémos supprimés — restaurables 7 jours, puis purge automatique' },
     on: { click: () => openTrashView() },
   });
-  trashItem.appendChild(el('span', { class: 'emoji', text: '🗑' }));
+  trashItem.appendChild(icon('trash'));
   trashItem.appendChild(el('span', { class: 'cat-label', text: 'Corbeille' }));
   trashItem.appendChild(el('span', { class: 'count', text: String((state.trash || []).length) }));
   nav.appendChild(trashItem);
@@ -1572,7 +1741,7 @@ function renderSidebar() {
   }));
 }
 
-const PROJ_COLORS = ['#4fc3f7', '#81c784', '#ffb74d', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
+const PROJ_COLORS = ['#4fc3f7', '#81c784', 'var(--warn)', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
 const createDialog = document.getElementById('create-dialog');
 const createForm = document.getElementById('create-form');
 let createKind = 'project';
@@ -1613,7 +1782,8 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-desc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
-  document.getElementById('create-delete').style.display = item ? '' : 'none';
+  document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
+  document.getElementById('create-menu').hidden = true;
   createLoc = item ? parseLoc(item.location) : null;
   refreshCreateLoc();
   const suggest = document.getElementById('emoji-suggest');
@@ -1662,10 +1832,17 @@ document.getElementById('create-delete').addEventListener('click', async () => {
   await loadAll();
   if (settingsDialog.open) { renderCatManage(); renderProjManage(); renderPrioManage(); }
 });
+const createMenu = document.getElementById('create-menu');
+const createMenuBtn = document.getElementById('create-menu-btn');
+createMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); createMenu.hidden = !createMenu.hidden; });
+document.addEventListener('click', (e) => {
+  if (!createMenu.hidden && !createMenu.contains(e.target) && e.target !== createMenuBtn) createMenu.hidden = true;
+});
 createForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = createForm.elements.name.value.trim();
   if (!name) return;
+  const _sb = document.getElementById('create-submit'); _sb.disabled = true; _sb.style.opacity = '0.6';
   const bases = { project: '/api/projects', category: '/api/categories', priority: '/api/priorities' };
   const base = bases[createKind];
   const payload = { name, color: createForm.elements.color.value };
@@ -1687,6 +1864,7 @@ createForm.addEventListener('submit', async (e) => {
     await loadAll();
     if (settingsDialog.open) { renderCatManage(); renderProjManage(); renderPrioManage(); }
   } catch (err) { await notify('Erreur : ' + err.message, { error: true }); }
+  finally { _sb.disabled = false; _sb.style.opacity = ''; }
 });
 
 /* ------------------------------------------------ links */
@@ -1766,7 +1944,7 @@ function osmUrl(loc) {
 function locBadgeEl(loc) {
   const a = el('a', {
     class: 'badge',
-    text: '📍' + (loc.label ? ' ' + loc.label : ''),
+    icon: 'map-pin', text: (loc.label ? ' ' + loc.label : ''),
     attrs: {
       href: osmUrl(loc), target: '_blank', rel: 'noopener noreferrer',
       title: 'Voir sur la carte (' + loc.lat + ', ' + loc.lng + ')',
@@ -1939,7 +2117,7 @@ function guestRecapEl(kind, targetId) {
   const shares = (state.shares || []).filter(s => s.kind === kind && s.target_id === targetId);
   if (!shares.length) return null;
   const wrap = el('div', { class: 'guest-recap' });
-  wrap.appendChild(el('span', { class: 'guest-chip', text: '🔗 ' + shares.length + ' lien' + (shares.length > 1 ? 's' : '') }));
+  wrap.appendChild(el('span', { class: 'guest-chip', icon: 'link', text: shares.length + ' lien' + (shares.length > 1 ? 's' : '') }));
   let any = false;
   shares.forEach(s => {
     (s.guests || []).filter(g => g.status === 'approved').forEach(g => {
@@ -2014,7 +2192,7 @@ function renderLinks() {
     }
 
     const actions = el('div', { class: 'actions' });
-    actions.appendChild(el('button', { text: '✎', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
+    actions.appendChild(el('button', { icon: 'pencil', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
     actions.appendChild(el('button', { text: '×', attrs: { title: 'Supprimer' }, on: { click: () => deleteLink(link.id) } }));
     card.appendChild(actions);
 
@@ -2314,7 +2492,7 @@ function fmtDeleted(iso) {
 function renderTrash() {
   const board = document.getElementById('trash-board');
   board.innerHTML = '';
-  board.appendChild(el('h2', { text: '🗑 Corbeille' }));
+  board.appendChild(el('h2', { icon: 'trash', text: 'Corbeille' }));
   const items = state.trash || [];
   board.appendChild(el('p', {
     attrs: { style: 'color:var(--muted);font-size:0.85rem;margin:0.2rem 0 1rem' },
@@ -2324,7 +2502,7 @@ function renderTrash() {
   }));
   if (items.length) {
     const empty = el('button', {
-      class: 'danger', text: '🗑 Vider la corbeille',
+      class: 'danger', icon: 'trash', text: 'Vider la corbeille',
       attrs: { style: 'margin-bottom:0.8rem' },
       on: { click: async () => {
         if (!(await confirmPopin(`Supprimer définitivement les ${items.length} mémo(s) de la corbeille ?\nCette action est irréversible.`, { okLabel: 'Vider' }))) return;
@@ -2435,7 +2613,7 @@ function revRowEl(r, onChange) {
         } },
       }));
       actions.appendChild(el('button', {
-        text: '🕘 Toutes les versions',
+        icon: 'history', text: 'Toutes les versions',
         on: { click: (e) => { e.stopPropagation(); openRevisions(state.memos.find(m => m.id === r.memo_id)); } },
       }));
     }
@@ -2450,7 +2628,7 @@ async function renderShares() {
   const board = document.getElementById('shares-board');
   board.innerHTML = '';
   const title = el('div', { attrs: { id: 'board-title' } });
-  title.appendChild(el('span', { text: '🔗 Partages & activité' }));
+  title.appendChild(el('span', { icon: 'link', text: 'Partages & activité' }));
   board.appendChild(title);
 
   const [shares, guests, activity] = await Promise.all([
@@ -2478,7 +2656,7 @@ async function renderShares() {
   byEmail.forEach((accs, email) => {
     const card = el('div', { class: 'share-card' });
     const head = el('div', { class: 'share-row' });
-    head.appendChild(el('span', { text: '👤' }));
+    head.appendChild(el('span', { icon: 'user' }));
     const dispName = (accs.find(a => a.name) || {}).name || email;
     head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: dispName + (dispName !== email ? ' — ' + email : '') }));
     head.appendChild(el('span', { class: 'rev-meta', text: accs.length + ' accès' }));
@@ -2504,7 +2682,7 @@ async function renderShares() {
       }
       info.appendChild(el('span', { class: 'rev-meta', text: 'depuis le ' + fmtWhen(g.created_at) }));
       row.appendChild(info);
-      row.appendChild(el('span', { class: 'status-pill ' + (g.can_edit ? 'approved' : ''), text: g.can_edit ? '✏️ modification' : '👁 lecture' }));
+      row.appendChild(el('span', { class: 'status-pill ' + (g.can_edit ? 'approved' : ''), icon: g.can_edit ? 'pencil' : 'eye', text: g.can_edit ? 'modification' : 'lecture' }));
       row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { pending: 'en attente', approved: 'validé', rejected: 'refusé' }[g.status] || g.status }));
       row.appendChild(el('button', {
         text: '📋', attrs: { title: 'Copier le lien de cet accès' },
@@ -2517,7 +2695,7 @@ async function renderShares() {
         } },
       }));
       row.appendChild(el('button', {
-        text: '▦', attrs: { title: 'QR code de cet accès' },
+        icon: 'qr', attrs: { title: 'QR code de cet accès' },
         on: { click: () => {
           const sh = shares.find(x => x.token === g.token);
           openQr(location.origin + '/share/' + g.token, sh
@@ -2591,7 +2769,7 @@ async function renderShares() {
     const r1 = el('div', { class: 'share-row' });
     r1.appendChild(el('span', { text: s.kind === 'memo' ? '📝' : '📁' }));
     r1.appendChild(el('span', { class: 'grow share-target', text: s.target || '(supprimé)' }));
-    r1.appendChild(el('span', { class: 'status-pill', text: s.can_edit ? '✏️ modifiable' : '👁 lecture' }));
+    r1.appendChild(el('span', { class: 'status-pill', icon: s.can_edit ? 'pencil' : 'eye', text: s.can_edit ? 'modifiable' : 'lecture' }));
     const pinWrap = el('span', { class: 'pin-wrap', attrs: { title: 'Code à 4 chiffres que l\'invité doit saisir — modifiable' } });
     pinWrap.appendChild(el('span', { class: 'rev-meta', text: 'Code ' }));
     const pinIn = el('input', { class: 'pin-input', attrs: { type: 'text', maxlength: '4', inputmode: 'numeric' } });
@@ -2612,7 +2790,7 @@ async function renderShares() {
       } },
     }));
     r1.appendChild(el('button', {
-      text: '▦', attrs: { title: 'QR code du lien' },
+      icon: 'qr', attrs: { title: 'QR code du lien' },
       on: { click: () => openQr(url, { kind: s.kind, target: s.target, can_edit: s.can_edit, pin: s.pin, guests: s.guests }) },
     }));
     r1.appendChild(el('button', {
@@ -2644,7 +2822,7 @@ async function renderShares() {
   byEditor.forEach((revs, editor) => {
     const userCard = el('div', { class: 'share-card' });
     const head = el('div', { class: 'share-row' });
-    head.appendChild(el('span', { text: '👤' }));
+    head.appendChild(el('span', { icon: 'user' }));
     head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: editor }));
     head.appendChild(el('span', { class: 'rev-meta', text: revs.length + ' modification' + (revs.length > 1 ? 's' : '') }));
     userCard.appendChild(head);
@@ -2768,7 +2946,7 @@ async function renderShareList() {
   }
   mine.forEach(s => {
     const row = el('div', { class: 'cat-manage-row' });
-    row.appendChild(el('span', { text: s.can_edit ? '✏️' : '👁', attrs: { title: s.can_edit ? 'Modifiable' : 'Lecture seule' } }));
+    row.appendChild(el('span', { icon: s.can_edit ? 'pencil' : 'eye', attrs: { title: s.can_edit ? 'Modifiable' : 'Lecture seule' } }));
     row.appendChild(el('span', {
       class: 'pin-input',
       text: s.pin || '----',
@@ -2981,7 +3159,7 @@ function renderMePeople() {
   const meMemo = state.memos.find(m => m.id === editingMemoId) || null;
   const wrap = document.getElementById('me-people');
   wrap.innerHTML = '';
-  wrap.appendChild(el('span', { text: '👤', attrs: { title: 'Personnes rattachées à ce mémo' } }));
+  wrap.appendChild(el('span', { icon: 'user', attrs: { title: 'Personnes rattachées à ce mémo' } }));
   editingAssignees.forEach(a => {
     const noAcc = assigneeNoAccess(a, meMemo);
     const chip = el('span', { class: 'assignee-chip' + (noAcc ? ' noaccess' : ''), attrs: noAcc ? { title: NO_ACCESS_TIP } : {} });
@@ -3060,7 +3238,7 @@ memoMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); memoMenu.hid
 document.addEventListener('click', (e) => {
   if (!memoMenu.hidden && !memoMenu.contains(e.target) && e.target !== memoMenuBtn) memoMenu.hidden = true;
 });
-document.getElementById('memo-edit-save').addEventListener('click', async () => {
+document.getElementById('memo-edit-save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
   const q = getQuill();
   if (!q || editingMemoId == null) return;
   const text = q.getText().trim();
@@ -3070,7 +3248,7 @@ document.getElementById('memo-edit-save').addEventListener('click', async () => 
   memoEditDialog.close();
   await patchMemo(editingMemoId, { content: html, title, assignees: editingAssignees });
   editingMemoId = null;
-});
+}));
 
 const lightbox = document.getElementById('lightbox');
 lightbox.addEventListener('click', () => lightbox.close());
@@ -3198,13 +3376,13 @@ function taskEl(memo) {
     badges.appendChild(el('span', {
       class: 'badge',
       text: (noAcc ? '⚠ @' : '@') + a.replace(/@.*$/, ''),
-      attrs: { title: noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a), style: 'color:' + (noAcc ? '#ffb74d' : '#80cbc4') },
+      attrs: { title: noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a), style: 'color:' + (noAcc ? 'var(--warn)' : 'var(--assignee)') },
     }));
   });
   if (memo.comment_count) {
     const cb = el('span', {
       class: 'badge',
-      text: '💬 ' + memo.comment_count,
+      icon: 'message', text: '' + memo.comment_count,
       attrs: { title: 'Commentaires — cliquer pour les voir', style: 'cursor:pointer;color:#ffcc80' },
     });
     cb.addEventListener('click', (e) => {
@@ -3218,18 +3396,18 @@ function taskEl(memo) {
   if (subs.length) {
     badges.appendChild(el('span', {
       class: 'badge',
-      text: `☑ ${subs.filter(s => s.done).length}/${subs.length}`,
+      icon: 'checklist', text: `${subs.filter(s => s.done).length}/${subs.length}`,
     }));
   }
   if (memo.guest_editor) {
     const gname = memo.guest_editor.replace(/\s*<[^>]*>/, '');
     badges.appendChild(el('span', {
       class: 'badge',
-      text: '👤 ' + gname,
+      icon: 'user', text: gname,
       attrs: {
         title: (memo.guest_action === 'created' ? 'Ajouté par ' : 'Dernière modification par ')
           + memo.guest_editor + ' via un lien de partage, le ' + fmtWhen(memo.guest_at),
-        style: 'color:#b39ddb',
+        style: 'color:var(--guest)',
       },
     }));
   }
@@ -3255,7 +3433,7 @@ function taskEl(memo) {
     } },
   }));
   actions.appendChild(el('button', {
-    text: '⧉', attrs: { title: 'Dupliquer ce mémo' },
+    icon: 'copy', attrs: { title: 'Dupliquer ce mémo' },
     on: { click: () => duplicateMemo(memo.id) },
   }));
   row.appendChild(actions);
@@ -3309,7 +3487,7 @@ function assigneeSuggestions() {
 
 function assigneeRowEl(memo) {
   const row = el('div', { class: 'detail-row', attrs: { style: 'flex-wrap:wrap' } });
-  row.appendChild(el('span', { text: '👤', attrs: { title: 'Personnes rattachées à cette tâche' } }));
+  row.appendChild(el('span', { icon: 'user', attrs: { title: 'Personnes rattachées à cette tâche' } }));
   (memo.assignees || []).forEach(a => {
     const noAcc = assigneeNoAccess(a, memo);
     const chip = el('span', { class: 'assignee-chip' + (noAcc ? ' noaccess' : ''), attrs: noAcc ? { title: NO_ACCESS_TIP } : {} });
@@ -3406,7 +3584,7 @@ function attachInputMention(input, getNames) {
   input.addEventListener('blur', () => setTimeout(close, 150));
 }
 
-const COMMENT_PRIO_COL = { 1: '#ff5252', 2: '#ffb74d', 3: '#66bb6a' };
+const COMMENT_PRIO_COL = { 1: '#ff5252', 2: 'var(--warn)', 3: '#66bb6a' };
 
 function commentInputEl(memo, parentId, onPosted) {
   const input = el('input', { attrs: { type: 'text', placeholder: (parentId ? '↩ Répondre… (Entrée)' : '💬 Commenter… (Entrée, @ pour mentionner)'), maxlength: '2000' } });
@@ -3446,7 +3624,7 @@ function commentsBlockEl(memo) {
       }
       const author = (c.author || '').replace(/\s*<[^>]*>/, '');
       const a = el('span', { class: 'c-author', text: (c.guest ? '👤 ' : '') + author });
-      if (c.guest) a.style.color = '#b39ddb';
+      if (c.guest) a.style.color = 'var(--guest)';
       a.title = c.author;
       r.appendChild(a);
       r.appendChild(el('span', { class: 'c-body', text: c.body }));
@@ -3517,7 +3695,7 @@ function taskDetailEl(memo) {
       on: { click: () => patchMemo(memo.id, { due_date: '' }) },
     }));
   }
-  row1.appendChild(el('span', { text: '⚑' }));
+  row1.appendChild(el('span', { icon: 'flag' }));
   const noneBtn = el('button', {
     class: 'prio-btn' + (memo.priority === 0 ? ' sel-none' : ''),
     text: 'Aucune',
@@ -3567,23 +3745,23 @@ function taskDetailEl(memo) {
   fileIn.style.display = 'none';
   fileIn.addEventListener('change', () => { if (fileIn.files.length) uploadMemoImages(memo.id, [...fileIn.files]); });
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '📎 Image',
+    class: 'prio-btn', icon: 'paperclip', text: 'Image',
     attrs: { title: 'Ajouter une image (ou glisser un fichier sur le mémo)' },
     on: { click: () => fileIn.click() },
   }));
   row1.appendChild(fileIn);
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '🔗 Partager',
+    class: 'prio-btn', icon: 'link', text: 'Partager',
     attrs: { title: 'Partager ce mémo par lien (sans compte)' },
     on: { click: () => openShareDialog('memo', memo.id, stripHTML(memo.content).slice(0, 40)) },
   }));
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '🕘 Versions',
+    class: 'prio-btn', icon: 'history', text: 'Versions',
     attrs: { title: 'Historique des modifications et restauration' },
     on: { click: () => openRevisions(memo) },
   }));
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '📍 Ma position',
+    class: 'prio-btn', icon: 'map-pin', text: 'Ma position',
     attrs: { title: 'Attacher ta position GPS actuelle à ce mémo' },
     on: { click: () => capturePosition((loc) => patchMemo(memo.id, { location: loc })) },
   }));
@@ -3690,7 +3868,7 @@ function renderBoard() {
       const pLoc = parseLoc(proj.location);
       if (pLoc) title.appendChild(locBadgeEl(pLoc));
       title.appendChild(el('button', {
-        class: 'prio-btn', text: '🔗 Partager',
+        class: 'prio-btn', icon: 'link', text: 'Partager',
         attrs: { title: 'Partager ce projet par lien (sans compte)' },
         on: { click: () => openShareDialog('project', proj.id, proj.name) },
       }));
@@ -3699,7 +3877,7 @@ function renderBoard() {
   const mapPoints = boardMapPoints();
   if (mapPoints.length) {
     title.appendChild(el('button', {
-      class: 'prio-btn', text: '🗺 Carte (' + mapPoints.length + ')',
+      class: 'prio-btn', icon: 'map', text: 'Carte (' + mapPoints.length + ')',
       attrs: { title: 'Voir tous les points géolocalisés de cette vue sur une carte' },
       on: { click: () => openMapDialog(document.getElementById('board-title').textContent.replace(/🗺.*$/, '').trim() || 'Carte', boardMapPoints()) },
     }));
@@ -3786,7 +3964,7 @@ function renderBoard() {
     const taggedLinks = state.links.filter(l => (l.tags || '').split(/\s+/).includes(activeTag));
     if (taggedLinks.length) {
       const banner = el('div', { class: 'detail-row', attrs: { style: 'margin-bottom:1rem' } });
-      banner.appendChild(el('span', { text: '🔗' }));
+      banner.appendChild(el('span', { icon: 'link' }));
       banner.appendChild(el('button', {
         class: 'prio-btn',
         text: `Voir ${taggedLinks.length} lien${taggedLinks.length > 1 ? 's' : ''} avec #${activeTag}`,
@@ -3838,7 +4016,7 @@ function renderBoard() {
   const prioBtn = el('button', { attrs: { type: 'button', title: 'Priorité — cliquer pour changer' } });
   const refreshPrioBtn = () => {
     const p = prioOf(addPrio);
-    prioBtn.textContent = p ? '⚑ ' + p.name : '⚑ Priorité';
+    prioBtn.textContent = ''; prioBtn.append(icon('flag'), ' ' + (p ? p.name : 'Priorité'));
     if (p && p.color) {
       prioBtn.style.background = p.color;
       prioBtn.style.borderColor = p.color;
@@ -4278,17 +4456,110 @@ form.addEventListener('submit', async (e) => {
     category_id: form.elements.category_id.value ? Number(form.elements.category_id.value) : null,
   };
   const id = form.elements.id.value;
-  if (id) {
-    await api(`/api/links/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-  } else {
-    await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
-  }
-  dialog.close();
-  await loadAll();
+  const _sb = form.querySelector('button[type="submit"]');
+  if (_sb) { _sb.disabled = true; _sb.style.opacity = '0.6'; }
+  try {
+    if (id) {
+      await api(`/api/links/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+    } else {
+      await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
+    }
+    dialog.close();
+    await loadAll();
+  } finally { if (_sb) { _sb.disabled = false; _sb.style.opacity = ''; } }
 });
 
 document.getElementById('cancel').addEventListener('click', () => dialog.close());
 document.getElementById('add-link').addEventListener('click', () => openDialog());
+
+// Thème clair / sombre (tokens surchargés sous [data-theme=light], persistant)
+const themeBtn = document.getElementById('theme-btn');
+function setTheme(t) {
+  const light = t === 'light';
+  if (light) document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (e) {}
+  const u = themeBtn && themeBtn.querySelector('use');
+  if (u) u.setAttribute('href', light ? '#ic-sun' : '#ic-moon');
+}
+setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
+if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
+
+/* ---- barre latérale : eye (montre/cache tout) + hamburger (rail icônes) ----
+   GSAP optionnel : dégrade en bascule de classe instantanée si absent ou reduced-motion.
+   Sidebar n'est PAS un <dialog> → animer son transform/width est sûr (cf. invariant 8). */
+(function () {
+  const sb = document.getElementById('sidebar');
+  const eyeBtn = document.getElementById('sidebar-eye-btn');
+  const railBtn = document.getElementById('sidebar-rail-btn');
+  if (!sb || !eyeBtn || !railBtn) return;
+  const g = window.gsap;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const mobile = () => window.matchMedia('(max-width: 900px)').matches;
+  const anim = (a) => g && a && !reduce && !mobile();
+  const save = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) {} };
+  const load = (k) => { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
+
+  let hidden = load('sbHidden');
+  let rail = load('sbRail');
+
+  function syncBtns() {
+    eyeBtn.classList.toggle('toggle-on', hidden);
+    eyeBtn.querySelector('use').setAttribute('href', hidden ? '#ic-eye-off' : '#ic-eye');
+    railBtn.classList.toggle('toggle-on', rail);
+    railBtn.setAttribute('aria-expanded', String(!rail));
+  }
+
+  // EYE : back.in en sortie, back.out à l'entrée
+  function setHidden(next, animate) {
+    hidden = next; save('sbHidden', next); syncBtns();
+    if (next) {
+      if (anim(animate)) {
+        g.to(sb, { width: 0, paddingLeft: 0, paddingRight: 0, autoAlpha: 0, x: -24,
+          duration: 0.32, ease: 'back.in(1.4)', overwrite: true,
+          onComplete: () => sb.classList.add('sb-hidden') });
+      } else { sb.classList.add('sb-hidden'); }
+    } else {
+      sb.classList.remove('sb-hidden');
+      if (anim(animate)) {
+        g.killTweensOf(sb);
+        g.set(sb, { clearProps: 'width,paddingLeft,paddingRight,opacity,visibility,transform' });
+        g.from(sb, { width: 0, paddingLeft: 0, paddingRight: 0, autoAlpha: 0, x: -24,
+          duration: 0.4, ease: 'back.out(1.4)', overwrite: true,
+          clearProps: 'width,paddingLeft,paddingRight,transform,opacity,visibility' });
+      }
+    }
+  }
+
+  // HAMBURGER : labels glissent à gauche (back.in) puis reviennent (back.out)
+  function setRail(next, animate) {
+    rail = next; save('sbRail', next);
+    if (next) {
+      const labels = sb.querySelectorAll('.cat-label, .count');
+      if (anim(animate) && labels.length) {
+        g.to(labels, { x: -16, autoAlpha: 0, duration: 0.22, ease: 'back.in(2)',
+          stagger: 0.015, overwrite: true,
+          onComplete: () => { sb.classList.add('sb-rail'); g.set(labels, { clearProps: 'all' }); syncBtns(); } });
+      } else { sb.classList.add('sb-rail'); syncBtns(); }
+    } else {
+      sb.classList.remove('sb-rail'); syncBtns();
+      const labels = sb.querySelectorAll('.cat-label, .count');
+      if (anim(animate) && labels.length) {
+        g.from(labels, { x: -16, autoAlpha: 0, duration: 0.3, ease: 'back.out(1.7)',
+          stagger: 0.02, overwrite: true, clearProps: 'transform,opacity,visibility' });
+      }
+    }
+  }
+
+  eyeBtn.addEventListener('click', () => setHidden(!hidden, true));
+  railBtn.addEventListener('click', () => setRail(!rail, true));
+
+  if (!mobile()) {
+    if (hidden) setHidden(true, false);
+    if (rail) setRail(true, false);
+  }
+  syncBtns();
+})();
 
 /* ------------------------------------------------ settings */
 
@@ -4328,7 +4599,7 @@ document.getElementById('backup-now').addEventListener('click', async () => {
   await notify('Sauvegarde créée : ' + r.created.join(' + '), { title: '💾 Sauvegarde' });
 });
 document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
-document.getElementById('refresh-status').addEventListener('click', loadStatus);
+document.getElementById('refresh-status').addEventListener('click', async () => { await loadStatus(); announce('Statuts des services mis à jour.'); });
 
 const tzSelect = document.getElementById('tz-select');
 TZ_CHOICES.forEach(([v, label]) => tzSelect.appendChild(el('option', { attrs: { value: v }, text: label })));
@@ -4362,7 +4633,7 @@ function renderCatManage() {
     row.appendChild(colorIn);
     row.appendChild(el('span', { class: 'grow', text: `${cat.name} (${cat.link_count})` }));
     row.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      icon: 'pencil', attrs: { title: 'Modifier (nom + couleur)' },
       on: { click: () => openCreateDialog('category', cat) },
     }));
     row.appendChild(el('button', {
@@ -4399,7 +4670,7 @@ function renderProjManage() {
     row.appendChild(colorIn);
     row.appendChild(el('span', { class: 'grow', text: `${proj.name} (${proj.memo_count})` }));
     row.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      icon: 'pencil', attrs: { title: 'Modifier (nom + couleur)' },
       on: { click: () => openCreateDialog('project', proj) },
     }));
     row.appendChild(el('button', {
@@ -4436,7 +4707,7 @@ function renderPrioManage() {
     row.appendChild(colorIn);
     row.appendChild(el('span', { class: 'grow', text: `${prio.name} (${prio.memo_count} mémo${prio.memo_count > 1 ? 's' : ''})` }));
     row.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      icon: 'pencil', attrs: { title: 'Modifier (nom + couleur)' },
       on: { click: () => openCreateDialog('priority', prio) },
     }));
     row.appendChild(el('button', {
@@ -4473,6 +4744,7 @@ document.getElementById('import-btn').addEventListener('click', () => importFile
 importFile.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  const _ib = document.getElementById('import-btn'); if (_ib) { _ib.disabled = true; _ib.style.opacity = '0.6'; }
   try {
     const text = await file.text();
     const data = JSON.parse(text);
@@ -4498,6 +4770,7 @@ importFile.addEventListener('change', async (e) => {
     await notify("Erreur d'import : " + err.message, { error: true });
   } finally {
     e.target.value = '';
+    if (_ib) { _ib.disabled = false; _ib.style.opacity = ''; }
   }
 });
 
