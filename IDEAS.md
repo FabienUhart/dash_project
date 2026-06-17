@@ -10,7 +10,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Favicons automatiques (serveur via URL locale, fallback DuckDuckGo puis lettre)
 - [x] Horloge + météo Bayonne (open-meteo)
 - [x] Drag & drop pour réorganiser liens et mémos
-- [x] Paramètres : export/import JSON v14 (liens, catégories, projets, priorités, mémos, historique, commentaires)
+- [x] Paramètres : export/import JSON v15 (liens, catégories, projets, priorités, mémos, historique, commentaires avec priorité/réponses)
 - [x] Responsive mobile : catégories en puces horizontales, mémos repliables
 - [x] Vue Mémos façon Planify : tuiles de filtres, sections par échéance, sous-tâches, projets colorés avec Inbox
 - [x] Tags `#` reliant liens, mémos et projets
@@ -29,7 +29,14 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Géolocalisation mémos/projets : GPS + adresses (Nominatim, labels courts), carte Leaflet multi-points avec liste des points cliquable
 - [x] Titres sur les mémos (mémo valide avec titre seul) + descriptions sur les projets
 - [x] Assignés multiples @nom (saisie libre, même non-invités, suggestions) — owner et invités
-- [x] Commentaires signés sous les mémos (💬, invités inclus, comptés dans la cloche 🔔, export v14)
+- [x] Commentaires signés sous les mémos (💬, invités inclus, comptés dans la cloche 🔔)
+- [x] Refonte visuelle + animations GSAP (cards/tuiles/intro ; pop-ins en CSS pour rester en top-layer) + favicon
+- [x] Mentions `@` dans l'éditeur ET les commentaires (autocomplete, ajout aux assignés) ; signal ambre ⚠ si la personne n'a pas accès au partage
+- [x] Corbeille : suppression douce des mémos (restaurable 7 j, purge auto), côté propriétaire et invités
+- [x] Dupliquer un mémo ; menu ⋯ (Supprimer/Dupliquer) dans la pop-in d'édition
+- [x] QR code des liens de partage (SVG, lib `qrcode`) + récap, et ouverture d'un projet à un invité existant depuis 🔗 Partages
+- [x] Commentaires v2 : réponses imbriquées, priorité P1/P2/P3, accusés de lecture « 👁 vu par … » (export v15)
+- [x] Carte alignée sur la liste filtrée (recherche/filtre) — fini les points fantômes
 
 ## Quick wins
 

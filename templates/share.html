@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>Partage — Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="/share/assets/favicon.svg">
 <link rel="stylesheet" href="/share/assets/quill.snow.css">
 <script src="/share/assets/quill.min.js" defer></script>
 <link rel="stylesheet" href="/share/assets/leaflet.css">
@@ -313,6 +314,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .mention-menu { position: fixed; z-index: 10000; min-width: 11rem; max-height: 13rem; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; }
 .mention-item { padding: 0.32rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text); white-space: nowrap; }
 .mention-item.active { background: var(--accent); color: #fff; }
+.assignee-chip.noaccess { color: #ffb74d; border-color: rgba(255,183,77,0.45); }
+.mention.noaccess { color: #ffb74d; background: rgba(255,183,77,0.16); }
 .q-people { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
 .assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: #80cbc4; }
 .ql-snow .ql-stroke { stroke: var(--muted); }
@@ -390,6 +393,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 
 <dialog id="edit-dialog">
   <h3>✏️ Modifier le mémo</h3>
+  <input id="q-title" type="text" placeholder="🏷 Titre (optionnel)" maxlength="200" autocomplete="off"
+         style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem;box-sizing:border-box">
   <div id="q-wrap"><div id="q-editor"></div></div>
   <div id="q-people" class="q-people"></div>
   <div class="dlg-actions">
@@ -629,6 +634,111 @@ function shareSuggestions() {
   return [...names].filter(Boolean);
 }
 
+// Accès : une personne assignée voit-elle ce partage ? (sinon affichage ambre)
+const NO_ACCESS_TIP = "N'a pas accès à ce partage — ne verra pas ce mémo.";
+function shareNoAccess(name) {
+  const members = new Set((DATA.members || []).map(n => (n || '').toLowerCase().trim()));
+  return !members.has((name || '').toLowerCase().trim());
+}
+
+const COMMENT_PRIO_COL = { 1: '#ff5252', 2: '#ffb74d', 3: '#66bb6a' };
+const seenMarked = new Set();
+
+function markMemoSeen(memoId) {
+  if (seenMarked.has(memoId)) return;
+  seenMarked.add(memoId);
+  fetch(API + '/memo/' + memoId + '/seen', { method: 'POST', headers: { 'X-Guest-Token': guestToken() } }).catch(() => {});
+}
+
+// Autocomplete @ sur un <input> simple (réutilise .mention-menu).
+function attachInputMention(input, getNames) {
+  const menu = document.createElement('div');
+  menu.className = 'mention-menu';
+  menu.style.display = 'none';
+  (input.closest('dialog') || document.body).appendChild(menu);
+  let open = false, items = [], active = 0, qstart = -1;
+  const close = () => { open = false; menu.style.display = 'none'; };
+  const draw = () => {
+    menu.innerHTML = '';
+    items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'mention-item' + (i === active ? ' active' : '');
+      row.textContent = it.add ? ('➕ Ajouter « ' + it.value + ' »') : ('@' + it.value);
+      row.addEventListener('mousedown', (e) => { e.preventDefault(); pick(i); });
+      menu.appendChild(row);
+    });
+  };
+  const place = () => {
+    const r = input.getBoundingClientRect();
+    menu.style.left = Math.round(r.left) + 'px';
+    menu.style.top = Math.round(r.bottom + 4) + 'px';
+    menu.style.minWidth = Math.round(r.width) + 'px';
+  };
+  const pick = (i) => {
+    const it = items[i]; if (!it) { close(); return; }
+    const name = String(it.value).trim(); if (!name) { close(); return; }
+    const val = input.value, pos = input.selectionStart;
+    input.value = val.slice(0, qstart) + '@' + name + ' ' + val.slice(pos);
+    const np = qstart + name.length + 2;
+    input.setSelectionRange(np, np);
+    close(); input.focus();
+  };
+  const detect = () => {
+    const before = input.value.slice(0, input.selectionStart);
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(before);
+    if (!m) { close(); return; }
+    qstart = input.selectionStart - m[1].length - 1;
+    const q = m[1].toLowerCase();
+    const all = (getNames() || []).filter(Boolean);
+    const list = all.filter(n => n.toLowerCase().includes(q)).map(v => ({ value: v }));
+    if (m[1] && !all.some(n => n.toLowerCase() === q)) list.push({ value: m[1], add: true });
+    items = list;
+    if (!items.length) { close(); return; }
+    if (active >= items.length) active = 0;
+    draw(); place(); menu.style.display = 'block'; open = true;
+  };
+  input.addEventListener('input', detect);
+  input.addEventListener('keydown', (e) => {
+    if (!open || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); active = (active + 1) % items.length; draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); active = (active - 1 + items.length) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); pick(active); }
+    else if (e.key === 'Escape') { e.stopImmediatePropagation(); close(); }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+}
+
+// Champ commentaire invité (avec priorité + mention + parent éventuel).
+function shareCommentInput(memo, parentId) {
+  const row = el('div', '');
+  row.style.cssText = 'display:flex;gap:0.35rem;margin-top:0.3rem';
+  const prioSel = document.createElement('select');
+  prioSel.title = 'Priorité du commentaire';
+  prioSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.76rem;padding:0.2rem';
+  [['0', '⚑ —'], ['1', 'P1'], ['2', 'P2'], ['3', 'P3']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; prioSel.appendChild(o); });
+  const ci = document.createElement('input');
+  ci.type = 'text';
+  ci.placeholder = parentId ? '↩ Répondre… (Entrée)' : '💬 Commenter… (Entrée, @ pour mentionner)';
+  ci.maxLength = 2000;
+  ci.style.cssText = 'flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.3rem 0.5rem';
+  attachInputMention(ci, () => shareSuggestions());
+  ci.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || !ci.value.trim()) return;
+    e.preventDefault();
+    const body = { body: ci.value.trim(), priority: parseInt(prioSel.value, 10) || 0 };
+    if (parentId) body.parent_id = parentId;
+    const r = await fetch(API + '/memo/' + memo.id + '/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) await load(); else alert('Commentaire refusé.');
+  });
+  row.appendChild(prioSel);
+  row.appendChild(ci);
+  return row;
+}
+
 function renderQPeople() {
   const wrap = document.getElementById('q-people');
   if (!wrap) return;
@@ -636,7 +746,9 @@ function renderQPeople() {
   const ic = el('span', null, '👤'); ic.title = 'Personnes rattachées à ce mémo';
   wrap.appendChild(ic);
   editAssignees.forEach(a => {
-    const chip = el('span', 'assignee-chip', '@' + a + ' ');
+    const noAcc = shareNoAccess(a);
+    const chip = el('span', 'assignee-chip' + (noAcc ? ' noaccess' : ''), (noAcc ? '⚠ @' : '@') + a + ' ');
+    if (noAcc) chip.title = NO_ACCESS_TIP;
     const x = el('button', null, '×');
     x.type = 'button';
     x.title = 'Retirer ' + a;
@@ -717,6 +829,8 @@ function openEditor(memo, contentEl, taskEl) {
     return;
   }
   editingId = memo.id;
+  const titleEl = document.getElementById('q-title');
+  if (titleEl) titleEl.value = memo.title || '';
   editAssignees = [...(memo.assignees || [])];
   renderQPeople();
   q.setContents([]);
@@ -731,10 +845,12 @@ document.getElementById('edit-save').addEventListener('click', async () => {
   const q = getShareQuill();
   if (!q || editingId == null) return;
   const text = q.getText().trim();
-  if (!text) { alert('Le mémo ne peut pas être vide.'); return; }
+  const titleEl = document.getElementById('q-title');
+  const title = titleEl ? titleEl.value.trim() : '';
+  if (!text && !title) return; // titre OU contenu requis
   const html = q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ');
   editDialog.close();
-  await put(editingId, { content: html, assignees: editAssignees });
+  await put(editingId, { content: html, assignees: editAssignees, title: title });
   editingId = null;
 });
 
@@ -996,6 +1112,47 @@ function renderTiles() {
     tile.addEventListener('click', openShareMap);
     tiles.appendChild(tile);
   }
+  const tn = (DATA.trash || []).length;
+  if (DATA.can_edit && tn > 0) {
+    const tile = el('div', 'tile' + (FILTER === 'trash' ? ' active' : ''));
+    tile.appendChild(el('span', 'tn', String(tn)));
+    const l = el('span', 'tl', '🗑 Corbeille');
+    l.style.color = '#ff8a80';
+    tile.appendChild(l);
+    tile.addEventListener('click', () => { FILTER = 'trash'; render(); });
+    tiles.appendChild(tile);
+  }
+}
+
+function renderShareTrash(list) {
+  const items = DATA.trash || [];
+  if (!items.length) { list.appendChild(el('div', 'empty', 'Corbeille vide. 🎉')); return; }
+  items.forEach(m => {
+    const row = el('div', 'task');
+    row.style.cssText = 'display:flex;align-items:center;gap:0.6rem';
+    const main = el('div');
+    main.style.cssText = 'flex:1;min-width:0';
+    const label = m.title || (m.content || '').replace(/<[^>]+>/g, ' ').trim().slice(0, 90) || '(mémo vide)';
+    main.appendChild(el('div', null, (m.emoji ? m.emoji + ' ' : '') + label));
+    let when = '';
+    if (m.deleted_at) {
+      const d = new Date(m.deleted_at);
+      if (!isNaN(d.getTime())) when = 'Supprimé le ' + d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    }
+    const meta = el('div', null, when);
+    meta.style.cssText = 'color:var(--muted);font-size:0.78rem;margin-top:0.15rem';
+    main.appendChild(meta);
+    row.appendChild(main);
+    const rb = document.createElement('button');
+    rb.className = 'tool-btn';
+    rb.textContent = '↩ Restaurer';
+    rb.addEventListener('click', async () => {
+      const r = await fetch(API + '/memo/' + m.id + '/restore', { method: 'POST', headers: { 'X-Guest-Token': guestToken() } });
+      if (r.ok) await load(); else alert('Restauration impossible.');
+    });
+    row.appendChild(rb);
+    list.appendChild(row);
+  });
 }
 
 function visibleShareMemos() {
@@ -1052,6 +1209,7 @@ function render() {
 
   const list = document.getElementById('list');
   list.innerHTML = '';
+  if (FILTER === 'trash') { renderShareTrash(list); return; }
   const visible = visibleShareMemos();
   if (!visible.length) {
     list.appendChild(el('div', 'empty', 'Rien dans cette vue. 🎉'));
@@ -1093,6 +1251,9 @@ function render() {
     }
     if (isRich(memo.content)) content.appendChild(sanitize(memo.content));
     else content.appendChild(linkifyText(memo.content));
+    content.querySelectorAll('.mention[data-mention]').forEach(sp => {
+      if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
+    });
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
       if (!canEditNow()) return;
       li.classList.add('cl-edit');
@@ -1118,9 +1279,10 @@ function render() {
       row.appendChild(la);
     }
     (memo.assignees || []).forEach(a => {
-      const ab = el('span', 'badge', '@' + a.replace(/@.*$/, ''));
-      ab.title = 'Assigné à ' + a;
-      ab.style.color = '#80cbc4';
+      const noAcc = shareNoAccess(a);
+      const ab = el('span', 'badge', (noAcc ? '⚠ @' : '@') + a.replace(/@.*$/, ''));
+      ab.title = noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a);
+      ab.style.color = noAcc ? '#ffb74d' : '#80cbc4';
       row.appendChild(ab);
     });
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
@@ -1177,9 +1339,15 @@ function render() {
     if ((memo.comments || []).length || canEditNow()) {
       const cwrap = el('div', '');
       cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
-      (memo.comments || []).forEach(c => {
+      const comments = memo.comments || [];
+      const renderC = (c, isReply) => {
         const r = el('div', '');
-        r.style.cssText = 'display:flex;gap:0.5rem;align-items:flex-start;font-size:0.82rem;padding:0.3rem 0.5rem;background:var(--bg);border-radius:6px;margin-top:0.3rem';
+        r.style.cssText = 'display:flex;gap:0.5rem;align-items:flex-start;font-size:0.82rem;padding:0.3rem 0.5rem;background:var(--bg);border-radius:6px;margin-top:0.3rem' + (isReply ? ';margin-left:1.5rem;border-left:2px solid var(--border)' : '');
+        if (c.priority) {
+          const pp = el('span', '', 'P' + c.priority);
+          pp.style.cssText = 'flex-shrink:0;font-size:0.66rem;font-weight:700;color:#10141a;border-radius:4px;padding:0 0.3rem;line-height:1.5;background:' + (COMMENT_PRIO_COL[c.priority] || 'var(--muted)');
+          r.appendChild(pp);
+        }
         const author = (c.author || '').replace(/\s*<[^>]*>/, '');
         const a = el('span', '', author);
         a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:#b39ddb' : '');
@@ -1192,28 +1360,37 @@ function render() {
         w.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0';
         w.title = new Date(c.created_at).toLocaleString('fr-FR');
         r.appendChild(w);
-        cwrap.appendChild(r);
-      });
-      if (canEditNow()) {
-        const ci = document.createElement('input');
-        ci.type = 'text';
-        ci.placeholder = '💬 Commenter… (Entrée)';
-        ci.maxLength = 2000;
-        ci.style.cssText = 'width:100%;margin-top:0.3rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.3rem 0.5rem';
-        ci.addEventListener('keydown', async (e) => {
-          if (e.key !== 'Enter' || !ci.value.trim()) return;
-          e.preventDefault();
-          const r = await fetch(API + '/memo/' + memo.id + '/comments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
-            body: JSON.stringify({ body: ci.value.trim() }),
+        const self = (GUEST && (GUEST.name || GUEST.email)) || '';
+        const others = (c.seen || []).filter(v => v && v !== author && v !== self);
+        if (others.length) {
+          const s = el('span', '', '👁 ' + others.join(', '));
+          s.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0;white-space:nowrap';
+          s.title = 'Vu par ' + others.join(', ');
+          r.appendChild(s);
+        }
+        if (!isReply && canEditNow()) {
+          const rep = el('span', '', '↩');
+          rep.style.cssText = 'cursor:pointer;color:var(--muted);flex-shrink:0';
+          rep.title = 'Répondre';
+          rep.addEventListener('click', () => {
+            if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
+            const rb = shareCommentInput(memo, c.id);
+            rb.classList.add('reply-box');
+            rb.style.marginLeft = '1.5rem';
+            r.after(rb);
+            rb.querySelector('input').focus();
           });
-          if (r.ok) await load();
-          else alert('Commentaire refusé.');
-        });
-        cwrap.appendChild(ci);
-      }
+          r.appendChild(rep);
+        }
+        cwrap.appendChild(r);
+      };
+      comments.filter(c => !c.parent_id).forEach(c => {
+        renderC(c, false);
+        comments.filter(ch => ch.parent_id === c.id).forEach(ch => renderC(ch, true));
+      });
+      if (canEditNow()) cwrap.appendChild(shareCommentInput(memo, null));
       t.appendChild(cwrap);
+      if (comments.length && canEditNow()) markMemoSeen(memo.id);
     }
 
     if ((memo.images || []).length) {
@@ -1401,6 +1578,18 @@ function render() {
       eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
       eBtn.addEventListener('click', () => openEditor(memo, content, t));
       tools.appendChild(eBtn);
+
+      const dBtn = document.createElement('button');
+      dBtn.className = 'tool-btn';
+      dBtn.textContent = '🗑';
+      dBtn.title = 'Mettre ce mémo à la corbeille (restaurable depuis la tuile 🗑)';
+      dBtn.addEventListener('click', async () => {
+        const r = await fetch(API + '/memo/' + memo.id, {
+          method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
+        });
+        if (r.ok) await load();
+      });
+      tools.appendChild(dBtn);
       t.appendChild(tools);
     }
     list.appendChild(t);
