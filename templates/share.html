@@ -245,6 +245,9 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   background: var(--accent); color: #001; border: none; border-radius: 6px;
   padding: 0.5rem 1rem; font: inherit; cursor: pointer;
 }
+#guest-form input.invalid { border-color: var(--danger); }
+#guest-error { flex-basis: 100%; margin: 0.2rem 0 0; color: var(--danger); font-size: 0.82rem; }
+#guest-error:empty { display: none; }
 #add-bar, #proj-bar { display: flex; gap: 0.5rem; margin: 1rem 0; }
 #proj-bar { margin-top: 0.4rem; }
 #add-bar[hidden], #proj-bar[hidden], #guest-banner[hidden], #tiles[hidden] { display: none; }
@@ -465,6 +468,14 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   </div>
 </dialog>
 
+<dialog id="notify-dialog">
+  <h3 id="notify-title">Info</h3>
+  <p id="notify-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
+  <div class="dlg-actions">
+    <button type="button" id="notify-ok" class="primary">OK</button>
+  </div>
+</dialog>
+
 <script>
 const TOKEN = location.pathname.split('/')[2];
 const API = '/share/' + TOKEN;
@@ -501,6 +512,12 @@ function renderGuestBanner() {
   const b = document.getElementById('guest-banner');
   b.hidden = !DATA.can_edit;
   if (!DATA.can_edit) return;
+  // Le formulaire de connexion invité est affiché tant que l'invité n'est ni
+  // approuvé, ni en attente, ni refusé. S'il est déjà à l'écran, NE PAS le
+  // reconstruire : le refresh auto (setInterval 15s → load → ici) effacerait
+  // ce que l'invité est en train de taper (prénom / e-mail / code).
+  const anonymous = !['approved', 'pending', 'rejected'].includes(GUEST.status);
+  if (anonymous && document.getElementById('guest-form')) return;
   b.innerHTML = '';
   b.className = '';
   if (GUEST.status === 'approved') {
@@ -534,10 +551,20 @@ function renderGuestBanner() {
   pinIn.style.cssText = 'flex:0 0 5.5rem;min-width:5.5rem;text-align:center;letter-spacing:0.3em';
   const btn = document.createElement('button');
   btn.textContent = 'Se connecter';
-  btn.addEventListener('click', async () => {
+  const errEl = document.createElement('div');
+  errEl.id = 'guest-error';
+  errEl.setAttribute('role', 'alert');
+  const showErr = (msg, focusEl, markEl) => {
+    errEl.textContent = msg;
+    [nameIn, emailIn, pinIn].forEach(i => i.classList.remove('invalid'));
+    if (markEl) markEl.classList.add('invalid');
+    if (focusEl) focusEl.focus();
+  };
+  const submit = async () => {
     const email = emailIn.value.trim();
-    if (!email || !email.includes('@')) { emailIn.focus(); return; }
-    if (!/^\d{4}$/.test(pinIn.value.trim())) { pinIn.focus(); return; }
+    if (!email || !email.includes('@')) { showErr('E-mail invalide.', emailIn, emailIn); return; }
+    if (!/^\d{4}$/.test(pinIn.value.trim())) { showErr('Le code est composé de 4 chiffres.', pinIn, pinIn); return; }
+    errEl.textContent = '';
     const r = await fetch(API + '/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -551,13 +578,18 @@ function renderGuestBanner() {
       await load();
     } else {
       const err = await r.json().catch(() => ({}));
-      alert(err.error || 'Connexion impossible');
+      // On NE vide PAS prénom/e-mail : seul le code est remis à zéro et refocus.
+      pinIn.value = '';
+      showErr(err.error || 'Connexion impossible.', pinIn, pinIn);
     }
-  });
+  };
+  btn.addEventListener('click', submit);
+  [nameIn, emailIn, pinIn].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); }));
   form.appendChild(nameIn);
   form.appendChild(emailIn);
   form.appendChild(pinIn);
   form.appendChild(btn);
+  form.appendChild(errEl);
   b.appendChild(form);
 }
 
@@ -566,6 +598,21 @@ function el(tag, cls, text) {
   if (cls) e.className = cls;
   if (text != null) e.textContent = text;
   return e;
+}
+
+// Remplace les alert() natifs par une pop-in (cohérent avec le reste de l'app).
+function notify(message, { title = 'ℹ️ Info', error = false } = {}) {
+  if (typeof announce === 'function') announce(message);
+  return new Promise(resolve => {
+    const dlg = document.getElementById('notify-dialog');
+    document.getElementById('notify-title').textContent = error ? '⚠️ Erreur' : title;
+    document.getElementById('notify-msg').textContent = message;
+    const ok = document.getElementById('notify-ok');
+    const done = () => { dlg.close(); ok.onclick = dlg.oncancel = null; resolve(); };
+    ok.onclick = done;
+    dlg.oncancel = (e) => { e.preventDefault(); done(); };
+    dlg.showModal();
+  });
 }
 
 function shareIcon(name) {
@@ -838,7 +885,7 @@ function shareCommentInput(memo, parentId) {
       headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
       body: JSON.stringify(body),
     });
-    if (r.ok) await load(); else alert('Commentaire refusé.');
+    if (r.ok) await load(); else notify('Commentaire refusé.', { error: true });
   });
   row.appendChild(prioSel);
   row.appendChild(ci);
@@ -1004,7 +1051,7 @@ async function guestPut(url, body) {
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
-    if (err.error) alert(err.error);
+    if (err.error) notify(err.error, { error: true });
   }
   await load();
 }
@@ -1125,7 +1172,7 @@ let activeMap = null;
 document.getElementById('map-close').addEventListener('click', () => document.getElementById('map-dialog').close());
 
 function openShareMap() {
-  if (typeof L === 'undefined') { alert('Carte indisponible (fichiers Leaflet manquants).'); return; }
+  if (typeof L === 'undefined') { notify('Carte indisponible (fichiers Leaflet manquants).', { error: true }); return; }
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
   const points = [];
   scopedMemos().forEach(m => {
@@ -1142,7 +1189,7 @@ function openShareMap() {
       points.push({ lat: p.location.lat, lng: p.location.lng, title: '📁 ' + p.name, sub: p.location.label || '', color: p.color || '#81c784' });
     }
   });
-  if (!points.length) { alert('Aucun point géolocalisé dans cette vue.'); return; }
+  if (!points.length) { notify('Aucun point géolocalisé dans cette vue.'); return; }
   const dlg = document.getElementById('map-dialog');
   document.getElementById('map-title').textContent = '🗺 ' + DATA.title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
   dlg.showModal();
@@ -1261,7 +1308,7 @@ function renderShareTrash(list) {
     rb.textContent = '↩ Restaurer';
     rb.addEventListener('click', async () => {
       const r = await fetch(API + '/memo/' + m.id + '/restore', { method: 'POST', headers: { 'X-Guest-Token': guestToken() } });
-      if (r.ok) await load(); else alert('Restauration impossible.');
+      if (r.ok) await load(); else notify('Restauration impossible.', { error: true });
     });
     row.appendChild(rb);
     list.appendChild(row);
@@ -1581,7 +1628,7 @@ function render() {
           });
           if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            alert('Image refusée : ' + (err.error || r.statusText));
+            notify('Image refusée : ' + (err.error || r.statusText), { error: true });
           }
         }
         await load();
@@ -1614,10 +1661,10 @@ function render() {
       locBtn.title = memo.location ? 'Retirer la position' : 'Attacher ma position GPS à ce mémo';
       locBtn.addEventListener('click', () => {
         if (memo.location) { put(memo.id, { location: null }); return; }
-        if (!navigator.geolocation) { alert('Géolocalisation non disponible.'); return; }
+        if (!navigator.geolocation) { notify('Géolocalisation non disponible.', { error: true }); return; }
         navigator.geolocation.getCurrentPosition(
           (pos) => put(memo.id, { location: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
-          () => alert('Position refusée ou indisponible.'),
+          () => notify('Position refusée ou indisponible.', { error: true }),
           { enableHighAccuracy: true, timeout: 10000 }
         );
       });
@@ -1635,7 +1682,7 @@ function render() {
         if (q.length < 3) return;
         const r = await fetch(API + '/geocode?q=' + encodeURIComponent(q), { headers: { 'X-Guest-Token': guestToken() } });
         const data = r.ok ? await r.json() : { results: [] };
-        if (!data.results.length) { alert('Adresse introuvable : « ' + q + ' »'); return; }
+        if (!data.results.length) { notify('Adresse introuvable : « ' + q + ' »'); return; }
         const best = data.results[0];
         await put(memo.id, { location: best });
       });
@@ -1755,7 +1802,7 @@ async function addSubProject() {
   if (r.ok) { projInput.value = ''; await load(); }
   else {
     const err = await r.json().catch(() => ({}));
-    alert(err.error || 'Création impossible');
+    notify(err.error || 'Création impossible', { error: true });
   }
 }
 projInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addSubProject(); });

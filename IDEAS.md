@@ -37,6 +37,10 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] QR code des liens de partage (SVG, lib `qrcode`) + récap, et ouverture d'un projet à un invité existant depuis 🔗 Partages
 - [x] Commentaires v2 : réponses imbriquées, priorité P1/P2/P3, accusés de lecture « 👁 vu par … » (export v15)
 - [x] Carte alignée sur la liste filtrée (recherche/filtre) — fini les points fantômes
+- [x] Thème clair / sombre (bascule 🌙/☀️ dans le header, mémorisé, anti-FOUC, dashboard + page partagée)
+- [x] Sidebar repliable : 👁 masquer entièrement / ☰ replier en rail d'icônes 64px (états mémorisés, animations GSAP)
+- [x] Pop-ins maison partout (plus aucun `alert`/`confirm`/`prompt` natif, y compris page partagée)
+- [x] Fix formulaire d'accès invité : la saisie ne s'efface plus au refresh ; mauvais PIN = erreur inline sans tout retaper
 
 ## Quick wins
 
@@ -51,7 +55,8 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - **Historique de disponibilité** : stocker les résultats du status check (table `status_history`) et afficher un mini sparkline uptime sur chaque card. Le Zimaboard devient aussi un mini-monitoring.
 - **Épingler des liens** : section "Favoris" en haut, toujours visible quelles que soient les catégories.
 - **Notifications par e-mail** : envoyer un mail (via la messagerie auto-hébergée) quand un invité modifie un partage — résumé quotidien ou immédiat.
-- **Thèmes** : 2-3 palettes (sombre actuel, clair, AMOLED noir) en paramètre.
+- **Thèmes** : clair/sombre faits ; reste une palette **AMOLED noir** (et éventuellement le suivi auto du thème système via `prefers-color-scheme`).
+- **Vue graphe / constellation des tags** : un force-directed graph (lib `force-graph` de vasturiano, 2D canvas, à auto-héberger dans `static/` — invariant 6) montrant les liens ↔ mémos ↔ projets reliés par leurs `#tags` communs (et éventuellement les assignés). Clic sur un nœud = ouvrir/filtrer. À scoper comme **explorateur de relations** (surtout les tags, qui sont du many-to-many), pas comme un dump générique du graphe — l'arbre de projets se lit déjà en arbre. Voir discussion : utile si ciblé sur les tags.
 
 ## Plus ambitieux
 
@@ -59,4 +64,6 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - **Audios sur les mémos** : bouton 🎤 (MediaRecorder), upload validé par signature comme les images, lecteur sur la card. Sans transcription (Zimaboard trop léger pour Whisper) — pièce jointe vocale simple.
 - **Widgets de services** : pour certains services connus, afficher une info en plus du statut (espace disque du NAS, nombre de téléchargements en cours, capteurs Home Assistant via leurs APIs).
 - **Multi-profils** : page d'accueil différente par navigateur/contexte (perso / boulot) via un paramètre `?profile=`.
+- **Espace multi-utilisateur (via Authelia)** : de vrais comptes, chacun son dashboard, **sans casser l'invariant 5 (pas d'auth dans l'app)** — l'app lirait le header `Remote-User` qu'Authelia transmet déjà pour scoper les données. Implique de scoper **chaque** table par `owner_id` (liens, catégories, mémos, projets, priorités, shares…), de porter le scope dans l'export/import, et de le faire respecter partout. Gros chantier qui change la nature du produit (de « mon dashboard partagé » à « N dashboards ») — à ne lancer que s'il y a réellement plusieurs utilisateurs indépendants à servir ; sinon le système de partage/invités couvre déjà la collaboration.
+- **Notifications push (PWA)** : en complément des notifs e-mail. Léger pour le Zimaboard (POST HTTPS vers le service push d'Apple/Google via `pywebpush`/VAPID, pas de connexion persistante). ⚠️ sur iPhone, push uniquement si le PWA est installé sur l'écran d'accueil (iOS 16.4+), et possible restriction UE (DMA) — à tester sur l'appareil avant de s'y fier ; les notifs e-mail restent le repli universel.
 - **Backup automatique planifié** : un cron dans le conteneur qui poste l'export JSON quotidien dans un dossier `data/backups/` avec rotation (7 jours), pour ne plus dépendre de l'export manuel.
