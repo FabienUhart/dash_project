@@ -1332,6 +1332,17 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 <dialog id="settings-dialog">
   <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-settings"/></svg>Paramètres</h3>
   <div class="settings-section">
+    <h4>IDENTITÉ</h4>
+    <div class="settings-row">
+      <input type="text" id="owner-name-input" maxlength="40" placeholder="Ton nom" autocomplete="off"
+             style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.45rem 0.6rem">
+      <button id="owner-name-save" class="primary">Enregistrer</button>
+    </div>
+    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+      Le nom sous lequel tu apparais dans les mentions <code>@</code>, les assignations et les accusés de lecture (« 👁 vu par… »).
+    </p>
+  </div>
+  <div class="settings-section">
     <h4>SAUVEGARDE</h4>
     <div class="settings-row">
       <button id="export-btn" title="Télécharge liens, catégories et mémos en JSON">⬇ Export JSON</button>
@@ -1422,6 +1433,7 @@ const state = {
   memoFilter: 'all',
   memoProject: 'all',
   searchScope: 'all',
+  ownerName: 'Fabien',
 };
 
 function parseSearch() {
@@ -1544,6 +1556,7 @@ async function loadAll() {
       && !state.projects.some(p => p.id === state.memoProject)) {
     state.memoProject = 'all';
   }
+  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; } catch (e) {}
   renderAll();
   if (state.view === 'links') loadStatus();
 }
@@ -2702,6 +2715,29 @@ async function renderShares() {
     const dispName = (accs.find(a => a.name) || {}).name || email;
     head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: dispName + (dispName !== email ? ' — ' + email : '') }));
     head.appendChild(el('span', { class: 'rev-meta', text: accs.length + ' accès' }));
+    head.appendChild(el('button', {
+      class: 'btn-soft', icon: 'pencil',
+      attrs: { title: 'Renommer cet invité (s\'applique à tous ses accès)' },
+      on: { click: () => {
+        const inp = el('input', { attrs: { type: 'text', value: (accs.find(a => a.name) || {}).name || '', placeholder: 'Nom de l\'invité', maxlength: '60',
+          style: 'flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.35rem 0.55rem' } });
+        const editRow = el('div', { class: 'share-row' });
+        const save = async () => {
+          const name = inp.value.trim();
+          if (!name) { inp.focus(); return; }
+          await api('/api/guests/rename', { method: 'POST', body: JSON.stringify({ email, name }) });
+          await loadAll();
+          rerender();
+          notify('Invité renommé : ' + name + '.');
+        };
+        const okBtn = el('button', { class: 'btn-soft', text: '✓ Enregistrer', on: { click: save } });
+        const caBtn = el('button', { class: 'btn-soft', text: 'Annuler', on: { click: () => rerender() } });
+        editRow.append(inp, okBtn, caBtn);
+        head.replaceWith(editRow);
+        inp.focus();
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') rerender(); });
+      } },
+    }));
     card.appendChild(head);
     accs.forEach(g => {
       const row = el('div', { class: 'guest-row' });
@@ -3519,7 +3555,7 @@ function taskEl(memo) {
 }
 
 function assigneeSuggestions() {
-  const names = new Set(['Fabien']);
+  const names = new Set([state.ownerName || 'Fabien']);
   (state.shares || []).forEach(s => (s.guests || []).forEach(g => {
     if (g.status === 'approved') names.add(g.name || g.email);
   }));
@@ -3671,7 +3707,7 @@ function commentsBlockEl(memo) {
       r.appendChild(a);
       r.appendChild(el('span', { class: 'c-body', text: c.body }));
       r.appendChild(el('span', { class: 'c-when', text: fmtWhen(c.created_at) }));
-      const others = (c.seen || []).filter(v => v && v !== author && v !== 'Fabien');
+      const others = (c.seen || []).filter(v => v && v !== author && v !== (state.ownerName || 'Fabien'));
       if (others.length) r.appendChild(el('span', { class: 'c-seen', text: '👁 ' + others.join(', '), attrs: { title: 'Vu par ' + others.join(', ') } }));
       if (!isReply) r.appendChild(el('button', {
         text: '↩', attrs: { type: 'button', title: 'Répondre', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0' },
@@ -4622,11 +4658,24 @@ window.addEventListener('load', syncHeaderHeight);
 
 const settingsDialog = document.getElementById('settings-dialog');
 document.getElementById('settings-btn').addEventListener('click', () => {
+  document.getElementById('owner-name-input').value = state.ownerName || '';
   renderCatManage();
   renderProjManage();
   renderPrioManage();
   renderBackups();
   settingsDialog.showModal();
+});
+
+document.getElementById('owner-name-save').addEventListener('click', async (e) => {
+  const input = document.getElementById('owner-name-input');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return notify('Le nom ne peut pas être vide.', { error: true }); }
+  await withBusy(e.currentTarget, async () => {
+    const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ owner_name: name }) });
+    state.ownerName = (r && r.owner_name) || name;
+    renderAll();
+    notify('Nom enregistré : ' + state.ownerName + '.');
+  });
 });
 
 async function renderBackups() {

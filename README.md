@@ -28,7 +28,8 @@ UI : http://localhost:8099
 - **🗑 Corbeille** (sidebar) : supprimer un mémo ne l'efface pas — il part en corbeille, restaurable 7 jours puis purgé. Restaurer / supprimer définitivement / vider. La suppression et la duplication d'un mémo sont dans un **menu ⋯** en haut de la pop-in d'édition. De même, la suppression d'un **projet** est dans un menu ⋯ en haut de sa pop-in (le pied de page ne garde qu'Annuler / Enregistrer).
 - **Mentions `@`** : dans l'éditeur d'un mémo et dans les commentaires, taper `@` propose les personnes (toi + invités + noms déjà utilisés, saisie libre) et insère `@Nom` (qui est aussi ajouté aux assignés). Un assigné/mention sans accès au partage apparaît en **ambre ⚠**.
 - **Commentaires** : fil signé sous chaque mémo, avec **réponses** (↩), **priorité** P1/P2/P3 et **« 👁 vu par … »** (accusé de lecture auto à l'ouverture). Fonctionne aussi pour les invités sur la page partagée.
-- **🔗 Partages** : QR code (▦) de chaque lien/accès (pop-in avec récap cible/droits/PIN/personnes), et bouton pour **ouvrir un projet supplémentaire à un invité existant** (pré-approuvé, lien + PIN générés).
+- **🔗 Partages** : QR code (▦) de chaque lien/accès (pop-in avec récap cible/droits/PIN/personnes), bouton pour **ouvrir un projet supplémentaire à un invité existant** (pré-approuvé, lien + PIN générés), et bouton **✎** pour **renommer un invité** (édition inline, s'applique à tous ses accès ; n'affecte pas sa connexion).
+- **Identité** : dans ⚙ Paramètres → IDENTITÉ, le nom du propriétaire (par défaut « Fabien ») est modifiable — c'est le nom sous lequel tu apparais dans les mentions `@`, les assignations et les accusés de lecture.
 - **Favicon** : `static/favicon.svg` (tuile aux couleurs du dashboard).
 - **Header** : bouton 👁 pour **masquer entièrement la sidebar**, bouton ☰ pour la **replier en rail d'icônes** (64px) — les deux états sont indépendants et mémorisés (`localStorage` `sbHidden`/`sbRail`), animations GSAP backIn/backOut. Bouton 🌙/☀️ pour basculer le **thème clair / sombre** (mémorisé dans `localStorage` `theme`, appliqué avant le rendu pour éviter tout flash). Disponible aussi sur la page partagée.
 - **Pop-ins partout** : aucune boîte de dialogue native du navigateur (`alert`/`confirm`/`prompt`). Confirmations et messages passent par des pop-ins maison (`notify()` / `confirmPopin()`), côté propriétaire **comme côté page partagée**.
@@ -101,6 +102,8 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | POST    | `/api/memos/<id>/comments/seen` | Marque les commentaires du mémo « vus » (propriétaire) |
 | DELETE  | `/api/comments/<id>`       | Supprime un commentaire (propriétaire)         |
 | GET     | `/api/qr?data=<url>`       | QR code du texte/URL, en SVG                   |
+| GET     | `/api/settings`            | Réglages (`{owner_name}`)                      |
+| PUT     | `/api/settings`            | Change le nom du propriétaire (`{owner_name}`) |
 | GET     | `/api/projects`            | Liste avec `memo_count` (mémos en cours)       |
 | POST    | `/api/projects`            | Crée un projet (`{name, color}`)               |
 | PUT     | `/api/projects/<id>`       | Renomme / change la couleur                    |
@@ -171,6 +174,7 @@ access_control:
 | PUT     | `/api/guests/<id>`              | `{status: approved/rejected/pending}`    |
 | DELETE  | `/api/guests/<id>`              | Supprime un invité                       |
 | POST    | `/api/guests/grant`             | Ouvre un projet à un invité (`{email, name, project_id, can_edit}`) — réutilise un partage aux mêmes droits ou en crée un, pré-approuve, renvoie lien+PIN |
+| POST    | `/api/guests/rename`            | Renomme un invité (`{email, name}`) sur tous ses accès — cosmétique, n'affecte ni e-mail/PIN/token/session |
 | GET     | `/api/activity`                 | Fil d'activité + compteur non-lus        |
 | POST    | `/api/activity/seen`            | Marque l'activité comme lue              |
 | GET     | `/api/memos/<id>/revisions`     | Versions d'un mémo (avant/après, auteur) |

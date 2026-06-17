@@ -1752,6 +1752,31 @@ def _set_state(db, key, value):
     )
 
 
+def _owner_name(db):
+    """Nom du propriétaire (mentions @, assignations, accusés de lecture).
+    Configurable dans Paramètres ; défaut « Fabien »."""
+    return (_get_state(db, "owner_name", "Fabien") or "Fabien").strip() or "Fabien"
+
+
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    db = get_db()
+    return jsonify({"owner_name": _owner_name(db)})
+
+
+@app.route("/api/settings", methods=["PUT"])
+def put_settings():
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    if "owner_name" in data:
+        name = (str(data.get("owner_name") or "")).strip()[:40]
+        if not name:
+            return jsonify({"error": "nom vide"}), 400
+        _set_state(db, "owner_name", name)
+        db.commit()
+    return jsonify({"owner_name": _owner_name(db)})
+
+
 @app.route("/api/guests", methods=["GET"])
 def list_guests():
     db = get_db()
@@ -1799,6 +1824,25 @@ def update_guest(guest_id):
     )
     db.commit()
     return jsonify({"id": guest_id, "status": status})
+
+
+@app.route("/api/guests/rename", methods=["POST"])
+def rename_guest():
+    """Renomme un invité (tous ses accès, par e-mail). Cosmétique : les attributions
+    déjà enregistrées (assignés, commentaires) gardent l'ancien nom."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    name = (str(data.get("name") or "")).strip()[:60]
+    if not email:
+        return jsonify({"error": "email requis"}), 400
+    if not name:
+        return jsonify({"error": "nom vide"}), 400
+    db = get_db()
+    cur = db.execute(
+        "UPDATE share_guests SET name = ? WHERE lower(email) = ?", (name, email)
+    )
+    db.commit()
+    return jsonify({"email": email, "name": name, "updated": cur.rowcount})
 
 
 @app.route("/api/guests/<int:guest_id>", methods=["DELETE"])
@@ -2038,7 +2082,7 @@ def add_comment(memo_id):
 @app.route("/api/memos/<int:memo_id>/comments/seen", methods=["POST"])
 def mark_comments_seen_owner(memo_id):
     db = get_db()
-    _mark_comments_seen(db, memo_id, "Fabien")
+    _mark_comments_seen(db, memo_id, _owner_name(db))
     db.commit()
     return "", 204
 
@@ -2171,7 +2215,7 @@ def share_data(token):
         payload["color"] = ""
         payload["description"] = ""
     # Personnes du partage (suggestions d'assignés + récap) : propriétaire + invités approuvés
-    members = ["Fabien"]
+    members = [_owner_name(db)]
     for g in db.execute(
         "SELECT name, email FROM share_guests WHERE share_id = ? AND status = 'approved' ORDER BY id",
         (share["id"],),

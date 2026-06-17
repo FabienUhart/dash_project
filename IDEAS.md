@@ -42,6 +42,8 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Pop-ins maison partout (plus aucun `alert`/`confirm`/`prompt` natif, y compris page partagée)
 - [x] Fix formulaire d'accès invité : la saisie ne s'efface plus au refresh ; mauvais PIN = erreur inline sans tout retaper
 - [x] Passe responsive mobile : barre de projets collante, badges/commentaires/vue Partages en pleine largeur (plus de colonne 1 caractère), actions de card visibles sans survol, ronds non déformés, barre Quill sur une ligne défilable, bouton ✎ Modifier projet, « + Ajouter » masqué hors vue Liens (dashboard + page partagée)
+- [x] Nom du propriétaire configurable (Paramètres → Identité, `app_state`/`/api/settings`) — mentions, assignations, accusés de lecture
+- [x] Renommer un invité depuis 🔗 Partages (✎, par e-mail, tous ses accès — cosmétique, sans toucher à sa connexion)
 
 ## Quick wins
 
