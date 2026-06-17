@@ -1826,7 +1826,7 @@ def delete_comment(comment_id):
     return "", 204
 
 
-SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css"}
+SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js"}
 
 
 @app.route("/api/geocode")

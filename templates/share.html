@@ -9,35 +9,57 @@
 <script src="/share/assets/quill.min.js" defer></script>
 <link rel="stylesheet" href="/share/assets/leaflet.css">
 <script src="/share/assets/leaflet.js" defer></script>
+<script src="/share/assets/gsap.min.js" defer></script>
 <style>
 :root {
-  --bg: #0f1419; --panel: #1a2129; --panel-2: #232c36; --text: #e6edf3;
-  --muted: #8a96a3; --accent: #4fc3f7; --green: #4caf50; --border: #2d3742;
+  --bg: #0e1217; --panel: #161d25; --panel-2: #212b35; --text: #e8eef5;
+  --muted: #8a96a3; --accent: #4fc3f7; --accent-2: #38aee0; --green: #4caf50; --border: #283340;
+  --bg-elev: #1c2530; --radius: 10px; --radius-sm: 6px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
+  --shadow-lg: 0 8px 28px rgba(0,0,0,0.4);
+  --ring: 0 0 0 3px rgba(79,195,247,0.22);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: var(--bg);
+  background:
+    radial-gradient(1200px 600px at 100% -10%, rgba(79,195,247,0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(79,195,247,0.04), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0.01em;
 }
+::selection { background: rgba(79,195,247,0.28); }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
 header {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   padding: 0.8rem 1.25rem;
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(33,43,53,0.55), rgba(22,29,37,0.85)), var(--panel);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.02), var(--shadow);
 }
-header h1 { margin: 0; font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
+header h1 { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
 header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
 .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
 #layout { display: flex; min-height: calc(100vh - 54px); }
 #snav {
   width: 190px;
   flex-shrink: 0;
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.4));
   border-right: 1px solid var(--border);
   padding: 0.75rem 0.5rem;
 }
@@ -46,16 +68,22 @@ header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); backg
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--muted);
   font-size: 0.88rem;
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   user-select: none;
+  position: relative;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.12s var(--ease);
 }
-.sitem:hover { background: var(--panel-2); color: var(--text); }
+.sitem:hover { background: var(--panel-2); color: var(--text); transform: translateX(2px); }
 .sitem.active { background: var(--panel-2); color: var(--accent); }
+.sitem.active::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 1.05rem; border-radius: 999px; background: var(--accent);
+}
 .sitem.droptarget { outline: 1px dashed var(--accent); color: var(--accent); }
 .sitem .cnt { margin-left: auto; font-size: 0.72rem; opacity: 0.7; flex-shrink: 0; }
 .sitem .slabel { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -70,10 +98,13 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   background: var(--panel);
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
   padding: 0.6rem 0.8rem;
   margin-bottom: 0.5rem;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
 }
+.task:hover { border-left-color: var(--accent); box-shadow: var(--shadow-lg); transform: translateX(2px); }
 .task-row { display: flex; align-items: flex-start; gap: 0.6rem; }
 .task-check {
   width: 1.15rem; height: 1.15rem; border-radius: 50%;
@@ -213,11 +244,14 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .tile {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+  padding: 0.45rem 0.65rem;
   cursor: pointer;
   user-select: none;
+  box-shadow: var(--shadow);
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
+.tile:hover { background: var(--panel-2); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .tile .tn { font-weight: 700; float: right; }
 .tile .tl { font-size: 0.7rem; font-weight: 600; display: block; }
 .tile.active { border-color: var(--accent); background: #15232e; }
@@ -225,20 +259,32 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); font: inherit; padding: 0.55rem 0.8rem; outline: none;
 }
-#add-bar input:focus { border-color: var(--accent); }
+#add-bar input:focus { border-color: var(--accent); box-shadow: var(--ring); }
 #add-bar button {
-  background: var(--accent); color: #001; border: none; border-radius: 6px;
-  padding: 0.5rem 1rem; font: inherit; cursor: pointer;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #04161f; border: none; border-radius: var(--radius-sm);
+  padding: 0.5rem 1rem; font: inherit; cursor: pointer; font-weight: 600;
+  box-shadow: 0 2px 10px rgba(79,195,247,0.25); transition: filter 0.18s var(--ease);
 }
+#add-bar button:hover { filter: brightness(1.08); }
 .empty { color: var(--muted); font-style: italic; padding: 1rem 0; text-align: center; }
 footer { text-align: center; color: var(--muted); font-size: 0.72rem; padding: 1.5rem; }
 dialog { background: transparent; border: none; padding: 0; max-width: 94vw; max-height: 94vh; }
-dialog::backdrop { background: rgba(0,0,0,0.85); }
+dialog::backdrop { background: rgba(6,9,12,0.78); backdrop-filter: blur(3px); }
+/* Entrée des pop-ins en CSS. NE PAS animer le <dialog> via GSAP (transform/visibility) :
+   poser un transform sur l'élément dialog le sort du top-layer Chromium → perte du
+   centrage (position:fixed→absolute) et du ::backdrop. Une animation CSS reste sûre. */
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] { animation: dlg-in 0.24s cubic-bezier(0.16, 1, 0.3, 1); }
+  dialog[open]::backdrop { animation: dlg-bd 0.24s ease-out; }
+  @keyframes dlg-in { from { opacity: 0; transform: translateY(12px) scale(0.97); } }
+  @keyframes dlg-bd { from { opacity: 0; } }
+}
+dialog:not(#lightbox) { box-shadow: var(--shadow-lg); }
 dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom-out; }
 #edit-dialog {
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 1.25rem;
   width: min(620px, 94vw);
   color: var(--text);
@@ -246,10 +292,14 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 #edit-dialog h3 { margin: 0 0 0.8rem; font-size: 1rem; }
 .dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.8rem; }
 .dlg-actions button {
-  border-radius: 6px; padding: 0.45rem 0.9rem; font: inherit; cursor: pointer;
+  border-radius: var(--radius-sm); padding: 0.45rem 0.9rem; font: inherit; cursor: pointer; font-weight: 500;
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), transform 0.08s var(--ease);
 }
-.dlg-actions button.primary { background: var(--accent); color: #001; border-color: var(--accent); }
+.dlg-actions button:hover { background: var(--bg-elev); border-color: #36465a; }
+.dlg-actions button:active { transform: translateY(1px); }
+.dlg-actions button.primary { background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #04161f; border-color: transparent; font-weight: 600; box-shadow: 0 2px 10px rgba(79,195,247,0.25); }
+.dlg-actions button.primary:hover { background: linear-gradient(180deg, #6fcef9, var(--accent)); }
 #q-wrap .ql-toolbar { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px 6px 0 0; }
 #q-wrap .ql-container {
   border: 1px solid var(--border); border-top: none; border-radius: 0 0 6px 6px;
@@ -258,6 +308,13 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 }
 #q-wrap .ql-editor { min-height: 180px; }
 #q-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
+/* Mentions @ dans l'éditeur */
+.mention { color: #80cbc4; background: rgba(128,203,196,0.14); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+.mention-menu { position: fixed; z-index: 10000; min-width: 11rem; max-height: 13rem; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; }
+.mention-item { padding: 0.32rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text); white-space: nowrap; }
+.mention-item.active { background: var(--accent); color: #fff; }
+.q-people { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: #80cbc4; }
 .ql-snow .ql-stroke { stroke: var(--muted); }
 .ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--muted); }
 .ql-snow .ql-picker { color: var(--muted); }
@@ -334,6 +391,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 <dialog id="edit-dialog">
   <h3>✏️ Modifier le mémo</h3>
   <div id="q-wrap"><div id="q-editor"></div></div>
+  <div id="q-people" class="q-people"></div>
   <div class="dlg-actions">
     <button type="button" id="edit-cancel">Annuler</button>
     <button type="button" id="edit-save" class="primary">Enregistrer</button>
@@ -463,14 +521,159 @@ function linkifyText(text) {
 
 let sQuill = null;
 let editingId = null;
+let editAssignees = [];
 const editDialog = document.getElementById('edit-dialog');
+
+// --- Mentions @ : blot stylé + menu de suggestions (self-hosté, zéro CDN) ---
+function registerMentionBlot() {
+  if (typeof Quill === 'undefined' || Quill.__mentionReady) return;
+  const Inline = Quill.import('blots/inline');
+  class MentionBlot extends Inline {
+    static create(value) { const node = super.create(); node.setAttribute('data-mention', value); return node; }
+    static formats(node) { return node.getAttribute('data-mention'); }
+  }
+  MentionBlot.blotName = 'mention';
+  MentionBlot.tagName = 'span';
+  MentionBlot.className = 'mention';
+  Quill.register(MentionBlot, true);
+  Quill.__mentionReady = true;
+}
+function addMentionMatcher(q) {
+  const Delta = Quill.import('delta');
+  q.clipboard.addMatcher('SPAN', (node, delta) => {
+    if (node.classList && node.classList.contains('mention')) {
+      const nm = node.getAttribute('data-mention') || node.textContent.replace(/^@/, '');
+      return new Delta().insert('@' + nm, { mention: nm });
+    }
+    return delta;
+  });
+}
+function setupMentions(quill, getNames, onPick) {
+  const host = quill.container.closest('dialog') || document.body;
+  const menu = document.createElement('div');
+  menu.className = 'mention-menu';
+  menu.style.display = 'none';
+  host.appendChild(menu);
+  let open = false, items = [], active = 0, query = '', picking = false;
+
+  const close = () => { open = false; menu.style.display = 'none'; };
+  const draw = () => {
+    menu.innerHTML = '';
+    items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'mention-item' + (i === active ? ' active' : '');
+      row.textContent = it.add ? ('➕ Ajouter « ' + it.value + ' »') : ('@' + it.value);
+      row.addEventListener('mousedown', (e) => { e.preventDefault(); pick(i); });
+      row.addEventListener('mousemove', () => { if (active !== i) { active = i; draw(); } });
+      menu.appendChild(row);
+    });
+  };
+  const place = () => {
+    const sel = quill.getSelection(); if (!sel) return;
+    const b = quill.getBounds(sel.index);
+    const c = quill.container.getBoundingClientRect();
+    menu.style.left = Math.round(c.left + b.left) + 'px';
+    menu.style.top = Math.round(c.top + b.bottom + 4) + 'px';
+  };
+  const refresh = () => {
+    const all = (getNames() || []).filter(Boolean);
+    const q = query.toLowerCase();
+    const list = all.filter(n => n.toLowerCase().includes(q)).map(v => ({ value: v }));
+    if (query && !all.some(n => n.toLowerCase() === q)) list.push({ value: query, add: true });
+    items = list;
+    if (!items.length) { close(); return; }
+    if (active >= items.length) active = 0;
+    draw(); place();
+    menu.style.display = 'block'; open = true;
+  };
+  const pick = (i) => {
+    const it = items[i]; if (!it) { close(); return; }
+    const name = String(it.value).trim(); if (!name) { close(); return; }
+    const sel = quill.getSelection(true); if (!sel) { close(); return; }
+    const delLen = query.length + 1;
+    const start = sel.index - delLen;
+    picking = true;
+    quill.deleteText(start, delLen, 'user');
+    quill.insertText(start, '@' + name, { mention: name }, 'user');
+    quill.insertText(start + name.length + 1, ' ', { mention: false }, 'user');
+    quill.setSelection(start + name.length + 2, 0, 'user');
+    picking = false;
+    close();
+    try { onPick(name); } catch (e) {}
+  };
+  const detect = () => {
+    if (picking) return;
+    const sel = quill.getSelection();
+    if (!sel || sel.length) { close(); return; }
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(quill.getText(0, sel.index));
+    if (!m) { close(); return; }
+    query = m[1];
+    refresh();
+  };
+  quill.on('text-change', (d, o, source) => { if (source === 'user') detect(); else close(); });
+  quill.on('selection-change', (range) => { if (!range && !picking) close(); });
+  quill.root.addEventListener('keydown', (e) => {
+    if (!open || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); active = (active + 1) % items.length; draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); active = (active - 1 + items.length) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); pick(active); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); }
+  }, true);
+}
+
+// Suggestions = membres du partage + noms déjà utilisés sur les mémos.
+function shareSuggestions() {
+  const names = new Set();
+  (DATA.members || []).forEach(n => { if (n) names.add(n); });
+  (DATA.memos || []).forEach(m => (m.assignees || []).forEach(a => names.add(a)));
+  return [...names].filter(Boolean);
+}
+
+function renderQPeople() {
+  const wrap = document.getElementById('q-people');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const ic = el('span', null, '👤'); ic.title = 'Personnes rattachées à ce mémo';
+  wrap.appendChild(ic);
+  editAssignees.forEach(a => {
+    const chip = el('span', 'assignee-chip', '@' + a + ' ');
+    const x = el('button', null, '×');
+    x.type = 'button';
+    x.title = 'Retirer ' + a;
+    x.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.85rem';
+    x.addEventListener('click', () => { editAssignees = editAssignees.filter(v => v !== a); renderQPeople(); });
+    chip.appendChild(x);
+    wrap.appendChild(chip);
+  });
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = '+ @personne (Entrée)';
+  input.setAttribute('list', 'share-assignees');
+  input.style.cssText = 'width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.45rem';
+  let sdl = document.getElementById('share-assignees');
+  if (!sdl) { sdl = document.createElement('datalist'); sdl.id = 'share-assignees'; document.body.appendChild(sdl); }
+  sdl.innerHTML = '';
+  shareSuggestions().forEach(n => { const o = document.createElement('option'); o.value = n; sdl.appendChild(o); });
+  const add = () => {
+    const name = input.value.replace(/^@/, '').trim();
+    if (!name) return;
+    if (!editAssignees.some(v => v.toLowerCase() === name.toLowerCase())) editAssignees.push(name);
+    input.value = '';
+    renderQPeople();
+    const ni = document.getElementById('q-people').querySelector('input'); if (ni) ni.focus();
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  input.addEventListener('change', () => { if (shareSuggestions().includes(input.value.trim())) add(); });
+  wrap.appendChild(input);
+}
 
 function getShareQuill() {
   if (typeof Quill === 'undefined') return null;
   if (!sQuill) {
+    registerMentionBlot();
     sQuill = new Quill('#q-editor', {
       theme: 'snow',
-      placeholder: 'Contenu du mémo…',
+      placeholder: 'Contenu du mémo… (tape @ pour mentionner)',
       modules: {
         toolbar: [
           [{ header: [1, 2, 3, false] }],
@@ -481,6 +684,11 @@ function getShareQuill() {
           ['clean'],
         ],
       },
+    });
+    addMentionMatcher(sQuill);
+    setupMentions(sQuill, shareSuggestions, (name) => {
+      if (!editAssignees.some(v => v.toLowerCase() === name.toLowerCase())) editAssignees.push(name);
+      renderQPeople();
     });
   }
   return sQuill;
@@ -509,6 +717,8 @@ function openEditor(memo, contentEl, taskEl) {
     return;
   }
   editingId = memo.id;
+  editAssignees = [...(memo.assignees || [])];
+  renderQPeople();
   q.setContents([]);
   if (isRich(memo.content)) q.clipboard.dangerouslyPasteHTML(0, memo.content);
   else q.setText(memo.content);
@@ -524,7 +734,7 @@ document.getElementById('edit-save').addEventListener('click', async () => {
   if (!text) { alert('Le mémo ne peut pas être vide.'); return; }
   const html = q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ');
   editDialog.close();
-  await put(editingId, { content: html });
+  await put(editingId, { content: html, assignees: editAssignees });
   editingId = null;
 });
 
@@ -1249,6 +1459,72 @@ document.getElementById('proj-btn').addEventListener('click', addSubProject);
 
 load();
 setInterval(load, 15000);
+
+/* ------------------------------------------------ animations GSAP
+   Dégrade proprement si gsap.min.js est absent.
+   load() est rappelé toutes les 15 s ; on n'anime l'entrée QUE quand
+   le filtre ou le projet change (FILTER|PFILTER), pas à chaque refresh. */
+window.addEventListener('DOMContentLoaded', () => {
+  const g = window.gsap;
+  if (!g) return;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function stagger(sel, opts) {
+    if (reduce) return;
+    const nodes = document.querySelectorAll(sel);
+    if (!nodes.length) return;
+    g.killTweensOf(nodes);
+    g.fromTo(nodes,
+      { autoAlpha: 0, y: 14 },
+      Object.assign({
+        autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out',
+        stagger: 0.045, overwrite: true, clearProps: 'transform,opacity,visibility',
+      }, opts || {}));
+  }
+  function countUp(node) {
+    const to = parseInt(node.textContent, 10);
+    if (isNaN(to) || reduce) return;
+    const o = { v: 0 };
+    g.fromTo(o, { v: 0 }, {
+      v: to, duration: 0.7, ease: 'power1.out', snap: { v: 1 },
+      onUpdate: () => { node.textContent = Math.round(o.v); },
+    });
+  }
+  function animateView() {
+    stagger('#tiles .tile', { y: 10, duration: 0.35, stagger: 0.03 });
+    stagger('#list .task');
+    document.querySelectorAll('#tiles .tn').forEach(countUp);
+  }
+
+  const viewKey = () => [typeof FILTER !== 'undefined' ? FILTER : '', typeof PFILTER !== 'undefined' ? PFILTER : ''].join('|');
+  let lastKey = null;
+  let firstPaint = true;
+
+  function playIntro() {
+    if (!firstPaint) return;
+    firstPaint = false;
+    lastKey = viewKey();
+    if (!reduce) {
+      g.from('header', { y: -20, autoAlpha: 0, duration: 0.4, ease: 'power2.out', clearProps: 'all' });
+      g.from('#snav .sitem', { x: -12, autoAlpha: 0, duration: 0.3, stagger: 0.03, ease: 'power2.out', delay: 0.08, clearProps: 'all' });
+    }
+    animateView();
+  }
+
+  const _render = render;
+  render = function () {
+    const r = _render.apply(this, arguments);
+    if (firstPaint) { playIntro(); }
+    else { const k = viewKey(); if (k !== lastKey) { lastKey = k; animateView(); } }
+    return r;
+  };
+
+  if (document.querySelector('#list .task') || document.querySelector('#tiles .tile')) playIntro();
+
+  // Entrée des pop-ins : gérée en CSS (@keyframes dlg-in / dlg-bd).
+  // Ne pas wrapper showModal pour animer le <dialog> via GSAP : poser un transform
+  // dessus le sort du top-layer Chromium et casse le centrage + le backdrop.
+});
 </script>
 </body>
 </html>
