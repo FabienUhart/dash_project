@@ -11,3 +11,7 @@ venv/
 .env
 .idea/
 .vscode/
+
+# skill tooling (emil-design-eng)
+.agents/
+skills-lock.json

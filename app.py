@@ -26,7 +26,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "14"
+APP_VERSION = "15"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
@@ -254,6 +254,8 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN title TEXT DEFAULT ''")
     if "assignees" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN assignees TEXT DEFAULT '[]'")
+    if "deleted_at" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN deleted_at TEXT DEFAULT ''")
     if "description" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN description TEXT DEFAULT ''")
     conn.execute(
@@ -266,6 +268,22 @@ def init_db():
             share_id INTEGER,
             body TEXT NOT NULL,
             created_at TEXT NOT NULL
+        )
+        """
+    )
+    ccols = {r[1] for r in conn.execute("PRAGMA table_info(memo_comments)").fetchall()}
+    if "parent_id" not in ccols:
+        conn.execute("ALTER TABLE memo_comments ADD COLUMN parent_id INTEGER")
+    if "priority" not in ccols:
+        conn.execute("ALTER TABLE memo_comments ADD COLUMN priority INTEGER DEFAULT 0")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS comment_seen (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            comment_id INTEGER NOT NULL,
+            viewer TEXT NOT NULL,
+            seen_at TEXT NOT NULL,
+            UNIQUE(comment_id, viewer)
         )
         """
     )
@@ -1014,7 +1032,9 @@ def _clean_description(value):
 @app.route("/api/memos", methods=["GET"])
 def list_memos():
     db = get_db()
-    rows = db.execute("SELECT * FROM memos ORDER BY position, id").fetchall()
+    rows = db.execute(
+        "SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' ORDER BY position, id"
+    ).fetchall()
     guest_last = {}
     for r in db.execute(
         "SELECT memo_id, editor, before IS NULL AS created, edited_at "
@@ -1238,14 +1258,93 @@ def update_memo(memo_id):
 
 @app.route("/api/memos/<int:memo_id>", methods=["DELETE"])
 def delete_memo(memo_id):
+    # Suppression douce : le mémo part dans la corbeille (restaurable), purge auto après BACKUP_KEEP_DAYS jours.
     db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute("UPDATE memos SET deleted_at = ? WHERE id = ?", (now, memo_id))
+    db.commit()
+    return "", 204
+
+
+def _purge_memo_row(db, memo_id):
     row = db.execute("SELECT images FROM memos WHERE id = ?", (memo_id,)).fetchone()
     if row:
         _delete_image_files(row["images"])
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
+    db.execute("DELETE FROM memo_comments WHERE memo_id = ?", (memo_id,))
+
+
+@app.route("/api/trash", methods=["GET"])
+def list_trash():
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM memos WHERE COALESCE(deleted_at, '') != '' "
+        "ORDER BY deleted_at DESC, id DESC"
+    ).fetchall()
+    return jsonify([_memo_dict(r) for r in rows])
+
+
+@app.route("/api/trash/<int:memo_id>/restore", methods=["POST"])
+def restore_memo(memo_id):
+    db = get_db()
+    db.execute("UPDATE memos SET deleted_at = '' WHERE id = ?", (memo_id,))
+    db.commit()
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not row:
+        return "", 404
+    return jsonify(_memo_dict(row))
+
+
+@app.route("/api/trash/<int:memo_id>", methods=["DELETE"])
+def purge_memo(memo_id):
+    db = get_db()
+    _purge_memo_row(db, memo_id)
     db.commit()
     return "", 204
+
+
+@app.route("/api/trash", methods=["DELETE"])
+def empty_trash():
+    db = get_db()
+    ids = [
+        r["id"]
+        for r in db.execute(
+            "SELECT id FROM memos WHERE COALESCE(deleted_at, '') != ''"
+        ).fetchall()
+    ]
+    for mid in ids:
+        _purge_memo_row(db, mid)
+    db.commit()
+    return jsonify({"purged": len(ids)})
+
+
+@app.route("/api/memos/<int:memo_id>/duplicate", methods=["POST"])
+def duplicate_memo(memo_id):
+    db = get_db()
+    src = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not src:
+        return "", 404
+    now = datetime.now(timezone.utc).isoformat()
+    max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
+    title = _row_get(src, "title", "") or ""
+    new_title = (title + " (copie)") if title else ""
+    cur = db.execute(
+        "INSERT INTO memos (content, position, created_at, uid, updated_at, "
+        "done, due_date, priority, subtasks, project_id, recurrence, emoji, location, "
+        "title, assignees) "
+        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            src["content"], max_pos + 1, now, str(uuid.uuid4()), now,
+            _row_get(src, "due_date", ""), _row_get(src, "priority", 0),
+            _row_get(src, "subtasks", "[]"), _row_get(src, "project_id"),
+            _row_get(src, "recurrence", ""), _row_get(src, "emoji", ""),
+            _row_get(src, "location", ""), new_title, _row_get(src, "assignees", "[]"),
+        ),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (cur.lastrowid,)).fetchone()
+    return jsonify(_memo_dict(row)), 201
 
 
 @app.route("/uploads/<path:filename>")
@@ -1460,16 +1559,18 @@ def _share_memo_dict(row):
     }
 
 
-def _share_scope_memos(db, share):
+def _share_scope_memos(db, share, deleted=False):
+    cond = "COALESCE(deleted_at, '') {} ''".format("!=" if deleted else "=")
     if share["kind"] == "memo":
         row = db.execute(
-            "SELECT * FROM memos WHERE id = ?", (share["target_id"],)
+            f"SELECT * FROM memos WHERE id = ? AND {cond}", (share["target_id"],)
         ).fetchone()
         return [row] if row else []
     ids = _project_descendants(db, share["target_id"])
     placeholders = ",".join("?" * len(ids))
     return db.execute(
-        f"SELECT * FROM memos WHERE project_id IN ({placeholders}) ORDER BY position, id",
+        f"SELECT * FROM memos WHERE project_id IN ({placeholders}) AND {cond} "
+        "ORDER BY position, id",
         ids,
     ).fetchall()
 
@@ -1507,6 +1608,63 @@ def list_shares():
         ]
         out.append(d)
     return jsonify(out)
+
+
+@app.route("/api/guests/grant", methods=["POST"])
+def grant_guest_project():
+    # Ouvre l'accès d'un invité (par e-mail) à un projet : réutilise un partage projet
+    # aux mêmes droits si possible, sinon en crée un, et pré-approuve l'invité.
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    name = (data.get("name") or "").strip()[:60]
+    can_edit = 1 if data.get("can_edit") else 0
+    try:
+        project_id = int(data.get("project_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "project_id requis"}), 400
+    if not email or "@" not in email or len(email) > 120:
+        return jsonify({"error": "e-mail invalide"}), 400
+    proj = db.execute("SELECT id, name FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not proj:
+        return jsonify({"error": "projet introuvable"}), 404
+    now = datetime.now(timezone.utc).isoformat()
+    share = db.execute(
+        "SELECT * FROM shares WHERE kind = 'project' AND target_id = ? AND can_edit = ? "
+        "ORDER BY id LIMIT 1",
+        (project_id, can_edit),
+    ).fetchone()
+    if share:
+        share_id, token, pin, reused = share["id"], share["token"], share["pin"], True
+    else:
+        token = secrets.token_urlsafe(24)
+        pin = f"{secrets.randbelow(10000):04d}"
+        cur = db.execute(
+            "INSERT INTO shares (token, kind, target_id, can_edit, created_at, pin) "
+            "VALUES (?, 'project', ?, ?, ?, ?)",
+            (token, project_id, can_edit, now, pin),
+        )
+        share_id, reused = cur.lastrowid, False
+    existing = db.execute(
+        "SELECT * FROM share_guests WHERE share_id = ? AND email = ?", (share_id, email)
+    ).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE share_guests SET status = 'approved', approved_at = ?, "
+            "name = COALESCE(NULLIF(?, ''), name) WHERE id = ?",
+            (now, name, existing["id"]),
+        )
+    else:
+        db.execute(
+            "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at) "
+            "VALUES (?, ?, ?, ?, 'approved', ?, ?)",
+            (share_id, email, name, secrets.token_urlsafe(24), now, now),
+        )
+    db.commit()
+    return jsonify({
+        "share_id": share_id, "token": token, "pin": pin, "can_edit": bool(can_edit),
+        "project": proj["name"], "reused": reused, "url": f"/share/{token}",
+    })
 
 
 @app.route("/api/shares", methods=["POST"])
@@ -1767,7 +1925,7 @@ def memo_restore(memo_id):
     return jsonify(_memo_dict(row))
 
 
-def _comment_dict(r):
+def _comment_dict(r, seen_map=None):
     return {
         "id": r["id"],
         "memo_id": r["memo_id"],
@@ -1775,19 +1933,74 @@ def _comment_dict(r):
         "body": r["body"],
         "created_at": r["created_at"],
         "guest": r["share_id"] is not None,
+        "parent_id": _row_get(r, "parent_id"),
+        "priority": _row_get(r, "priority", 0) or 0,
+        "seen": (seen_map or {}).get(r["id"], []),
     }
+
+
+def _comment_seen_map(db, comment_ids):
+    ids = [c for c in comment_ids if c is not None]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    out = {}
+    for s in db.execute(
+        f"SELECT comment_id, viewer FROM comment_seen WHERE comment_id IN ({ph}) "
+        "ORDER BY seen_at, id",
+        ids,
+    ).fetchall():
+        out.setdefault(s["comment_id"], []).append(s["viewer"])
+    return out
+
+
+def _mark_comments_seen(db, memo_id, viewer):
+    viewer = (viewer or "").strip()[:140]
+    if not viewer:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    for c in db.execute(
+        "SELECT id FROM memo_comments WHERE memo_id = ?", (memo_id,)
+    ).fetchall():
+        db.execute(
+            "INSERT OR IGNORE INTO comment_seen (comment_id, viewer, seen_at) VALUES (?, ?, ?)",
+            (c["id"], viewer, now),
+        )
+
+
+def _valid_comment_priority(value):
+    try:
+        p = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return p if p in (1, 2, 3) else 0
+
+
+def _valid_parent_comment(db, memo_id, parent_id):
+    # Un seul niveau : si on répond à une réponse, on rattache au commentaire racine.
+    try:
+        pid = int(parent_id)
+    except (TypeError, ValueError):
+        return None
+    row = db.execute(
+        "SELECT id, parent_id FROM memo_comments WHERE id = ? AND memo_id = ?",
+        (pid, memo_id),
+    ).fetchone()
+    if not row:
+        return None
+    return row["parent_id"] or row["id"]
 
 
 def _clean_comment_body(value):
     return re.sub(r"[<>]", "", str(value or "")).strip()[:2000]
 
 
-def _insert_comment(db, memo_row, body, author, share_id=None):
+def _insert_comment(db, memo_row, body, author, share_id=None, parent_id=None, priority=0):
     now = datetime.now(timezone.utc).isoformat()
     cur = db.execute(
-        "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (memo_row["id"], memo_row["uid"] or "", author, share_id, body, now),
+        "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at, parent_id, priority) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (memo_row["id"], memo_row["uid"] or "", author, share_id, body, now, parent_id, priority),
     )
     return db.execute(
         "SELECT * FROM memo_comments WHERE id = ?", (cur.lastrowid,)
@@ -1801,7 +2014,8 @@ def list_comments(memo_id):
         "SELECT * FROM memo_comments WHERE memo_id = ? ORDER BY created_at, id",
         (memo_id,),
     ).fetchall()
-    return jsonify([_comment_dict(r) for r in rows])
+    seen = _comment_seen_map(db, [r["id"] for r in rows])
+    return jsonify([_comment_dict(r, seen) for r in rows])
 
 
 @app.route("/api/memos/<int:memo_id>/comments", methods=["POST"])
@@ -1810,12 +2024,23 @@ def add_comment(memo_id):
     memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
     if not memo:
         return jsonify({"error": "not found"}), 404
-    body = _clean_comment_body((request.get_json(silent=True) or {}).get("body"))
+    data = request.get_json(silent=True) or {}
+    body = _clean_comment_body(data.get("body"))
     if not body:
         return jsonify({"error": "body required"}), 400
-    row = _insert_comment(db, memo, body, "moi")
+    parent_id = _valid_parent_comment(db, memo_id, data.get("parent_id")) if data.get("parent_id") else None
+    priority = _valid_comment_priority(data.get("priority"))
+    row = _insert_comment(db, memo, body, "moi", parent_id=parent_id, priority=priority)
     db.commit()
     return jsonify(_comment_dict(row)), 201
+
+
+@app.route("/api/memos/<int:memo_id>/comments/seen", methods=["POST"])
+def mark_comments_seen_owner(memo_id):
+    db = get_db()
+    _mark_comments_seen(db, memo_id, "Fabien")
+    db.commit()
+    return "", 204
 
 
 @app.route("/api/comments/<int:comment_id>", methods=["DELETE"])
@@ -1826,7 +2051,7 @@ def delete_comment(comment_id):
     return "", 204
 
 
-SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css"}
+SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js", "favicon.svg", "Inter.woff2"}
 
 
 @app.route("/api/geocode")
@@ -1835,6 +2060,22 @@ def geocode():
     if len(q) < 3:
         return jsonify({"results": []})
     return jsonify({"results": _geocode_search(q)})
+
+
+@app.route("/api/qr")
+def qr_code():
+    data = (request.args.get("data") or "").strip()
+    if not data or len(data) > 1024:
+        return "", 400
+    import io
+    import qrcode
+    import qrcode.image.svg
+    qr = qrcode.QRCode(box_size=10, border=2, image_factory=qrcode.image.svg.SvgPathImage)
+    qr.add_data(data)
+    qr.make(fit=True)
+    buf = io.BytesIO()
+    qr.make_image().save(buf)
+    return Response(buf.getvalue(), mimetype="image/svg+xml")
 
 
 @app.route("/share/assets/<name>")
@@ -1890,11 +2131,13 @@ def share_data(token):
     comments_by_memo = {}
     if memo_ids:
         ph = ",".join("?" * len(memo_ids))
-        for c in db.execute(
+        crows = db.execute(
             f"SELECT * FROM memo_comments WHERE memo_id IN ({ph}) ORDER BY created_at, id",
             memo_ids,
-        ).fetchall():
-            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c))
+        ).fetchall()
+        cseen = _comment_seen_map(db, [c["id"] for c in crows])
+        for c in crows:
+            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen))
     for r in rows:
         d = _share_memo_dict(r)
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
@@ -1937,6 +2180,14 @@ def share_data(token):
         if label and label not in members:
             members.append(label)
     payload["members"] = members
+    # Corbeille du périmètre (mémos supprimés, restaurables) — visible si modifiable.
+    trash = []
+    if share["can_edit"]:
+        for r in _share_scope_memos(db, share, deleted=True):
+            td = _share_memo_dict(r)
+            td["deleted_at"] = _row_get(r, "deleted_at", "")
+            trash.append(td)
+    payload["trash"] = trash
     return jsonify(payload)
 
 
@@ -2042,6 +2293,52 @@ def share_update_memo(token, memo_id):
     if status == 200:
         payload = _share_memo_dict_from_payload(payload)
     return jsonify(payload), status
+
+
+def _share_guest_or_403(db, share):
+    if not share["can_edit"]:
+        return None, (jsonify({"error": "lecture seule"}), 403)
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return None, (
+            jsonify({"error": "guest_required",
+                     "status": guest["status"] if guest else "anonymous"}),
+            403,
+        )
+    return guest, None
+
+
+@app.route("/share/<token>/memo/<int:memo_id>", methods=["DELETE"])
+def share_delete_memo(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _share_guest_or_403(db, share)
+    if err:
+        return err
+    if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute("UPDATE memos SET deleted_at = ? WHERE id = ?", (now, memo_id))
+    db.commit()
+    return "", 204
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/restore", methods=["POST"])
+def share_restore_memo(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _share_guest_or_403(db, share)
+    if err:
+        return err
+    if memo_id not in {r["id"] for r in _share_scope_memos(db, share, deleted=True)}:
+        return jsonify({"error": "not found"}), 404
+    db.execute("UPDATE memos SET deleted_at = '' WHERE id = ?", (memo_id,))
+    db.commit()
+    return "", 204
 
 
 GUEST_IMG_EXT = {"png", "jpg", "jpeg"}
@@ -2342,13 +2639,32 @@ def share_add_comment(token, memo_id):
     if memo_id not in allowed_ids:
         return jsonify({"error": "not found"}), 404
     memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
-    body = _clean_comment_body((request.get_json(silent=True) or {}).get("body"))
+    data = request.get_json(silent=True) or {}
+    body = _clean_comment_body(data.get("body"))
     if not body:
         return jsonify({"error": "body required"}), 400
+    parent_id = _valid_parent_comment(db, memo_id, data.get("parent_id")) if data.get("parent_id") else None
+    priority = _valid_comment_priority(data.get("priority"))
     author = guest["name"] or guest["email"]
-    row = _insert_comment(db, memo, body, f"{author} <{guest['email']}>", share["id"])
+    row = _insert_comment(db, memo, body, f"{author} <{guest['email']}>", share["id"], parent_id=parent_id, priority=priority)
     db.commit()
     return jsonify(_comment_dict(row)), 201
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/seen", methods=["POST"])
+def share_mark_seen(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    _mark_comments_seen(db, memo_id, guest["name"] or guest["email"])
+    db.commit()
+    return "", 204
 
 
 @app.route("/share/<token>/geocode")
@@ -2400,7 +2716,9 @@ def _build_export(db):
     links = db.execute(
         f"SELECT {LINK_FIELDS} FROM links ORDER BY position, id"
     ).fetchall()
-    memos = db.execute("SELECT * FROM memos ORDER BY position, id").fetchall()
+    memos = db.execute(
+        "SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' ORDER BY position, id"
+    ).fetchall()
     categories = db.execute(
         "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
@@ -2441,11 +2759,13 @@ def _build_export(db):
         "SELECT id, name, color, position FROM priorities ORDER BY position, id"
     ).fetchall()
     comments = db.execute(
-        "SELECT memo_uid, author, body, created_at FROM memo_comments "
-        "WHERE memo_uid != '' ORDER BY created_at, id"
+        "SELECT c.memo_uid, c.author, c.body, c.created_at, "
+        "COALESCE(c.priority, 0) AS priority, p.created_at AS parent_created_at "
+        "FROM memo_comments c LEFT JOIN memo_comments p ON p.id = c.parent_id "
+        "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
     return {
-        "version": 14,
+        "version": 15,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -2495,11 +2815,43 @@ def _maybe_backup():
         _create_backup()
 
 
+def _purge_trash():
+    # Purge définitive des mémos en corbeille depuis plus de BACKUP_KEEP_DAYS jours.
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=BACKUP_KEEP_DAYS)).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        ids = [
+            r["id"]
+            for r in conn.execute(
+                "SELECT id FROM memos WHERE COALESCE(deleted_at, '') != '' "
+                "AND deleted_at < ?",
+                (cutoff,),
+            ).fetchall()
+        ]
+        for mid in ids:
+            r = conn.execute("SELECT images FROM memos WHERE id = ?", (mid,)).fetchone()
+            if r:
+                _delete_image_files(r["images"])
+            conn.execute("DELETE FROM memos WHERE id = ?", (mid,))
+            conn.execute(
+                "DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (mid,)
+            )
+            conn.execute("DELETE FROM memo_comments WHERE memo_id = ?", (mid,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _backup_loop():
     time.sleep(15)
     while True:
         try:
             _maybe_backup()
+        except Exception:
+            pass
+        try:
+            _purge_trash()
         except Exception:
             pass
         time.sleep(3600)
@@ -2905,12 +3257,13 @@ def import_links():
         existing_hist.add(key)
         imported_history += 1
 
-    existing_comments = {
-        (r["memo_uid"], r["created_at"], r["author"])
-        for r in db.execute(
-            "SELECT memo_uid, created_at, author FROM memo_comments"
-        ).fetchall()
-    }
+    existing_comments = set()
+    comment_id_by_key = {}
+    for r in db.execute(
+        "SELECT id, memo_uid, created_at, author FROM memo_comments"
+    ).fetchall():
+        existing_comments.add((r["memo_uid"], r["created_at"], r["author"]))
+        comment_id_by_key[(r["memo_uid"], r["created_at"])] = r["id"]
     imported_comments = 0
     for c in data.get("comments") or []:
         if not isinstance(c, dict):
@@ -2927,12 +3280,16 @@ def import_links():
         key = (c_uid, c_at, c_author)
         if key in existing_comments:
             continue
-        db.execute(
-            "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at) "
-            "VALUES (?, ?, ?, NULL, ?, ?)",
-            (memo_row["id"], c_uid, c_author, c_body, c_at),
+        c_prio = _valid_comment_priority(c.get("priority"))
+        parent_at = (c.get("parent_created_at") or "").strip()
+        parent_id = comment_id_by_key.get((c_uid, parent_at)) if parent_at else None
+        cur = db.execute(
+            "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at, parent_id, priority) "
+            "VALUES (?, ?, ?, NULL, ?, ?, ?, ?)",
+            (memo_row["id"], c_uid, c_author, c_body, c_at, parent_id, c_prio),
         )
         existing_comments.add(key)
+        comment_id_by_key[(c_uid, c_at)] = cur.lastrowid
         imported_comments += 1
 
     db.commit()

@@ -5,39 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>Partage — Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="/share/assets/favicon.svg">
 <link rel="stylesheet" href="/share/assets/quill.snow.css">
 <script src="/share/assets/quill.min.js" defer></script>
 <link rel="stylesheet" href="/share/assets/leaflet.css">
 <script src="/share/assets/leaflet.js" defer></script>
+<script src="/share/assets/gsap.min.js" defer></script>
 <style>
 :root {
-  --bg: #0f1419; --panel: #1a2129; --panel-2: #232c36; --text: #e6edf3;
-  --muted: #8a96a3; --accent: #4fc3f7; --green: #4caf50; --border: #2d3742;
+  --bg: #0e1217; --panel: #161d25; --panel-2: #212b35; --text: #e8eef5;
+  --muted: #9aa7b4; --accent: #4fc3f7; --accent-2: #38aee0; --green: #4caf50; --border: #283340;
+  --danger: #ff8a80; --warn: #ffb74d; --guest: #b39ddb; --assignee: #80cbc4;
+  --bg-elev: #1c2530; --radius: 10px; --radius-sm: 6px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
+  --shadow-lg: 0 8px 28px rgba(0,0,0,0.4);
+  --ring: 0 0 0 3px rgba(79,195,247,0.22);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
+:root[data-theme="light"] {
+  --bg: #eef1f5; --panel: #ffffff; --panel-2: #eef2f7; --text: #1b2531;
+  --muted: #5c6b7a; --accent: #0288d1; --accent-2: #0277bd; --green: #2e7d32; --border: #d3dce5;
+  --danger: #e53935; --warn: #ef6c00; --guest: #6a3fb5; --assignee: #00897b;
+  --bg-elev: #f4f7fa;
+  --shadow: 0 1px 2px rgba(16,30,50,0.08), 0 2px 8px rgba(16,30,50,0.06);
+  --shadow-lg: 0 10px 30px rgba(16,30,50,0.18);
+  --ring: 0 0 0 3px rgba(2,136,209,0.28);
+}
+[data-theme="light"] header { background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.92)), var(--panel); }
+[data-theme="light"] #snav { background: linear-gradient(180deg, var(--panel), #eef2f7); }
 * { box-sizing: border-box; }
+@font-face {
+  font-family: 'Inter';
+  src: url('/share/assets/Inter.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
+.ic { width: 1.1em; height: 1.1em; display: inline-block; vertical-align: -0.15em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.ic-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: var(--bg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 100% -10%, rgba(79,195,247,0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(79,195,247,0.04), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0.01em;
 }
+::selection { background: rgba(79,195,247,0.28); }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
 header {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   padding: 0.8rem 1.25rem;
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(33,43,53,0.55), rgba(22,29,37,0.85)), var(--panel);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.02), var(--shadow);
 }
-header h1 { margin: 0; font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
-header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
+header h1 { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
+header .mode { font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
+header #theme-btn { margin-left: auto; }
+button.icon { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s var(--ease), transform 0.1s var(--ease); }
+button.icon:hover { background: var(--bg-elev); }
+button.icon:active { transform: scale(0.94); }
 .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
-#layout { display: flex; min-height: calc(100vh - 54px); }
+#layout { display: flex; min-height: calc(100dvh - 54px); }
 #snav {
-  width: 190px;
+  width: clamp(170px, 15vw, 230px);
   flex-shrink: 0;
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.4));
   border-right: 1px solid var(--border);
   padding: 0.75rem 0.5rem;
 }
@@ -46,22 +94,28 @@ header .mode { margin-left: auto; font-size: 0.75rem; color: var(--muted); backg
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--muted);
   font-size: 0.88rem;
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   user-select: none;
+  position: relative;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.12s var(--ease);
 }
-.sitem:hover { background: var(--panel-2); color: var(--text); }
+.sitem:hover { background: var(--panel-2); color: var(--text); transform: translateX(2px); }
 .sitem.active { background: var(--panel-2); color: var(--accent); }
+.sitem.active::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 1.05rem; border-radius: 999px; background: var(--accent);
+}
 .sitem.droptarget { outline: 1px dashed var(--accent); color: var(--accent); }
 .sitem .cnt { margin-left: auto; font-size: 0.72rem; opacity: 0.7; flex-shrink: 0; }
 .sitem .slabel { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .sdot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem; }
-@media (max-width: 800px) {
+@media (max-width: 900px) {
   #layout { flex-direction: column; }
   #snav { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; gap: 0.3rem; }
   .sitem { flex-shrink: 0; margin-bottom: 0; }
@@ -70,10 +124,13 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   background: var(--panel);
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
-  border-radius: 0 8px 8px 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
   padding: 0.6rem 0.8rem;
   margin-bottom: 0.5rem;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
 }
+.task:hover { border-left-color: var(--accent); box-shadow: var(--shadow-lg); transform: translateX(2px); }
 .task-row { display: flex; align-items: flex-start; gap: 0.6rem; }
 .task-check {
   width: 1.15rem; height: 1.15rem; border-radius: 50%;
@@ -188,6 +245,9 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   background: var(--accent); color: #001; border: none; border-radius: 6px;
   padding: 0.5rem 1rem; font: inherit; cursor: pointer;
 }
+#guest-form input.invalid { border-color: var(--danger); }
+#guest-error { flex-basis: 100%; margin: 0.2rem 0 0; color: var(--danger); font-size: 0.82rem; }
+#guest-error:empty { display: none; }
 #add-bar, #proj-bar { display: flex; gap: 0.5rem; margin: 1rem 0; }
 #proj-bar { margin-top: 0.4rem; }
 #add-bar[hidden], #proj-bar[hidden], #guest-banner[hidden], #tiles[hidden] { display: none; }
@@ -213,11 +273,14 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .tile {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+  padding: 0.45rem 0.65rem;
   cursor: pointer;
   user-select: none;
+  box-shadow: var(--shadow);
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
+.tile:hover { background: var(--panel-2); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .tile .tn { font-weight: 700; float: right; }
 .tile .tl { font-size: 0.7rem; font-weight: 600; display: block; }
 .tile.active { border-color: var(--accent); background: #15232e; }
@@ -225,20 +288,48 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); font: inherit; padding: 0.55rem 0.8rem; outline: none;
 }
-#add-bar input:focus { border-color: var(--accent); }
+#add-bar input:focus { border-color: var(--accent); box-shadow: var(--ring); }
 #add-bar button {
-  background: var(--accent); color: #001; border: none; border-radius: 6px;
-  padding: 0.5rem 1rem; font: inherit; cursor: pointer;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #04161f; border: none; border-radius: var(--radius-sm);
+  padding: 0.5rem 1rem; font: inherit; cursor: pointer; font-weight: 600;
+  box-shadow: 0 2px 10px rgba(79,195,247,0.25); transition: filter 0.18s var(--ease);
 }
+#add-bar button:hover { filter: brightness(1.08); }
 .empty { color: var(--muted); font-style: italic; padding: 1rem 0; text-align: center; }
 footer { text-align: center; color: var(--muted); font-size: 0.72rem; padding: 1.5rem; }
+/* ---------- accessibilité (Lot 1+2) ---------- */
+button, .sitem, .tile, .task, a { touch-action: manipulation; }
+.sitem:focus-visible, .tile:focus-visible, button:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none; box-shadow: var(--ring); border-radius: 8px;
+}
+@media (pointer: coarse) {
+  button, .sitem, .tile, .task-check { min-height: 44px; }
+}
+@media (max-width: 900px) {
+  input, select, textarea { font-size: 16px; }
+}
+.tn, .cnt, .c-when { font-variant-numeric: tabular-nums; }
+.sitem:active, .tile:active { transform: scale(0.97); }
+.task:hover { will-change: transform; }
+@media (prefers-reduced-motion: reduce) { .sitem:active, .tile:active { transform: none; } }
 dialog { background: transparent; border: none; padding: 0; max-width: 94vw; max-height: 94vh; }
-dialog::backdrop { background: rgba(0,0,0,0.85); }
+dialog::backdrop { background: rgba(6,9,12,0.78); backdrop-filter: blur(3px); }
+/* Entrée des pop-ins en CSS. NE PAS animer le <dialog> via GSAP (transform/visibility) :
+   poser un transform sur l'élément dialog le sort du top-layer Chromium → perte du
+   centrage (position:fixed→absolute) et du ::backdrop. Une animation CSS reste sûre. */
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] { animation: dlg-in 0.24s cubic-bezier(0.16, 1, 0.3, 1); }
+  dialog[open]::backdrop { animation: dlg-bd 0.24s ease-out; }
+  @keyframes dlg-in { from { opacity: 0; transform: translateY(12px) scale(0.97); } }
+  @keyframes dlg-bd { from { opacity: 0; } }
+}
+dialog:not(#lightbox) { box-shadow: var(--shadow-lg); }
 dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom-out; }
 #edit-dialog {
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 1.25rem;
   width: min(620px, 94vw);
   color: var(--text);
@@ -246,10 +337,14 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 #edit-dialog h3 { margin: 0 0 0.8rem; font-size: 1rem; }
 .dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.8rem; }
 .dlg-actions button {
-  border-radius: 6px; padding: 0.45rem 0.9rem; font: inherit; cursor: pointer;
+  border-radius: var(--radius-sm); padding: 0.45rem 0.9rem; font: inherit; cursor: pointer; font-weight: 500;
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), transform 0.08s var(--ease);
 }
-.dlg-actions button.primary { background: var(--accent); color: #001; border-color: var(--accent); }
+.dlg-actions button:hover { background: var(--bg-elev); border-color: #36465a; }
+.dlg-actions button:active { transform: translateY(1px); }
+.dlg-actions button.primary { background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #04161f; border-color: transparent; font-weight: 600; box-shadow: 0 2px 10px rgba(79,195,247,0.25); }
+.dlg-actions button.primary:hover { background: linear-gradient(180deg, #6fcef9, var(--accent)); }
 #q-wrap .ql-toolbar { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px 6px 0 0; }
 #q-wrap .ql-container {
   border: 1px solid var(--border); border-top: none; border-radius: 0 0 6px 6px;
@@ -258,6 +353,16 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 }
 #q-wrap .ql-editor { min-height: 180px; }
 #q-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
+/* Mentions @ dans l'éditeur */
+.mention { color: var(--assignee); background: rgba(128,203,196,0.14); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+.mention-menu { position: fixed; z-index: 10000; min-width: 11rem; max-height: 13rem; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; }
+.mention-item { padding: 0.32rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text); white-space: nowrap; }
+.mention-item.active { background: var(--accent); color: #fff; }
+.assignee-chip.noaccess { color: var(--warn); border-color: rgba(255,183,77,0.45); }
+.mention.noaccess { color: var(--warn); background: rgba(255,183,77,0.16); }
+.q-people { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-top: 0.2rem; }
+.me-label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin: 0.5rem 0 0.2rem; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: var(--assignee); }
 .ql-snow .ql-stroke { stroke: var(--muted); }
 .ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--muted); }
 .ql-snow .ql-picker { color: var(--muted); }
@@ -271,10 +376,27 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .ql-snow .ql-picker-item:hover, .ql-snow .ql-picker-item.ql-selected { color: var(--accent); }
 .ql-snow a { color: var(--accent); }
 </style>
+<script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
 <body>
+<svg class="ic-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="ic-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="ic-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="ic-reply" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="ic-map" viewBox="0 0 24 24"><path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3Z"/><path d="M9 3v15"/><path d="M15 6v15"/></symbol>
+  <symbol id="ic-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="ic-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="ic-checklist" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+  <symbol id="ic-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="ic-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="ic-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+</defs></svg>
+<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
   <h1 id="title">…</h1>
+  <button id="theme-btn" class="icon" title="Thème clair / sombre" aria-label="Basculer le thème"><svg class="ic"><use href="#ic-moon"/></svg></button>
   <span class="mode" id="mode"></span>
 </header>
 <div id="layout">
@@ -332,11 +454,25 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 </dialog>
 
 <dialog id="edit-dialog">
-  <h3>✏️ Modifier le mémo</h3>
+  <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-pencil"/></svg>Modifier le mémo</h3>
+  <label class="me-label" for="q-title">Titre <span style="font-weight:400">(optionnel)</span></label>
+  <input id="q-title" type="text" placeholder="Titre du mémo…" maxlength="200" autocomplete="off"
+         style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem;box-sizing:border-box">
+  <label class="me-label">Contenu</label>
   <div id="q-wrap"><div id="q-editor"></div></div>
+  <label class="me-label">Assigné·es</label>
+  <div id="q-people" class="q-people"></div>
   <div class="dlg-actions">
     <button type="button" id="edit-cancel">Annuler</button>
     <button type="button" id="edit-save" class="primary">Enregistrer</button>
+  </div>
+</dialog>
+
+<dialog id="notify-dialog">
+  <h3 id="notify-title">Info</h3>
+  <p id="notify-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
+  <div class="dlg-actions">
+    <button type="button" id="notify-ok" class="primary">OK</button>
   </div>
 </dialog>
 
@@ -345,6 +481,19 @@ const TOKEN = location.pathname.split('/')[2];
 const API = '/share/' + TOKEN;
 let DATA = null;
 let GUEST = { status: 'anonymous', email: '', name: '' };
+
+// Thème clair / sombre (tokens surchargés sous [data-theme=light], persistant)
+const themeBtn = document.getElementById('theme-btn');
+function setTheme(t) {
+  const light = t === 'light';
+  if (light) document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (e) {}
+  const u = themeBtn && themeBtn.querySelector('use');
+  if (u) u.setAttribute('href', light ? '#ic-sun' : '#ic-moon');
+}
+setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
+if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
 
 function guestToken() { return localStorage.getItem('dashguest:' + TOKEN) || ''; }
 function canEditNow() { return DATA && DATA.can_edit && GUEST.status === 'approved'; }
@@ -363,6 +512,12 @@ function renderGuestBanner() {
   const b = document.getElementById('guest-banner');
   b.hidden = !DATA.can_edit;
   if (!DATA.can_edit) return;
+  // Le formulaire de connexion invité est affiché tant que l'invité n'est ni
+  // approuvé, ni en attente, ni refusé. S'il est déjà à l'écran, NE PAS le
+  // reconstruire : le refresh auto (setInterval 15s → load → ici) effacerait
+  // ce que l'invité est en train de taper (prénom / e-mail / code).
+  const anonymous = !['approved', 'pending', 'rejected'].includes(GUEST.status);
+  if (anonymous && document.getElementById('guest-form')) return;
   b.innerHTML = '';
   b.className = '';
   if (GUEST.status === 'approved') {
@@ -396,10 +551,20 @@ function renderGuestBanner() {
   pinIn.style.cssText = 'flex:0 0 5.5rem;min-width:5.5rem;text-align:center;letter-spacing:0.3em';
   const btn = document.createElement('button');
   btn.textContent = 'Se connecter';
-  btn.addEventListener('click', async () => {
+  const errEl = document.createElement('div');
+  errEl.id = 'guest-error';
+  errEl.setAttribute('role', 'alert');
+  const showErr = (msg, focusEl, markEl) => {
+    errEl.textContent = msg;
+    [nameIn, emailIn, pinIn].forEach(i => i.classList.remove('invalid'));
+    if (markEl) markEl.classList.add('invalid');
+    if (focusEl) focusEl.focus();
+  };
+  const submit = async () => {
     const email = emailIn.value.trim();
-    if (!email || !email.includes('@')) { emailIn.focus(); return; }
-    if (!/^\d{4}$/.test(pinIn.value.trim())) { pinIn.focus(); return; }
+    if (!email || !email.includes('@')) { showErr('E-mail invalide.', emailIn, emailIn); return; }
+    if (!/^\d{4}$/.test(pinIn.value.trim())) { showErr('Le code est composé de 4 chiffres.', pinIn, pinIn); return; }
+    errEl.textContent = '';
     const r = await fetch(API + '/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -413,13 +578,18 @@ function renderGuestBanner() {
       await load();
     } else {
       const err = await r.json().catch(() => ({}));
-      alert(err.error || 'Connexion impossible');
+      // On NE vide PAS prénom/e-mail : seul le code est remis à zéro et refocus.
+      pinIn.value = '';
+      showErr(err.error || 'Connexion impossible.', pinIn, pinIn);
     }
-  });
+  };
+  btn.addEventListener('click', submit);
+  [nameIn, emailIn, pinIn].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); }));
   form.appendChild(nameIn);
   form.appendChild(emailIn);
   form.appendChild(pinIn);
   form.appendChild(btn);
+  form.appendChild(errEl);
   b.appendChild(form);
 }
 
@@ -429,6 +599,52 @@ function el(tag, cls, text) {
   if (text != null) e.textContent = text;
   return e;
 }
+
+// Remplace les alert() natifs par une pop-in (cohérent avec le reste de l'app).
+function notify(message, { title = 'ℹ️ Info', error = false } = {}) {
+  if (typeof announce === 'function') announce(message);
+  return new Promise(resolve => {
+    const dlg = document.getElementById('notify-dialog');
+    document.getElementById('notify-title').textContent = error ? '⚠️ Erreur' : title;
+    document.getElementById('notify-msg').textContent = message;
+    const ok = document.getElementById('notify-ok');
+    const done = () => { dlg.close(); ok.onclick = dlg.oncancel = null; resolve(); };
+    ok.onclick = done;
+    dlg.oncancel = (e) => { e.preventDefault(); done(); };
+    dlg.showModal();
+  });
+}
+
+function shareIcon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const s = document.createElementNS(NS, 'svg'); s.setAttribute('class', 'ic');
+  const u = document.createElementNS(NS, 'use'); u.setAttribute('href', '#ic-' + name);
+  s.appendChild(u); return s;
+}
+
+// Désactive un bouton pendant une action async (anti double-clic).
+async function withBusy(btn, fn) {
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.style.opacity = '0.6'; }
+  try { return await fn(); }
+  finally { if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); btn.style.opacity = ''; } }
+}
+
+// Rend les éléments "bouton" (sidebar, tuiles) focusables et activables au clavier.
+function applyA11y() {
+  document.querySelectorAll('.sitem, .tile').forEach(e => {
+    if (!e.hasAttribute('tabindex')) e.tabIndex = 0;
+    if (!e.hasAttribute('role')) e.setAttribute('role', 'button');
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = e.target;
+  if (t.matches && t.matches('.sitem, .tile') && !t.closest('input, textarea, select')) {
+    e.preventDefault();
+    t.click();
+  }
+});
 
 function sanitize(html) {
   const tpl = document.createElement('template');
@@ -463,14 +679,266 @@ function linkifyText(text) {
 
 let sQuill = null;
 let editingId = null;
+let editAssignees = [];
 const editDialog = document.getElementById('edit-dialog');
+
+// --- Mentions @ : blot stylé + menu de suggestions (self-hosté, zéro CDN) ---
+function registerMentionBlot() {
+  if (typeof Quill === 'undefined' || Quill.__mentionReady) return;
+  const Inline = Quill.import('blots/inline');
+  class MentionBlot extends Inline {
+    static create(value) { const node = super.create(); node.setAttribute('data-mention', value); return node; }
+    static formats(node) { return node.getAttribute('data-mention'); }
+  }
+  MentionBlot.blotName = 'mention';
+  MentionBlot.tagName = 'span';
+  MentionBlot.className = 'mention';
+  Quill.register(MentionBlot, true);
+  Quill.__mentionReady = true;
+}
+function addMentionMatcher(q) {
+  const Delta = Quill.import('delta');
+  q.clipboard.addMatcher('SPAN', (node, delta) => {
+    if (node.classList && node.classList.contains('mention')) {
+      const nm = node.getAttribute('data-mention') || node.textContent.replace(/^@/, '');
+      return new Delta().insert('@' + nm, { mention: nm });
+    }
+    return delta;
+  });
+}
+function setupMentions(quill, getNames, onPick) {
+  const host = quill.container.closest('dialog') || document.body;
+  const menu = document.createElement('div');
+  menu.className = 'mention-menu';
+  menu.style.display = 'none';
+  host.appendChild(menu);
+  let open = false, items = [], active = 0, query = '', picking = false;
+
+  const close = () => { open = false; menu.style.display = 'none'; };
+  const draw = () => {
+    menu.innerHTML = '';
+    items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'mention-item' + (i === active ? ' active' : '');
+      row.textContent = it.add ? ('➕ Ajouter « ' + it.value + ' »') : ('@' + it.value);
+      row.addEventListener('mousedown', (e) => { e.preventDefault(); pick(i); });
+      row.addEventListener('mousemove', () => { if (active !== i) { active = i; draw(); } });
+      menu.appendChild(row);
+    });
+  };
+  const place = () => {
+    const sel = quill.getSelection(); if (!sel) return;
+    const b = quill.getBounds(sel.index);
+    const c = quill.container.getBoundingClientRect();
+    menu.style.left = Math.round(c.left + b.left) + 'px';
+    menu.style.top = Math.round(c.top + b.bottom + 4) + 'px';
+  };
+  const refresh = () => {
+    const all = (getNames() || []).filter(Boolean);
+    const q = query.toLowerCase();
+    const list = all.filter(n => n.toLowerCase().includes(q)).map(v => ({ value: v }));
+    if (query && !all.some(n => n.toLowerCase() === q)) list.push({ value: query, add: true });
+    items = list;
+    if (!items.length) { close(); return; }
+    if (active >= items.length) active = 0;
+    draw(); place();
+    menu.style.display = 'block'; open = true;
+  };
+  const pick = (i) => {
+    const it = items[i]; if (!it) { close(); return; }
+    const name = String(it.value).trim(); if (!name) { close(); return; }
+    const sel = quill.getSelection(true); if (!sel) { close(); return; }
+    const delLen = query.length + 1;
+    const start = sel.index - delLen;
+    picking = true;
+    quill.deleteText(start, delLen, 'user');
+    quill.insertText(start, '@' + name, { mention: name }, 'user');
+    quill.insertText(start + name.length + 1, ' ', { mention: false }, 'user');
+    quill.setSelection(start + name.length + 2, 0, 'user');
+    picking = false;
+    close();
+    try { onPick(name); } catch (e) {}
+  };
+  const detect = () => {
+    if (picking) return;
+    const sel = quill.getSelection();
+    if (!sel || sel.length) { close(); return; }
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(quill.getText(0, sel.index));
+    if (!m) { close(); return; }
+    query = m[1];
+    refresh();
+  };
+  quill.on('text-change', (d, o, source) => { if (source === 'user') detect(); else close(); });
+  quill.on('selection-change', (range) => { if (!range && !picking) close(); });
+  quill.root.addEventListener('keydown', (e) => {
+    if (!open || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); active = (active + 1) % items.length; draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); active = (active - 1 + items.length) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); pick(active); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); }
+  }, true);
+}
+
+// Suggestions = membres du partage + noms déjà utilisés sur les mémos.
+function shareSuggestions() {
+  const names = new Set();
+  (DATA.members || []).forEach(n => { if (n) names.add(n); });
+  (DATA.memos || []).forEach(m => (m.assignees || []).forEach(a => names.add(a)));
+  return [...names].filter(Boolean);
+}
+
+// Accès : une personne assignée voit-elle ce partage ? (sinon affichage ambre)
+const NO_ACCESS_TIP = "N'a pas accès à ce partage — ne verra pas ce mémo.";
+function shareNoAccess(name) {
+  const members = new Set((DATA.members || []).map(n => (n || '').toLowerCase().trim()));
+  return !members.has((name || '').toLowerCase().trim());
+}
+
+const COMMENT_PRIO_COL = { 1: '#ff5252', 2: 'var(--warn)', 3: '#66bb6a' };
+const seenMarked = new Set();
+
+function markMemoSeen(memoId) {
+  if (seenMarked.has(memoId)) return;
+  seenMarked.add(memoId);
+  fetch(API + '/memo/' + memoId + '/seen', { method: 'POST', headers: { 'X-Guest-Token': guestToken() } }).catch(() => {});
+}
+
+// Autocomplete @ sur un <input> simple (réutilise .mention-menu).
+function attachInputMention(input, getNames) {
+  const menu = document.createElement('div');
+  menu.className = 'mention-menu';
+  menu.style.display = 'none';
+  (input.closest('dialog') || document.body).appendChild(menu);
+  let open = false, items = [], active = 0, qstart = -1;
+  const close = () => { open = false; menu.style.display = 'none'; };
+  const draw = () => {
+    menu.innerHTML = '';
+    items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'mention-item' + (i === active ? ' active' : '');
+      row.textContent = it.add ? ('➕ Ajouter « ' + it.value + ' »') : ('@' + it.value);
+      row.addEventListener('mousedown', (e) => { e.preventDefault(); pick(i); });
+      menu.appendChild(row);
+    });
+  };
+  const place = () => {
+    const r = input.getBoundingClientRect();
+    menu.style.left = Math.round(r.left) + 'px';
+    menu.style.top = Math.round(r.bottom + 4) + 'px';
+    menu.style.minWidth = Math.round(r.width) + 'px';
+  };
+  const pick = (i) => {
+    const it = items[i]; if (!it) { close(); return; }
+    const name = String(it.value).trim(); if (!name) { close(); return; }
+    const val = input.value, pos = input.selectionStart;
+    input.value = val.slice(0, qstart) + '@' + name + ' ' + val.slice(pos);
+    const np = qstart + name.length + 2;
+    input.setSelectionRange(np, np);
+    close(); input.focus();
+  };
+  const detect = () => {
+    const before = input.value.slice(0, input.selectionStart);
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(before);
+    if (!m) { close(); return; }
+    qstart = input.selectionStart - m[1].length - 1;
+    const q = m[1].toLowerCase();
+    const all = (getNames() || []).filter(Boolean);
+    const list = all.filter(n => n.toLowerCase().includes(q)).map(v => ({ value: v }));
+    if (m[1] && !all.some(n => n.toLowerCase() === q)) list.push({ value: m[1], add: true });
+    items = list;
+    if (!items.length) { close(); return; }
+    if (active >= items.length) active = 0;
+    draw(); place(); menu.style.display = 'block'; open = true;
+  };
+  input.addEventListener('input', detect);
+  input.addEventListener('keydown', (e) => {
+    if (!open || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); active = (active + 1) % items.length; draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); active = (active - 1 + items.length) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); pick(active); }
+    else if (e.key === 'Escape') { e.stopImmediatePropagation(); close(); }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+}
+
+// Champ commentaire invité (avec priorité + mention + parent éventuel).
+function shareCommentInput(memo, parentId) {
+  const row = el('div', '');
+  row.style.cssText = 'display:flex;gap:0.35rem;margin-top:0.3rem';
+  const prioSel = document.createElement('select');
+  prioSel.title = 'Priorité du commentaire';
+  prioSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.76rem;padding:0.2rem';
+  [['0', '⚑ —'], ['1', 'P1'], ['2', 'P2'], ['3', 'P3']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; prioSel.appendChild(o); });
+  const ci = document.createElement('input');
+  ci.type = 'text';
+  ci.placeholder = parentId ? '↩ Répondre… (Entrée)' : '💬 Commenter… (Entrée, @ pour mentionner)';
+  ci.maxLength = 2000;
+  ci.style.cssText = 'flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.3rem 0.5rem';
+  attachInputMention(ci, () => shareSuggestions());
+  ci.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || !ci.value.trim()) return;
+    e.preventDefault();
+    const body = { body: ci.value.trim(), priority: parseInt(prioSel.value, 10) || 0 };
+    if (parentId) body.parent_id = parentId;
+    const r = await fetch(API + '/memo/' + memo.id + '/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) await load(); else notify('Commentaire refusé.', { error: true });
+  });
+  row.appendChild(prioSel);
+  row.appendChild(ci);
+  return row;
+}
+
+function renderQPeople() {
+  const wrap = document.getElementById('q-people');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const ic = el('span', null); ic.appendChild(shareIcon('user')); ic.title = 'Personnes rattachées à ce mémo';
+  wrap.appendChild(ic);
+  editAssignees.forEach(a => {
+    const noAcc = shareNoAccess(a);
+    const chip = el('span', 'assignee-chip' + (noAcc ? ' noaccess' : ''), (noAcc ? '⚠ @' : '@') + a + ' ');
+    if (noAcc) chip.title = NO_ACCESS_TIP;
+    const x = el('button', null, '×');
+    x.type = 'button';
+    x.title = 'Retirer ' + a;
+    x.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.85rem';
+    x.addEventListener('click', () => { editAssignees = editAssignees.filter(v => v !== a); renderQPeople(); });
+    chip.appendChild(x);
+    wrap.appendChild(chip);
+  });
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = '+ @personne (Entrée)';
+  input.setAttribute('list', 'share-assignees');
+  input.style.cssText = 'width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.45rem';
+  let sdl = document.getElementById('share-assignees');
+  if (!sdl) { sdl = document.createElement('datalist'); sdl.id = 'share-assignees'; document.body.appendChild(sdl); }
+  sdl.innerHTML = '';
+  shareSuggestions().forEach(n => { const o = document.createElement('option'); o.value = n; sdl.appendChild(o); });
+  const add = () => {
+    const name = input.value.replace(/^@/, '').trim();
+    if (!name) return;
+    if (!editAssignees.some(v => v.toLowerCase() === name.toLowerCase())) editAssignees.push(name);
+    input.value = '';
+    renderQPeople();
+    const ni = document.getElementById('q-people').querySelector('input'); if (ni) ni.focus();
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  input.addEventListener('change', () => { if (shareSuggestions().includes(input.value.trim())) add(); });
+  wrap.appendChild(input);
+}
 
 function getShareQuill() {
   if (typeof Quill === 'undefined') return null;
   if (!sQuill) {
+    registerMentionBlot();
     sQuill = new Quill('#q-editor', {
       theme: 'snow',
-      placeholder: 'Contenu du mémo…',
+      placeholder: 'Contenu du mémo… (tape @ pour mentionner)',
       modules: {
         toolbar: [
           [{ header: [1, 2, 3, false] }],
@@ -481,6 +949,11 @@ function getShareQuill() {
           ['clean'],
         ],
       },
+    });
+    addMentionMatcher(sQuill);
+    setupMentions(sQuill, shareSuggestions, (name) => {
+      if (!editAssignees.some(v => v.toLowerCase() === name.toLowerCase())) editAssignees.push(name);
+      renderQPeople();
     });
   }
   return sQuill;
@@ -509,6 +982,10 @@ function openEditor(memo, contentEl, taskEl) {
     return;
   }
   editingId = memo.id;
+  const titleEl = document.getElementById('q-title');
+  if (titleEl) titleEl.value = memo.title || '';
+  editAssignees = [...(memo.assignees || [])];
+  renderQPeople();
   q.setContents([]);
   if (isRich(memo.content)) q.clipboard.dangerouslyPasteHTML(0, memo.content);
   else q.setText(memo.content);
@@ -517,16 +994,25 @@ function openEditor(memo, contentEl, taskEl) {
 }
 
 document.getElementById('edit-cancel').addEventListener('click', () => editDialog.close());
-document.getElementById('edit-save').addEventListener('click', async () => {
+document.getElementById('edit-save').addEventListener('click', (ev) => withBusy(ev.currentTarget, async () => {
   const q = getShareQuill();
   if (!q || editingId == null) return;
   const text = q.getText().trim();
-  if (!text) { alert('Le mémo ne peut pas être vide.'); return; }
+  const titleEl = document.getElementById('q-title');
+  const title = titleEl ? titleEl.value.trim() : '';
+  if (!text && !title) return; // titre OU contenu requis
   const html = q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ');
   editDialog.close();
-  await put(editingId, { content: html });
+  await put(editingId, { content: html, assignees: editAssignees, title: title });
   editingId = null;
-});
+}));
+
+function announce(msg) {
+  const e = document.getElementById('sr-live');
+  if (!e) return;
+  e.textContent = '';
+  setTimeout(() => { e.textContent = msg; }, 40);
+}
 
 async function put(memoId, body) {
   const r = await fetch(API + '/memo/' + memoId, {
@@ -534,7 +1020,7 @@ async function put(memoId, body) {
     headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
     body: JSON.stringify(body),
   });
-  if (r.ok) await load();
+  if (r.ok) { await load(); announce('Modification enregistrée.'); }
   else if (r.status === 403) await load();
 }
 
@@ -565,7 +1051,7 @@ async function guestPut(url, body) {
   });
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
-    if (err.error) alert(err.error);
+    if (err.error) notify(err.error, { error: true });
   }
   await load();
 }
@@ -686,7 +1172,7 @@ let activeMap = null;
 document.getElementById('map-close').addEventListener('click', () => document.getElementById('map-dialog').close());
 
 function openShareMap() {
-  if (typeof L === 'undefined') { alert('Carte indisponible (fichiers Leaflet manquants).'); return; }
+  if (typeof L === 'undefined') { notify('Carte indisponible (fichiers Leaflet manquants).', { error: true }); return; }
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
   const points = [];
   scopedMemos().forEach(m => {
@@ -703,7 +1189,7 @@ function openShareMap() {
       points.push({ lat: p.location.lat, lng: p.location.lng, title: '📁 ' + p.name, sub: p.location.label || '', color: p.color || '#81c784' });
     }
   });
-  if (!points.length) { alert('Aucun point géolocalisé dans cette vue.'); return; }
+  if (!points.length) { notify('Aucun point géolocalisé dans cette vue.'); return; }
   const dlg = document.getElementById('map-dialog');
   document.getElementById('map-title').textContent = '🗺 ' + DATA.title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
   dlg.showModal();
@@ -759,9 +1245,9 @@ function renderTiles() {
   const defs = [
     ['all', 'En cours', '#4fc3f7', ms.filter(m => !m.done).length],
     ['today', "Aujourd'hui", '#4caf50', ms.filter(m => !m.done && m.due_date === t).length],
-    ['sched', 'Planifiés', '#b39ddb', ms.filter(m => !m.done && m.due_date > t).length],
-    ['late', 'En retard', '#ff8a80', ms.filter(m => !m.done && m.due_date && m.due_date < t).length],
-    ['done', 'Terminés', '#ffb74d', ms.filter(m => m.done).length],
+    ['sched', 'Planifiés', 'var(--guest)', ms.filter(m => !m.done && m.due_date > t).length],
+    ['late', 'En retard', 'var(--danger)', ms.filter(m => !m.done && m.due_date && m.due_date < t).length],
+    ['done', 'Terminés', 'var(--warn)', ms.filter(m => m.done).length],
   ];
   const tiles = document.getElementById('tiles');
   tiles.hidden = false;
@@ -780,12 +1266,53 @@ function renderTiles() {
   if (located > 0) {
     const tile = el('div', 'tile');
     tile.appendChild(el('span', 'tn', String(located)));
-    const l = el('span', 'tl', '🗺 Carte');
+    const l = el('span', 'tl'); l.append(shareIcon('map'), ' Carte');
     l.style.color = '#4db6ac';
     tile.appendChild(l);
     tile.addEventListener('click', openShareMap);
     tiles.appendChild(tile);
   }
+  const tn = (DATA.trash || []).length;
+  if (DATA.can_edit && tn > 0) {
+    const tile = el('div', 'tile' + (FILTER === 'trash' ? ' active' : ''));
+    tile.appendChild(el('span', 'tn', String(tn)));
+    const l = el('span', 'tl', '🗑 Corbeille');
+    l.style.color = 'var(--danger)';
+    tile.appendChild(l);
+    tile.addEventListener('click', () => { FILTER = 'trash'; render(); });
+    tiles.appendChild(tile);
+  }
+}
+
+function renderShareTrash(list) {
+  const items = DATA.trash || [];
+  if (!items.length) { list.appendChild(el('div', 'empty', 'Corbeille vide. 🎉')); return; }
+  items.forEach(m => {
+    const row = el('div', 'task');
+    row.style.cssText = 'display:flex;align-items:center;gap:0.6rem';
+    const main = el('div');
+    main.style.cssText = 'flex:1;min-width:0';
+    const label = m.title || (m.content || '').replace(/<[^>]+>/g, ' ').trim().slice(0, 90) || '(mémo vide)';
+    main.appendChild(el('div', null, (m.emoji ? m.emoji + ' ' : '') + label));
+    let when = '';
+    if (m.deleted_at) {
+      const d = new Date(m.deleted_at);
+      if (!isNaN(d.getTime())) when = 'Supprimé le ' + d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    }
+    const meta = el('div', null, when);
+    meta.style.cssText = 'color:var(--muted);font-size:0.78rem;margin-top:0.15rem';
+    main.appendChild(meta);
+    row.appendChild(main);
+    const rb = document.createElement('button');
+    rb.className = 'tool-btn';
+    rb.textContent = '↩ Restaurer';
+    rb.addEventListener('click', async () => {
+      const r = await fetch(API + '/memo/' + m.id + '/restore', { method: 'POST', headers: { 'X-Guest-Token': guestToken() } });
+      if (r.ok) await load(); else notify('Restauration impossible.', { error: true });
+    });
+    row.appendChild(rb);
+    list.appendChild(row);
+  });
 }
 
 function visibleShareMemos() {
@@ -808,7 +1335,8 @@ function render() {
     h.appendChild(d);
   }
   h.appendChild(document.createTextNode(DATA.title));
-  document.getElementById('mode').textContent = canEditNow() ? '✏️ modifiable' : (DATA.can_edit ? '✏️ sur validation' : '👁 lecture seule');
+  const modeEl = document.getElementById('mode'); modeEl.textContent = '';
+  modeEl.append(shareIcon(canEditNow() || DATA.can_edit ? 'pencil' : 'eye'), ' ' + (canEditNow() ? 'modifiable' : (DATA.can_edit ? 'sur validation' : 'lecture seule')));
   const pdesc = document.getElementById('pdesc');
   let curDesc = DATA.description || '';
   if (PFILTER !== 'all') {
@@ -837,11 +1365,13 @@ function render() {
   renderGuestBanner();
   renderSidebar();
   renderTiles();
+  applyA11y();
 
   if (!projSel.hidden && PFILTER !== 'all') projSel.value = String(PFILTER);
 
   const list = document.getElementById('list');
   list.innerHTML = '';
+  if (FILTER === 'trash') { renderShareTrash(list); return; }
   const visible = visibleShareMemos();
   if (!visible.length) {
     list.appendChild(el('div', 'empty', 'Rien dans cette vue. 🎉'));
@@ -883,6 +1413,9 @@ function render() {
     }
     if (isRich(memo.content)) content.appendChild(sanitize(memo.content));
     else content.appendChild(linkifyText(memo.content));
+    content.querySelectorAll('.mention[data-mention]').forEach(sp => {
+      if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
+    });
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
       if (!canEditNow()) return;
       li.classList.add('cl-edit');
@@ -899,7 +1432,7 @@ function render() {
     row.appendChild(content);
 
     if (memo.location) {
-      const la = el('a', 'badge', '📍' + (memo.location.label ? ' ' + memo.location.label : ''));
+      const la = el('a', 'badge'); la.append(shareIcon('map-pin'), memo.location.label ? ' ' + memo.location.label : '');
       la.href = 'https://www.openstreetmap.org/?mlat=' + memo.location.lat + '&mlon=' + memo.location.lng + '#map=17/' + memo.location.lat + '/' + memo.location.lng;
       la.target = '_blank';
       la.rel = 'noopener noreferrer';
@@ -908,9 +1441,10 @@ function render() {
       row.appendChild(la);
     }
     (memo.assignees || []).forEach(a => {
-      const ab = el('span', 'badge', '@' + a.replace(/@.*$/, ''));
-      ab.title = 'Assigné à ' + a;
-      ab.style.color = '#80cbc4';
+      const noAcc = shareNoAccess(a);
+      const ab = el('span', 'badge', (noAcc ? '⚠ @' : '@') + a.replace(/@.*$/, ''));
+      ab.title = noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a);
+      ab.style.color = noAcc ? 'var(--warn)' : 'var(--assignee)';
       row.appendChild(ab);
     });
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
@@ -967,12 +1501,18 @@ function render() {
     if ((memo.comments || []).length || canEditNow()) {
       const cwrap = el('div', '');
       cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
-      (memo.comments || []).forEach(c => {
+      const comments = memo.comments || [];
+      const renderC = (c, isReply) => {
         const r = el('div', '');
-        r.style.cssText = 'display:flex;gap:0.5rem;align-items:flex-start;font-size:0.82rem;padding:0.3rem 0.5rem;background:var(--bg);border-radius:6px;margin-top:0.3rem';
+        r.style.cssText = 'display:flex;gap:0.5rem;align-items:flex-start;font-size:0.82rem;padding:0.3rem 0.5rem;background:var(--bg);border-radius:6px;margin-top:0.3rem' + (isReply ? ';margin-left:1.5rem;border-left:2px solid var(--border)' : '');
+        if (c.priority) {
+          const pp = el('span', '', 'P' + c.priority);
+          pp.style.cssText = 'flex-shrink:0;font-size:0.66rem;font-weight:700;color:#10141a;border-radius:4px;padding:0 0.3rem;line-height:1.5;background:' + (COMMENT_PRIO_COL[c.priority] || 'var(--muted)');
+          r.appendChild(pp);
+        }
         const author = (c.author || '').replace(/\s*<[^>]*>/, '');
         const a = el('span', '', author);
-        a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:#b39ddb' : '');
+        a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:var(--guest)' : '');
         a.title = c.author;
         r.appendChild(a);
         const b = el('span', '', c.body);
@@ -982,28 +1522,37 @@ function render() {
         w.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0';
         w.title = new Date(c.created_at).toLocaleString('fr-FR');
         r.appendChild(w);
-        cwrap.appendChild(r);
-      });
-      if (canEditNow()) {
-        const ci = document.createElement('input');
-        ci.type = 'text';
-        ci.placeholder = '💬 Commenter… (Entrée)';
-        ci.maxLength = 2000;
-        ci.style.cssText = 'width:100%;margin-top:0.3rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.3rem 0.5rem';
-        ci.addEventListener('keydown', async (e) => {
-          if (e.key !== 'Enter' || !ci.value.trim()) return;
-          e.preventDefault();
-          const r = await fetch(API + '/memo/' + memo.id + '/comments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
-            body: JSON.stringify({ body: ci.value.trim() }),
+        const self = (GUEST && (GUEST.name || GUEST.email)) || '';
+        const others = (c.seen || []).filter(v => v && v !== author && v !== self);
+        if (others.length) {
+          const s = el('span', ''); s.append(shareIcon('eye'), ' ' + others.join(', '));
+          s.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0;white-space:nowrap';
+          s.title = 'Vu par ' + others.join(', ');
+          r.appendChild(s);
+        }
+        if (!isReply && canEditNow()) {
+          const rep = el('span', ''); rep.appendChild(shareIcon('reply'));
+          rep.style.cssText = 'cursor:pointer;color:var(--muted);flex-shrink:0';
+          rep.title = 'Répondre';
+          rep.addEventListener('click', () => {
+            if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
+            const rb = shareCommentInput(memo, c.id);
+            rb.classList.add('reply-box');
+            rb.style.marginLeft = '1.5rem';
+            r.after(rb);
+            rb.querySelector('input').focus();
           });
-          if (r.ok) await load();
-          else alert('Commentaire refusé.');
-        });
-        cwrap.appendChild(ci);
-      }
+          r.appendChild(rep);
+        }
+        cwrap.appendChild(r);
+      };
+      comments.filter(c => !c.parent_id).forEach(c => {
+        renderC(c, false);
+        comments.filter(ch => ch.parent_id === c.id).forEach(ch => renderC(ch, true));
+      });
+      if (canEditNow()) cwrap.appendChild(shareCommentInput(memo, null));
       t.appendChild(cwrap);
+      if (comments.length && canEditNow()) markMemoSeen(memo.id);
     }
 
     if ((memo.images || []).length) {
@@ -1052,7 +1601,7 @@ function render() {
       pBtn.className = 'tool-btn';
       pBtn.title = 'Priorité — cliquer pour changer';
       const cur = prios.find(x => x.id === memo.priority);
-      pBtn.textContent = cur ? '⚑ ' + cur.name : '⚑ Priorité';
+      pBtn.textContent = ''; pBtn.append(shareIcon('flag'), ' ' + (cur ? cur.name : 'Priorité'));
       if (cur && cur.color) {
         pBtn.style.background = cur.color;
         pBtn.style.borderColor = cur.color;
@@ -1079,14 +1628,14 @@ function render() {
           });
           if (!r.ok) {
             const err = await r.json().catch(() => ({}));
-            alert('Image refusée : ' + (err.error || r.statusText));
+            notify('Image refusée : ' + (err.error || r.statusText), { error: true });
           }
         }
         await load();
       });
       const photoBtn = document.createElement('button');
       photoBtn.className = 'tool-btn';
-      photoBtn.textContent = '📷 Photo';
+      photoBtn.append(shareIcon('camera'), ' Photo');
       photoBtn.title = 'Ajouter une photo (JPG ou PNG uniquement)';
       photoBtn.addEventListener('click', () => fileIn.click());
       tools.appendChild(photoBtn);
@@ -1095,7 +1644,7 @@ function render() {
       if (!hasChecklist) {
         const listBtn = document.createElement('button');
         listBtn.className = 'tool-btn';
-        listBtn.textContent = '☑ Liste';
+        listBtn.append(shareIcon('checklist'), ' Liste');
         listBtn.title = 'Démarrer une liste à cocher dans ce mémo';
         listBtn.addEventListener('click', () => {
           if (t.querySelector('.item-add')) { t.querySelector('.item-add').focus(); return; }
@@ -1108,14 +1657,14 @@ function render() {
 
       const locBtn = document.createElement('button');
       locBtn.className = 'tool-btn';
-      locBtn.textContent = memo.location ? '📍 ×' : '📍 Position';
+      locBtn.append(shareIcon('map-pin'), memo.location ? ' ×' : ' Position');
       locBtn.title = memo.location ? 'Retirer la position' : 'Attacher ma position GPS à ce mémo';
       locBtn.addEventListener('click', () => {
         if (memo.location) { put(memo.id, { location: null }); return; }
-        if (!navigator.geolocation) { alert('Géolocalisation non disponible.'); return; }
+        if (!navigator.geolocation) { notify('Géolocalisation non disponible.', { error: true }); return; }
         navigator.geolocation.getCurrentPosition(
           (pos) => put(memo.id, { location: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
-          () => alert('Position refusée ou indisponible.'),
+          () => notify('Position refusée ou indisponible.', { error: true }),
           { enableHighAccuracy: true, timeout: 10000 }
         );
       });
@@ -1133,7 +1682,7 @@ function render() {
         if (q.length < 3) return;
         const r = await fetch(API + '/geocode?q=' + encodeURIComponent(q), { headers: { 'X-Guest-Token': guestToken() } });
         const data = r.ok ? await r.json() : { results: [] };
-        if (!data.results.length) { alert('Adresse introuvable : « ' + q + ' »'); return; }
+        if (!data.results.length) { notify('Adresse introuvable : « ' + q + ' »'); return; }
         const best = data.results[0];
         await put(memo.id, { location: best });
       });
@@ -1187,10 +1736,22 @@ function render() {
 
       const eBtn = document.createElement('button');
       eBtn.className = 'tool-btn';
-      eBtn.textContent = '✎ Modifier';
+      eBtn.append(shareIcon('pencil'), ' Modifier');
       eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
       eBtn.addEventListener('click', () => openEditor(memo, content, t));
       tools.appendChild(eBtn);
+
+      const dBtn = document.createElement('button');
+      dBtn.className = 'tool-btn';
+      dBtn.appendChild(shareIcon('trash'));
+      dBtn.title = 'Mettre ce mémo à la corbeille (restaurable depuis la tuile 🗑)';
+      dBtn.addEventListener('click', async () => {
+        const r = await fetch(API + '/memo/' + memo.id, {
+          method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
+        });
+        if (r.ok) await load();
+      });
+      tools.appendChild(dBtn);
       t.appendChild(tools);
     }
     list.appendChild(t);
@@ -1227,7 +1788,7 @@ async function addMemo() {
   if (r.ok) { addInput.value = ''; await load(); }
 }
 addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemo(); });
-document.getElementById('add-btn').addEventListener('click', addMemo);
+document.getElementById('add-btn').addEventListener('click', (e) => withBusy(e.currentTarget, addMemo));
 
 const projInput = document.getElementById('proj-input');
 async function addSubProject() {
@@ -1241,14 +1802,80 @@ async function addSubProject() {
   if (r.ok) { projInput.value = ''; await load(); }
   else {
     const err = await r.json().catch(() => ({}));
-    alert(err.error || 'Création impossible');
+    notify(err.error || 'Création impossible', { error: true });
   }
 }
 projInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addSubProject(); });
-document.getElementById('proj-btn').addEventListener('click', addSubProject);
+document.getElementById('proj-btn').addEventListener('click', (e) => withBusy(e.currentTarget, addSubProject));
 
 load();
 setInterval(load, 15000);
+
+/* ------------------------------------------------ animations GSAP
+   Dégrade proprement si gsap.min.js est absent.
+   load() est rappelé toutes les 15 s ; on n'anime l'entrée QUE quand
+   le filtre ou le projet change (FILTER|PFILTER), pas à chaque refresh. */
+window.addEventListener('DOMContentLoaded', () => {
+  const g = window.gsap;
+  if (!g) return;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function stagger(sel, opts) {
+    if (reduce) return;
+    const nodes = document.querySelectorAll(sel);
+    if (!nodes.length) return;
+    g.killTweensOf(nodes);
+    g.fromTo(nodes,
+      { autoAlpha: 0, y: 14 },
+      Object.assign({
+        autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out',
+        stagger: 0.045, overwrite: true, clearProps: 'transform,opacity,visibility',
+      }, opts || {}));
+  }
+  function countUp(node) {
+    const to = parseInt(node.textContent, 10);
+    if (isNaN(to) || reduce) return;
+    const o = { v: 0 };
+    g.fromTo(o, { v: 0 }, {
+      v: to, duration: 0.7, ease: 'power1.out', snap: { v: 1 },
+      onUpdate: () => { node.textContent = Math.round(o.v); },
+    });
+  }
+  function animateView() {
+    stagger('#tiles .tile', { y: 10, duration: 0.35, stagger: 0.03 });
+    stagger('#list .task');
+    document.querySelectorAll('#tiles .tn').forEach(countUp);
+  }
+
+  const viewKey = () => [typeof FILTER !== 'undefined' ? FILTER : '', typeof PFILTER !== 'undefined' ? PFILTER : ''].join('|');
+  let lastKey = null;
+  let firstPaint = true;
+
+  function playIntro() {
+    if (!firstPaint) return;
+    firstPaint = false;
+    lastKey = viewKey();
+    if (!reduce) {
+      g.from('header', { y: -20, autoAlpha: 0, duration: 0.4, ease: 'power2.out', clearProps: 'all' });
+      g.from('#snav .sitem', { x: -12, autoAlpha: 0, duration: 0.3, stagger: 0.03, ease: 'power2.out', delay: 0.08, clearProps: 'all' });
+    }
+    animateView();
+  }
+
+  const _render = render;
+  render = function () {
+    const r = _render.apply(this, arguments);
+    if (firstPaint) { playIntro(); }
+    else { const k = viewKey(); if (k !== lastKey) { lastKey = k; animateView(); } }
+    return r;
+  };
+
+  if (document.querySelector('#list .task') || document.querySelector('#tiles .tile')) playIntro();
+
+  // Entrée des pop-ins : gérée en CSS (@keyframes dlg-in / dlg-bd).
+  // Ne pas wrapper showModal pour animer le <dialog> via GSAP : poser un transform
+  // dessus le sort du top-layer Chromium et casse le centrage + le backdrop.
+});
 </script>
 </body>
 </html>

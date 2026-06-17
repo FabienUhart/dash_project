@@ -4,34 +4,83 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/quill.snow.css">
 <script src="/static/quill.min.js" defer></script>
 <link rel="stylesheet" href="/static/leaflet.css">
 <script src="/static/leaflet.js" defer></script>
+<script src="/static/gsap.min.js" defer></script>
 <style>
 :root {
-  --bg: #0f1419;
-  --panel: #1a2129;
-  --panel-2: #232c36;
-  --text: #e6edf3;
-  --muted: #8a96a3;
+  --bg: #0e1217;
+  --panel: #161d25;
+  --panel-2: #212b35;
+  --text: #e8eef5;
+  --muted: #9aa7b4;
   --accent: #4fc3f7;
+  --accent-2: #38aee0;
   --green: #4caf50;
   --red: #f44336;
   --orange: #ff9800;
   --yellow: #ffc107;
   --gray: #607d8b;
-  --border: #2d3742;
+  /* couleurs sémantiques (états) */
+  --danger: #ff8a80;     /* rouge doux : retard, alertes */
+  --warn: #ffb74d;       /* ambre : priorité P2, sans accès */
+  --guest: #b39ddb;      /* violet : invités, planifié */
+  --assignee: #80cbc4;   /* teal : assignés / mentions */
+  --border: #283340;
+  --border-soft: #1f2832;
   --memo-bg: #2e2a1f;
+  --bg-elev: #1c2530;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
+  --shadow-lg: 0 8px 28px rgba(0,0,0,0.4);
+  --ring: 0 0 0 3px rgba(79,195,247,0.22);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
+/* ---------- thème clair ---------- */
+:root[data-theme="light"] {
+  --bg: #eef1f5; --panel: #ffffff; --panel-2: #eef2f7; --text: #1b2531; --muted: #5c6b7a;
+  --accent: #0288d1; --accent-2: #0277bd;
+  --green: #2e7d32; --red: #d32f2f; --orange: #ef6c00; --yellow: #f9a825;
+  --danger: #e53935; --warn: #ef6c00; --guest: #6a3fb5; --assignee: #00897b;
+  --border: #d3dce5; --border-soft: #e6ecf2; --memo-bg: #fff8e1; --bg-elev: #f4f7fa;
+  --ring: 0 0 0 3px rgba(2,136,209,0.28);
+  --shadow: 0 1px 2px rgba(16,30,50,0.08), 0 2px 8px rgba(16,30,50,0.06);
+  --shadow-lg: 0 10px 30px rgba(16,30,50,0.18);
+}
+[data-theme="light"] header { background: linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.9)), var(--panel); }
+[data-theme="light"] nav#sidebar, [data-theme="light"] aside#memo-panel { background: linear-gradient(180deg, var(--panel), #eef2f7); }
+[data-theme="light"] .card { background: linear-gradient(180deg, var(--panel), #f4f7fb); }
 * { box-sizing: border-box; }
+/* Police de marque Inter (auto-hébergée) — dégrade sur system-ui si le fichier manque. */
+@font-face {
+  font-family: 'Inter';
+  src: url('/static/Inter.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-display: swap;
+}
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: var(--bg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 100% -10%, rgba(79,195,247,0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(79,195,247,0.04), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0.01em;
 }
+::selection { background: rgba(79,195,247,0.28); }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: #36465680; }
 
 /* ---------- header ---------- */
 header {
@@ -39,14 +88,17 @@ header {
   align-items: center;
   gap: 0.75rem;
   padding: 0.6rem 1.25rem;
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(33,43,53,0.55), rgba(22,29,37,0.85)), var(--panel);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 10;
   flex-wrap: wrap;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.02), var(--shadow);
 }
-header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+header h1 { margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em;
+  background: linear-gradient(90deg, var(--text), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 #search-wrap {
   flex: 1;
   max-width: 340px;
@@ -56,10 +108,11 @@ header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
   gap: 0.4rem;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
-#search-wrap:focus-within { border-color: var(--accent); }
+#search-wrap:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
 #search {
   flex: 1;
   background: none;
@@ -99,14 +152,48 @@ button {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
-  padding: 0.45rem 0.8rem;
-  border-radius: 6px;
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font: inherit;
+  font-weight: 500;
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), transform 0.08s var(--ease);
 }
-button:hover { background: #2d3742; }
-button.primary { background: var(--accent); color: #001; border-color: var(--accent); }
-button.primary:hover { background: #6fcef9; }
+button:hover { background: var(--bg-elev); border-color: #36465a; }
+button:active { transform: translateY(1px); }
+button:focus-visible { outline: none; box-shadow: var(--ring); }
+/* ---------- accessibilité (Lot 1+2) ---------- */
+button, .card, .cat-item, .sitem, .task, .task-content, .mfilter, .tile, .tag, a { touch-action: manipulation; }
+.card:focus-visible, .cat-item:focus-visible, .sitem:focus-visible, .task-content:focus-visible,
+.mfilter:focus-visible, .tile:focus-visible, .tag:focus-visible,
+dialog input:focus-visible, dialog textarea:focus-visible, dialog select:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none; box-shadow: var(--ring); border-radius: var(--radius, 8px);
+}
+/* Révéler les actions au survol ET au focus clavier */
+.card:focus-within .actions, .task:focus-within .task-actions { opacity: 1; }
+/* Écrans tactiles : actions visibles en permanence + cibles ≥ 44px + pas de zoom iOS */
+@media (pointer: coarse) {
+  .card .actions, .task .task-actions { opacity: 0.85; }
+  button, .task-check, .thumb-del, .cat-item, .sitem, .mfilter, .tile { min-height: 44px; }
+  .card .actions button, .task .task-actions button { min-width: 40px; }
+}
+@media (max-width: 900px) {
+  input, select, textarea, #search { font-size: 16px; }
+}
+/* Finitions : chiffres alignés, retour d'appui, GPU au survol */
+#clock-time, #clock-date, #clock-extra, .count, .mf-count, .mf-num, .pin-input, .c-when { font-variant-numeric: tabular-nums; }
+.cat-item:active, .mfilter:active, .tile:active, .tag:active, .prio-btn:active { transform: scale(0.97); }
+.card:hover, .task:hover { will-change: transform; }
+@media (prefers-reduced-motion: reduce) {
+  .cat-item:active, .mfilter:active, .tile:active, .tag:active { transform: none; }
+}
+/* Icônes SVG système (Lucide) — currentColor, taille relative à la police */
+.ic { width: 1.1em; height: 1.1em; display: inline-block; vertical-align: -0.15em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.ic-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+button.primary { background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #04161f; border-color: transparent; font-weight: 600; box-shadow: 0 2px 10px rgba(79,195,247,0.25); }
+button.primary:hover { background: linear-gradient(180deg, #6fcef9, var(--accent)); }
 button.danger { background: var(--red); color: #fff; border-color: var(--red); }
 button.danger:hover { background: #d32f2f; }
 button.icon { padding: 0.45rem 0.6rem; }
@@ -117,7 +204,7 @@ button.icon { padding: 0.45rem 0.6rem; }
   right: -5px;
   background: var(--red);
   color: #fff;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   font-weight: 700;
   border-radius: 999px;
   padding: 0.05rem 0.3rem;
@@ -173,6 +260,13 @@ button.icon { padding: 0.45rem 0.6rem; }
 .rev-actions { display: flex; gap: 0.4rem; width: 100%; }
 .rev-actions button { padding: 0.2rem 0.6rem; font-size: 0.78rem; }
 #shares-board { max-width: 760px; margin: 0 auto; }
+#trash-board { max-width: 760px; margin: 0 auto; }
+#trash-board h2 { margin: 0 0 0.2rem; }
+.trash-row { display: flex; align-items: center; gap: 0.6rem; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.55rem 0.8rem; margin-bottom: 0.5rem; }
+.trash-row .grow { flex: 1; min-width: 0; }
+.trash-heading { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trash-meta { color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }
+.btn-soft { font: inherit; font-size: 0.8rem; padding: 0.28rem 0.6rem; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
 .share-card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -211,12 +305,12 @@ button.icon { padding: 0.45rem 0.6rem; }
 .share-row button { padding: 0.15rem 0.5rem; font-size: 0.8rem; flex-shrink: 0; }
 
 /* ---------- layout ---------- */
-.layout { display: flex; min-height: calc(100vh - 57px); }
+.layout { display: flex; min-height: calc(100dvh - 57px); }
 
 nav#sidebar {
-  width: 200px;
+  width: clamp(180px, 16vw, 240px);
   flex-shrink: 0;
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.4));
   border-right: 1px solid var(--border);
   padding: 0.75rem 0.5rem;
 }
@@ -224,15 +318,21 @@ nav#sidebar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.45rem 0.6rem;
-  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--muted);
   font-size: 0.9rem;
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   user-select: none;
+  position: relative;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.12s var(--ease);
 }
-.cat-item:hover { background: var(--panel-2); color: var(--text); }
+.cat-item:hover { background: var(--panel-2); color: var(--text); transform: translateX(2px); }
+.cat-item.active::before {
+  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 1.1rem; border-radius: 999px; background: var(--accent);
+}
 .cat-item.active { background: var(--panel-2); color: var(--accent); }
 .cat-item.drop-target { outline: 1px dashed var(--accent); color: var(--accent); }
 .cat-item .count { margin-left: auto; font-size: 0.75rem; opacity: 0.7; flex-shrink: 0; }
@@ -247,6 +347,25 @@ nav#sidebar {
   margin: 0 0.2rem;
 }
 .sidebar-sep { border-top: 1px solid var(--border); margin: 0.6rem 0.3rem; }
+/* toggles barre latérale (eye = masquer, hamburger = rail icônes) */
+nav#sidebar.sb-hidden { width: 0; padding-left: 0; padding-right: 0; overflow: hidden; border-right: none; }
+nav#sidebar.sb-rail { width: 64px; overflow: hidden; }
+nav#sidebar.sb-rail .cat-label,
+nav#sidebar.sb-rail .count,
+nav#sidebar.sb-rail #add-cat,
+nav#sidebar.sb-rail #add-proj,
+nav#sidebar.sb-rail .proj-badge { display: none; }
+nav#sidebar.sb-rail .cat-item {
+  justify-content: center;
+  overflow: hidden;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  padding-left: 0 !important;   /* écrase le padding-left inline des projets imbriqués */
+  padding-right: 0 !important;
+}
+nav#sidebar.sb-rail .cat-item > * { flex-shrink: 0; }
+.icon.toggle-on { color: var(--accent); }
+@media (max-width: 900px) { #sidebar-eye-btn, #sidebar-rail-btn { display: none; } }
 .cat-item.sub { padding-left: 2rem; font-size: 0.85rem; }
 #add-proj {
   padding: 0.3rem 0.6rem 0.3rem 2rem;
@@ -287,23 +406,32 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 0.75rem;
+  gap: 0.85rem;
   list-style: none;
   padding: 0;
   margin: 0;
 }
 .card {
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.25));
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.8rem 0.9rem;
+  border-radius: var(--radius);
+  padding: 0.85rem 0.95rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  transition: border-color 0.15s;
+  box-shadow: var(--shadow);
+  transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), transform 0.18s var(--ease);
   cursor: grab;
+  position: relative;
+  overflow: hidden;
 }
-.card:hover { border-color: var(--accent); }
+.card::after {
+  content: ''; position: absolute; inset: 0 0 auto 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0; transition: opacity 0.2s var(--ease);
+}
+.card:hover { border-color: #36465a; box-shadow: var(--shadow-lg); transform: translateY(-3px); }
+.card:hover::after { opacity: 0.7; }
 .card.dragging { opacity: 0.4; }
 .card .title-row { display: flex; align-items: center; gap: 0.5rem; }
 .favicon {
@@ -329,7 +457,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .card .name { font-weight: 600; font-size: 1rem; }
 .card .cat-tag {
   margin-left: auto;
-  font-size: 0.65rem;
+  font-size: 0.72rem;
   color: var(--muted);
   background: var(--panel-2);
   padding: 0.1rem 0.4rem;
@@ -401,12 +529,14 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .mfilter {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius);
+  padding: 0.55rem 0.7rem;
   cursor: pointer;
   user-select: none;
+  box-shadow: var(--shadow);
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
-.mfilter:hover { background: var(--panel-2); }
+.mfilter:hover { background: var(--panel-2); transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .mfilter .mf-top {
   display: flex;
   align-items: center;
@@ -417,8 +547,8 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .mfilter .mf-label { font-size: 0.78rem; font-weight: 600; display: block; margin-top: 0.1rem; }
 .mfilter.f-inbox .mf-label, .mfilter.f-inbox .mf-icon { color: var(--accent); }
 .mfilter.f-today .mf-label, .mfilter.f-today .mf-icon { color: var(--green); }
-.mfilter.f-scheduled .mf-label, .mfilter.f-scheduled .mf-icon { color: #b39ddb; }
-.mfilter.f-overdue .mf-label, .mfilter.f-overdue .mf-icon { color: #ff8a80; }
+.mfilter.f-scheduled .mf-label, .mfilter.f-scheduled .mf-icon { color: var(--guest); }
+.mfilter.f-overdue .mf-label, .mfilter.f-overdue .mf-icon { color: var(--danger); }
 .mfilter.f-done .mf-label, .mfilter.f-done .mf-icon { color: var(--orange); }
 .mfilter.f-history .mf-label, .mfilter.f-history .mf-icon { color: #f06292; }
 .mfilter.active.f-history { border-color: #f06292; background: #2c1a22; }
@@ -438,8 +568,8 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .hist-row .hist-proj { font-size: 0.72rem; color: var(--muted); flex-shrink: 0; display: inline-flex; align-items: center; gap: 0.3rem; }
 .mfilter.active.f-inbox { border-color: var(--accent); background: #15232e; }
 .mfilter.active.f-today { border-color: var(--green); background: #16271a; }
-.mfilter.active.f-scheduled { border-color: #b39ddb; background: #221f2e; }
-.mfilter.active.f-overdue { border-color: #ff8a80; background: #2e1a1a; }
+.mfilter.active.f-scheduled { border-color: var(--guest); background: #221f2e; }
+.mfilter.active.f-overdue { border-color: var(--danger); background: #2e1a1a; }
 .mfilter.active.f-done { border-color: var(--orange); background: #2c2113; }
 #memo-add-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
 #memo-add-bar input[type="text"] {
@@ -472,17 +602,20 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   font-weight: 600;
 }
 .memo-section h2 .sec-count { opacity: 0.7; font-weight: 400; }
-.memo-section.sec-overdue h2 { color: #ff8a80; }
+.memo-section.sec-overdue h2 { color: var(--danger); }
 .memo-section.sec-today h2 { color: var(--yellow); }
 .task {
   background: var(--panel);
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
-  border-radius: 0 8px 8px 0;
-  padding: 0.55rem 0.75rem;
-  margin-bottom: 0.45rem;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.5rem;
   cursor: grab;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
 }
+.task:hover { border-left-color: var(--accent); box-shadow: var(--shadow-lg); transform: translateX(2px); }
 .task.dragging { opacity: 0.4; }
 .task .task-row { display: flex; align-items: flex-start; gap: 0.6rem; }
 .task-check {
@@ -508,7 +641,12 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .comment-row .c-author { font-weight: 600; flex-shrink: 0; }
 .comment-row .c-body { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comment-row .c-when { color: var(--muted); font-size: 0.72rem; flex-shrink: 0; }
-.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: #80cbc4; }
+.comment-row.comment-reply { margin-left: 1.5rem; border-left: 2px solid var(--border); }
+.comment-row .c-prio { flex-shrink: 0; font-size: 0.68rem; font-weight: 700; color: #10141a; border-radius: 4px; padding: 0 0.3rem; line-height: 1.5; }
+.comment-row .c-seen { color: var(--muted); font-size: 0.7rem; flex-shrink: 0; white-space: nowrap; }
+.assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: var(--assignee); }
+.assignee-chip.noaccess { color: var(--warn); border-color: rgba(255,183,77,0.45); }
+.mention.noaccess { color: var(--warn); background: rgba(255,183,77,0.16); }
 .task.done-task .task-content { text-decoration: line-through; color: var(--muted); }
 .task .task-content a { color: var(--accent); word-break: break-all; }
 .task .task-badges { display: flex; gap: 0.35rem; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
@@ -524,7 +662,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   text-overflow: ellipsis;
 }
 .task .task-badges { max-width: 55%; }
-.badge.due-late { background: #3a1f1f; color: #ff8a80; }
+.badge.due-late { background: #3a1f1f; color: var(--danger); }
 .badge.due-today { background: #38301a; color: var(--yellow); }
 .task .task-actions { display: flex; gap: 0.15rem; opacity: 0; transition: opacity 0.15s; }
 .task:hover .task-actions { opacity: 1; }
@@ -619,6 +757,14 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   max-width: 92vw;
   max-height: 92vh;
 }
+.qr-dialog { background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px; padding: 1rem; text-align: center; }
+.qr-box { background: #fff; padding: 12px; border-radius: 10px; display: inline-block; }
+.qr-box img { display: block; width: 256px; height: 256px; }
+.qr-url { margin-top: 0.6rem; font-size: 0.78rem; color: var(--text); max-width: 280px; word-break: break-all; }
+.qr-recap { margin-top: 0.55rem; font-size: 0.82rem; color: var(--text); text-align: left; display: inline-block; max-width: 280px; }
+.qr-recap div { margin: 0.12rem 0; }
+.qr-recap .qr-recap-people { color: var(--muted); font-size: 0.78rem; }
+.qr-hint { margin-top: 0.5rem; font-size: 0.72rem; color: var(--muted); }
 #lightbox img {
   max-width: 92vw;
   max-height: 88vh;
@@ -639,9 +785,9 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 
 /* ---------- colonne mémos (résumé) ---------- */
 aside#memo-panel {
-  width: 250px;
+  width: clamp(220px, 18vw, 290px);
   flex-shrink: 0;
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel), rgba(14,18,23,0.4));
   border-left: 1px solid var(--border);
   padding: 0.75rem;
 }
@@ -674,7 +820,7 @@ aside#memo-panel {
   word-break: break-word;
 }
 .memo-note .mini-due { display: block; font-size: 0.7rem; margin-top: 0.2rem; }
-.memo-note .mini-due.due-late { color: #ff8a80; }
+.memo-note .mini-due.due-late { color: var(--danger); }
 .memo-note .mini-due.due-today { color: var(--yellow); }
 .memo-note .mini-due.due-future { color: var(--muted); }
 #memo-quick {
@@ -772,6 +918,11 @@ aside#memo-panel {
 }
 #quill-wrap .ql-editor { min-height: 200px; }
 #quill-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
+/* Mentions @ dans l'éditeur */
+.mention { color: var(--assignee); background: rgba(128,203,196,0.14); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+.mention-menu { position: fixed; z-index: 10000; min-width: 11rem; max-height: 13rem; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; }
+.mention-item { padding: 0.32rem 0.55rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text); white-space: nowrap; }
+.mention-item.active { background: var(--accent); color: #fff; }
 .ql-snow .ql-stroke { stroke: var(--muted); }
 .ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--muted); }
 .ql-snow .ql-picker { color: var(--muted); }
@@ -787,17 +938,29 @@ aside#memo-panel {
 
 /* ---------- dialogs ---------- */
 dialog {
-  background: var(--panel);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 1.5rem;
   width: min(450px, 90vw);
+  box-shadow: var(--shadow-lg);
 }
-dialog::backdrop { background: rgba(0,0,0,0.7); }
+dialog::backdrop { background: rgba(6,9,12,0.62); backdrop-filter: blur(3px); }
+/* Entrée des pop-ins en CSS. NE PAS animer le <dialog> via GSAP (transform/visibility) :
+   poser un transform sur l'élément dialog le sort du top-layer Chromium → perte du
+   centrage (position:fixed→absolute) et du ::backdrop. Une animation CSS reste sûre. */
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] { animation: dlg-in 0.24s cubic-bezier(0.16, 1, 0.3, 1); }
+  dialog[open]::backdrop { animation: dlg-bd 0.24s ease-out; }
+  @keyframes dlg-in { from { opacity: 0; transform: translateY(12px) scale(0.97); } }
+  @keyframes dlg-bd { from { opacity: 0; } }
+}
 dialog h3 { margin: 0 0 1rem; }
 dialog form { display: flex; flex-direction: column; gap: 0.75rem; }
 dialog label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+.me-label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin: 0.5rem 0 0.2rem; }
+.me-label:first-child { margin-top: 0; }
 dialog input, dialog textarea, dialog select {
   background: var(--bg);
   color: var(--text);
@@ -808,6 +971,15 @@ dialog input, dialog textarea, dialog select {
   resize: vertical;
 }
 dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem; }
+.me-head { display: flex; align-items: center; gap: 0.5rem; position: relative; margin-bottom: 1rem; }
+.me-head h3 { flex: 1; }
+.icon-btn { background: none; border: 1px solid transparent; color: var(--muted); cursor: pointer; font-size: 1.2rem; line-height: 1; border-radius: 6px; padding: 0.1rem 0.5rem; }
+.icon-btn:hover { background: var(--panel-2); color: var(--text); }
+.card-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 6; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; display: flex; flex-direction: column; min-width: 9.5rem; }
+.card-menu[hidden] { display: none; }
+.card-menu button { background: none; border: none; color: var(--text); text-align: left; padding: 0.4rem 0.6rem; border-radius: 6px; cursor: pointer; font: inherit; font-size: 0.85rem; white-space: nowrap; }
+.card-menu button:hover { background: var(--panel); }
+.card-menu .danger-item { color: var(--red); }
 .settings-section { margin-bottom: 1.25rem; }
 .settings-section h4 { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--muted); letter-spacing: 0.04em; }
 .settings-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -893,13 +1065,49 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   main { padding: 0.75rem; }
 }
 </style>
+<script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
 <body>
+<svg class="ic-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="ic-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+  <symbol id="ic-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="ic-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="ic-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="ic-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="ic-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="ic-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+  <symbol id="ic-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="ic-eye-off" viewBox="0 0 24 24"><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M6.61 6.61A18.45 18.45 0 0 0 2 12s3 8 10 8a9.12 9.12 0 0 0 5.39-1.61"/><path d="M2 2l20 20"/></symbol>
+  <symbol id="ic-menu" viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></symbol>
+  <symbol id="ic-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="ic-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="ic-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="ic-map" viewBox="0 0 24 24"><path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3-6-3Z"/><path d="M9 3v15"/><path d="M15 6v15"/></symbol>
+  <symbol id="ic-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="ic-qr" viewBox="0 0 24 24"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></symbol>
+  <symbol id="ic-reply" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="ic-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="ic-expand" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="ic-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="ic-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="ic-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="ic-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="ic-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+  <symbol id="ic-checklist" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+  <symbol id="ic-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+</defs></svg>
+<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
+  <button id="sidebar-rail-btn" class="icon" title="Replier la barre latérale" aria-label="Replier la barre latérale" aria-expanded="true"><svg class="ic"><use href="#ic-menu"/></svg></button>
+  <button id="sidebar-eye-btn" class="icon" title="Afficher / masquer la barre latérale" aria-label="Afficher / masquer la barre latérale"><svg class="ic"><use href="#ic-eye"/></svg></button>
   <h1>Dashboard</h1>
   <div id="search-wrap">
-    <span style="color:var(--muted)">🔍</span>
-    <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off">
+    <span style="color:var(--muted)"><svg class="ic"><use href="#ic-search"/></svg></span>
+    <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off" aria-label="Rechercher">
     <select id="search-scope" title="Portée de la recherche (raccourcis : p# l# m#)">
       <option value="all">Tout</option>
       <option value="links">Liens</option>
@@ -915,8 +1123,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div id="clock-extra"></div>
   </div>
   <div id="weather" title="Météo Bayonne"></div>
-  <button id="activity-btn" class="icon" title="Activité des invités">🔔<span id="activity-badge"></span></button>
-  <button id="settings-btn" class="icon" title="Paramètres">⚙</button>
+  <button id="activity-btn" class="icon" title="Activité des invités" aria-label="Activité des invités"><svg class="ic"><use href="#ic-bell"/></svg><span id="activity-badge"></span></button>
+  <button id="theme-btn" class="icon" title="Thème clair / sombre" aria-label="Basculer le thème"><svg class="ic"><use href="#ic-moon"/></svg></button>
+  <button id="settings-btn" class="icon" title="Paramètres" aria-label="Paramètres"><svg class="ic"><use href="#ic-settings"/></svg></button>
   <button id="add-link" class="primary">+ Ajouter</button>
 </header>
 
@@ -926,6 +1135,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <ul id="links" class="cards"></ul>
     <div id="memo-board" hidden></div>
     <div id="shares-board" hidden></div>
+    <div id="trash-board" hidden></div>
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
@@ -959,6 +1169,12 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="lightbox"><img alt=""></dialog>
+<dialog id="qr-dialog" class="qr-dialog">
+  <div class="qr-box"><img id="qr-img" alt="QR code du lien de partage"></div>
+  <div class="qr-url" id="qr-url"></div>
+  <div class="qr-recap" id="qr-recap"></div>
+  <div class="qr-hint">Scanne pour ouvrir le lien · clique pour fermer</div>
+</dialog>
 
 <dialog id="revisions-dialog">
   <h3 id="revisions-title">🕘 Versions</h3>
@@ -986,7 +1202,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="geo-dialog">
-  <h3>📍 Quelle adresse ?</h3>
+  <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-map-pin"/></svg>Quelle adresse ?</h3>
   <div id="geo-results"></div>
   <div class="actions">
     <button type="button" id="geo-cancel">Annuler</button>
@@ -1022,7 +1238,13 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="create-dialog">
-  <h3 id="create-title">Nouveau projet</h3>
+  <div class="me-head">
+    <h3 id="create-title">Nouveau projet</h3>
+    <button type="button" id="create-menu-btn" class="icon-btn" title="Actions" aria-label="Actions" style="display:none">⋯</button>
+    <div id="create-menu" class="card-menu" hidden>
+      <button type="button" id="create-delete" class="danger-item">🗑 Supprimer</button>
+    </div>
+  </div>
   <form id="create-form">
     <label>Nom<input type="text" name="name" required autocomplete="off"></label>
     <label id="create-emoji-label">Emoji
@@ -1041,7 +1263,6 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <span id="create-loc-info" style="font-size:0.78rem;color:var(--muted);margin-top:0.25rem">aucune</span>
     </label>
     <div class="actions">
-      <button type="button" id="create-delete" class="danger" style="margin-right:auto;display:none">Supprimer</button>
       <button type="button" id="create-cancel">Annuler</button>
       <button type="submit" class="primary" id="create-submit">Créer</button>
     </div>
@@ -1049,12 +1270,23 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="memo-edit-dialog">
-  <h3>Éditer le mémo</h3>
-  <input id="me-title" type="text" placeholder="🏷 Titre (optionnel)" maxlength="200" autocomplete="off"
+  <div class="me-head">
+    <h3 style="margin:0">Éditer le mémo</h3>
+    <button type="button" id="memo-menu-btn" class="icon-btn" title="Actions" aria-label="Actions">⋯</button>
+    <div id="memo-menu" class="card-menu" hidden>
+      <button type="button" id="memo-edit-dup">⧉ Dupliquer</button>
+      <button type="button" id="memo-edit-delete" class="danger-item">🗑 Supprimer</button>
+    </div>
+  </div>
+  <label class="me-label" for="me-title">Titre <span style="font-weight:400">(optionnel)</span></label>
+  <input id="me-title" type="text" placeholder="Titre du mémo…" maxlength="200" autocomplete="off"
          style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem">
+  <label class="me-label">Contenu</label>
   <div id="quill-wrap"><div id="quill-editor"></div></div>
-  <div id="me-people" style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem"></div>
-  <div id="me-comments" style="margin-top:0.5rem;max-height:9rem;overflow-y:auto"></div>
+  <label class="me-label">Assigné·es</label>
+  <div id="me-people" style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-top:0.2rem"></div>
+  <label class="me-label">Commentaires</label>
+  <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
   <div class="actions">
     <button type="button" id="memo-edit-cancel">Annuler</button>
     <button type="button" id="memo-edit-save" class="primary">Sauver</button>
@@ -1062,7 +1294,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="settings-dialog">
-  <h3>⚙ Paramètres</h3>
+  <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-settings"/></svg>Paramètres</h3>
   <div class="settings-section">
     <h4>SAUVEGARDE</h4>
     <div class="settings-row">
@@ -1100,7 +1332,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
   <div class="settings-section">
     <h4>HISTORIQUE</h4>
-    <button id="purge-history">🗑 Vider l'historique</button>
+    <button id="purge-history"><svg class="ic" style="margin-right:0.35em"><use href="#ic-trash"/></svg>Vider l'historique</button>
     <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
       L'historique des tâches effectuées est conservé sans limite. Cette action le vide définitivement.
     </p>
@@ -1117,7 +1349,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
   <div class="settings-section">
     <h4>STATUTS</h4>
-    <button id="refresh-status">↻ Rafraîchir les statuts</button>
+    <button id="refresh-status"><svg class="ic" style="margin-right:0.35em"><use href="#ic-refresh"/></svg>Rafraîchir les statuts</button>
   </div>
   <div class="actions">
     <button id="settings-close" class="primary">Fermer</button>
@@ -1147,6 +1379,7 @@ const state = {
   projects: [],
   priorities: [],
   history: [],
+  trash: [],
   filterCat: 'all',
   search: '',
   view: 'links',
@@ -1184,9 +1417,29 @@ function el(tag, opts = {}, ...children) {
   if (opts.class) e.className = opts.class;
   if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
   if (opts.text != null) e.textContent = opts.text;
+  if (opts.icon) { const ic = icon(opts.icon); if (opts.text != null) ic.style.marginRight = '0.35em'; e.insertBefore(ic, e.firstChild); }
   if (opts.on) for (const [k, v] of Object.entries(opts.on)) e.addEventListener(k, v);
   for (const c of children) if (c != null) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
   return e;
+}
+
+// Icône SVG système : <svg class="ic"><use href="#ic-NAME"/></svg>
+function icon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'ic');
+  const use = document.createElementNS(NS, 'use');
+  use.setAttribute('href', '#ic-' + name);
+  svg.appendChild(use);
+  return svg;
+}
+
+// Désactive un bouton + opacité pendant une action async (anti double-clic).
+async function withBusy(btn, fn) {
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.style.opacity = '0.6'; }
+  try { return await fn(); }
+  finally { if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); btn.style.opacity = ''; } }
 }
 
 function confirmPopin(message, { title = 'Confirmer la suppression', okLabel = 'Supprimer', danger = true } = {}) {
@@ -1210,7 +1463,16 @@ function confirmPopin(message, { title = 'Confirmer la suppression', okLabel = '
   });
 }
 
+// Annonce polie pour lecteurs d'écran (région aria-live).
+function announce(msg) {
+  const e = document.getElementById('sr-live');
+  if (!e) return;
+  e.textContent = '';
+  setTimeout(() => { e.textContent = msg; }, 40);
+}
+
 function notify(message, { title = 'ℹ️ Info', error = false } = {}) {
+  announce(message);
   return new Promise(resolve => {
     const dlg = document.getElementById('notify-dialog');
     document.getElementById('notify-title').textContent = error ? '⚠️ Erreur' : title;
@@ -1235,8 +1497,8 @@ async function api(path, opts = {}) {
 }
 
 async function loadAll() {
-  [state.links, state.categories, state.memos, state.projects, state.history, state.priorities, state.shares] = await Promise.all([
-    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'), api('/api/history'), api('/api/priorities'), api('/api/shares'),
+  [state.links, state.categories, state.memos, state.projects, state.history, state.priorities, state.shares, state.trash] = await Promise.all([
+    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'), api('/api/history'), api('/api/priorities'), api('/api/shares'), api('/api/trash'),
   ]);
   if (state.filterCat !== 'all' && state.filterCat !== 'none'
       && !state.categories.some(c => c.id === state.filterCat)) {
@@ -1256,12 +1518,31 @@ function renderAll() {
   document.getElementById('links').style.display = v === 'links' ? '' : 'none';
   document.getElementById('memo-board').hidden = v !== 'memos';
   document.getElementById('shares-board').hidden = v !== 'shares';
+  document.getElementById('trash-board').hidden = v !== 'trash';
   document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
   if (v === 'memos') renderBoard();
   else if (v === 'shares') renderShares();
+  else if (v === 'trash') renderTrash();
   else renderLinks();
   renderMemos();
+  applyA11y();
 }
+
+// Rend les conteneurs "bouton" (non natifs) focusables et activables au clavier.
+function applyA11y() {
+  document.querySelectorAll('.cat-item, .mfilter, .tag').forEach(e => {
+    if (!e.hasAttribute('tabindex')) e.tabIndex = 0;
+    if (!e.hasAttribute('role')) e.setAttribute('role', 'button');
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = e.target;
+  if (t.matches && t.matches('.cat-item, .mfilter, .tag') && !t.closest('input, textarea, select')) {
+    e.preventDefault();
+    t.click();
+  }
+});
 
 /* ------------------------------------------------ sidebar */
 
@@ -1281,7 +1562,7 @@ function renderSidebar() {
     attrs: { title: 'Liens de partage, invités et modifications' },
     on: { click: () => openSharesView() },
   });
-  actItem.appendChild(el('span', { class: 'emoji', text: '🔗' }));
+  actItem.appendChild(icon('link'));
   actItem.appendChild(el('span', { class: 'cat-label', text: 'Partages' }));
   const actBadge = el('span', { class: 'count', text: String(actCount) });
   if (actCount > 0) {
@@ -1289,6 +1570,17 @@ function renderSidebar() {
   }
   actItem.appendChild(actBadge);
   nav.appendChild(actItem);
+
+  const trashItem = el('div', {
+    class: 'cat-item' + (state.view === 'trash' ? ' active' : ''),
+    attrs: { title: 'Mémos supprimés — restaurables 7 jours, puis purge automatique' },
+    on: { click: () => openTrashView() },
+  });
+  trashItem.appendChild(icon('trash'));
+  trashItem.appendChild(el('span', { class: 'cat-label', text: 'Corbeille' }));
+  trashItem.appendChild(el('span', { class: 'count', text: String((state.trash || []).length) }));
+  nav.appendChild(trashItem);
+
   nav.appendChild(el('div', { class: 'sidebar-sep' }));
 
   const mkItem = (key, icon, label, count, editFn) => {
@@ -1449,7 +1741,7 @@ function renderSidebar() {
   }));
 }
 
-const PROJ_COLORS = ['#4fc3f7', '#81c784', '#ffb74d', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
+const PROJ_COLORS = ['#4fc3f7', '#81c784', 'var(--warn)', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
 const createDialog = document.getElementById('create-dialog');
 const createForm = document.getElementById('create-form');
 let createKind = 'project';
@@ -1490,7 +1782,8 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-desc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
-  document.getElementById('create-delete').style.display = item ? '' : 'none';
+  document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
+  document.getElementById('create-menu').hidden = true;
   createLoc = item ? parseLoc(item.location) : null;
   refreshCreateLoc();
   const suggest = document.getElementById('emoji-suggest');
@@ -1539,10 +1832,17 @@ document.getElementById('create-delete').addEventListener('click', async () => {
   await loadAll();
   if (settingsDialog.open) { renderCatManage(); renderProjManage(); renderPrioManage(); }
 });
+const createMenu = document.getElementById('create-menu');
+const createMenuBtn = document.getElementById('create-menu-btn');
+createMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); createMenu.hidden = !createMenu.hidden; });
+document.addEventListener('click', (e) => {
+  if (!createMenu.hidden && !createMenu.contains(e.target) && e.target !== createMenuBtn) createMenu.hidden = true;
+});
 createForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = createForm.elements.name.value.trim();
   if (!name) return;
+  const _sb = document.getElementById('create-submit'); _sb.disabled = true; _sb.style.opacity = '0.6';
   const bases = { project: '/api/projects', category: '/api/categories', priority: '/api/priorities' };
   const base = bases[createKind];
   const payload = { name, color: createForm.elements.color.value };
@@ -1564,6 +1864,7 @@ createForm.addEventListener('submit', async (e) => {
     await loadAll();
     if (settingsDialog.open) { renderCatManage(); renderProjManage(); renderPrioManage(); }
   } catch (err) { await notify('Erreur : ' + err.message, { error: true }); }
+  finally { _sb.disabled = false; _sb.style.opacity = ''; }
 });
 
 /* ------------------------------------------------ links */
@@ -1643,7 +1944,7 @@ function osmUrl(loc) {
 function locBadgeEl(loc) {
   const a = el('a', {
     class: 'badge',
-    text: '📍' + (loc.label ? ' ' + loc.label : ''),
+    icon: 'map-pin', text: (loc.label ? ' ' + loc.label : ''),
     attrs: {
       href: osmUrl(loc), target: '_blank', rel: 'noopener noreferrer',
       title: 'Voir sur la carte (' + loc.lat + ', ' + loc.lng + ')',
@@ -1748,14 +2049,21 @@ function openMapDialog(title, points) {
 }
 
 function boardMapPoints() {
+  // Mêmes mémos que la liste affichée (recherche + filtre + projet) → la carte
+  // reste cohérente avec ce qu'on voit, jamais de point « fantôme ».
+  const searchActive = !!parseSearch().q;
   const scope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
     ? new Set([state.memoProject, ...projectDescendants(state.memoProject)])
     : null;
+  const memos = visibleMemos().filter(m => {
+    if (searchActive) return true;
+    if (state.memoProject === 'all') return true;
+    if (state.memoProject === 'inbox') return !m.project_id;
+    return scope.has(m.project_id);
+  });
   const points = [];
-  state.memos.forEach(m => {
+  memos.forEach(m => {
     if (!m.location) return;
-    if (state.memoProject === 'inbox' && m.project_id) return;
-    if (scope && !scope.has(m.project_id)) return;
     const proj = state.projects.find(p => p.id === m.project_id);
     points.push({
       lat: m.location.lat,
@@ -1765,7 +2073,7 @@ function boardMapPoints() {
       color: (prioOf(m.priority) || {}).color || '#4fc3f7',
     });
   });
-  if (scope) {
+  if (scope && !searchActive) {
     const proj = state.projects.find(p => p.id === state.memoProject);
     const pl = proj && parseLoc(proj.location);
     if (pl) points.push({ lat: pl.lat, lng: pl.lng, title: '📁 ' + proj.name, sub: pl.label || '', color: proj.color || '#81c784' });
@@ -1809,7 +2117,7 @@ function guestRecapEl(kind, targetId) {
   const shares = (state.shares || []).filter(s => s.kind === kind && s.target_id === targetId);
   if (!shares.length) return null;
   const wrap = el('div', { class: 'guest-recap' });
-  wrap.appendChild(el('span', { class: 'guest-chip', text: '🔗 ' + shares.length + ' lien' + (shares.length > 1 ? 's' : '') }));
+  wrap.appendChild(el('span', { class: 'guest-chip', icon: 'link', text: shares.length + ' lien' + (shares.length > 1 ? 's' : '') }));
   let any = false;
   shares.forEach(s => {
     (s.guests || []).filter(g => g.status === 'approved').forEach(g => {
@@ -1884,7 +2192,7 @@ function renderLinks() {
     }
 
     const actions = el('div', { class: 'actions' });
-    actions.appendChild(el('button', { text: '✎', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
+    actions.appendChild(el('button', { icon: 'pencil', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
     actions.appendChild(el('button', { text: '×', attrs: { title: 'Supprimer' }, on: { click: () => deleteLink(link.id) } }));
     card.appendChild(actions);
 
@@ -2103,7 +2411,7 @@ function applyTags(root) {
   });
 }
 
-function contentNode(content) {
+function contentNode(content, memo) {
   const div = document.createElement('div');
   if (isRichHTML(content)) {
     div.appendChild(sanitizeHTML(content));
@@ -2111,6 +2419,11 @@ function contentNode(content) {
     div.appendChild(linkify(content));
   }
   applyTags(div);
+  if (memo) {
+    div.querySelectorAll('.mention[data-mention]').forEach(sp => {
+      if (assigneeNoAccess(sp.getAttribute('data-mention'), memo)) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
+    });
+  }
   return div;
 }
 
@@ -2160,6 +2473,68 @@ async function openSharesView() {
   await api('/api/activity/seen', { method: 'POST' });
   await refreshActivityBadge();
   renderSidebar();
+}
+
+async function openTrashView() {
+  // loadAll refetche aussi state.trash et state.memos → compteurs et vue Mémos à jour après restauration/purge.
+  state.view = 'trash';
+  await loadAll();
+}
+
+function fmtDeleted(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+    + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderTrash() {
+  const board = document.getElementById('trash-board');
+  board.innerHTML = '';
+  board.appendChild(el('h2', { icon: 'trash', text: 'Corbeille' }));
+  const items = state.trash || [];
+  board.appendChild(el('p', {
+    attrs: { style: 'color:var(--muted);font-size:0.85rem;margin:0.2rem 0 1rem' },
+    text: items.length
+      ? 'Restaure un mémo supprimé par erreur. Purge automatique après 7 jours.'
+      : 'La corbeille est vide.',
+  }));
+  if (items.length) {
+    const empty = el('button', {
+      class: 'danger', icon: 'trash', text: 'Vider la corbeille',
+      attrs: { style: 'margin-bottom:0.8rem' },
+      on: { click: async () => {
+        if (!(await confirmPopin(`Supprimer définitivement les ${items.length} mémo(s) de la corbeille ?\nCette action est irréversible.`, { okLabel: 'Vider' }))) return;
+        await api('/api/trash', { method: 'DELETE' });
+        await openTrashView();
+        renderSidebar();
+      } },
+    });
+    board.appendChild(empty);
+  }
+  items.forEach(m => {
+    const row = el('div', { class: 'trash-row' });
+    const main = el('div', { class: 'grow' });
+    const label = m.title || stripHTML(m.content || '').slice(0, 90) || '(mémo vide)';
+    main.appendChild(el('div', { class: 'trash-heading', text: (m.emoji ? m.emoji + ' ' : '') + label }));
+    main.appendChild(el('div', { class: 'trash-meta', text: 'Supprimé le ' + fmtDeleted(m.deleted_at) }));
+    row.appendChild(main);
+    row.appendChild(el('button', {
+      class: 'btn-soft', text: '↩ Restaurer',
+      on: { click: async () => { await api(`/api/trash/${m.id}/restore`, { method: 'POST' }); await openTrashView(); renderSidebar(); } },
+    }));
+    row.appendChild(el('button', {
+      class: 'danger btn-soft', text: 'Supprimer',
+      on: { click: async () => {
+        if (!(await confirmPopin('Supprimer définitivement ce mémo ?\nCette action est irréversible.', { okLabel: 'Supprimer' }))) return;
+        await api(`/api/trash/${m.id}`, { method: 'DELETE' });
+        await openTrashView();
+        renderSidebar();
+      } },
+    }));
+    board.appendChild(row);
+  });
 }
 
 function guestRowEl(g, onChange) {
@@ -2238,7 +2613,7 @@ function revRowEl(r, onChange) {
         } },
       }));
       actions.appendChild(el('button', {
-        text: '🕘 Toutes les versions',
+        icon: 'history', text: 'Toutes les versions',
         on: { click: (e) => { e.stopPropagation(); openRevisions(state.memos.find(m => m.id === r.memo_id)); } },
       }));
     }
@@ -2253,7 +2628,7 @@ async function renderShares() {
   const board = document.getElementById('shares-board');
   board.innerHTML = '';
   const title = el('div', { attrs: { id: 'board-title' } });
-  title.appendChild(el('span', { text: '🔗 Partages & activité' }));
+  title.appendChild(el('span', { icon: 'link', text: 'Partages & activité' }));
   board.appendChild(title);
 
   const [shares, guests, activity] = await Promise.all([
@@ -2281,7 +2656,7 @@ async function renderShares() {
   byEmail.forEach((accs, email) => {
     const card = el('div', { class: 'share-card' });
     const head = el('div', { class: 'share-row' });
-    head.appendChild(el('span', { text: '👤' }));
+    head.appendChild(el('span', { icon: 'user' }));
     const dispName = (accs.find(a => a.name) || {}).name || email;
     head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: dispName + (dispName !== email ? ' — ' + email : '') }));
     head.appendChild(el('span', { class: 'rev-meta', text: accs.length + ' accès' }));
@@ -2307,7 +2682,7 @@ async function renderShares() {
       }
       info.appendChild(el('span', { class: 'rev-meta', text: 'depuis le ' + fmtWhen(g.created_at) }));
       row.appendChild(info);
-      row.appendChild(el('span', { class: 'status-pill ' + (g.can_edit ? 'approved' : ''), text: g.can_edit ? '✏️ modification' : '👁 lecture' }));
+      row.appendChild(el('span', { class: 'status-pill ' + (g.can_edit ? 'approved' : ''), icon: g.can_edit ? 'pencil' : 'eye', text: g.can_edit ? 'modification' : 'lecture' }));
       row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { pending: 'en attente', approved: 'validé', rejected: 'refusé' }[g.status] || g.status }));
       row.appendChild(el('button', {
         text: '📋', attrs: { title: 'Copier le lien de cet accès' },
@@ -2317,6 +2692,15 @@ async function renderShares() {
             e.target.textContent = '✓';
             setTimeout(() => { e.target.textContent = '📋'; }, 1200);
           } catch (_) {}
+        } },
+      }));
+      row.appendChild(el('button', {
+        icon: 'qr', attrs: { title: 'QR code de cet accès' },
+        on: { click: () => {
+          const sh = shares.find(x => x.token === g.token);
+          openQr(location.origin + '/share/' + g.token, sh
+            ? { kind: sh.kind, target: sh.target, can_edit: sh.can_edit, pin: sh.pin, guests: sh.guests }
+            : { kind: g.kind, target: g.target, can_edit: g.can_edit });
         } },
       }));
       if (g.status === 'pending') {
@@ -2341,6 +2725,38 @@ async function renderShares() {
       }));
       card.appendChild(row);
     });
+    // Ouvrir l'accès à un nouveau projet pour cette personne
+    const realName = (accs.find(a => a.name) || {}).name || '';
+    const grantRow = el('div', { class: 'guest-row', attrs: { style: 'gap:0.4rem;flex-wrap:wrap' } });
+    grantRow.appendChild(el('span', { text: '➕', attrs: { title: 'Ouvrir un projet à cette personne' } }));
+    const projSel = el('select');
+    projSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem;max-width:14rem';
+    projSel.appendChild(el('option', { attrs: { value: '' }, text: '+ Partager un projet…' }));
+    (state.projects || []).forEach(p => projSel.appendChild(el('option', { attrs: { value: String(p.id) }, text: (p.emoji ? p.emoji + ' ' : '') + p.name })));
+    grantRow.appendChild(projSel);
+    const rightsSel = el('select');
+    rightsSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
+    rightsSel.appendChild(el('option', { attrs: { value: '1' }, text: '✏️ Modifiable' }));
+    rightsSel.appendChild(el('option', { attrs: { value: '0' }, text: '👁 Lecture seule' }));
+    grantRow.appendChild(rightsSel);
+    const result = el('span', { class: 'rev-meta', attrs: { style: 'flex-basis:100%' } });
+    grantRow.appendChild(el('button', {
+      class: 'g-approve', text: 'Partager',
+      on: { click: async () => {
+        const pid = parseInt(projSel.value, 10);
+        if (!pid) { result.textContent = 'Choisis un projet.'; return; }
+        try {
+          const r = await api('/api/guests/grant', { method: 'POST', body: JSON.stringify({ email, name: realName, project_id: pid, can_edit: rightsSel.value === '1' }) });
+          const url = location.origin + r.url;
+          let copied = '';
+          try { await navigator.clipboard.writeText(url); copied = ' · lien copié'; } catch (_) {}
+          result.textContent = `✓ ${r.project} ouvert à ${dispName} (${r.can_edit ? 'modifiable' : 'lecture'}, PIN ${r.pin})${copied} — ${url}`;
+          projSel.value = '';
+        } catch (e) { result.textContent = '⚠ ' + (e.message || 'échec'); }
+      } },
+    }));
+    grantRow.appendChild(result);
+    card.appendChild(grantRow);
     secU.appendChild(card);
   });
   board.appendChild(secU);
@@ -2353,7 +2769,7 @@ async function renderShares() {
     const r1 = el('div', { class: 'share-row' });
     r1.appendChild(el('span', { text: s.kind === 'memo' ? '📝' : '📁' }));
     r1.appendChild(el('span', { class: 'grow share-target', text: s.target || '(supprimé)' }));
-    r1.appendChild(el('span', { class: 'status-pill', text: s.can_edit ? '✏️ modifiable' : '👁 lecture' }));
+    r1.appendChild(el('span', { class: 'status-pill', icon: s.can_edit ? 'pencil' : 'eye', text: s.can_edit ? 'modifiable' : 'lecture' }));
     const pinWrap = el('span', { class: 'pin-wrap', attrs: { title: 'Code à 4 chiffres que l\'invité doit saisir — modifiable' } });
     pinWrap.appendChild(el('span', { class: 'rev-meta', text: 'Code ' }));
     const pinIn = el('input', { class: 'pin-input', attrs: { type: 'text', maxlength: '4', inputmode: 'numeric' } });
@@ -2372,6 +2788,10 @@ async function renderShares() {
       on: { click: async (e) => {
         try { await navigator.clipboard.writeText(url); e.target.textContent = '✓'; setTimeout(() => { e.target.textContent = '📋'; }, 1200); } catch (_) {}
       } },
+    }));
+    r1.appendChild(el('button', {
+      icon: 'qr', attrs: { title: 'QR code du lien' },
+      on: { click: () => openQr(url, { kind: s.kind, target: s.target, can_edit: s.can_edit, pin: s.pin, guests: s.guests }) },
     }));
     r1.appendChild(el('button', {
       text: '×', attrs: { title: 'Révoquer ce lien' },
@@ -2402,7 +2822,7 @@ async function renderShares() {
   byEditor.forEach((revs, editor) => {
     const userCard = el('div', { class: 'share-card' });
     const head = el('div', { class: 'share-row' });
-    head.appendChild(el('span', { text: '👤' }));
+    head.appendChild(el('span', { icon: 'user' }));
     head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: editor }));
     head.appendChild(el('span', { class: 'rev-meta', text: revs.length + ' modification' + (revs.length > 1 ? 's' : '') }));
     userCard.appendChild(head);
@@ -2526,7 +2946,7 @@ async function renderShareList() {
   }
   mine.forEach(s => {
     const row = el('div', { class: 'cat-manage-row' });
-    row.appendChild(el('span', { text: s.can_edit ? '✏️' : '👁', attrs: { title: s.can_edit ? 'Modifiable' : 'Lecture seule' } }));
+    row.appendChild(el('span', { icon: s.can_edit ? 'pencil' : 'eye', attrs: { title: s.can_edit ? 'Modifiable' : 'Lecture seule' } }));
     row.appendChild(el('span', {
       class: 'pin-input',
       text: s.pin || '----',
@@ -2577,12 +2997,114 @@ const memoEditDialog = document.getElementById('memo-edit-dialog');
 let quillInstance = null;
 let editingMemoId = null;
 
+// --- Mentions @ : blot stylé + menu de suggestions (self-hosté, zéro CDN) ---
+function registerMentionBlot() {
+  if (typeof Quill === 'undefined' || Quill.__mentionReady) return;
+  const Inline = Quill.import('blots/inline');
+  class MentionBlot extends Inline {
+    static create(value) { const node = super.create(); node.setAttribute('data-mention', value); return node; }
+    static formats(node) { return node.getAttribute('data-mention'); }
+  }
+  MentionBlot.blotName = 'mention';
+  MentionBlot.tagName = 'span';
+  MentionBlot.className = 'mention';
+  Quill.register(MentionBlot, true);
+  Quill.__mentionReady = true;
+}
+
+// Réinjecte le format mention quand un contenu HTML est recollé (round-trip).
+function addMentionMatcher(q) {
+  const Delta = Quill.import('delta');
+  q.clipboard.addMatcher('SPAN', (node, delta) => {
+    if (node.classList && node.classList.contains('mention')) {
+      const nm = node.getAttribute('data-mention') || node.textContent.replace(/^@/, '');
+      return new Delta().insert('@' + nm, { mention: nm });
+    }
+    return delta;
+  });
+}
+
+// getNames() -> liste de suggestions ; onPick(name) -> appelé à la sélection.
+function setupMentions(quill, getNames, onPick) {
+  const host = quill.container.closest('dialog') || document.body;
+  const menu = document.createElement('div');
+  menu.className = 'mention-menu';
+  menu.style.display = 'none';
+  host.appendChild(menu);
+  let open = false, items = [], active = 0, query = '', picking = false;
+
+  const close = () => { open = false; menu.style.display = 'none'; };
+  const draw = () => {
+    menu.innerHTML = '';
+    items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'mention-item' + (i === active ? ' active' : '');
+      row.textContent = it.add ? ('➕ Ajouter « ' + it.value + ' »') : ('@' + it.value);
+      row.addEventListener('mousedown', (e) => { e.preventDefault(); pick(i); });
+      row.addEventListener('mousemove', () => { if (active !== i) { active = i; draw(); } });
+      menu.appendChild(row);
+    });
+  };
+  const place = () => {
+    const sel = quill.getSelection(); if (!sel) return;
+    const b = quill.getBounds(sel.index);
+    const c = quill.container.getBoundingClientRect();
+    menu.style.left = Math.round(c.left + b.left) + 'px';
+    menu.style.top = Math.round(c.top + b.bottom + 4) + 'px';
+  };
+  const refresh = () => {
+    const all = (getNames() || []).filter(Boolean);
+    const q = query.toLowerCase();
+    const list = all.filter(n => n.toLowerCase().includes(q)).map(v => ({ value: v }));
+    if (query && !all.some(n => n.toLowerCase() === q)) list.push({ value: query, add: true });
+    items = list;
+    if (!items.length) { close(); return; }
+    if (active >= items.length) active = 0;
+    draw(); place();
+    menu.style.display = 'block'; open = true;
+  };
+  const pick = (i) => {
+    const it = items[i]; if (!it) { close(); return; }
+    const name = String(it.value).trim(); if (!name) { close(); return; }
+    const sel = quill.getSelection(true); if (!sel) { close(); return; }
+    const delLen = query.length + 1;
+    const start = sel.index - delLen;
+    picking = true;
+    quill.deleteText(start, delLen, 'user');
+    quill.insertText(start, '@' + name, { mention: name }, 'user');
+    quill.insertText(start + name.length + 1, ' ', { mention: false }, 'user');
+    quill.setSelection(start + name.length + 2, 0, 'user');
+    picking = false;
+    close();
+    try { onPick(name); } catch (e) {}
+  };
+  const detect = () => {
+    if (picking) return;
+    const sel = quill.getSelection();
+    if (!sel || sel.length) { close(); return; }
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(quill.getText(0, sel.index));
+    if (!m) { close(); return; }
+    query = m[1];
+    refresh();
+  };
+  quill.on('text-change', (d, o, source) => { if (source === 'user') detect(); else close(); });
+  quill.on('selection-change', (range) => { if (!range && !picking) close(); });
+  quill.root.addEventListener('keydown', (e) => {
+    if (!open || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); active = (active + 1) % items.length; draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); active = (active - 1 + items.length) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); pick(active); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); }
+  }, true);
+}
+
 function getQuill() {
   if (typeof Quill === 'undefined') return null;
   if (!quillInstance) {
+    registerMentionBlot();
     quillInstance = new Quill('#quill-editor', {
       theme: 'snow',
-      placeholder: 'Contenu du mémo…',
+      placeholder: 'Contenu du mémo… (tape @ pour mentionner)',
       modules: {
         toolbar: [
           [{ header: [1, 2, 3, false] }],
@@ -2594,19 +3116,54 @@ function getQuill() {
         ],
       },
     });
+    addMentionMatcher(quillInstance);
+    setupMentions(quillInstance, assigneeSuggestions, (name) => {
+      if (!editingAssignees.some(x => x.toLowerCase() === name.toLowerCase())) editingAssignees.push(name);
+      renderMePeople();
+    });
   }
   return quillInstance;
 }
 
 let editingAssignees = [];
 
+// --- Accès partage : un assigné voit-il ce mémo ? (sinon affichage ambre) ---
+function projectAncestorIds(pid) {
+  const byId = {};
+  (state.projects || []).forEach(p => { byId[p.id] = p; });
+  const out = [];
+  let cur = pid, guard = 0;
+  while (cur != null && guard++ < 50) { out.push(cur); cur = byId[cur] ? byId[cur].parent_id : null; }
+  return out;
+}
+function sharedNamesForMemo(memo) {
+  const set = new Set(['fabien']); // le propriétaire voit tout
+  if (!memo) return set;
+  const anc = new Set(projectAncestorIds(memo.project_id));
+  (state.shares || []).forEach(s => {
+    const covers = (s.kind === 'memo' && s.target_id === memo.id)
+      || (s.kind === 'project' && anc.has(s.target_id));
+    if (!covers) return;
+    (s.guests || []).forEach(g => {
+      if (g.status === 'approved') { const nm = (g.name || g.email || '').toLowerCase().trim(); if (nm) set.add(nm); }
+    });
+  });
+  return set;
+}
+function assigneeNoAccess(name, memo) {
+  return !!memo && !sharedNamesForMemo(memo).has((name || '').toLowerCase().trim());
+}
+const NO_ACCESS_TIP = "N'a pas accès à ce partage — ne verra pas ce mémo. Partage le projet avec cette personne pour qu'elle le voie.";
+
 function renderMePeople() {
+  const meMemo = state.memos.find(m => m.id === editingMemoId) || null;
   const wrap = document.getElementById('me-people');
   wrap.innerHTML = '';
-  wrap.appendChild(el('span', { text: '👤', attrs: { title: 'Personnes rattachées à ce mémo' } }));
+  wrap.appendChild(el('span', { icon: 'user', attrs: { title: 'Personnes rattachées à ce mémo' } }));
   editingAssignees.forEach(a => {
-    const chip = el('span', { class: 'assignee-chip' });
-    chip.appendChild(el('span', { text: '@' + a }));
+    const noAcc = assigneeNoAccess(a, meMemo);
+    const chip = el('span', { class: 'assignee-chip' + (noAcc ? ' noaccess' : ''), attrs: noAcc ? { title: NO_ACCESS_TIP } : {} });
+    chip.appendChild(el('span', { text: (noAcc ? '⚠ @' : '@') + a }));
     chip.appendChild(el('button', {
       text: '×',
       attrs: { type: 'button', title: 'Retirer ' + a, style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.85rem' },
@@ -2654,13 +3211,34 @@ function openMemoEditor(memo) {
   } else {
     q.setText(memo.content);
   }
+  document.getElementById('memo-menu').hidden = true;
   memoEditDialog.showModal();
   q.focus();
   return true;
 }
 
 document.getElementById('memo-edit-cancel').addEventListener('click', () => memoEditDialog.close());
-document.getElementById('memo-edit-save').addEventListener('click', async () => {
+document.getElementById('memo-edit-delete').addEventListener('click', async () => {
+  if (editingMemoId == null) return;
+  const id = editingMemoId;
+  memoEditDialog.close();
+  editingMemoId = null;
+  await deleteMemo(id, true); // direct vers la corbeille, restaurable
+});
+document.getElementById('memo-edit-dup').addEventListener('click', async () => {
+  if (editingMemoId == null) return;
+  const id = editingMemoId;
+  memoEditDialog.close();
+  editingMemoId = null;
+  await duplicateMemo(id);
+});
+const memoMenu = document.getElementById('memo-menu');
+const memoMenuBtn = document.getElementById('memo-menu-btn');
+memoMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); memoMenu.hidden = !memoMenu.hidden; });
+document.addEventListener('click', (e) => {
+  if (!memoMenu.hidden && !memoMenu.contains(e.target) && e.target !== memoMenuBtn) memoMenu.hidden = true;
+});
+document.getElementById('memo-edit-save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
   const q = getQuill();
   if (!q || editingMemoId == null) return;
   const text = q.getText().trim();
@@ -2670,13 +3248,31 @@ document.getElementById('memo-edit-save').addEventListener('click', async () => 
   memoEditDialog.close();
   await patchMemo(editingMemoId, { content: html, title, assignees: editingAssignees });
   editingMemoId = null;
-});
+}));
 
 const lightbox = document.getElementById('lightbox');
 lightbox.addEventListener('click', () => lightbox.close());
 function openLightbox(src) {
   lightbox.querySelector('img').src = src;
   lightbox.showModal();
+}
+
+const qrDialog = document.getElementById('qr-dialog');
+qrDialog.addEventListener('click', () => qrDialog.close());
+function openQr(url, info) {
+  document.getElementById('qr-img').src = '/api/qr?data=' + encodeURIComponent(url);
+  document.getElementById('qr-url').textContent = url;
+  const recap = document.getElementById('qr-recap');
+  recap.innerHTML = '';
+  if (info) {
+    recap.appendChild(el('div', { text: (info.kind === 'memo' ? '📝 ' : '📁 ') + (info.target || '(supprimé)') }));
+    let line2 = (info.can_edit ? '✏️ Modifiable' : '👁 Lecture seule');
+    if (info.pin) line2 += ' · 🔑 Code ' + info.pin;
+    recap.appendChild(el('div', { text: line2 }));
+    const approved = (info.guests || []).filter(g => g.status === 'approved').map(g => g.name || g.email);
+    if (approved.length) recap.appendChild(el('div', { class: 'qr-recap-people', text: '👥 ' + approved.join(', ') }));
+  }
+  qrDialog.showModal();
 }
 
 async function uploadMemoImages(memoId, files) {
@@ -2722,9 +3318,14 @@ async function deleteMemo(id, skipConfirm = false) {
   if (!skipConfirm) {
     const memo = state.memos.find(m => m.id === id);
     const excerpt = memo ? (memo.title || stripHTML(memo.content).slice(0, 60)) : '';
-    if (!(await confirmPopin(`Supprimer le mémo « ${excerpt}${excerpt.length >= 60 ? '…' : ''} » ?`))) return;
+    if (!(await confirmPopin(`Déplacer le mémo « ${excerpt}${excerpt.length >= 60 ? '…' : ''} » dans la corbeille ?\nTu pourras le restaurer pendant 7 jours.`, { okLabel: 'Mettre à la corbeille' }))) return;
   }
   await api(`/api/memos/${id}`, { method: 'DELETE' });
+  await loadAll();
+}
+
+async function duplicateMemo(id) {
+  await api(`/api/memos/${id}/duplicate`, { method: 'POST' });
   await loadAll();
 }
 
@@ -2756,7 +3357,7 @@ function taskEl(memo) {
   } else if (memo.emoji) {
     content.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
   }
-  if (memo.content) content.appendChild(contentNode(memo.content));
+  if (memo.content) content.appendChild(contentNode(memo.content, memo));
   wireChecklist(content, memo);
   content.addEventListener('click', () => {
     if (!openMemoEditor(memo)) editTaskInline(task, content, memo);
@@ -2771,16 +3372,17 @@ function taskEl(memo) {
   }
   if (memo.location) badges.appendChild(locBadgeEl(memo.location));
   (memo.assignees || []).forEach(a => {
+    const noAcc = assigneeNoAccess(a, memo);
     badges.appendChild(el('span', {
       class: 'badge',
-      text: '@' + a.replace(/@.*$/, ''),
-      attrs: { title: 'Assigné à ' + a, style: 'color:#80cbc4' },
+      text: (noAcc ? '⚠ @' : '@') + a.replace(/@.*$/, ''),
+      attrs: { title: noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a), style: 'color:' + (noAcc ? 'var(--warn)' : 'var(--assignee)') },
     }));
   });
   if (memo.comment_count) {
     const cb = el('span', {
       class: 'badge',
-      text: '💬 ' + memo.comment_count,
+      icon: 'message', text: '' + memo.comment_count,
       attrs: { title: 'Commentaires — cliquer pour les voir', style: 'cursor:pointer;color:#ffcc80' },
     });
     cb.addEventListener('click', (e) => {
@@ -2794,18 +3396,18 @@ function taskEl(memo) {
   if (subs.length) {
     badges.appendChild(el('span', {
       class: 'badge',
-      text: `☑ ${subs.filter(s => s.done).length}/${subs.length}`,
+      icon: 'checklist', text: `${subs.filter(s => s.done).length}/${subs.length}`,
     }));
   }
   if (memo.guest_editor) {
     const gname = memo.guest_editor.replace(/\s*<[^>]*>/, '');
     badges.appendChild(el('span', {
       class: 'badge',
-      text: '👤 ' + gname,
+      icon: 'user', text: gname,
       attrs: {
         title: (memo.guest_action === 'created' ? 'Ajouté par ' : 'Dernière modification par ')
           + memo.guest_editor + ' via un lien de partage, le ' + fmtWhen(memo.guest_at),
-        style: 'color:#b39ddb',
+        style: 'color:var(--guest)',
       },
     }));
   }
@@ -2831,8 +3433,8 @@ function taskEl(memo) {
     } },
   }));
   actions.appendChild(el('button', {
-    text: '×', attrs: { title: 'Supprimer' },
-    on: { click: () => deleteMemo(memo.id) },
+    icon: 'copy', attrs: { title: 'Dupliquer ce mémo' },
+    on: { click: () => duplicateMemo(memo.id) },
   }));
   row.appendChild(actions);
   task.appendChild(row);
@@ -2885,10 +3487,11 @@ function assigneeSuggestions() {
 
 function assigneeRowEl(memo) {
   const row = el('div', { class: 'detail-row', attrs: { style: 'flex-wrap:wrap' } });
-  row.appendChild(el('span', { text: '👤', attrs: { title: 'Personnes rattachées à cette tâche' } }));
+  row.appendChild(el('span', { icon: 'user', attrs: { title: 'Personnes rattachées à cette tâche' } }));
   (memo.assignees || []).forEach(a => {
-    const chip = el('span', { class: 'assignee-chip' });
-    chip.appendChild(el('span', { text: '@' + a }));
+    const noAcc = assigneeNoAccess(a, memo);
+    const chip = el('span', { class: 'assignee-chip' + (noAcc ? ' noaccess' : ''), attrs: noAcc ? { title: NO_ACCESS_TIP } : {} });
+    chip.appendChild(el('span', { text: (noAcc ? '⚠ @' : '@') + a }));
     chip.appendChild(el('button', {
       text: '×',
       attrs: { type: 'button', title: 'Retirer ' + a, style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.85rem' },
@@ -2923,24 +3526,123 @@ function assigneeRowEl(memo) {
   return row;
 }
 
+// Autocomplete @ sur un <input> simple (réutilise le menu de mention).
+function attachInputMention(input, getNames) {
+  const menu = document.createElement('div');
+  menu.className = 'mention-menu';
+  menu.style.display = 'none';
+  (input.closest('dialog') || document.body).appendChild(menu);
+  let open = false, items = [], active = 0, qstart = -1;
+  const close = () => { open = false; menu.style.display = 'none'; };
+  const draw = () => {
+    menu.innerHTML = '';
+    items.forEach((it, i) => {
+      const row = document.createElement('div');
+      row.className = 'mention-item' + (i === active ? ' active' : '');
+      row.textContent = it.add ? ('➕ Ajouter « ' + it.value + ' »') : ('@' + it.value);
+      row.addEventListener('mousedown', (e) => { e.preventDefault(); pick(i); });
+      menu.appendChild(row);
+    });
+  };
+  const place = () => {
+    const r = input.getBoundingClientRect();
+    menu.style.left = Math.round(r.left) + 'px';
+    menu.style.top = Math.round(r.bottom + 4) + 'px';
+    menu.style.minWidth = Math.round(r.width) + 'px';
+  };
+  const pick = (i) => {
+    const it = items[i]; if (!it) { close(); return; }
+    const name = String(it.value).trim(); if (!name) { close(); return; }
+    const val = input.value, pos = input.selectionStart;
+    input.value = val.slice(0, qstart) + '@' + name + ' ' + val.slice(pos);
+    const np = qstart + name.length + 2;
+    input.setSelectionRange(np, np);
+    close(); input.focus();
+  };
+  const detect = () => {
+    const before = input.value.slice(0, input.selectionStart);
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(before);
+    if (!m) { close(); return; }
+    qstart = input.selectionStart - m[1].length - 1;
+    const q = m[1].toLowerCase();
+    const all = (getNames() || []).filter(Boolean);
+    const list = all.filter(n => n.toLowerCase().includes(q)).map(v => ({ value: v }));
+    if (m[1] && !all.some(n => n.toLowerCase() === q)) list.push({ value: m[1], add: true });
+    items = list;
+    if (!items.length) { close(); return; }
+    if (active >= items.length) active = 0;
+    draw(); place(); menu.style.display = 'block'; open = true;
+  };
+  input.addEventListener('input', detect);
+  input.addEventListener('keydown', (e) => {
+    if (!open || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopImmediatePropagation(); active = (active + 1) % items.length; draw(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); active = (active - 1 + items.length) % items.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); pick(active); }
+    else if (e.key === 'Escape') { e.stopImmediatePropagation(); close(); }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+}
+
+const COMMENT_PRIO_COL = { 1: '#ff5252', 2: 'var(--warn)', 3: '#66bb6a' };
+
+function commentInputEl(memo, parentId, onPosted) {
+  const input = el('input', { attrs: { type: 'text', placeholder: (parentId ? '↩ Répondre… (Entrée)' : '💬 Commenter… (Entrée, @ pour mentionner)'), maxlength: '2000' } });
+  input.style.cssText = 'flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.84rem;padding:0.3rem 0.5rem';
+  attachInputMention(input, () => assigneeSuggestions());
+  const prioSel = el('select', { attrs: { title: 'Priorité du commentaire' } });
+  prioSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.78rem;padding:0.25rem';
+  [['0', '⚑ —'], ['1', 'P1'], ['2', 'P2'], ['3', 'P3']].forEach(([v, t]) => prioSel.appendChild(el('option', { attrs: { value: v }, text: t })));
+  input.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    e.preventDefault();
+    const body = { body: input.value.trim(), priority: parseInt(prioSel.value, 10) || 0 };
+    if (parentId) body.parent_id = parentId;
+    await api(`/api/memos/${memo.id}/comments`, { method: 'POST', body: JSON.stringify(body) });
+    input.value = ''; prioSel.value = '0';
+    memo.comment_count = (memo.comment_count || 0) + 1;
+    onPosted();
+  });
+  const row = el('div', { attrs: { style: 'display:flex;gap:0.35rem;margin-top:0.35rem' } });
+  row.appendChild(prioSel);
+  row.appendChild(input);
+  return row;
+}
+
 function commentsBlockEl(memo) {
   const wrap = el('div', { attrs: { style: 'margin-top:0.5rem' } });
   const list = el('div');
   wrap.appendChild(list);
   const renderComments = (comments) => {
     list.innerHTML = '';
-    comments.forEach(c => {
-      const r = el('div', { class: 'comment-row' });
+    const renderOne = (c, isReply) => {
+      const r = el('div', { class: 'comment-row' + (isReply ? ' comment-reply' : '') });
+      if (c.priority) {
+        const pp = el('span', { class: 'c-prio', text: 'P' + c.priority });
+        pp.style.background = COMMENT_PRIO_COL[c.priority] || 'var(--muted)';
+        r.appendChild(pp);
+      }
       const author = (c.author || '').replace(/\s*<[^>]*>/, '');
       const a = el('span', { class: 'c-author', text: (c.guest ? '👤 ' : '') + author });
-      if (c.guest) a.style.color = '#b39ddb';
+      if (c.guest) a.style.color = 'var(--guest)';
       a.title = c.author;
       r.appendChild(a);
       r.appendChild(el('span', { class: 'c-body', text: c.body }));
       r.appendChild(el('span', { class: 'c-when', text: fmtWhen(c.created_at) }));
+      const others = (c.seen || []).filter(v => v && v !== author && v !== 'Fabien');
+      if (others.length) r.appendChild(el('span', { class: 'c-seen', text: '👁 ' + others.join(', '), attrs: { title: 'Vu par ' + others.join(', ') } }));
+      if (!isReply) r.appendChild(el('button', {
+        text: '↩', attrs: { type: 'button', title: 'Répondre', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0' },
+        on: { click: () => {
+          if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
+          const rb = commentInputEl(memo, c.id, loadComments);
+          rb.classList.add('reply-box', 'comment-reply');
+          r.after(rb);
+          rb.querySelector('input').focus();
+        } },
+      }));
       r.appendChild(el('button', {
-        text: '×',
-        attrs: { type: 'button', title: 'Supprimer ce commentaire', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0' },
+        text: '×', attrs: { type: 'button', title: 'Supprimer ce commentaire', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0' },
         on: { click: async () => {
           if (!(await confirmPopin('Supprimer ce commentaire ?'))) return;
           await api(`/api/comments/${c.id}`, { method: 'DELETE' });
@@ -2948,23 +3650,18 @@ function commentsBlockEl(memo) {
         } },
       }));
       list.appendChild(r);
+    };
+    comments.filter(c => !c.parent_id).forEach(c => {
+      renderOne(c, false);
+      comments.filter(ch => ch.parent_id === c.id).forEach(ch => renderOne(ch, true));
     });
   };
   const loadComments = async () => {
+    try { await api(`/api/memos/${memo.id}/comments/seen`, { method: 'POST' }); } catch (e) { /* silencieux */ }
     try { renderComments(await api(`/api/memos/${memo.id}/comments`)); } catch (e) { /* silencieux */ }
   };
   if (memo.comment_count) loadComments();
-  const input = el('input', { attrs: { type: 'text', placeholder: '💬 Commenter… (Entrée)', maxlength: '2000' } });
-  input.style.cssText = 'width:100%;margin-top:0.35rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.84rem;padding:0.3rem 0.5rem';
-  input.addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter' || !input.value.trim()) return;
-    e.preventDefault();
-    await api(`/api/memos/${memo.id}/comments`, { method: 'POST', body: JSON.stringify({ body: input.value.trim() }) });
-    input.value = '';
-    memo.comment_count = (memo.comment_count || 0) + 1;
-    loadComments();
-  });
-  wrap.appendChild(input);
+  wrap.appendChild(commentInputEl(memo, null, loadComments));
   return wrap;
 }
 
@@ -2998,7 +3695,7 @@ function taskDetailEl(memo) {
       on: { click: () => patchMemo(memo.id, { due_date: '' }) },
     }));
   }
-  row1.appendChild(el('span', { text: '⚑' }));
+  row1.appendChild(el('span', { icon: 'flag' }));
   const noneBtn = el('button', {
     class: 'prio-btn' + (memo.priority === 0 ? ' sel-none' : ''),
     text: 'Aucune',
@@ -3048,23 +3745,23 @@ function taskDetailEl(memo) {
   fileIn.style.display = 'none';
   fileIn.addEventListener('change', () => { if (fileIn.files.length) uploadMemoImages(memo.id, [...fileIn.files]); });
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '📎 Image',
+    class: 'prio-btn', icon: 'paperclip', text: 'Image',
     attrs: { title: 'Ajouter une image (ou glisser un fichier sur le mémo)' },
     on: { click: () => fileIn.click() },
   }));
   row1.appendChild(fileIn);
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '🔗 Partager',
+    class: 'prio-btn', icon: 'link', text: 'Partager',
     attrs: { title: 'Partager ce mémo par lien (sans compte)' },
     on: { click: () => openShareDialog('memo', memo.id, stripHTML(memo.content).slice(0, 40)) },
   }));
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '🕘 Versions',
+    class: 'prio-btn', icon: 'history', text: 'Versions',
     attrs: { title: 'Historique des modifications et restauration' },
     on: { click: () => openRevisions(memo) },
   }));
   row1.appendChild(el('button', {
-    class: 'prio-btn', text: '📍 Ma position',
+    class: 'prio-btn', icon: 'map-pin', text: 'Ma position',
     attrs: { title: 'Attacher ta position GPS actuelle à ce mémo' },
     on: { click: () => capturePosition((loc) => patchMemo(memo.id, { location: loc })) },
   }));
@@ -3171,7 +3868,7 @@ function renderBoard() {
       const pLoc = parseLoc(proj.location);
       if (pLoc) title.appendChild(locBadgeEl(pLoc));
       title.appendChild(el('button', {
-        class: 'prio-btn', text: '🔗 Partager',
+        class: 'prio-btn', icon: 'link', text: 'Partager',
         attrs: { title: 'Partager ce projet par lien (sans compte)' },
         on: { click: () => openShareDialog('project', proj.id, proj.name) },
       }));
@@ -3180,7 +3877,7 @@ function renderBoard() {
   const mapPoints = boardMapPoints();
   if (mapPoints.length) {
     title.appendChild(el('button', {
-      class: 'prio-btn', text: '🗺 Carte (' + mapPoints.length + ')',
+      class: 'prio-btn', icon: 'map', text: 'Carte (' + mapPoints.length + ')',
       attrs: { title: 'Voir tous les points géolocalisés de cette vue sur une carte' },
       on: { click: () => openMapDialog(document.getElementById('board-title').textContent.replace(/🗺.*$/, '').trim() || 'Carte', boardMapPoints()) },
     }));
@@ -3267,7 +3964,7 @@ function renderBoard() {
     const taggedLinks = state.links.filter(l => (l.tags || '').split(/\s+/).includes(activeTag));
     if (taggedLinks.length) {
       const banner = el('div', { class: 'detail-row', attrs: { style: 'margin-bottom:1rem' } });
-      banner.appendChild(el('span', { text: '🔗' }));
+      banner.appendChild(el('span', { icon: 'link' }));
       banner.appendChild(el('button', {
         class: 'prio-btn',
         text: `Voir ${taggedLinks.length} lien${taggedLinks.length > 1 ? 's' : ''} avec #${activeTag}`,
@@ -3319,7 +4016,7 @@ function renderBoard() {
   const prioBtn = el('button', { attrs: { type: 'button', title: 'Priorité — cliquer pour changer' } });
   const refreshPrioBtn = () => {
     const p = prioOf(addPrio);
-    prioBtn.textContent = p ? '⚑ ' + p.name : '⚑ Priorité';
+    prioBtn.textContent = ''; prioBtn.append(icon('flag'), ' ' + (p ? p.name : 'Priorité'));
     if (p && p.color) {
       prioBtn.style.background = p.color;
       prioBtn.style.borderColor = p.color;
@@ -3759,17 +4456,110 @@ form.addEventListener('submit', async (e) => {
     category_id: form.elements.category_id.value ? Number(form.elements.category_id.value) : null,
   };
   const id = form.elements.id.value;
-  if (id) {
-    await api(`/api/links/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-  } else {
-    await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
-  }
-  dialog.close();
-  await loadAll();
+  const _sb = form.querySelector('button[type="submit"]');
+  if (_sb) { _sb.disabled = true; _sb.style.opacity = '0.6'; }
+  try {
+    if (id) {
+      await api(`/api/links/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+    } else {
+      await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
+    }
+    dialog.close();
+    await loadAll();
+  } finally { if (_sb) { _sb.disabled = false; _sb.style.opacity = ''; } }
 });
 
 document.getElementById('cancel').addEventListener('click', () => dialog.close());
 document.getElementById('add-link').addEventListener('click', () => openDialog());
+
+// Thème clair / sombre (tokens surchargés sous [data-theme=light], persistant)
+const themeBtn = document.getElementById('theme-btn');
+function setTheme(t) {
+  const light = t === 'light';
+  if (light) document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (e) {}
+  const u = themeBtn && themeBtn.querySelector('use');
+  if (u) u.setAttribute('href', light ? '#ic-sun' : '#ic-moon');
+}
+setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
+if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
+
+/* ---- barre latérale : eye (montre/cache tout) + hamburger (rail icônes) ----
+   GSAP optionnel : dégrade en bascule de classe instantanée si absent ou reduced-motion.
+   Sidebar n'est PAS un <dialog> → animer son transform/width est sûr (cf. invariant 8). */
+(function () {
+  const sb = document.getElementById('sidebar');
+  const eyeBtn = document.getElementById('sidebar-eye-btn');
+  const railBtn = document.getElementById('sidebar-rail-btn');
+  if (!sb || !eyeBtn || !railBtn) return;
+  const g = window.gsap;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const mobile = () => window.matchMedia('(max-width: 900px)').matches;
+  const anim = (a) => g && a && !reduce && !mobile();
+  const save = (k, v) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch (e) {} };
+  const load = (k) => { try { return localStorage.getItem(k) === '1'; } catch (e) { return false; } };
+
+  let hidden = load('sbHidden');
+  let rail = load('sbRail');
+
+  function syncBtns() {
+    eyeBtn.classList.toggle('toggle-on', hidden);
+    eyeBtn.querySelector('use').setAttribute('href', hidden ? '#ic-eye-off' : '#ic-eye');
+    railBtn.classList.toggle('toggle-on', rail);
+    railBtn.setAttribute('aria-expanded', String(!rail));
+  }
+
+  // EYE : back.in en sortie, back.out à l'entrée
+  function setHidden(next, animate) {
+    hidden = next; save('sbHidden', next); syncBtns();
+    if (next) {
+      if (anim(animate)) {
+        g.to(sb, { width: 0, paddingLeft: 0, paddingRight: 0, autoAlpha: 0, x: -24,
+          duration: 0.32, ease: 'back.in(1.4)', overwrite: true,
+          onComplete: () => sb.classList.add('sb-hidden') });
+      } else { sb.classList.add('sb-hidden'); }
+    } else {
+      sb.classList.remove('sb-hidden');
+      if (anim(animate)) {
+        g.killTweensOf(sb);
+        g.set(sb, { clearProps: 'width,paddingLeft,paddingRight,opacity,visibility,transform' });
+        g.from(sb, { width: 0, paddingLeft: 0, paddingRight: 0, autoAlpha: 0, x: -24,
+          duration: 0.4, ease: 'back.out(1.4)', overwrite: true,
+          clearProps: 'width,paddingLeft,paddingRight,transform,opacity,visibility' });
+      }
+    }
+  }
+
+  // HAMBURGER : labels glissent à gauche (back.in) puis reviennent (back.out)
+  function setRail(next, animate) {
+    rail = next; save('sbRail', next);
+    if (next) {
+      const labels = sb.querySelectorAll('.cat-label, .count');
+      if (anim(animate) && labels.length) {
+        g.to(labels, { x: -16, autoAlpha: 0, duration: 0.22, ease: 'back.in(2)',
+          stagger: 0.015, overwrite: true,
+          onComplete: () => { sb.classList.add('sb-rail'); g.set(labels, { clearProps: 'all' }); syncBtns(); } });
+      } else { sb.classList.add('sb-rail'); syncBtns(); }
+    } else {
+      sb.classList.remove('sb-rail'); syncBtns();
+      const labels = sb.querySelectorAll('.cat-label, .count');
+      if (anim(animate) && labels.length) {
+        g.from(labels, { x: -16, autoAlpha: 0, duration: 0.3, ease: 'back.out(1.7)',
+          stagger: 0.02, overwrite: true, clearProps: 'transform,opacity,visibility' });
+      }
+    }
+  }
+
+  eyeBtn.addEventListener('click', () => setHidden(!hidden, true));
+  railBtn.addEventListener('click', () => setRail(!rail, true));
+
+  if (!mobile()) {
+    if (hidden) setHidden(true, false);
+    if (rail) setRail(true, false);
+  }
+  syncBtns();
+})();
 
 /* ------------------------------------------------ settings */
 
@@ -3809,7 +4599,7 @@ document.getElementById('backup-now').addEventListener('click', async () => {
   await notify('Sauvegarde créée : ' + r.created.join(' + '), { title: '💾 Sauvegarde' });
 });
 document.getElementById('settings-close').addEventListener('click', () => settingsDialog.close());
-document.getElementById('refresh-status').addEventListener('click', loadStatus);
+document.getElementById('refresh-status').addEventListener('click', async () => { await loadStatus(); announce('Statuts des services mis à jour.'); });
 
 const tzSelect = document.getElementById('tz-select');
 TZ_CHOICES.forEach(([v, label]) => tzSelect.appendChild(el('option', { attrs: { value: v }, text: label })));
@@ -3843,7 +4633,7 @@ function renderCatManage() {
     row.appendChild(colorIn);
     row.appendChild(el('span', { class: 'grow', text: `${cat.name} (${cat.link_count})` }));
     row.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      icon: 'pencil', attrs: { title: 'Modifier (nom + couleur)' },
       on: { click: () => openCreateDialog('category', cat) },
     }));
     row.appendChild(el('button', {
@@ -3880,7 +4670,7 @@ function renderProjManage() {
     row.appendChild(colorIn);
     row.appendChild(el('span', { class: 'grow', text: `${proj.name} (${proj.memo_count})` }));
     row.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      icon: 'pencil', attrs: { title: 'Modifier (nom + couleur)' },
       on: { click: () => openCreateDialog('project', proj) },
     }));
     row.appendChild(el('button', {
@@ -3917,7 +4707,7 @@ function renderPrioManage() {
     row.appendChild(colorIn);
     row.appendChild(el('span', { class: 'grow', text: `${prio.name} (${prio.memo_count} mémo${prio.memo_count > 1 ? 's' : ''})` }));
     row.appendChild(el('button', {
-      text: '✎', attrs: { title: 'Modifier (nom + couleur)' },
+      icon: 'pencil', attrs: { title: 'Modifier (nom + couleur)' },
       on: { click: () => openCreateDialog('priority', prio) },
     }));
     row.appendChild(el('button', {
@@ -3954,6 +4744,7 @@ document.getElementById('import-btn').addEventListener('click', () => importFile
 importFile.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  const _ib = document.getElementById('import-btn'); if (_ib) { _ib.disabled = true; _ib.style.opacity = '0.6'; }
   try {
     const text = await file.text();
     const data = JSON.parse(text);
@@ -3979,6 +4770,7 @@ importFile.addEventListener('change', async (e) => {
     await notify("Erreur d'import : " + err.message, { error: true });
   } finally {
     e.target.value = '';
+    if (_ib) { _ib.disabled = false; _ib.style.opacity = ''; }
   }
 });
 
@@ -3993,6 +4785,84 @@ mq.addEventListener('change', adaptMemoPanel);
 loadAll();
 refreshActivityBadge();
 setInterval(refreshActivityBadge, 15 * 1000);
+
+/* ------------------------------------------------ animations GSAP
+   Dégrade proprement si gsap.min.js est absent (rien ne casse).
+   GSAP est chargé en `defer`, donc on attend DOMContentLoaded.
+   On n'anime l'entrée des cartes/tâches QUE quand la vue change
+   (view|catégorie|projet) — pas à chaque loadAll() déclenché par une
+   mutation, sinon tout clignoterait à chaque ajout/déplacement. */
+window.addEventListener('DOMContentLoaded', () => {
+  const g = window.gsap;
+  if (!g) return;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function stagger(sel, opts) {
+    if (reduce) return;
+    const nodes = document.querySelectorAll(sel);
+    if (!nodes.length) return;
+    g.killTweensOf(nodes);
+    g.fromTo(nodes,
+      { autoAlpha: 0, y: 14 },
+      Object.assign({
+        autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out',
+        stagger: 0.045, overwrite: true, clearProps: 'transform,opacity,visibility',
+      }, opts || {}));
+  }
+
+  function countUp(node) {
+    const to = parseInt(node.textContent, 10);
+    if (isNaN(to)) return;
+    if (reduce) { return; }
+    const o = { v: 0 };
+    g.fromTo(o, { v: 0 }, {
+      v: to, duration: 0.7, ease: 'power1.out', snap: { v: 1 },
+      onUpdate: () => { node.textContent = Math.round(o.v); },
+    });
+  }
+
+  function animateView() {
+    if (state.view === 'links') {
+      stagger('#links .card');
+    } else if (state.view === 'memos') {
+      stagger('#memo-board .mfilter', { y: 10, duration: 0.35, stagger: 0.03 });
+      stagger('#memo-board .task');
+      document.querySelectorAll('#memo-board .mf-count').forEach(countUp);
+    } else if (state.view === 'shares') {
+      stagger('#shares-board .share-card');
+    }
+  }
+
+  const viewKey = () => [state.view, state.filterCat, state.memoProject].join('|');
+  let lastKey = null;
+  let firstPaint = true;
+
+  function playIntro() {
+    if (!firstPaint) return;
+    firstPaint = false;
+    lastKey = viewKey();
+    if (!reduce) {
+      g.from('header', { y: -20, autoAlpha: 0, duration: 0.4, ease: 'power2.out', clearProps: 'all' });
+      g.from('#sidebar .cat-item', { x: -12, autoAlpha: 0, duration: 0.3, stagger: 0.03, ease: 'power2.out', delay: 0.08, clearProps: 'all' });
+    }
+    animateView();
+  }
+
+  const _renderAll = renderAll;
+  renderAll = function () {
+    const r = _renderAll.apply(this, arguments);
+    if (firstPaint) { playIntro(); }
+    else { const k = viewKey(); if (k !== lastKey) { lastKey = k; animateView(); } }
+    return r;
+  };
+
+  // Si loadAll() a déjà peint avant l'install du wrapper, joue l'intro maintenant.
+  if (document.querySelector('#sidebar .cat-item')) playIntro();
+
+  // Entrée des pop-ins : gérée en CSS (@keyframes dlg-in / dlg-bd).
+  // Ne pas wrapper showModal pour animer le <dialog> via GSAP : poser un transform
+  // dessus le sort du top-layer Chromium et casse le centrage + le backdrop.
+});
 </script>
 </body>
 </html>
