@@ -32,6 +32,7 @@ UI : http://localhost:8099
 - **Favicon** : `static/favicon.svg` (tuile aux couleurs du dashboard).
 - **Header** : bouton 👁 pour **masquer entièrement la sidebar**, bouton ☰ pour la **replier en rail d'icônes** (64px) — les deux états sont indépendants et mémorisés (`localStorage` `sbHidden`/`sbRail`), animations GSAP backIn/backOut. Bouton 🌙/☀️ pour basculer le **thème clair / sombre** (mémorisé dans `localStorage` `theme`, appliqué avant le rendu pour éviter tout flash). Disponible aussi sur la page partagée.
 - **Pop-ins partout** : aucune boîte de dialogue native du navigateur (`alert`/`confirm`/`prompt`). Confirmations et messages passent par des pop-ins maison (`notify()` / `confirmPopin()`), côté propriétaire **comme côté page partagée**.
+- **Responsive mobile** : sous 900px, la sidebar devient une rangée de puces **collante** (épinglée sous le header), les badges des mémos passent sous le texte (pas de colonne écrasée), les actions de card sont visibles d'emblée (sans survol), la barre d'outils de l'éditeur tient sur une ligne défilable, et l'en-tête d'un projet expose un bouton **✎ Modifier** (le double-clic n'étant pas tactile). Le bouton « + Ajouter » du header (création de lien) est masqué hors de la vue Liens. Mêmes adaptations sur la page partagée.
 
 ## Modèle de données
 

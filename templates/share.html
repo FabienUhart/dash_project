@@ -117,7 +117,9 @@ button.icon:active { transform: scale(0.94); }
 main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem; }
 @media (max-width: 900px) {
   #layout { flex-direction: column; }
-  #snav { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; gap: 0.3rem; }
+  #snav { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; gap: 0.3rem;
+    /* Navigation projets collante : épinglée sous le header au défilement (--header-h mesuré en JS). */
+    position: sticky; top: var(--header-h, 0px); z-index: 9; background: var(--panel); }
   .sitem { flex-shrink: 0; margin-bottom: 0; }
 }
 .task {
@@ -305,9 +307,25 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 @media (pointer: coarse) {
   button, .sitem, .tile, .task-check { min-height: 44px; }
+  /* Rond cochable : largeur = hauteur, ne pas l'étirer en ovale avec min-height 44px. */
+  .task-check { min-height: 0; width: 1.5rem; height: 1.5rem; }
+  /* Boutons de la barre Quill : garder leur taille native (sinon barre énorme en mobile). */
+  #q-wrap .ql-toolbar button { min-height: 0; }
 }
 @media (max-width: 900px) {
   input, select, textarea { font-size: 16px; }
+  /* Mémos en mobile : le texte prend toute la première ligne, les badges (lieu,
+     assignés, projet, échéance) passent dessous au lieu d'écraser le contenu. */
+  .task-row { flex-wrap: wrap; }
+  .task-content { flex-basis: 100%; }
+  /* Commentaires : le corps prend toute la largeur (sinon empilé en 1 caractère/ligne).
+     !important car le flex:1 est posé en style inline sur l'élément. */
+  .comment-row { flex-wrap: wrap; }
+  .comment-row .c-body { flex-basis: 100% !important; }
+  /* Éditeur Quill plus compact + barre d'outils sur une ligne défilable en mobile. */
+  #q-wrap .ql-container, #q-wrap .ql-editor { min-height: 130px; }
+  #q-wrap .ql-toolbar { white-space: nowrap; overflow-x: auto; overflow-y: hidden; }
+  #q-wrap .ql-toolbar .ql-formats { display: inline-block; vertical-align: middle; }
 }
 .tn, .cnt, .c-when { font-variant-numeric: tabular-nums; }
 .sitem:active, .tile:active { transform: scale(0.97); }
@@ -494,6 +512,15 @@ function setTheme(t) {
 }
 setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
 if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
+
+// Hauteur réelle du header → barre de projets collante (position: sticky; top: var(--header-h)).
+function syncHeaderHeight() {
+  const h = document.querySelector('header');
+  if (h) document.documentElement.style.setProperty('--header-h', h.offsetHeight + 'px');
+}
+syncHeaderHeight();
+window.addEventListener('resize', syncHeaderHeight);
+window.addEventListener('load', syncHeaderHeight);
 
 function guestToken() { return localStorage.getItem('dashguest:' + TOKEN) || ''; }
 function canEditNow() { return DATA && DATA.can_edit && GUEST.status === 'approved'; }
@@ -1366,6 +1393,9 @@ function render() {
   renderSidebar();
   renderTiles();
   applyA11y();
+  // Le titre (nom du projet) peut faire varier la hauteur du header → re-mesurer
+  // pour caler la barre de projets collante.
+  syncHeaderHeight();
 
   if (!projSel.hidden && PFILTER !== 'all') projSel.value = String(PFILTER);
 
@@ -1503,7 +1533,7 @@ function render() {
       cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
       const comments = memo.comments || [];
       const renderC = (c, isReply) => {
-        const r = el('div', '');
+        const r = el('div', 'comment-row');
         r.style.cssText = 'display:flex;gap:0.5rem;align-items:flex-start;font-size:0.82rem;padding:0.3rem 0.5rem;background:var(--bg);border-radius:6px;margin-top:0.3rem' + (isReply ? ';margin-left:1.5rem;border-left:2px solid var(--border)' : '');
         if (c.priority) {
           const pp = el('span', '', 'P' + c.priority);
@@ -1515,7 +1545,7 @@ function render() {
         a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:var(--guest)' : '');
         a.title = c.author;
         r.appendChild(a);
-        const b = el('span', '', c.body);
+        const b = el('span', 'c-body', c.body);
         b.style.cssText = 'flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere';
         r.appendChild(b);
         const w = el('span', '', new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }));

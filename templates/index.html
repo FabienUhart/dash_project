@@ -177,9 +177,18 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   .card .actions, .task .task-actions { opacity: 0.85; }
   button, .task-check, .thumb-del, .cat-item, .sitem, .mfilter, .tile { min-height: 44px; }
   .card .actions button, .task .task-actions button { min-width: 40px; }
+  /* Boutons ronds à taille fixe : ne pas les étirer en ovale avec min-height 44px.
+     On garde largeur = hauteur (donc parfaitement ronds), un poil plus grands pour le tactile. */
+  .task-check { min-height: 0; width: 1.5rem; height: 1.5rem; }
+  .thumb-del { min-height: 0; }
+  /* Boutons de la barre Quill : ne pas les gonfler à 44px (sinon barre d'outils énorme,
+     icônes SVG étirées). On garde leur taille native. */
+  #quill-wrap .ql-toolbar button { min-height: 0; }
 }
 @media (max-width: 900px) {
   input, select, textarea, #search { font-size: 16px; }
+  /* (Les overrides de mise en page des mémos mobile sont plus bas, après les règles
+     de base, pour gagner la cascade — voir le bloc « Overrides mémos mobile ».) */
 }
 /* Finitions : chiffres alignés, retour d'appui, GPU au survol */
 #clock-time, #clock-date, #clock-extra, .count, .mf-count, .mf-num, .pin-input, .c-when { font-variant-numeric: tabular-nums; }
@@ -1048,6 +1057,12 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     border-right: none;
     border-bottom: 1px solid var(--border);
     gap: 0.3rem;
+    /* Barre de navigation projets collante : reste épinglée juste sous le header
+       (hauteur du header mesurée en JS → --header-h) quand on fait défiler. */
+    position: sticky;
+    top: var(--header-h, 0px);
+    z-index: 9;
+    background: var(--panel);
   }
   .cat-item { flex-shrink: 0; margin-bottom: 0; padding: 0.35rem 0.7rem; }
   .cat-item .count { margin-left: 0.3rem; }
@@ -1063,6 +1078,27 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   #memo-details[open] summary::before { content: "▾ "; }
   #clock-date { display: none; }
   main { padding: 0.75rem; }
+  /* === Overrides mémos mobile (placés APRÈS les règles de base pour gagner la cascade :
+     les @media n'augmentent pas la spécificité, c'est l'ordre qui tranche) === */
+  .task .task-row { flex-wrap: wrap; }
+  .task .task-content { flex: 1 1 100%; }
+  .task .task-actions { order: 1; }
+  .task .task-badges { order: 2; flex-basis: 100%; max-width: 100%; margin-left: 2.1rem; }
+  .task .task-actions .tdup { display: none; }
+  /* Actions de card visibles d'emblée en mobile (par largeur d'écran, car le survol
+     n'existe pas au doigt et @media pointer:coarse ne matche pas toujours). */
+  .card .actions, .task .task-actions { opacity: 1; }
+  /* Flèche d'expansion (date/priorité/sous-tâches) plus grande et tappable en mobile. */
+  .task .task-actions button { font-size: 1.3rem; min-width: 40px; }
+  /* Vue Partages : rangées en multi-lignes pour que le nom/arbre prenne toute la largeur
+     (sinon il s'effondre en 1 caractère/ligne, étranglé par les boutons d'action). */
+  .guest-row, .rev-row, .share-row { flex-wrap: wrap; }
+  .guest-row .grow, .rev-row .grow, .share-row .grow { flex-basis: 100%; }
+  .comment-row { flex-wrap: wrap; }
+  .comment-row .c-body { flex-basis: 100%; }
+  #quill-wrap .ql-container, #quill-wrap .ql-editor { min-height: 130px; }
+  #quill-wrap .ql-toolbar { white-space: nowrap; overflow-x: auto; overflow-y: hidden; }
+  #quill-wrap .ql-toolbar .ql-formats { display: inline-block; vertical-align: middle; }
 }
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
@@ -1520,12 +1556,18 @@ function renderAll() {
   document.getElementById('shares-board').hidden = v !== 'shares';
   document.getElementById('trash-board').hidden = v !== 'trash';
   document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
+  // Le bouton « + Ajouter » du header ne crée que des liens → masqué hors de la vue Liens
+  // (les vues Mémos/Projet ont leur propre barre « + Nouveau mémo »).
+  document.getElementById('add-link').style.display = v === 'links' ? '' : 'none';
   if (v === 'memos') renderBoard();
   else if (v === 'shares') renderShares();
   else if (v === 'trash') renderTrash();
   else renderLinks();
   renderMemos();
   applyA11y();
+  // La hauteur du header change selon la vue (le bouton « + Ajouter » n'est visible
+  // qu'en vue Liens) → re-mesurer pour que la barre collante se cale au bon endroit.
+  syncHeaderHeight();
 }
 
 // Rend les conteneurs "bouton" (non natifs) focusables et activables au clavier.
@@ -3433,7 +3475,7 @@ function taskEl(memo) {
     } },
   }));
   actions.appendChild(el('button', {
-    icon: 'copy', attrs: { title: 'Dupliquer ce mémo' },
+    class: 'tdup', icon: 'copy', attrs: { title: 'Dupliquer ce mémo' },
     on: { click: () => duplicateMemo(memo.id) },
   }));
   row.appendChild(actions);
@@ -3867,6 +3909,11 @@ function renderBoard() {
       title.appendChild(el('span', { text: proj.name }));
       const pLoc = parseLoc(proj.location);
       if (pLoc) title.appendChild(locBadgeEl(pLoc));
+      title.appendChild(el('button', {
+        class: 'prio-btn', icon: 'pencil', text: 'Modifier',
+        attrs: { title: 'Modifier ce projet (nom, emoji, couleur, description…)' },
+        on: { click: () => openCreateDialog('project', proj) },
+      }));
       title.appendChild(el('button', {
         class: 'prio-btn', icon: 'link', text: 'Partager',
         attrs: { title: 'Partager ce projet par lien (sans compte)' },
@@ -4484,6 +4531,16 @@ function setTheme(t) {
 }
 setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
 if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
+
+// Hauteur réelle du header (qui se replie sur 2 lignes en mobile) → utilisée par la
+// barre de projets collante (position: sticky; top: var(--header-h)).
+function syncHeaderHeight() {
+  const h = document.querySelector('header');
+  if (h) document.documentElement.style.setProperty('--header-h', h.offsetHeight + 'px');
+}
+syncHeaderHeight();
+window.addEventListener('resize', syncHeaderHeight);
+window.addEventListener('load', syncHeaderHeight);
 
 /* ---- barre latérale : eye (montre/cache tout) + hamburger (rail icônes) ----
    GSAP optionnel : dégrade en bascule de classe instantanée si absent ou reduced-motion.

@@ -41,6 +41,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Sidebar repliable : 👁 masquer entièrement / ☰ replier en rail d'icônes 64px (états mémorisés, animations GSAP)
 - [x] Pop-ins maison partout (plus aucun `alert`/`confirm`/`prompt` natif, y compris page partagée)
 - [x] Fix formulaire d'accès invité : la saisie ne s'efface plus au refresh ; mauvais PIN = erreur inline sans tout retaper
+- [x] Passe responsive mobile : barre de projets collante, badges/commentaires/vue Partages en pleine largeur (plus de colonne 1 caractère), actions de card visibles sans survol, ronds non déformés, barre Quill sur une ligne défilable, bouton ✎ Modifier projet, « + Ajouter » masqué hors vue Liens (dashboard + page partagée)
 
 ## Quick wins
 
