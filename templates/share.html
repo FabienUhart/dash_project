@@ -680,12 +680,6 @@ function renderGuestBanner() {
   b.appendChild(form);
 }
 
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
-}
 
 // Remplace les alert() natifs par une pop-in (cohérent avec le reste de l'app).
 function notify(message, { title = 'ℹ️ Info', error = false } = {}) {
