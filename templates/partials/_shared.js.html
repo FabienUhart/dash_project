@@ -31,11 +31,260 @@ function usableProjColor(c) {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 24 ? '' : c;
 }
 
+const PROV_PALETTE = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#f06292', '#a1887f', '#90a4ae', '#fff176'];
 function provenanceColor(proj) {
   const c = usableProjColor(proj ? proj.color : '');
   if (c) return c;
   const id = proj ? proj.id : 0;
   return PROV_PALETTE[((id % PROV_PALETTE.length) + PROV_PALETTE.length) % PROV_PALETTE.length];
+}
+
+// Pop-in carte mutualisée (ADR-001 item 4). Une seule implémentation owner/invité ;
+// tout ce qui diffère est passé dans `cfg` (accès données, persistance, sauvegardes).
+// cfg = { title, points, recompute, editable, projects, currentProjectId,
+//         subFilterScope, defaultMarkerColor, focusKey, subKey,
+//         saveColor(p,color), saveGroups(p,groups) }
+// Dépend de globals présents sur les deux pages : L (Leaflet), activeMap, notify, el, provenanceColor.
+function runMapDialog(cfg) {
+  if (typeof L === 'undefined') {
+    notify('Carte non disponible : fichiers Leaflet manquants dans static/ (voir README).', { error: true });
+    return;
+  }
+  const points = cfg.points;
+  if (!points.length) { notify('Aucun élément géolocalisé dans cette vue.'); return; }
+  const recompute = cfg.recompute;
+  const editable = cfg.editable;
+  const projects = cfg.projects || [];
+  const curId = cfg.currentProjectId;
+  const UNGROUPED = ' none';
+
+  document.getElementById('map-title').textContent = '🗺 ' + cfg.title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
+  document.getElementById('map-dialog').showModal();
+  if (activeMap) { activeMap.remove(); activeMap = null; }
+  activeMap = L.map('map-el');
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(activeMap);
+  const markerLayer = L.layerGroup().addTo(activeMap);
+  const listEl = document.getElementById('map-list');
+  const subbar = document.getElementById('map-subbar');
+  const groupbar = document.getElementById('map-groupbar');
+  const selbar = document.getElementById('map-selbar');
+
+  const GKEY = cfg.focusKey, SUBKEY = cfg.subKey;
+  let active, subActive;
+  try { active = new Set(JSON.parse(localStorage.getItem(GKEY) || '[]')); } catch (e) { active = new Set(); }
+  try { subActive = new Set(JSON.parse(localStorage.getItem(SUBKEY) || '[]')); } catch (e) { subActive = new Set(); }
+  const selected = new Set();
+  let current = points;
+
+  const pkey = p => p.kind + ':' + p.id;
+  const persist = () => localStorage.setItem(GKEY, JSON.stringify([...active]));
+  const persistSub = () => localStorage.setItem(SUBKEY, JSON.stringify([...subActive]));
+  const subToken = p => (p.kind === 'memo' ? (p.project_id || 0) : p.id);
+  const subFilterScope = cfg.subFilterScope;
+  function groupNames(pts) {
+    const s = new Set();
+    pts.forEach(p => (p.groups || []).forEach(g => s.add(g)));
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }
+  function hasUngrouped(pts) { return pts.some(p => !(p.groups && p.groups.length)); }
+  function isGroupFocused(p) {
+    if (!active.size) return true;
+    const gs = (p.groups && p.groups.length) ? p.groups : [UNGROUPED];
+    return gs.some(g => active.has(g));
+  }
+  function isSubFocused(p) {
+    if (!subActive.size) return true;
+    return subActive.has(subToken(p));
+  }
+  function isFocused(p) { return isGroupFocused(p) && isSubFocused(p); }
+
+  function renderSubbar() {
+    subbar.innerHTML = '';
+    if (!subFilterScope) { subbar.style.display = 'none'; return; }
+    const present = new Set(current.map(subToken));
+    if (![...present].some(t => t !== curId)) { subbar.style.display = 'none'; return; }
+    const ordered = projects.filter(p => present.has(p.id)).map(p => p.id);
+    present.forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
+    subbar.style.display = 'flex';
+    subbar.appendChild(el('span', { text: 'Sous-projets :', attrs: { style: 'font-size:0.78rem;color:var(--muted)' } }));
+    ordered.forEach(t => {
+      const proj = projects.find(p => p.id === t);
+      const label = proj ? ((proj.emoji ? proj.emoji + ' ' : '') + proj.name) + (t === curId ? ' (ce projet)' : '') : '(sans projet)';
+      const on = subActive.has(t);
+      subbar.appendChild(el('button', {
+        class: 'prio-btn', text: (on ? '✓ ' : '') + label,
+        attrs: { type: 'button', title: on ? 'Ne plus filtrer sur ce sous-projet' : 'Afficher seulement ce sous-projet',
+          style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+        on: { click: () => { if (subActive.has(t)) subActive.delete(t); else subActive.add(t); persistSub(); refresh(true); } },
+      }));
+    });
+    if (subActive.size) {
+      subbar.appendChild(el('button', {
+        class: 'prio-btn', text: '↺ tous les sous-projets', attrs: { type: 'button', style: 'padding:0.1rem 0.45rem' },
+        on: { click: () => { subActive.clear(); persistSub(); refresh(true); } },
+      }));
+    }
+  }
+
+  function renderGroupbar() {
+    groupbar.innerHTML = '';
+    const names = groupNames(current);
+    if (!names.length) { groupbar.style.display = 'none'; return; }
+    groupbar.style.display = 'flex';
+    groupbar.appendChild(el('span', { text: 'Groupes :', attrs: { style: 'font-size:0.78rem;color:var(--muted)' } }));
+    const chip = (label, token) => {
+      const on = active.has(token);
+      groupbar.appendChild(el('button', {
+        class: 'prio-btn', text: (on ? '✓ ' : '') + label,
+        attrs: { type: 'button', title: on ? 'Ne plus filtrer sur ce groupe' : 'Afficher seulement ce groupe',
+          style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+        on: { click: () => { if (active.has(token)) active.delete(token); else active.add(token); persist(); refresh(true); } },
+      }));
+    };
+    names.forEach(n => chip(n, n));
+    if (hasUngrouped(current)) chip('(sans groupe)', UNGROUPED);
+    if (active.size) {
+      groupbar.appendChild(el('button', {
+        class: 'prio-btn', text: '↺ tout afficher', attrs: { type: 'button', style: 'padding:0.1rem 0.45rem' },
+        on: { click: () => { active.clear(); persist(); refresh(true); } },
+      }));
+    }
+  }
+
+  function renderSelbar() {
+    selbar.innerHTML = '';
+    if (!editable || !selected.size) { selbar.style.display = 'none'; return; }
+    selbar.style.display = 'flex';
+    selbar.appendChild(el('span', { text: selected.size + ' sélectionné' + (selected.size > 1 ? 's' : ''), attrs: { style: 'font-size:0.8rem;font-weight:600' } }));
+    const input = el('input', { attrs: { type: 'text', placeholder: 'nom du groupe', list: 'map-group-list', style: 'flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.2rem 0.4rem' } });
+    const dl = el('datalist', { attrs: { id: 'map-group-list' } });
+    groupNames(current).forEach(n => dl.appendChild(el('option', { attrs: { value: n } })));
+    selbar.appendChild(input);
+    selbar.appendChild(dl);
+    const apply = async () => {
+      const name = input.value.trim();
+      if (!name) return;
+      for (const key of [...selected]) {
+        const p = current.find(x => pkey(x) === key);
+        if (!p || p.kind !== 'memo') continue;
+        const next = Array.from(new Set([...(p.groups || []), name]));
+        await cfg.saveGroups(p, next);
+      }
+      selected.clear();
+      current = recompute();
+      refresh(false);
+    };
+    selbar.appendChild(el('button', { class: 'primary', text: '＋ Grouper', attrs: { type: 'button', style: 'padding:0.2rem 0.6rem' }, on: { click: apply } }));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+    selbar.appendChild(el('button', { class: 'prio-btn', text: 'Tout décocher', attrs: { type: 'button' }, on: { click: () => { selected.clear(); refresh(false); } } }));
+  }
+
+  function draw(pts, fit) {
+    markerLayer.clearLayers();
+    listEl.innerHTML = '';
+    const latlngs = [];
+
+    function buildRow(p, proj, showChip) {
+      const ll = [p.lat, p.lng];
+      const focused = isFocused(p);
+      if (focused) latlngs.push(ll);
+      const dotColor = p.color || cfg.defaultMarkerColor || '#e53935';
+      const mColor = focused ? dotColor : '#8a93a0';
+      const marker = L.circleMarker(ll, {
+        radius: focused ? 9 : 6, color: mColor, weight: focused ? 2 : 1, fillColor: mColor, fillOpacity: focused ? 0.55 : 0.18,
+      }).addTo(markerLayer).bindPopup(
+        '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
+      );
+      const row = el('div', { attrs: { style: 'display:flex;align-items:flex-start;gap:0.4rem;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%' + (focused ? '' : ';opacity:0.4') } });
+      if (showChip) {
+        const accent = proj ? provenanceColor(proj) : 'var(--border)';
+        const chip = el('span', { attrs: { title: proj ? proj.name : 'sans projet', style: 'display:inline-flex;align-items:center;gap:0.2rem;flex-shrink:0;margin-top:0.18rem;font-size:0.72rem' } });
+        chip.appendChild(el('span', { attrs: { style: 'width:9px;height:9px;border-radius:50%;flex-shrink:0;background:' + accent } }));
+        if (proj && proj.emoji) chip.appendChild(el('span', { text: proj.emoji }));
+        row.appendChild(chip);
+      }
+      if (editable && p.kind === 'memo') {
+        const cb = el('input', { attrs: { type: 'checkbox', style: 'flex-shrink:0;margin-top:0.28rem;cursor:pointer' } });
+        cb.checked = selected.has(pkey(p));
+        cb.addEventListener('change', () => { if (cb.checked) selected.add(pkey(p)); else selected.delete(pkey(p)); renderSelbar(); });
+        row.appendChild(cb);
+      }
+      if (editable && (p.kind === 'memo' || p.kind === 'project')) {
+        const colorIn = el('input', { attrs: { type: 'color', value: dotColor, title: 'Couleur de ce point', style: 'width:18px;height:18px;padding:0;border:none;background:none;flex-shrink:0;margin-top:0.18rem;cursor:pointer' } });
+        colorIn.addEventListener('change', async () => { await cfg.saveColor(p, colorIn.value); current = recompute(); refresh(false); });
+        row.appendChild(colorIn);
+      } else {
+        row.appendChild(el('span', { attrs: { style: 'width:10px;height:10px;border-radius:50%;background:' + dotColor + ';flex-shrink:0;margin-top:0.25rem' } }));
+      }
+      const txt = el('button', {
+        attrs: { type: 'button', style: 'flex:1;min-width:0;overflow-wrap:anywhere;text-align:left;background:none;border:none;padding:0;color:inherit;font:inherit;cursor:pointer' },
+        on: { click: () => { activeMap.setView(ll, 16); marker.openPopup(); } },
+      });
+      txt.appendChild(el('strong', { text: p.title || '' }));
+      if (p.placeLabel) txt.appendChild(el('div', { text: p.placeLabel, attrs: { style: 'color:var(--muted);font-size:0.72rem' } }));
+      if (p.groups && p.groups.length) {
+        const chips = el('div', { attrs: { style: 'display:flex;flex-wrap:wrap;gap:0.2rem;margin-top:0.2rem' } });
+        p.groups.forEach(g => {
+          const c = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.15rem;font-size:0.66rem;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:0.02rem 0.4rem' } });
+          c.appendChild(el('span', { text: g }));
+          if (editable) {
+            c.appendChild(el('button', {
+              text: '×', attrs: { type: 'button', title: 'Retirer de « ' + g + ' »', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.8rem;line-height:1' },
+              on: { click: async (ev) => { ev.stopPropagation(); await cfg.saveGroups(p, (p.groups || []).filter(x => x !== g)); current = recompute(); refresh(false); } },
+            }));
+          }
+          chips.appendChild(c);
+        });
+        txt.appendChild(chips);
+      }
+      row.appendChild(txt);
+      if (editable && p.override) {
+        row.appendChild(el('button', {
+          class: 'prio-btn', text: '↺', attrs: { type: 'button', title: 'Couleur par défaut', style: 'flex-shrink:0;padding:0.05rem 0.3rem' },
+          on: { click: async () => { await cfg.saveColor(p, ''); current = recompute(); refresh(false); } },
+        }));
+      }
+      listEl.appendChild(row);
+    }
+
+    const byProj = new Map();
+    pts.forEach(p => { const t = subToken(p); if (!byProj.has(t)) byProj.set(t, []); byProj.get(t).push(p); });
+    const ordered = [];
+    if (byProj.has(curId)) ordered.push(curId);
+    projects.forEach(pr => { if (pr.id !== curId && byProj.has(pr.id)) ordered.push(pr.id); });
+    [...byProj.keys()].forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
+
+    const multi = ordered.length > 1;
+    ordered.forEach(t => {
+      const proj = projects.find(pr => pr.id === t);
+      if (multi) {
+        const accent = proj ? provenanceColor(proj) : 'var(--border)';
+        const head = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.35rem;font-size:0.74rem;color:var(--muted);font-weight:600;margin-top:0.4rem;padding:0.1rem 0.2rem 0.1rem 0.35rem;border-left:3px solid ' + accent } });
+        const lab = proj ? ((proj.emoji ? proj.emoji + ' ' : '') + proj.name) + (t === curId ? ' (ce projet)' : '') : '(sans projet)';
+        head.appendChild(el('span', { text: lab }));
+        head.appendChild(el('span', { text: '· ' + byProj.get(t).length, attrs: { style: 'font-weight:400' } }));
+        listEl.appendChild(head);
+      }
+      byProj.get(t).forEach(p => buildRow(p, proj, multi));
+    });
+
+    if (fit) {
+      setTimeout(() => {
+        activeMap.invalidateSize();
+        if (latlngs.length === 1) activeMap.setView(latlngs[0], 15);
+        else if (latlngs.length) activeMap.fitBounds(latlngs, { padding: [30, 30] });
+      }, 60);
+    }
+  }
+
+  function refresh(fit) {
+    renderSubbar();
+    renderGroupbar();
+    renderSelbar();
+    draw(current, fit);
+  }
+
+  refresh(true);
 }
 
 function setTheme(t) {
