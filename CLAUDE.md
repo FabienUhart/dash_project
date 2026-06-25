@@ -1,3 +1,12 @@
+# === MEMORY BANK ===
+
+Une banque de mémoire vit dans `.claude/memory/`. Avant toute réponse importante ou modification de code :
+1. Lire `.claude/memory/MEMORY.md` (résumé, stack réelle, état du projet, pointeurs).
+2. Lire `.claude/memory/patterns.md` si pertinent (conventions transverses).
+3. Consulter les ADR dans `docs/adr/`.
+
+Ce `CLAUDE.md` reste la **source canonique** (invariants, format d'export, historique). La Memory Bank l'**indexe**, elle ne la duplique pas. Après une grosse réalisation ou décision d'archi, proposer une mise à jour de la Memory Bank ET de ce fichier, sans recopier le contenu de l'un dans l'autre.
+
 # CLAUDE.md
 
 Contexte pour Claude Code. À lire avant toute modification ou commit.
