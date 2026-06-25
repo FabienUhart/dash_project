@@ -93,7 +93,7 @@ button.icon:active { transform: scale(0.94); }
 .sitem {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.3rem;
   padding: 0.45rem 0.65rem;
   border-radius: 8px;
   cursor: pointer;
@@ -112,16 +112,54 @@ button.icon:active { transform: scale(0.94); }
 }
 .sitem.droptarget { outline: 1px dashed var(--accent); color: var(--accent); }
 .sitem .cnt { margin-left: auto; font-size: 0.72rem; opacity: 0.7; flex-shrink: 0; }
-.sitem .slabel { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sitem .slabel { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sitem .cat-edit {
+  position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
   flex-shrink: 0; min-height: 0; width: 1.5rem; height: 1.5rem;
-  margin-left: 0.2rem; padding: 0; border: none; background: none;
+  padding: 0; border: none; background: none;
   color: var(--muted); cursor: pointer; border-radius: 5px; opacity: 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .sitem:hover .cat-edit, .sitem:focus-within .cat-edit { opacity: 0.7; }
 .sitem .cat-edit:hover { opacity: 1; color: var(--text); background: var(--panel-2); }
+.sitem:hover .cnt, .sitem:focus-within .cnt { opacity: 0; }
 .sdot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+/* arbre `tree` de la sidebar invité + chevrons de repli */
+.sb-tree {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre; color: var(--muted); opacity: 0.55;
+  font-size: 0.78rem; flex-shrink: 0; line-height: 1;
+}
+.sb-proj-chev {
+  width: 1.1rem; flex-shrink: 0; text-align: center;
+  color: var(--muted); font-size: 0.85rem; line-height: 1; cursor: pointer;
+}
+/* vue Plan invité (arbre projets → mémos) */
+#tree-board { max-width: 720px; margin: 0 auto; }
+.tree-toolbar { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.6rem; }
+.tree-toolbar h2 { margin: 0; font-size: 1.05rem; }
+.tree-rows { display: flex; flex-direction: column; }
+.tree-row { display: flex; align-items: center; gap: 0.3rem; padding: 0.16rem 0.4rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; min-width: 0; }
+.tree-row:hover { background: var(--panel-2); }
+.tree-pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; color: var(--muted); opacity: 0.55; flex-shrink: 0; font-size: 0.8rem; line-height: 1; }
+.tree-chev {
+  width: 1.4rem; flex-shrink: 0; text-align: center;
+  color: var(--muted); font-size: 0.95rem; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.tree-chev:hover { color: var(--text); }
+.tree-check { width: 1rem; flex-shrink: 0; text-align: center; color: var(--green, #4caf50); font-weight: 700; }
+.tree-pip { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex-shrink: 0; }
+.tree-title { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-proj .tree-title { font-weight: 600; }
+.tree-projname { cursor: pointer; }
+.tree-projname:hover { color: var(--accent); }
+.tree-title.done { text-decoration: line-through; color: var(--muted); }
+.tree-count { flex-shrink: 0; font-size: 0.72rem; color: var(--muted); margin-left: 0.3rem; }
+.tree-meta { display: flex; gap: 0.4rem; flex-shrink: 0; margin-left: 0.5rem; }
+.tcol { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcol-due { width: 84px; } .tcol-asg { width: 96px; } .tcol-loc { width: 120px; }
+.tcol-due.due-late { color: var(--danger); } .tcol-due.due-today { color: var(--warn); }
 main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem; }
 @media (max-width: 900px) {
   #layout { flex-direction: column; }
@@ -131,6 +169,12 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   .sitem { flex-shrink: 0; margin-bottom: 0; }
   /* Crayon d'édition projet toujours visible au doigt (le survol n'existe pas). */
   .sitem .cat-edit { opacity: 0.85; }
+  /* Barre horizontale : l'arbre vertical n'a pas de sens → masquer connecteurs/chevrons. */
+  .sb-tree, .sb-proj-chev { display: none; }
+  #tree-board { max-width: 100%; }
+  .tree-meta { display: none; }
+  .tree-pre { font-size: 0.74rem; }
+  .tree-chev { width: 1.8rem; height: 1.8rem; font-size: 1.1rem; }
 }
 .task {
   background: var(--panel);
@@ -457,6 +501,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
     <button id="proj-btn">Créer</button>
   </div>
   <div id="list"></div>
+  <div id="tree-board" hidden></div>
 </main>
 </div>
 <footer>Page de partage — les modifications sont visibles par le propriétaire.<br>Dashboard v{{ version }} · créé par Fabien U.</footer>
@@ -1080,6 +1125,12 @@ async function put(memoId, body) {
 
 let FILTER = 'all';
 let PFILTER = 'all';
+let GVIEW = 'board';   // 'board' | 'plan' (vue Plan invité)
+// Repli persisté, scopé par partage (TOKEN) — sidebar et vue Plan séparés.
+function shareSbProjOpen(id) { return localStorage.getItem('shareSbProjOpen:' + TOKEN + ':' + id) !== '0'; }
+function toggleShareSbProj(id) { localStorage.setItem('shareSbProjOpen:' + TOKEN + ':' + id, shareSbProjOpen(id) ? '0' : '1'); }
+function shareTreeOpen(id) { return localStorage.getItem('shareTreeOpen:' + TOKEN + ':' + id) !== '0'; }
+function setShareTreeOpen(id, v) { localStorage.setItem('shareTreeOpen:' + TOKEN + ':' + id, v ? '1' : '0'); }
 let dragShareMemo = null;
 let dragShareProj = null;
 
@@ -1145,12 +1196,13 @@ function renderSidebar() {
   nav.innerHTML = '';
 
   const mkItem = (label, icon, count, key, depth, proj) => {
-    const item = el('div', 'sitem' + (PFILTER === key ? ' active' : ''));
+    // En vue Plan, aucun item projet/Tous n'est surligné (c'est l'item Plan qui l'est).
+    const item = el('div', 'sitem' + (GVIEW !== 'plan' && PFILTER === key ? ' active' : ''));
     item.style.paddingLeft = (0.6 + (depth || 0) * 0.9) + 'rem';
     if (icon) item.appendChild(icon);
     item.appendChild(el('span', 'slabel', label));
     item.appendChild(el('span', 'cnt', String(count)));
-    const select = () => { PFILTER = key; render(); };
+    const select = () => { PFILTER = key; GVIEW = 'board'; render(); };
     if (proj && canEditNow()) {
       let timer = null;
       item.addEventListener('click', () => {
@@ -1170,10 +1222,21 @@ function renderSidebar() {
     return item;
   };
 
+  // Item « Plan » en haut (comme côté propriétaire) — bascule la vue Plan.
+  const planItem = el('div', 'sitem' + (GVIEW === 'plan' ? ' active' : ''));
+  planItem.appendChild(el('span', '', '🌳'));
+  planItem.appendChild(el('span', 'slabel', 'Plan'));
+  planItem.title = 'Vue Plan : arbre projets → mémos';
+  planItem.addEventListener('click', () => { GVIEW = 'plan'; render(); });
+  nav.appendChild(planItem);
+
   const pendingAll = DATA.memos.filter(m => !m.done).length;
   nav.appendChild(mkItem('Tous', el('span', '', '🗂'), pendingAll, 'all', 0));
 
-  const renderTree = (p, depth) => {
+  // En mobile (barre horizontale) on force le dépli pour que tout reste atteignable.
+  const flat = window.matchMedia('(max-width: 900px)').matches;
+  const projOpen = (id) => flat || shareSbProjOpen(id);
+  const renderTree = (p, ancestorsLast, isLast) => {
     const icon = el('span', '');
     icon.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0';
     if (p.emoji) icon.appendChild(el('span', '', p.emoji));
@@ -1189,7 +1252,20 @@ function renderSidebar() {
       icon.appendChild(d);
     }
     const count = DATA.memos.filter(m => m.project_id === p.id && !m.done).length;
-    const item = mkItem(p.name, icon, count, p.id, depth, p);
+    const item = mkItem(p.name, icon, count, p.id, 0, p);
+
+    // Connecteurs `tree` + chevron de repli (façon dashboard propriétaire).
+    const kids = projChildren(p.id);
+    const conn = ancestorsLast.map(l => l ? '   ' : '│  ').join('') + (isLast ? '└─ ' : '├─ ');
+    const chev = el('span', 'sb-proj-chev');
+    if (kids.length) {
+      const open = projOpen(p.id);
+      chev.textContent = open ? '▾' : '▸';
+      chev.title = open ? 'Replier ce projet' : 'Déplier ce projet';
+      chev.addEventListener('click', (e) => { e.stopPropagation(); toggleShareSbProj(p.id); render(); });
+    } else { chev.style.visibility = 'hidden'; }
+    item.insertBefore(el('span', 'sb-tree', conn), item.firstChild);
+    item.insertBefore(chev, item.firstChild);
 
     if (canEditNow()) {
       if (p.id !== DATA.root_id) {
@@ -1216,10 +1292,10 @@ function renderSidebar() {
       });
     }
     nav.appendChild(item);
-    projChildren(p.id).forEach(c => renderTree(c, depth + 1));
+    if (projOpen(p.id)) kids.forEach((c, i) => renderTree(c, [...ancestorsLast, isLast], i === kids.length - 1));
   };
   const root = (DATA.projects || []).find(p => p.id === DATA.root_id);
-  if (root) renderTree(root, 0);
+  if (root) renderTree(root, [], true);
 }
 
 function todayStr() {
@@ -1665,6 +1741,102 @@ function renderShareTrash(list) {
   });
 }
 
+function renderShareTreeView() {
+  const board = document.getElementById('tree-board');
+  board.innerHTML = '';
+  const root = (DATA.projects || []).find(p => p.id === DATA.root_id);
+  if (!root) { board.appendChild(el('p', '', 'Aucun projet à afficher.')); return; }
+  const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
+  const today = todayStr();
+
+  const bar = el('div', 'tree-toolbar');
+  bar.appendChild(el('h2', '', '🌳 Plan'));
+  const allIds = (DATA.projects || []).map(p => p.id);
+  const anyClosed = allIds.some(id => !shareTreeOpen(id));
+  const tb = el('button', 'tool-btn', anyClosed ? 'Tout déplier' : 'Tout replier');
+  tb.addEventListener('click', () => { allIds.forEach(id => setShareTreeOpen(id, anyClosed)); renderShareTreeView(); });
+  bar.appendChild(tb);
+  board.appendChild(bar);
+
+  const tree = el('div', 'tree-rows');
+  board.appendChild(tree);
+
+  const activeMemos = (pid) => DATA.memos.filter(m => m.project_id === pid && !m.deleted_at);
+  const countActive = (pid) => {
+    let n = DATA.memos.filter(m => m.project_id === pid && !m.deleted_at && !m.done).length;
+    projChildren(pid).forEach(c => { n += countActive(c.id); });
+    return n;
+  };
+  const connOf = (a, last) => a.map(l => l ? '   ' : '│  ').join('') + (last ? '└─ ' : '├─ ');
+
+  function projIcon(p) {
+    const icon = el('span', '');
+    icon.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0';
+    if (p.emoji) icon.appendChild(el('span', '', p.emoji));
+    if (p.color) { const d = el('span', 'sdot'); d.style.background = p.color; if (p.emoji) { d.style.width = '0.4rem'; d.style.height = '0.4rem'; } icon.appendChild(d); }
+    if (!p.emoji && !p.color) { const d = el('span', 'sdot'); d.style.background = 'var(--gray)'; icon.appendChild(d); }
+    return icon;
+  }
+
+  function memoRow(m, conn) {
+    const row = el('div', 'tree-row tree-memo');
+    if (canEditNow()) row.addEventListener('click', () => openEditor(m, null, null));
+    row.appendChild(el('span', 'tree-pre', conn));
+    row.appendChild(el('span', 'tree-check', m.done ? '✓' : ''));
+    const pip = el('span', 'tree-pip');
+    const prio = prios[m.priority];
+    if (prio && prio.color) pip.style.background = prio.color; else pip.style.visibility = 'hidden';
+    row.appendChild(pip);
+    const label = m.title || (isRich(m.content) ? stripTags(m.content) : (m.content || '')).slice(0, 60) || '(sans titre)';
+    row.appendChild(el('span', 'tree-title' + (m.done ? ' done' : ''), label));
+    const meta = el('div', 'tree-meta');
+    let dueTxt = '', dueCls = '';
+    if (m.due_date) {
+      dueTxt = '📅 ' + new Date(m.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      if (m.due_date < today) dueCls = ' due-late'; else if (m.due_date === today) dueCls = ' due-today';
+    }
+    meta.appendChild(el('span', 'tcol tcol-due' + dueCls, dueTxt));
+    const asg = m.assignees || [];
+    meta.appendChild(el('span', 'tcol tcol-asg', asg.length ? '👤 ' + asg[0] + (asg.length > 1 ? ' +' + (asg.length - 1) : '') : ''));
+    meta.appendChild(el('span', 'tcol tcol-loc', m.location ? '📍 ' + ((m.location.label || '').slice(0, 18)) : ''));
+    row.appendChild(meta);
+    return row;
+  }
+
+  function node(p, ancestorsLast, isLast) {
+    const kids = projChildren(p.id);
+    const memos = activeMemos(p.id);
+    const hasChildren = kids.length || memos.length;
+    const open = shareTreeOpen(p.id);
+    const row = el('div', 'tree-row tree-proj');
+    row.appendChild(el('span', 'tree-pre', connOf(ancestorsLast, isLast)));
+    const chev = el('span', 'tree-chev');
+    if (hasChildren) {
+      chev.textContent = open ? '▾' : '▸';
+      chev.title = open ? 'Replier' : 'Déplier';
+      chev.addEventListener('click', (e) => { e.stopPropagation(); setShareTreeOpen(p.id, !open); renderShareTreeView(); });
+    } else { chev.style.visibility = 'hidden'; }
+    row.appendChild(chev);
+    row.appendChild(projIcon(p));
+    const nameEl = el('span', 'tree-title tree-projname', p.name);
+    nameEl.addEventListener('click', () => { PFILTER = p.id; GVIEW = 'board'; render(); });
+    row.appendChild(nameEl);
+    row.appendChild(el('span', 'tree-count', String(countActive(p.id))));
+    tree.appendChild(row);
+    if (open && hasChildren) {
+      const childAnc = [...ancestorsLast, isLast];
+      const items = [...memos.map(m => ({ memo: m })), ...kids.map(c => ({ proj: c }))];
+      items.forEach((it, i) => {
+        const last = i === items.length - 1;
+        if (it.memo) tree.appendChild(memoRow(it.memo, connOf(childAnc, last)));
+        else node(it.proj, childAnc, last);
+      });
+    }
+  }
+
+  node(root, [], true);
+}
+
 function visibleShareMemos() {
   const t = todayStr();
   return scopedMemos().filter(m => {
@@ -1721,6 +1893,18 @@ function render() {
   syncHeaderHeight();
 
   if (!projSel.hidden && PFILTER !== 'all') projSel.value = String(PFILTER);
+
+  // Vue Plan : arbre projets → mémos en plein écran (board et barres d'ajout masqués).
+  const treeBoard = document.getElementById('tree-board');
+  const showPlan = GVIEW === 'plan' && DATA.kind === 'project';
+  treeBoard.hidden = !showPlan;
+  document.getElementById('list').hidden = showPlan;
+  if (showPlan) {
+    document.getElementById('add-bar').hidden = true;
+    document.getElementById('proj-bar').hidden = true;
+    renderShareTreeView();
+    return;
+  }
 
   const list = document.getElementById('list');
   list.innerHTML = '';

@@ -51,6 +51,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - [x] Sidebar façon Evernote ([SIDEBAR-EVERNOTE]) : sections repliables « Liens »/« Projets » (chevron + ＋), arbre des projets façon `tree` (`├──`/`└──`/`│`), projets repliables, états persistés ; troncature ellipsis des noms, masqué proprement en rail/mobile
 - [x] Vue Plan ([TREE-OUTLINE]) : page arbre projets → sous-projets → mémos (feuilles), connecteurs `tree`, repli persisté + tout déplier/replier, colonnes méta desktop (échéance/assignés/lieu), clic mémo = détail / clic projet = board
 - [x] Fix compteurs sidebar : `/api/projects` et `/api/priorities` excluent les mémos en corbeille (`deleted_at`) — invariant 7
+- [x] Parité page invité ([GUEST-PARITY], `share.html`) : sidebar façon Evernote (arbre `tree` + chevrons repliables `shareSbProjOpen:<token>:<id>`), vue Plan (toggle « 🌳 Plan », `renderShareTreeView`, repli `shareTreeOpen:<token>:<id>`, colonnes méta desktop), chevrons agrandis — strictement scopé au partage (invariant 5)
 
 ## Quick wins
 
@@ -60,6 +61,31 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - **Compteur de clics** : colonne `clicks` sur `links`, tri optionnel "par usage" — les services les plus utilisés remontent tout seuls.
 - **Mode édition verrouillable** : un cadenas dans le header qui masque les boutons éditer/supprimer/drag pour éviter les fausses manips (surtout sur mobile).
 - **Badge favicon "service down"** : si un service est offline, changer le favicon de l'onglet (point rouge) — visible d'un coup d'œil quand le dash est la page d'accueil.
+
+## Dette technique / architecture
+
+- **[SHARED-HELPERS] Mutualiser les helpers front owner/invité** (voir [docs/adr/ADR-001](docs/adr/ADR-001-mutualisation-helpers-front.md), **accepté — Option C**) : ~31 fonctions JS dupliquées entre `index.html` et `share.html` (cause : invariant 6). Extraire les helpers purs/sans état dans un partial unique `templates/partials/_shared.js.html` inclus au rendu (`{% include %}`) dans les deux templates ; mettre à jour l'invariant 6 (distinguer *source* et *sortie livrée*). 2e passe : factoriser la logique de rendu carte (`draw`/`renderSubbar`/`memoRow`). Le backend (`app.py`) est déjà factorisé (owner et invité partagent `_perform_memo_update`, etc.) — la dette est frontend only.
+
+## Confort / UX (rendre l'app agréable)
+
+Gains rapides à fort effet :
+
+- **[UNDO-DELETE] « Annuler » après suppression** : quand un mémo part à la corbeille, toast « Mémo supprimé — Annuler » pendant ~5 s. Réutilise la suppression douce (`deleted_at`) + la route de restauration existante → annulation quasi gratuite. Le geste qui rassure le plus à l'usage. Frontend + un appel restore.
+- **[SAVE-INDICATOR] Indicateur « enregistré »** : petit ✓ discret pendant ~1 s à chaque `patch` de mémo (titre, date, priorité) — aujourd'hui les sauvegardes sont silencieuses. Frontend pur.
+- **[EMPTY-STATES] États vides soignés** : projet sans mémo, carte sans point, recherche sans résultat → message amical + bouton d'action (« Ajouter le premier mémo »). Beaucoup de polish pour peu de code, frontend pur.
+- **[SHORTCUT-HELP] Aide raccourcis (`?`)** : overlay listant les raccourcis (`/`, à venir Cmd/K, 1-9…) + focus `/` plus visible. Discoverability quasi nulle aujourd'hui. Frontend pur.
+
+Moins de clics :
+
+- **[CMD-K] Palette de commandes (Cmd/Ctrl+K)** : sauter à n'importe quel projet/mémo/lien ou créer un mémo, au clavier. Le plus gros saut de confort pour un usage quotidien intensif. Frontend, effort moyen, autonome.
+- **[INLINE-TITLE] Édition inline du titre** d'un mémo sur la carte (double-clic) sans ouvrir la pop-in.
+- **[MOVE-MENU] « Déplacer vers… »** dans le menu au survol d'un mémo (en plus de dupliquer), pour éviter le drag & drop.
+
+Petites touches de plaisir :
+
+- **[VIEW-TRANSITIONS] Transitions entre vues** (Liens ↔ Mémos ↔ Plan) en léger fondu GSAP — cohérent avec les animations cards/tuiles existantes (invariant 8 : jamais sur un `<dialog>`).
+- **[PROJECT-DONE] Micro-célébration** quand tous les mémos d'un projet passent à « terminé » (petite animation discrète, pas de confetti envahissant).
+- **[RELATIVE-DATES] Dates relatives partout** (« dans 3 j », « il y a 2 j ») en complément de la date — déjà partiel via `dueInfo`, à généraliser.
 
 ## Moyens
 
