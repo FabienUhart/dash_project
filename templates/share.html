@@ -1075,7 +1075,7 @@ function renderSidebar() {
 
     // Connecteurs `tree` + chevron de repli (façon dashboard propriétaire).
     const kids = projChildren(p.id);
-    const conn = ancestorsLast.map(l => l ? '   ' : '│  ').join('') + (isLast ? '└─ ' : '├─ ');
+    const conn = treeConnector(ancestorsLast, isLast);
     const chev = el('span', 'sb-proj-chev');
     if (kids.length) {
       const open = projOpen(p.id);
@@ -1293,7 +1293,7 @@ function renderShareTreeView() {
     projChildren(pid).forEach(c => { n += countActive(c.id); });
     return n;
   };
-  const connOf = (a, last) => a.map(l => l ? '   ' : '│  ').join('') + (last ? '└─ ' : '├─ ');
+  const connOf = treeConnector;
 
   function projIcon(p) {
     const icon = el('span', '');

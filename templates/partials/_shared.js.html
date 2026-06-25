@@ -31,6 +31,14 @@ function usableProjColor(c) {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 24 ? '' : c;
 }
 
+// Primitive d'arbre `tree` (ADR-001 item 6) : préfixe de connecteurs ├─ / └─ / │
+// à partir du tableau « chaque ancêtre est-il le dernier de sa fratrie ? » + isLast.
+// Pure, identique owner/invité ; les deux renderSidebar/renderTreeView restent séparés
+// (assemblages de sections différents) et appellent juste cette primitive.
+function treeConnector(ancestorsLast, isLast) {
+  return ancestorsLast.map(l => l ? '   ' : '│  ').join('') + (isLast ? '└─ ' : '├─ ');
+}
+
 const PROV_PALETTE = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#f06292', '#a1887f', '#90a4ae', '#fff176'];
 function provenanceColor(proj) {
   const c = usableProjColor(proj ? proj.color : '');

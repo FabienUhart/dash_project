@@ -1929,7 +1929,7 @@ function renderSidebar() {
     const renderProjTree = (p, ancestorsLast, isLast) => {
       const icon = comboIcon(p.emoji, p.color, null);
       const item = mkProjItem(p.id, icon, p.name, p.memo_count, p.id, () => openCreateDialog('project', p));
-      const conn = ancestorsLast.map(last => last ? '   ' : '│  ').join('') + (isLast ? '└─ ' : '├─ ');
+      const conn = treeConnector(ancestorsLast, isLast);
       const kids = projectChildren(p.id);
       const chev = el('span', { class: 'sb-proj-chev' });
       if (kids.length) {
@@ -2763,8 +2763,7 @@ function renderTreeView() {
     projectChildren(pid).forEach(c => { n += countActive(c.id); });
     return n;
   };
-  const connOf = (ancestorsLast, isLast) =>
-    ancestorsLast.map(l => l ? '   ' : '│  ').join('') + (isLast ? '└─ ' : '├─ ');
+  const connOf = treeConnector;
 
   function memoRow(m, conn) {
     const row = el('div', { class: 'tree-row tree-memo', on: { click: () => openMemoEditor(m) } });
