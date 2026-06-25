@@ -26,7 +26,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "15"
+APP_VERSION = "17"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
@@ -258,6 +258,12 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN deleted_at TEXT DEFAULT ''")
     if "description" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN description TEXT DEFAULT ''")
+    if "marker_color" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN marker_color TEXT DEFAULT ''")
+    if "marker_color" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN marker_color TEXT DEFAULT ''")
+    if "map_groups" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN map_groups TEXT DEFAULT '[]'")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS memo_comments (
@@ -670,8 +676,8 @@ def list_projects():
     rows = (
         get_db()
         .execute(
-            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, "
-            "COUNT(CASE WHEN m.done = 0 THEN m.id END) AS memo_count "
+            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, "
+            "COUNT(CASE WHEN m.done = 0 AND COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
             "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
             "GROUP BY p.id ORDER BY p.position, p.id"
         )
@@ -696,14 +702,15 @@ def create_project():
     tags = _normalize_tags(data.get("tags", ""))
     emoji = _clean_emoji(data.get("emoji"))
     description = _clean_description(data.get("description"))
+    marker_color = _clean_hex_color(data.get("marker_color"), "")
     cur = db.execute(
-        "INSERT INTO projects (name, color, position, tags, emoji, description) VALUES (?, ?, ?, ?, ?, ?)",
-        (name, color, max_pos + 1, tags, emoji, description),
+        "INSERT INTO projects (name, color, position, tags, emoji, description, marker_color) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, color, max_pos + 1, tags, emoji, description, marker_color),
     )
     db.commit()
     return (
         jsonify(
-            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags, "emoji": emoji, "description": description}
+            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags, "emoji": emoji, "description": description, "marker_color": marker_color}
         ),
         201,
     )
@@ -744,12 +751,17 @@ def update_project(project_id):
             return jsonify({"error": err}), 400
     else:
         parent_id = existing["parent_id"]
+    marker_color = (
+        _clean_hex_color(data.get("marker_color"), "")
+        if "marker_color" in data
+        else _row_get(existing, "marker_color")
+    )
     db.execute(
-        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ? WHERE id = ?",
-        (name, color, tags, emoji, parent_id, location, description, project_id),
+        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ? WHERE id = ?",
+        (name, color, tags, emoji, parent_id, location, description, marker_color, project_id),
     )
     db.commit()
-    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description})
+    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color})
 
 
 @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
@@ -834,7 +846,8 @@ def list_priorities():
     rows = (
         get_db()
         .execute(
-            "SELECT p.id, p.name, p.color, p.position, COUNT(m.id) AS memo_count "
+            "SELECT p.id, p.name, p.color, p.position, "
+            "COUNT(CASE WHEN COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
             "FROM priorities p LEFT JOIN memos m ON m.priority = p.id "
             "GROUP BY p.id ORDER BY p.position, p.id"
         )
@@ -957,6 +970,10 @@ def _memo_dict(row):
         d["assignees"] = json.loads(d.get("assignees") or "[]")
     except Exception:
         d["assignees"] = []
+    try:
+        d["map_groups"] = json.loads(d.get("map_groups") or "[]")
+    except Exception:
+        d["map_groups"] = []
     d["location"] = _parse_location(d.get("location"))
     d["done"] = bool(d.get("done"))
     return d
@@ -1021,6 +1038,25 @@ def _assignees_json(value):
     return json.dumps(clean, ensure_ascii=False)
 
 
+def _map_groups_json(value):
+    """Groupes de carte d'un mémo (étiquettes nommées, saisie libre), nettoyés/dédupliqués."""
+    if not isinstance(value, list):
+        return "[]"
+    clean, seen = [], set()
+    for g in value:
+        name = re.sub(r"[<>&\"']", "", str(g or "")).strip()[:60]
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append(name)
+        if len(clean) >= 30:
+            break
+    return json.dumps(clean, ensure_ascii=False)
+
+
 def _clean_title(value):
     return re.sub(r"[<>]", "", str(value or "")).strip()[:200]
 
@@ -1076,8 +1112,8 @@ def create_memo():
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
         "done, due_date, priority, subtasks, project_id, recurrence, emoji, location, "
-        "title, assignees) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "title, assignees, marker_color, map_groups) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -1094,6 +1130,8 @@ def create_memo():
             _enrich_location(_clean_location(data.get("location"))),
             title,
             _assignees_json(data.get("assignees")),
+            _clean_hex_color(data.get("marker_color"), ""),
+            _map_groups_json(data.get("map_groups")),
         ),
     )
     db.commit()
@@ -1220,10 +1258,20 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
         if "location" in data
         else (existing["location"] or "")
     )
+    marker_color = (
+        _clean_hex_color(data.get("marker_color"), "")
+        if "marker_color" in data
+        else _row_get(existing, "marker_color")
+    )
+    map_groups = (
+        _map_groups_json(data.get("map_groups"))
+        if "map_groups" in data
+        else (_row_get(existing, "map_groups", "[]") or "[]")
+    )
     db.execute(
         "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
         "project_id=?, recurrence=?, emoji=?, location=?, title=?, assignees=?, "
-        "updated_at=? WHERE id=?",
+        "marker_color=?, map_groups=?, updated_at=? WHERE id=?",
         (
             content,
             done,
@@ -1236,6 +1284,8 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             location,
             title,
             assignees,
+            marker_color,
+            map_groups,
             now,
             memo_id,
         ),
@@ -1556,6 +1606,8 @@ def _share_memo_dict(row):
         "location": d.get("location"),
         "title": d.get("title", "") or "",
         "assignees": d.get("assignees", []),
+        "point_color": d.get("marker_color", "") or "",
+        "map_groups": d.get("map_groups", []),
     }
 
 
@@ -1758,10 +1810,30 @@ def _owner_name(db):
     return (_get_state(db, "owner_name", "Fabien") or "Fabien").strip() or "Fabien"
 
 
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+DEFAULT_MARKER_COLOR = "#e53935"
+
+
+def _clean_hex_color(value, default):
+    """Renvoie une couleur #rrggbb valide, sinon le défaut. Jamais de HTML."""
+    v = (str(value or "")).strip()
+    return v if _HEX_COLOR_RE.match(v) else default
+
+
+def _map_marker_color(db):
+    """Couleur de repli des points de la carte (mémo sans priorité ni projet).
+    Configurable dans Paramètres ; défaut rouge visible."""
+    return _clean_hex_color(
+        _get_state(db, "map_marker_color", DEFAULT_MARKER_COLOR), DEFAULT_MARKER_COLOR
+    )
+
+
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
     db = get_db()
-    return jsonify({"owner_name": _owner_name(db)})
+    return jsonify(
+        {"owner_name": _owner_name(db), "map_marker_color": _map_marker_color(db)}
+    )
 
 
 @app.route("/api/settings", methods=["PUT"])
@@ -1774,7 +1846,13 @@ def put_settings():
             return jsonify({"error": "nom vide"}), 400
         _set_state(db, "owner_name", name)
         db.commit()
-    return jsonify({"owner_name": _owner_name(db)})
+    if "map_marker_color" in data:
+        color = _clean_hex_color(data.get("map_marker_color"), DEFAULT_MARKER_COLOR)
+        _set_state(db, "map_marker_color", color)
+        db.commit()
+    return jsonify(
+        {"owner_name": _owner_name(db), "map_marker_color": _map_marker_color(db)}
+    )
 
 
 @app.route("/api/guests", methods=["GET"])
@@ -2150,7 +2228,7 @@ def share_data(token):
         all_p = {
             r["id"]: r
             for r in db.execute(
-                "SELECT id, name, emoji, color, parent_id, location, description FROM projects"
+                "SELECT id, name, emoji, color, parent_id, location, description, marker_color FROM projects"
             ).fetchall()
         }
         proj_names = {
@@ -2169,6 +2247,7 @@ def share_data(token):
                         "parent_id": p["parent_id"],
                         "location": _parse_location(p["location"]),
                         "description": _row_get(p, "description"),
+                        "point_color": _row_get(p, "marker_color"),
                     }
                 )
     memo_ids = [r["id"] for r in rows]
@@ -2200,6 +2279,7 @@ def share_data(token):
                 "SELECT id, name, color FROM priorities ORDER BY position, id"
             ).fetchall()
         ],
+        "marker_color": _map_marker_color(db),
     }
     if share["kind"] == "project":
         proj = db.execute(
@@ -2320,7 +2400,7 @@ def share_update_memo(token, memo_id):
     raw = request.get_json(silent=True) or {}
     data = {
         k: raw[k]
-        for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence", "location", "title", "assignees")
+        for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
         if k in raw
     }
     if "project_id" in raw and share["kind"] == "project":
@@ -2473,6 +2553,8 @@ def _share_memo_dict_from_payload(d):
         "location": d.get("location"),
         "title": d.get("title", "") or "",
         "assignees": d.get("assignees", []),
+        "point_color": d.get("marker_color", "") or "",
+        "map_groups": d.get("map_groups", []),
     }
 
 
@@ -2635,6 +2717,8 @@ def share_update_project(token, proj_id):
         updates["emoji"] = _clean_emoji(data.get("emoji"))
     if "color" in data:
         updates["color"] = (data.get("color") or "").strip()
+    if "marker_color" in data:
+        updates["marker_color"] = _clean_hex_color(data.get("marker_color"), "")
     if "location" in data:
         updates["location"] = _enrich_location(_clean_location(data.get("location")))
     if "description" in data:
@@ -2665,7 +2749,7 @@ def share_update_project(token, proj_id):
         )
     db.commit()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (proj_id,)).fetchone()
-    return jsonify({"id": proj_id, "name": row["name"], "emoji": row["emoji"], "color": row["color"], "parent_id": row["parent_id"], "description": _row_get(row, "description")})
+    return jsonify({"id": proj_id, "name": row["name"], "emoji": row["emoji"], "color": row["color"], "parent_id": row["parent_id"], "description": _row_get(row, "description"), "point_color": _row_get(row, "marker_color")})
 
 
 @app.route("/share/<token>/memo/<int:memo_id>/comments", methods=["POST"])
@@ -2767,7 +2851,7 @@ def _build_export(db):
         "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
     projects = db.execute(
-        "SELECT id, name, position, color, tags, emoji, parent_id, location, description FROM projects ORDER BY position, id"
+        "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color FROM projects ORDER BY position, id"
     ).fetchall()
     proj_names = {r["id"]: r["name"] for r in projects}
     out_links = []
@@ -2792,6 +2876,7 @@ def _build_export(db):
             "parent": proj_names.get(r["parent_id"], ""),
             "location": _parse_location(r["location"]),
             "description": _row_get(r, "description"),
+            "marker_color": _row_get(r, "marker_color"),
         }
         for r in projects
     ]
@@ -2809,7 +2894,7 @@ def _build_export(db):
         "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
     return {
-        "version": 15,
+        "version": 17,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -2983,14 +3068,14 @@ def import_links():
 
     proj_ids = {}
 
-    def ensure_project(name, color="", tags="", emoji="", location=None, description=""):
+    def ensure_project(name, color="", tags="", emoji="", location=None, description="", marker_color=""):
         name = (name or "").strip()
         if not name:
             return None
         if name in proj_ids:
             return proj_ids[name]
         row = db.execute(
-            "SELECT id, color, tags, emoji, location, description FROM projects WHERE name = ?", (name,)
+            "SELECT id, color, tags, emoji, location, description, marker_color FROM projects WHERE name = ?", (name,)
         ).fetchone()
         if row:
             proj_ids[name] = row["id"]
@@ -3018,13 +3103,18 @@ def import_links():
                     "UPDATE projects SET description = ? WHERE id = ?",
                     (_clean_description(description), row["id"]),
                 )
+            if marker_color and not (_row_get(row, "marker_color") or "").strip():
+                db.execute(
+                    "UPDATE projects SET marker_color = ? WHERE id = ?",
+                    (_clean_hex_color(marker_color, ""), row["id"]),
+                )
         else:
             max_pos = db.execute(
                 "SELECT COALESCE(MAX(position), -1) FROM projects"
             ).fetchone()[0]
             cur = db.execute(
-                "INSERT INTO projects (name, color, position, tags, emoji, location, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji), _clean_location(location), _clean_description(description)),
+                "INSERT INTO projects (name, color, position, tags, emoji, location, description, marker_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji), _clean_location(location), _clean_description(description), _clean_hex_color(marker_color, "")),
             )
             proj_ids[name] = cur.lastrowid
         return proj_ids[name]
@@ -3038,6 +3128,7 @@ def import_links():
                 proj.get("emoji") or "",
                 proj.get("location"),
                 proj.get("description") or "",
+                proj.get("marker_color") or "",
             )
         else:
             ensure_project(proj)
@@ -3225,6 +3316,8 @@ def import_links():
             memo_location = _clean_location(memo.get("location"))
             title = _clean_title(memo.get("title"))
             assignees = _assignees_json(memo.get("assignees"))
+            memo_marker = _clean_hex_color(memo.get("marker_color"), "")
+            memo_groups = _map_groups_json(memo.get("map_groups"))
         else:
             content = str(memo).strip()
             uid = ""
@@ -3241,6 +3334,8 @@ def import_links():
             memo_location = ""
             title = ""
             assignees = "[]"
+            memo_marker = ""
+            memo_groups = "[]"
         if not content and not title:
             continue
 
@@ -3248,11 +3343,12 @@ def import_links():
             existing = memos_by_uid[uid]
             if updated and updated > (existing["updated_at"] or ""):
                 merged_images = images if images != "[]" else (existing["images"] or "[]")
+                merged_marker = memo_marker or _row_get(existing, "marker_color")
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
-                    "title=?, assignees=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, updated, existing["id"]),
+                    "title=?, assignees=?, marker_color=?, map_groups=?, updated_at=? WHERE id=?",
+                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -3269,9 +3365,9 @@ def import_links():
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
             "done, due_date, priority, subtasks, project_id, images, recurrence, emoji, location, "
-            "title, assignees) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees),
+            "title, assignees, marker_color, map_groups) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)

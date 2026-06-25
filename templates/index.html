@@ -276,6 +276,38 @@ button.icon { padding: 0.45rem 0.6rem; }
 .trash-heading { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trash-meta { color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }
 .btn-soft { font: inherit; font-size: 0.8rem; padding: 0.28rem 0.6rem; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+/* ---------- vue Plan (arbre projets → mémos) ---------- */
+#tree-board { max-width: 920px; margin: 0 auto; }
+.tree-toolbar { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.6rem; }
+.tree-toolbar h2 { margin: 0; font-size: 1.05rem; }
+.tree-rows { display: flex; flex-direction: column; }
+.tree-row { display: flex; align-items: center; gap: 0.3rem; padding: 0.16rem 0.4rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; min-width: 0; }
+.tree-row:hover { background: var(--panel-2); }
+.tree-pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; color: var(--muted); opacity: 0.55; flex-shrink: 0; font-size: 0.8rem; line-height: 1; }
+.tree-chev {
+  width: 1.4rem; flex-shrink: 0; text-align: center;
+  color: var(--muted); font-size: 0.95rem; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.tree-chev:hover { color: var(--text); }
+.tree-check { width: 1rem; flex-shrink: 0; text-align: center; color: var(--green); font-weight: 700; }
+.tree-pip { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex-shrink: 0; }
+.tree-title { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-proj .tree-title { font-weight: 600; }
+.tree-projname { cursor: pointer; }
+.tree-projname:hover { color: var(--accent); }
+.tree-title.done { text-decoration: line-through; color: var(--muted); }
+.tree-count { flex-shrink: 0; font-size: 0.72rem; color: var(--muted); margin-left: 0.3rem; }
+.tree-meta { display: flex; gap: 0.4rem; flex-shrink: 0; margin-left: 0.5rem; }
+.tcol { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tcol-due { width: 84px; } .tcol-asg { width: 96px; } .tcol-loc { width: 120px; }
+.tcol-due.due-late { color: var(--red); } .tcol-due.due-today { color: var(--warn); }
+@media (max-width: 900px) {
+  #tree-board { max-width: 100%; }
+  .tree-meta { display: none; }
+  .tree-pre { font-size: 0.74rem; }
+  .tree-chev { width: 1.8rem; height: 1.8rem; font-size: 1.1rem; }
+}
 .share-card {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -326,7 +358,7 @@ nav#sidebar {
 .cat-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.3rem;
   padding: 0.5rem 0.65rem;
   border-radius: 8px;
   cursor: pointer;
@@ -345,8 +377,51 @@ nav#sidebar {
 .cat-item.active { background: var(--panel-2); color: var(--accent); }
 .cat-item.drop-target { outline: 1px dashed var(--accent); color: var(--accent); }
 .cat-item .count { margin-left: auto; font-size: 0.75rem; opacity: 0.7; flex-shrink: 0; }
-.cat-item .cat-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cat-item .cat-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cat-item .emoji { width: 1.1rem; text-align: center; }
+.cat-item .cat-edit {
+  position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
+  flex-shrink: 0; min-height: 0; width: 1.5rem; height: 1.5rem;
+  padding: 0; border: none; background: none;
+  color: var(--muted); cursor: pointer; border-radius: 5px; opacity: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cat-item:hover .cat-edit, .cat-item:focus-within .cat-edit { opacity: 0.7; }
+/* le crayon est en absolu : on masque le compteur au survol pour éviter le chevauchement */
+.cat-item:hover .count, .cat-item:focus-within .count { opacity: 0; }
+.cat-item .cat-edit:hover { opacity: 1; color: var(--text); background: var(--panel-2); }
+nav#sidebar.sb-rail .cat-edit { display: none; }
+/* en-têtes de sections repliables (façon Evernote) */
+.sb-section-head {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.55rem; margin-top: 0.15rem; cursor: pointer;
+  color: var(--muted); font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; user-select: none;
+  border-radius: 6px;
+}
+.sb-section-head:hover { color: var(--text); background: var(--panel-2); }
+.sb-section-head .sb-chevron { width: 1.1rem; flex-shrink: 0; font-size: 0.85rem; text-align: center; }
+.sb-section-head .sb-section-label { flex: 1; min-width: 0; }
+.sb-section-add {
+  flex-shrink: 0; min-height: 0; width: 1.4rem; height: 1.4rem; padding: 0;
+  border: none; background: none; color: var(--muted); cursor: pointer;
+  border-radius: 5px; font-size: 1rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.sb-section-add:hover { color: var(--text); background: var(--bg-elev); }
+/* arbre des projets façon `tree` */
+.sb-tree {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre; color: var(--muted); opacity: 0.55;
+  font-size: 0.78rem; flex-shrink: 0; line-height: 1;
+}
+.sb-proj-chev {
+  width: 1.1rem; flex-shrink: 0; text-align: center;
+  color: var(--muted); font-size: 0.85rem; line-height: 1; cursor: pointer;
+}
+nav#sidebar.sb-rail .sb-section-head,
+nav#sidebar.sb-rail .sb-tree,
+nav#sidebar.sb-rail .sb-proj-chev { display: none; }
 .cat-dot {
   width: 0.7rem;
   height: 0.7rem;
@@ -673,16 +748,26 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .task .task-badges { max-width: 55%; }
 .badge.due-late { background: #3a1f1f; color: var(--danger); }
 .badge.due-today { background: #38301a; color: var(--yellow); }
-.task .task-actions { display: flex; gap: 0.15rem; opacity: 0; transition: opacity 0.15s; }
-.task:hover .task-actions { opacity: 1; }
-.task .task-actions button {
-  padding: 0.1rem 0.4rem;
-  font-size: 0.8rem;
-  border: none;
-  background: none;
-  color: var(--muted);
+/* Pied de carte mémo : projet à gauche, actions à droite (séparé par un trait). */
+.task-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  margin: 0.55rem 0 0; padding: 0.5rem 0 0; border-top: 1px solid var(--border);
 }
-.task .task-actions button:hover { color: var(--text); background: var(--panel-2); border-radius: 4px; }
+.task-foot .foot-proj {
+  display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0;
+  font-size: 0.8rem; color: var(--muted);
+}
+.task-foot .foot-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task .task-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.task .task-actions button {
+  min-width: 44px; min-height: 36px; padding: 0.2rem 0.55rem;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2);
+  color: var(--muted); display: inline-flex; align-items: center; justify-content: center;
+}
+.task .task-actions .ic { width: 1.3em; height: 1.3em; }
+.task .task-actions button:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
+/* Déplier et modifier = actions principales, mises en avant en bleu d'accent. */
+.task .task-actions .texp, .task .task-actions .tedit { color: var(--accent); border-color: var(--accent); }
 .task-detail { margin: 0.55rem 0 0.15rem 1.75rem; display: flex; flex-direction: column; gap: 0.45rem; }
 .task-detail .detail-row { display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
 .task-detail input[type="date"] {
@@ -1066,6 +1151,11 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   }
   .cat-item { flex-shrink: 0; margin-bottom: 0; padding: 0.35rem 0.7rem; }
   .cat-item .count { margin-left: 0.3rem; }
+  /* Barre horizontale : l'arbre vertical (connecteurs, chevrons) et les en-têtes de
+     section n'ont pas de sens à plat — on masque, comme le mode rail le fait déjà. */
+  .sb-tree, .sb-proj-chev { display: none; }
+  .sb-section-head { display: none; }
+  .cat-item.sub { padding-left: 0.7rem; }
   .sidebar-sep { border-top: none; border-left: 1px solid var(--border); margin: 0.2rem 0.3rem; }
   #add-cat { border-top: none; margin-top: 0; flex-shrink: 0; padding: 0.35rem 0.5rem; }
   aside#memo-panel {
@@ -1082,14 +1172,16 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
      les @media n'augmentent pas la spécificité, c'est l'ordre qui tranche) === */
   .task .task-row { flex-wrap: wrap; }
   .task .task-content { flex: 1 1 100%; }
-  .task .task-actions { order: 1; }
   .task .task-badges { order: 2; flex-basis: 100%; max-width: 100%; margin-left: 2.1rem; }
+  /* Carte visible d'emblée (le survol n'existe pas au doigt). */
+  .card .actions { opacity: 1; }
+  /* En mobile, la barre de projets du haut n'affiche pas le crayon : il fait doublon
+     avec le bouton « Modifier » de l'en-tête du projet une fois qu'on entre dedans. */
+  .cat-item .cat-edit { display: none; }
+  /* Pied de carte un peu plus généreux + chips plus gros et duplicata masqué. */
   .task .task-actions .tdup { display: none; }
-  /* Actions de card visibles d'emblée en mobile (par largeur d'écran, car le survol
-     n'existe pas au doigt et @media pointer:coarse ne matche pas toujours). */
-  .card .actions, .task .task-actions { opacity: 1; }
-  /* Flèche d'expansion (date/priorité/sous-tâches) plus grande et tappable en mobile. */
-  .task .task-actions button { font-size: 1.3rem; min-width: 40px; }
+  .task .task-actions button { min-width: 46px; min-height: 40px; padding: 0.25rem 0.6rem; }
+  .task .task-actions .ic { width: 1.5em; height: 1.5em; }
   /* Vue Partages : rangées en multi-lignes pour que le nom/arbre prenne toute la largeur
      (sinon il s'effondre en 1 caractère/ligne, étranglé par les boutons d'action). */
   .guest-row, .rev-row, .share-row { flex-wrap: wrap; }
@@ -1126,6 +1218,8 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <symbol id="ic-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
   <symbol id="ic-expand" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
   <symbol id="ic-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="ic-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="ic-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="ic-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
   <symbol id="ic-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
   <symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
@@ -1172,6 +1266,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div id="memo-board" hidden></div>
     <div id="shares-board" hidden></div>
     <div id="trash-board" hidden></div>
+    <div id="tree-board" hidden></div>
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
@@ -1247,6 +1342,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 
 <dialog id="map-dialog" style="width:min(920px,96vw);padding:0.9rem">
   <h3 id="map-title" style="margin:0 0 0.6rem">🗺 Carte</h3>
+  <div id="map-subbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.45rem"></div>
+  <div id="map-groupbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.55rem"></div>
+  <div id="map-selbar" style="display:none;flex-wrap:wrap;gap:0.4rem;align-items:center;margin:0 0 0.55rem;padding:0.45rem 0.55rem;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px"></div>
   <div style="display:flex;gap:0.6rem;flex-wrap:wrap">
     <div id="map-el" style="flex:1;min-width:260px;height:min(60vh,480px);border-radius:8px;background:var(--panel-2)"></div>
     <div id="map-list" style="width:230px;max-height:min(60vh,480px);overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem"></div>
@@ -1321,6 +1419,14 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <div id="quill-wrap"><div id="quill-editor"></div></div>
   <label class="me-label">Assigné·es</label>
   <div id="me-people" style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-top:0.2rem"></div>
+  <label class="me-label">📍 Position</label>
+  <div id="me-loc-row" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.2rem">
+    <button type="button" id="me-loc-set" class="prio-btn">📍 Ma position</button>
+    <input id="me-loc-addr" type="text" placeholder="ou une adresse… (Entrée)" autocomplete="off"
+           style="flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.4rem 0.55rem">
+    <button type="button" id="me-loc-clear" class="prio-btn" style="display:none">×</button>
+    <span id="me-loc-label" style="font-size:0.8rem;color:var(--muted)">aucune</span>
+  </div>
   <label class="me-label">Commentaires</label>
   <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
   <div class="actions">
@@ -1340,6 +1446,19 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     </div>
     <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
       Le nom sous lequel tu apparais dans les mentions <code>@</code>, les assignations et les accusés de lecture (« 👁 vu par… »).
+    </p>
+  </div>
+  <div class="settings-section">
+    <h4>CARTE</h4>
+    <div class="settings-row" style="align-items:center">
+      <input type="color" id="marker-color-input" value="#e53935"
+             style="width:3rem;height:2.3rem;padding:0.15rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">
+      <button id="marker-color-save" class="primary">Enregistrer</button>
+      <button id="marker-color-reset" title="Revenir au rouge par défaut">Défaut</button>
+    </div>
+    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+      Couleur par défaut des points de la carte, utilisée quand un mémo n'a ni priorité ni couleur de projet.
+      Les mémos avec une priorité gardent la couleur de leur priorité.
     </p>
   </div>
   <div class="settings-section">
@@ -1434,6 +1553,7 @@ const state = {
   memoProject: 'all',
   searchScope: 'all',
   ownerName: 'Fabien',
+  mapMarkerColor: '#e53935',
 };
 
 function parseSearch() {
@@ -1556,7 +1676,7 @@ async function loadAll() {
       && !state.projects.some(p => p.id === state.memoProject)) {
     state.memoProject = 'all';
   }
-  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; } catch (e) {}
+  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; } catch (e) {}
   renderAll();
   if (state.view === 'links') loadStatus();
 }
@@ -1568,6 +1688,7 @@ function renderAll() {
   document.getElementById('memo-board').hidden = v !== 'memos';
   document.getElementById('shares-board').hidden = v !== 'shares';
   document.getElementById('trash-board').hidden = v !== 'trash';
+  document.getElementById('tree-board').hidden = v !== 'tree';
   document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
   // Le bouton « + Ajouter » du header ne crée que des liens → masqué hors de la vue Liens
   // (les vues Mémos/Projet ont leur propre barre « + Nouveau mémo »).
@@ -1575,6 +1696,7 @@ function renderAll() {
   if (v === 'memos') renderBoard();
   else if (v === 'shares') renderShares();
   else if (v === 'trash') renderTrash();
+  else if (v === 'tree') renderTreeView();
   else renderLinks();
   renderMemos();
   applyA11y();
@@ -1603,9 +1725,20 @@ document.addEventListener('keydown', (e) => {
 
 function catEmoji(idx) { return CAT_EMOJIS[(idx + 1) % CAT_EMOJIS.length]; }
 
+function sbSectionOpen(name) { return localStorage.getItem('sbSection:' + name) !== '0'; }
+function toggleSbSection(name) { localStorage.setItem('sbSection:' + name, sbSectionOpen(name) ? '0' : '1'); }
+function sbProjOpen(id) { return localStorage.getItem('sbProjOpen:' + id) !== '0'; }
+function toggleSbProj(id) { localStorage.setItem('sbProjOpen:' + id, sbProjOpen(id) ? '0' : '1'); }
+
 function renderSidebar() {
   const nav = document.getElementById('sidebar');
   nav.innerHTML = '';
+  // En mode rail (icônes 64px) ET en mobile (barre horizontale, en-têtes masqués) on
+  // ignore les replis pour que tous les items restent visibles/atteignables.
+  const rail = nav.classList.contains('sb-rail');
+  const flat = rail || window.matchMedia('(max-width: 900px)').matches;
+  const secOpen = (name) => flat || sbSectionOpen(name);
+  const projOpen = (id) => flat || sbProjOpen(id);
   const uncat = state.links.filter(l => !l.category_id).length;
   const pendingMemoCount = state.memos.filter(m => !m.done).length;
 
@@ -1661,69 +1794,62 @@ function renderSidebar() {
   const emojiIcon = (em) => el('span', { class: 'emoji', text: em });
   const catIcon = (cat, idx) => comboIcon(cat.emoji, cat.color, catEmoji(idx));
 
-  nav.appendChild(mkItem('all', emojiIcon('🗂'), 'Tous', state.links.length));
+  // En-tête de section repliable (chevron ▸/▾ + bouton ＋).
+  const sectionHeader = (name, label, addFn, addTitle) => {
+    const open = secOpen(name);
+    const head = el('div', { class: 'sb-section-head', attrs: { title: open ? 'Replier la section' : 'Déplier la section' } });
+    head.appendChild(el('span', { class: 'sb-chevron', text: open ? '▾' : '▸' }));
+    head.appendChild(el('span', { class: 'sb-section-label', text: label }));
+    head.appendChild(el('button', {
+      class: 'sb-section-add', text: '＋', attrs: { type: 'button', title: addTitle },
+      on: { click: (e) => { e.stopPropagation(); addFn(); } },
+    }));
+    head.addEventListener('click', () => { toggleSbSection(name); renderSidebar(); });
+    nav.appendChild(head);
+  };
 
-  state.categories.forEach((cat, idx) => {
-    const item = mkItem(cat.id, catIcon(cat, idx), cat.name, cat.link_count, () => openCreateDialog('category', cat));
-    item.addEventListener('dragover', (e) => {
-      if (!dragLinkId) return;
-      e.preventDefault();
-      item.classList.add('drop-target');
-    });
-    item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
-    item.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      item.classList.remove('drop-target');
-      if (!dragLinkId) return;
-      await api(`/api/links/${dragLinkId}`, {
-        method: 'PUT', body: JSON.stringify({ category_id: cat.id }),
+  // ===== Section LIENS (catégories) =====
+  sectionHeader('Liens', 'Liens', addCategory, 'Ajouter une catégorie');
+  if (secOpen('Liens')) {
+    nav.appendChild(mkItem('all', emojiIcon('🗂'), 'Tous', state.links.length));
+    state.categories.forEach((cat, idx) => {
+      const item = mkItem(cat.id, catIcon(cat, idx), cat.name, cat.link_count, () => openCreateDialog('category', cat));
+      item.addEventListener('dragover', (e) => {
+        if (!dragLinkId) return;
+        e.preventDefault();
+        item.classList.add('drop-target');
       });
-      await loadAll();
+      item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+      item.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        item.classList.remove('drop-target');
+        if (!dragLinkId) return;
+        await api(`/api/links/${dragLinkId}`, {
+          method: 'PUT', body: JSON.stringify({ category_id: cat.id }),
+        });
+        await loadAll();
+      });
+      nav.appendChild(item);
     });
-    nav.appendChild(item);
-  });
-
-  if (uncat > 0 && state.categories.length > 0) {
-    const item = mkItem('none', emojiIcon('📦'), 'Sans catégorie', uncat);
-    item.addEventListener('dragover', (e) => { if (dragLinkId) { e.preventDefault(); item.classList.add('drop-target'); } });
-    item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
-    item.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      item.classList.remove('drop-target');
-      if (!dragLinkId) return;
-      await api(`/api/links/${dragLinkId}`, { method: 'PUT', body: JSON.stringify({ category_id: null }) });
-      await loadAll();
-    });
-    nav.appendChild(item);
+    if (uncat > 0 && state.categories.length > 0) {
+      const item = mkItem('none', emojiIcon('📦'), 'Sans catégorie', uncat);
+      item.addEventListener('dragover', (e) => { if (dragLinkId) { e.preventDefault(); item.classList.add('drop-target'); } });
+      item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+      item.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        item.classList.remove('drop-target');
+        if (!dragLinkId) return;
+        await api(`/api/links/${dragLinkId}`, { method: 'PUT', body: JSON.stringify({ category_id: null }) });
+        await loadAll();
+      });
+      nav.appendChild(item);
+    }
   }
 
-  nav.appendChild(el('div', {
-    attrs: { id: 'add-cat' }, text: '+ Catégorie',
-    on: { click: addCategory },
-  }));
-
   nav.appendChild(el('div', { class: 'sidebar-sep' }));
-  const memoItem = el('div', {
-    class: 'cat-item' + (state.view === 'memos' && state.memoProject === 'all' ? ' active' : ''),
-    on: { click: () => { state.view = 'memos'; state.memoProject = 'all'; renderAll(); } },
-  });
-  memoItem.appendChild(emojiIcon('📝'));
-  memoItem.appendChild(el('span', { class: 'cat-label', text: 'Mémos' }));
-  memoItem.appendChild(el('span', { class: 'count', text: String(pendingMemoCount) }));
-  memoItem.addEventListener('dragover', (e) => {
-    if (!dragProjId) return;
-    e.preventDefault();
-    memoItem.classList.add('drop-target');
-  });
-  memoItem.addEventListener('dragleave', () => memoItem.classList.remove('drop-target'));
-  memoItem.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    memoItem.classList.remove('drop-target');
-    if (!dragProjId) return;
-    await api(`/api/projects/${dragProjId}`, { method: 'PUT', body: JSON.stringify({ parent_id: null }) });
-    await loadAll();
-  });
-  nav.appendChild(memoItem);
+
+  // ===== Section PROJETS (carnets) =====
+  sectionHeader('Projets', 'Projets', addProject, 'Ajouter un projet');
 
   const inboxCount = state.memos.filter(m => !m.done && !m.project_id).length;
   const mkProjItem = (key, icon, label, count, projId, editFn) => {
@@ -1745,6 +1871,12 @@ function renderSidebar() {
     item.appendChild(icon);
     item.appendChild(el('span', { class: 'cat-label', text: label }));
     item.appendChild(el('span', { class: 'count', text: String(count) }));
+    if (editFn) {
+      item.appendChild(el('button', {
+        class: 'cat-edit', icon: 'pencil', attrs: { title: 'Modifier ce projet' },
+        on: { click: (e) => { e.stopPropagation(); editFn(); } },
+      }));
+    }
     item.addEventListener('dragover', (e) => {
       if (!dragMemoId && !dragProjId) return;
       if (dragProjId && (dragProjId === projId || (projId && projectDescendants(dragProjId).includes(projId)))) return;
@@ -1775,25 +1907,73 @@ function renderSidebar() {
     return item;
   };
 
-  nav.appendChild(mkProjItem('inbox', emojiIcon('📥'), 'Inbox', inboxCount, null));
-  const renderProjTree = (p, depth) => {
-    const icon = comboIcon(p.emoji, p.color, null);
-    const item = mkProjItem(p.id, icon, p.name, p.memo_count, p.id, () => openCreateDialog('project', p));
-    item.style.paddingLeft = (2 + depth * 0.9) + 'rem';
-    item.setAttribute('draggable', 'true');
-    item.addEventListener('dragstart', (e) => {
-      dragProjId = p.id;
-      e.dataTransfer.effectAllowed = 'move';
+  if (secOpen('Projets')) {
+    // « Mémos » (tous) — accepte le drop d'un projet pour le détacher (parent = racine).
+    const memoItem = el('div', {
+      class: 'cat-item' + (state.view === 'memos' && state.memoProject === 'all' ? ' active' : ''),
+      on: { click: () => { state.view = 'memos'; state.memoProject = 'all'; renderAll(); } },
     });
-    item.addEventListener('dragend', () => { dragProjId = null; });
-    nav.appendChild(item);
-    projectChildren(p.id).forEach(c => renderProjTree(c, depth + 1));
-  };
-  state.projects.filter(p => !p.parent_id).forEach(p => renderProjTree(p, 0));
-  nav.appendChild(el('div', {
-    attrs: { id: 'add-proj' }, text: '+ Projet',
-    on: { click: addProject },
-  }));
+    memoItem.appendChild(emojiIcon('📝'));
+    memoItem.appendChild(el('span', { class: 'cat-label', text: 'Mémos' }));
+    memoItem.appendChild(el('span', { class: 'count', text: String(pendingMemoCount) }));
+    memoItem.addEventListener('dragover', (e) => {
+      if (!dragProjId) return;
+      e.preventDefault();
+      memoItem.classList.add('drop-target');
+    });
+    memoItem.addEventListener('dragleave', () => memoItem.classList.remove('drop-target'));
+    memoItem.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      memoItem.classList.remove('drop-target');
+      if (!dragProjId) return;
+      await api(`/api/projects/${dragProjId}`, { method: 'PUT', body: JSON.stringify({ parent_id: null }) });
+      await loadAll();
+    });
+    nav.appendChild(memoItem);
+
+    // Vue Plan : arbre projets → mémos.
+    const planItem = el('div', {
+      class: 'cat-item' + (state.view === 'tree' ? ' active' : ''),
+      attrs: { title: 'Vue Plan : toute la hiérarchie projets → mémos en arbre' },
+      on: { click: () => { state.view = 'tree'; renderAll(); } },
+    });
+    planItem.appendChild(emojiIcon('🌳'));
+    planItem.appendChild(el('span', { class: 'cat-label', text: 'Plan' }));
+    nav.appendChild(planItem);
+
+    nav.appendChild(mkProjItem('inbox', emojiIcon('📥'), 'Inbox', inboxCount, null));
+
+    // Arbre façon `tree` : préfixe de connecteurs ├── / └── / │ selon la fratrie.
+    const renderProjTree = (p, ancestorsLast, isLast) => {
+      const icon = comboIcon(p.emoji, p.color, null);
+      const item = mkProjItem(p.id, icon, p.name, p.memo_count, p.id, () => openCreateDialog('project', p));
+      const conn = ancestorsLast.map(last => last ? '   ' : '│  ').join('') + (isLast ? '└─ ' : '├─ ');
+      const kids = projectChildren(p.id);
+      const chev = el('span', { class: 'sb-proj-chev' });
+      if (kids.length) {
+        const open = projOpen(p.id);
+        chev.textContent = open ? '▾' : '▸';
+        chev.setAttribute('title', open ? 'Replier ce projet' : 'Déplier ce projet');
+        chev.addEventListener('click', (e) => { e.stopPropagation(); toggleSbProj(p.id); renderSidebar(); });
+      } else {
+        chev.style.cursor = 'default';
+      }
+      item.insertBefore(el('span', { class: 'sb-tree', text: conn }), item.firstChild);
+      item.insertBefore(chev, item.firstChild);
+      item.setAttribute('draggable', 'true');
+      item.addEventListener('dragstart', (e) => {
+        dragProjId = p.id;
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      item.addEventListener('dragend', () => { dragProjId = null; });
+      nav.appendChild(item);
+      if (projOpen(p.id)) {
+        kids.forEach((c, i) => renderProjTree(c, [...ancestorsLast, isLast], i === kids.length - 1));
+      }
+    };
+    const roots = state.projects.filter(p => !p.parent_id);
+    roots.forEach((p, i) => renderProjTree(p, [], i === roots.length - 1));
+  }
 }
 
 const PROJ_COLORS = ['#4fc3f7', '#81c784', 'var(--warn)', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
@@ -2049,7 +2229,44 @@ let activeMap = null;
 const mapDialog = document.getElementById('map-dialog');
 document.getElementById('map-close').addEventListener('click', () => mapDialog.close());
 
-function openMapDialog(title, points) {
+async function savePointColor(p, color) {
+  // Override de couleur d'un point (mémo ou projet). '' = on efface l'override.
+  const url = p.kind === 'memo' ? `/api/memos/${p.id}` : `/api/projects/${p.id}`;
+  await api(url, { method: 'PUT', body: JSON.stringify({ marker_color: color }) });
+  const arr = p.kind === 'memo' ? state.memos : state.projects;
+  const obj = arr.find(x => x.id === p.id);
+  if (obj) obj.marker_color = color;
+}
+
+async function savePointGroups(p, groups) {
+  // Groupes de carte d'un mémo (étiquettes). Le serveur nettoie/déduplique.
+  await api(`/api/memos/${p.id}`, { method: 'PUT', body: JSON.stringify({ map_groups: groups }) });
+  const obj = state.memos.find(x => x.id === p.id);
+  if (obj) obj.map_groups = groups;
+}
+
+const MAP_UNGROUPED = ' none';
+
+// Couleur de projet utilisable comme accent : repli '' si vide/invalide ou quasi-noir
+// (ex. Japon #000000, invisible en thème sombre → on retombe sur var(--border)).
+function usableProjColor(c) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(c || '')) return '';
+  const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 24 ? '' : c;
+}
+
+// Couleur de provenance d'un projet : sa couleur si utilisable, sinon une couleur
+// déterministe (stable par id) tirée d'une petite palette, pour rester visible et
+// distincte même si la couleur du projet est vide/quasi-noire (ex. Japon #000000).
+const PROV_PALETTE = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#f06292', '#a1887f', '#90a4ae', '#fff176'];
+function provenanceColor(proj) {
+  const c = usableProjColor(proj ? proj.color : '');
+  if (c) return c;
+  const id = proj ? proj.id : 0;
+  return PROV_PALETTE[((id % PROV_PALETTE.length) + PROV_PALETTE.length) % PROV_PALETTE.length];
+}
+
+function openMapDialog(title, points, recompute) {
   if (typeof L === 'undefined') {
     notify('Carte non disponible : fichiers Leaflet manquants dans static/ (voir README).', { error: true });
     return;
@@ -2066,41 +2283,257 @@ function openMapDialog(title, points) {
     attribution: '© OpenStreetMap',
     maxZoom: 19,
   }).addTo(activeMap);
-  const latlngs = [];
+  const markerLayer = L.layerGroup().addTo(activeMap);
   const listEl = document.getElementById('map-list');
-  listEl.innerHTML = '';
-  points.forEach(p => {
-    const ll = [p.lat, p.lng];
-    latlngs.push(ll);
-    const marker = L.circleMarker(ll, {
-      radius: 9,
-      color: p.color || '#4fc3f7',
-      weight: 2,
-      fillColor: p.color || '#4fc3f7',
-      fillOpacity: 0.55,
-    }).addTo(activeMap).bindPopup(
-      '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' +
-      (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
-    );
-    const row = el('button', {
-      attrs: {
-        type: 'button',
-        style: 'display:flex;align-items:flex-start;gap:0.4rem;text-align:left;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%',
-      },
-      on: { click: () => { activeMap.setView(ll, 16); marker.openPopup(); } },
+  const subbar = document.getElementById('map-subbar');
+  const groupbar = document.getElementById('map-groupbar');
+  const selbar = document.getElementById('map-selbar');
+  const editable = !!recompute;
+
+  // Filtres persistés par projet : groupes (map_groups) ET sous-projets. Vide = tout
+  // affiché normalement ; sinon seuls les points satisfaisant le focus sont en avant,
+  // le reste est grisé (mais toujours visible et cliquable). Les deux filtres se cumulent.
+  const GKEY = 'mapFocus:' + state.memoProject;
+  const SUBKEY = 'mapSubFilter:' + state.memoProject;
+  let active, subActive;
+  try { active = new Set(JSON.parse(localStorage.getItem(GKEY) || '[]')); } catch (e) { active = new Set(); }
+  try { subActive = new Set(JSON.parse(localStorage.getItem(SUBKEY) || '[]')); } catch (e) { subActive = new Set(); }
+  const selected = new Set();      // clés "kind:id" des points cochés (mémos)
+  let current = points;            // jeu complet, non filtré
+
+  const pkey = p => p.kind + ':' + p.id;
+  const persist = () => localStorage.setItem(GKEY, JSON.stringify([...active]));
+  const persistSub = () => localStorage.setItem(SUBKEY, JSON.stringify([...subActive]));
+  // Sous-projet d'un point : projet du mémo, ou le projet lui-même pour un point-projet.
+  const subToken = p => (p.kind === 'memo' ? (p.project_id || 0) : p.id);
+  // Filtre par sous-projet seulement quand on regarde un vrai projet (pas all/inbox).
+  const subFilterScope = (state.memoProject !== 'all' && state.memoProject !== 'inbox');
+  function groupNames(pts) {
+    const s = new Set();
+    pts.forEach(p => (p.groups || []).forEach(g => s.add(g)));
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }
+  function hasUngrouped(pts) { return pts.some(p => !(p.groups && p.groups.length)); }
+  function isGroupFocused(p) {
+    if (!active.size) return true;
+    const gs = (p.groups && p.groups.length) ? p.groups : [MAP_UNGROUPED];
+    return gs.some(g => active.has(g));
+  }
+  function isSubFocused(p) {
+    if (!subActive.size) return true;
+    return subActive.has(subToken(p));
+  }
+  // Cumul : un point est « en avant » s'il satisfait les deux filtres.
+  function isFocused(p) { return isGroupFocused(p) && isSubFocused(p); }
+
+  function renderSubbar() {
+    subbar.innerHTML = '';
+    if (!subFilterScope) { subbar.style.display = 'none'; return; }
+    // Jetons de sous-projet présents parmi les points, ordonnés par l'arbre des projets.
+    const present = new Set(current.map(subToken));
+    // Afficher dès qu'au moins un point vient d'un sous-projet descendant
+    // (subToken ≠ projet courant), même s'il n'y a qu'un seul sous-projet.
+    if (![...present].some(t => t !== state.memoProject)) { subbar.style.display = 'none'; return; }
+    const ordered = state.projects.filter(p => present.has(p.id)).map(p => p.id);
+    present.forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
+    subbar.style.display = 'flex';
+    subbar.appendChild(el('span', { text: 'Sous-projets :', attrs: { style: 'font-size:0.78rem;color:var(--muted)' } }));
+    const parentId = state.memoProject;
+    ordered.forEach(t => {
+      const proj = state.projects.find(p => p.id === t);
+      const label = proj ? ((proj.emoji ? proj.emoji + ' ' : '') + proj.name) + (t === parentId ? ' (ce projet)' : '') : '(sans projet)';
+      const on = subActive.has(t);
+      subbar.appendChild(el('button', {
+        class: 'prio-btn', text: (on ? '✓ ' : '') + label,
+        attrs: { type: 'button', title: on ? 'Ne plus filtrer sur ce sous-projet' : 'Afficher seulement ce sous-projet',
+          style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+        on: { click: () => { if (subActive.has(t)) subActive.delete(t); else subActive.add(t); persistSub(); refresh(true); } },
+      }));
     });
-    row.appendChild(el('span', { attrs: { style: 'width:10px;height:10px;border-radius:50%;background:' + (p.color || '#4fc3f7') + ';flex-shrink:0;margin-top:0.25rem' } }));
-    const txt = el('span', { attrs: { style: 'min-width:0;overflow-wrap:anywhere' } });
-    txt.appendChild(el('strong', { text: p.title || '' }));
-    if (p.sub) txt.appendChild(el('div', { text: p.sub, attrs: { style: 'color:var(--muted);font-size:0.72rem' } }));
-    row.appendChild(txt);
-    listEl.appendChild(row);
-  });
-  setTimeout(() => {
-    activeMap.invalidateSize();
-    if (latlngs.length === 1) activeMap.setView(latlngs[0], 15);
-    else activeMap.fitBounds(latlngs, { padding: [30, 30] });
-  }, 60);
+    if (subActive.size) {
+      subbar.appendChild(el('button', {
+        class: 'prio-btn', text: '↺ tous les sous-projets', attrs: { type: 'button', style: 'padding:0.1rem 0.45rem' },
+        on: { click: () => { subActive.clear(); persistSub(); refresh(true); } },
+      }));
+    }
+  }
+
+  function renderGroupbar() {
+    groupbar.innerHTML = '';
+    const names = groupNames(current);
+    if (!names.length) { groupbar.style.display = 'none'; return; }
+    groupbar.style.display = 'flex';
+    groupbar.appendChild(el('span', { text: 'Groupes :', attrs: { style: 'font-size:0.78rem;color:var(--muted)' } }));
+    const chip = (label, token) => {
+      const on = active.has(token);
+      const b = el('button', {
+        class: 'prio-btn', text: (on ? '✓ ' : '') + label,
+        attrs: { type: 'button', title: on ? 'Ne plus filtrer sur ce groupe' : 'Afficher seulement ce groupe',
+          style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+        on: { click: () => { if (active.has(token)) active.delete(token); else active.add(token); persist(); refresh(true); } },
+      });
+      groupbar.appendChild(b);
+    };
+    names.forEach(n => chip(n, n));
+    if (hasUngrouped(current)) chip('(sans groupe)', MAP_UNGROUPED);
+    if (active.size) {
+      groupbar.appendChild(el('button', {
+        class: 'prio-btn', text: '↺ tout afficher', attrs: { type: 'button', style: 'padding:0.1rem 0.45rem' },
+        on: { click: () => { active.clear(); persist(); refresh(true); } },
+      }));
+    }
+  }
+
+  function renderSelbar() {
+    selbar.innerHTML = '';
+    if (!editable || !selected.size) { selbar.style.display = 'none'; return; }
+    selbar.style.display = 'flex';
+    selbar.appendChild(el('span', { text: selected.size + ' sélectionné' + (selected.size > 1 ? 's' : ''), attrs: { style: 'font-size:0.8rem;font-weight:600' } }));
+    const input = el('input', { attrs: { type: 'text', placeholder: 'nom du groupe', list: 'map-group-list', style: 'flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.2rem 0.4rem' } });
+    const dl = el('datalist', { attrs: { id: 'map-group-list' } });
+    groupNames(current).forEach(n => dl.appendChild(el('option', { attrs: { value: n } })));
+    selbar.appendChild(input);
+    selbar.appendChild(dl);
+    const apply = async () => {
+      const name = input.value.trim();
+      if (!name) return;
+      for (const key of [...selected]) {
+        const p = current.find(x => pkey(x) === key);
+        if (!p || p.kind !== 'memo') continue;
+        const next = Array.from(new Set([...(p.groups || []), name]));
+        await savePointGroups(p, next);
+      }
+      selected.clear();
+      current = recompute();
+      refresh(false);
+    };
+    selbar.appendChild(el('button', { class: 'primary', text: '＋ Grouper', attrs: { type: 'button', style: 'padding:0.2rem 0.6rem' }, on: { click: apply } }));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+    selbar.appendChild(el('button', { class: 'prio-btn', text: 'Tout décocher', attrs: { type: 'button' }, on: { click: () => { selected.clear(); refresh(false); } } }));
+  }
+
+  function draw(pts, fit) {
+    markerLayer.clearLayers();
+    listEl.innerHTML = '';
+    const latlngs = [];
+
+    function buildRow(p, proj, showChip) {
+      const ll = [p.lat, p.lng];
+      const focused = isFocused(p);
+      if (focused) latlngs.push(ll);
+      const dotColor = p.color || state.mapMarkerColor || '#e53935';
+      const mColor = focused ? dotColor : '#8a93a0';
+      const marker = L.circleMarker(ll, {
+        radius: focused ? 9 : 6,
+        color: mColor,
+        weight: focused ? 2 : 1,
+        fillColor: mColor,
+        fillOpacity: focused ? 0.55 : 0.18,
+      }).addTo(markerLayer).bindPopup(
+        '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' +
+        (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
+      );
+      const row = el('div', {
+        attrs: { style: 'display:flex;align-items:flex-start;gap:0.4rem;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%' + (focused ? '' : ';opacity:0.4') },
+      });
+      // Pastille de provenance (couleur du projet + emoji) quand plusieurs projets coexistent.
+      if (showChip) {
+        const accent = proj ? provenanceColor(proj) : 'var(--border)';
+        const chip = el('span', { attrs: { title: proj ? proj.name : 'sans projet', style: 'display:inline-flex;align-items:center;gap:0.2rem;flex-shrink:0;margin-top:0.18rem;font-size:0.72rem' } });
+        chip.appendChild(el('span', { attrs: { style: 'width:9px;height:9px;border-radius:50%;flex-shrink:0;background:' + accent } }));
+        if (proj && proj.emoji) chip.appendChild(el('span', { text: proj.emoji }));
+        row.appendChild(chip);
+      }
+      // Case à cocher (mémos seulement) pour grouper une sélection.
+      if (editable && p.kind === 'memo') {
+        const cb = el('input', { attrs: { type: 'checkbox', style: 'flex-shrink:0;margin-top:0.28rem;cursor:pointer' } });
+        cb.checked = selected.has(pkey(p));
+        cb.addEventListener('change', () => { if (cb.checked) selected.add(pkey(p)); else selected.delete(pkey(p)); renderSelbar(); });
+        row.appendChild(cb);
+      }
+      // Pastille couleur = sélecteur d'override (si le point est éditable).
+      if (editable && (p.kind === 'memo' || p.kind === 'project')) {
+        const colorIn = el('input', {
+          attrs: { type: 'color', value: dotColor, title: 'Couleur de ce point', style: 'width:18px;height:18px;padding:0;border:none;background:none;flex-shrink:0;margin-top:0.18rem;cursor:pointer' },
+        });
+        colorIn.addEventListener('change', async () => { await savePointColor(p, colorIn.value); current = recompute(); refresh(false); });
+        row.appendChild(colorIn);
+      } else {
+        row.appendChild(el('span', { attrs: { style: 'width:10px;height:10px;border-radius:50%;background:' + dotColor + ';flex-shrink:0;margin-top:0.25rem' } }));
+      }
+      const txt = el('button', {
+        attrs: { type: 'button', style: 'flex:1;min-width:0;overflow-wrap:anywhere;text-align:left;background:none;border:none;padding:0;color:inherit;font:inherit;cursor:pointer' },
+        on: { click: () => { activeMap.setView(ll, 16); marker.openPopup(); } },
+      });
+      txt.appendChild(el('strong', { text: p.title || '' }));
+      // Liste : lieu seul (le projet est porté par l'en-tête de section et le chip).
+      if (p.placeLabel) txt.appendChild(el('div', { text: p.placeLabel, attrs: { style: 'color:var(--muted);font-size:0.72rem' } }));
+      // Étiquettes de groupe du point, retirables (×).
+      if (p.groups && p.groups.length) {
+        const chips = el('div', { attrs: { style: 'display:flex;flex-wrap:wrap;gap:0.2rem;margin-top:0.2rem' } });
+        p.groups.forEach(g => {
+          const c = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.15rem;font-size:0.66rem;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:0.02rem 0.4rem' } });
+          c.appendChild(el('span', { text: g }));
+          if (editable) {
+            c.appendChild(el('button', {
+              text: '×', attrs: { type: 'button', title: 'Retirer de « ' + g + ' »', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.8rem;line-height:1' },
+              on: { click: async (ev) => { ev.stopPropagation(); await savePointGroups(p, (p.groups || []).filter(x => x !== g)); current = recompute(); refresh(false); } },
+            }));
+          }
+          chips.appendChild(c);
+        });
+        txt.appendChild(chips);
+      }
+      row.appendChild(txt);
+      if (editable && p.override) {
+        row.appendChild(el('button', {
+          class: 'prio-btn', text: '↺', attrs: { type: 'button', title: 'Couleur par défaut', style: 'flex-shrink:0;padding:0.05rem 0.3rem' },
+          on: { click: async () => { await savePointColor(p, ''); current = recompute(); refresh(false); } },
+        }));
+      }
+      listEl.appendChild(row);
+    }
+
+    // Regroupement par projet d'origine, sections ordonnées : projet courant, puis
+    // sous-projets descendants dans l'ordre de l'arbre, puis « (sans projet) ».
+    const byProj = new Map();
+    pts.forEach(p => { const t = subToken(p); if (!byProj.has(t)) byProj.set(t, []); byProj.get(t).push(p); });
+    const ordered = [];
+    if (byProj.has(state.memoProject)) ordered.push(state.memoProject);
+    state.projects.forEach(pr => { if (pr.id !== state.memoProject && byProj.has(pr.id)) ordered.push(pr.id); });
+    [...byProj.keys()].forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
+
+    const multi = ordered.length > 1;
+    ordered.forEach(t => {
+      const proj = state.projects.find(pr => pr.id === t);
+      if (multi) {
+        const accent = proj ? provenanceColor(proj) : 'var(--border)';
+        const head = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.35rem;font-size:0.74rem;color:var(--muted);font-weight:600;margin-top:0.4rem;padding:0.1rem 0.2rem 0.1rem 0.35rem;border-left:3px solid ' + accent } });
+        const lab = proj ? ((proj.emoji ? proj.emoji + ' ' : '') + proj.name) + (t === state.memoProject ? ' (ce projet)' : '') : '(sans projet)';
+        head.appendChild(el('span', { text: lab }));
+        head.appendChild(el('span', { text: '· ' + byProj.get(t).length, attrs: { style: 'font-weight:400' } }));
+        listEl.appendChild(head);
+      }
+      byProj.get(t).forEach(p => buildRow(p, proj, multi));
+    });
+
+    if (fit) {
+      setTimeout(() => {
+        activeMap.invalidateSize();
+        if (latlngs.length === 1) activeMap.setView(latlngs[0], 15);
+        else if (latlngs.length) activeMap.fitBounds(latlngs, { padding: [30, 30] });
+      }, 60);
+    }
+  }
+
+  function refresh(fit) {
+    renderSubbar();
+    renderGroupbar();
+    renderSelbar();
+    draw(current, fit);
+  }
+
+  refresh(true);
 }
 
 function boardMapPoints() {
@@ -2124,14 +2557,17 @@ function boardMapPoints() {
       lat: m.location.lat,
       lng: m.location.lng,
       title: (m.emoji ? m.emoji + ' ' : '') + stripHTML(m.content).slice(0, 60),
+      // sub = texte de la popup du marqueur (lieu + projet) ; placeLabel = lieu seul (liste).
+      placeLabel: m.location.label || '',
       sub: (m.location.label || '') + (proj ? ' — ' + proj.name : ''),
-      color: (prioOf(m.priority) || {}).color || '#4fc3f7',
+      color: m.marker_color || (prioOf(m.priority) || {}).color || state.mapMarkerColor || '#e53935',
+      kind: 'memo', id: m.id, override: m.marker_color || '', groups: m.map_groups || [], project_id: m.project_id || null,
     });
   });
   if (scope && !searchActive) {
     const proj = state.projects.find(p => p.id === state.memoProject);
     const pl = proj && parseLoc(proj.location);
-    if (pl) points.push({ lat: pl.lat, lng: pl.lng, title: '📁 ' + proj.name, sub: pl.label || '', color: proj.color || '#81c784' });
+    if (pl) points.push({ lat: pl.lat, lng: pl.lng, title: '📁 ' + proj.name, placeLabel: pl.label || '', sub: pl.label || '', color: proj.marker_color || proj.color || '#81c784', kind: 'project', id: proj.id, override: proj.marker_color || '', groups: [] });
   }
   return points;
 }
@@ -2589,6 +3025,132 @@ function renderTrash() {
       } },
     }));
     board.appendChild(row);
+  });
+}
+
+/* ------------------------------------------------ vue Plan (arbre) */
+
+function treeOpen(id) { return localStorage.getItem('treeOpen:' + id) !== '0'; }
+function setTreeOpen(id, v) { localStorage.setItem('treeOpen:' + id, v ? '1' : '0'); }
+
+function renderTreeView() {
+  const board = document.getElementById('tree-board');
+  board.innerHTML = '';
+
+  // Barre d'outils : tout déplier / tout replier (projets + nœud Inbox).
+  const bar = el('div', { class: 'tree-toolbar' });
+  bar.appendChild(el('h2', { text: '🌳 Plan' }));
+  const allIds = state.projects.map(p => p.id).concat(['inbox']);
+  const anyClosed = allIds.some(id => !treeOpen(id));
+  bar.appendChild(el('button', {
+    class: 'prio-btn', text: anyClosed ? 'Tout déplier' : 'Tout replier',
+    attrs: { type: 'button' },
+    on: { click: () => { allIds.forEach(id => setTreeOpen(id, anyClosed)); renderTreeView(); } },
+  }));
+  board.appendChild(bar);
+
+  const tree = el('div', { class: 'tree-rows' });
+  board.appendChild(tree);
+
+  const activeMemos = (pid) => state.memos.filter(m => m.project_id === pid && !m.deleted_at);
+  // Compteur de mémos actifs (non terminés) du projet + descendants.
+  const countActive = (pid) => {
+    let n = state.memos.filter(m => m.project_id === pid && !m.deleted_at && !m.done).length;
+    projectChildren(pid).forEach(c => { n += countActive(c.id); });
+    return n;
+  };
+  const connOf = (ancestorsLast, isLast) =>
+    ancestorsLast.map(l => l ? '   ' : '│  ').join('') + (isLast ? '└─ ' : '├─ ');
+
+  function memoRow(m, conn) {
+    const row = el('div', { class: 'tree-row tree-memo', on: { click: () => openMemoEditor(m) } });
+    row.appendChild(el('span', { class: 'tree-pre', text: conn }));
+    row.appendChild(el('span', { class: 'tree-check', text: m.done ? '✓' : '' }));
+    const pip = el('span', { class: 'tree-pip' });
+    const prio = prioOf(m.priority);
+    if (prio && prio.color) pip.style.background = prio.color; else pip.style.visibility = 'hidden';
+    row.appendChild(pip);
+    const label = m.title || stripHTML(m.content || '').slice(0, 60) || '(sans titre)';
+    row.appendChild(el('span', { class: 'tree-title' + (m.done ? ' done' : ''), text: label }));
+    // Colonnes de métadonnées (masquées en mobile via CSS).
+    const meta = el('div', { class: 'tree-meta' });
+    const di = dueInfo(m.due_date);
+    meta.appendChild(el('span', { class: 'tcol tcol-due ' + (di ? di.cls : ''), text: di ? '📅 ' + di.label : '' }));
+    const asg = m.assignees || [];
+    meta.appendChild(el('span', { class: 'tcol tcol-asg', text: asg.length ? '👤 ' + asg[0] + (asg.length > 1 ? ' +' + (asg.length - 1) : '') : '' }));
+    meta.appendChild(el('span', { class: 'tcol tcol-loc', text: m.location ? '📍 ' + ((m.location.label || '').slice(0, 18)) : '' }));
+    row.appendChild(meta);
+    return row;
+  }
+
+  // Rend un nœud projet (ou le pseudo-nœud Inbox) puis, s'il est déplié, ses mémos
+  // (feuilles) et ses sous-projets comme une même fratrie (connecteurs cohérents).
+  function node(opts, ancestorsLast, isLast) {
+    const { key, name, iconEl, memos, kids, count, onName } = opts;
+    const hasChildren = kids.length > 0 || memos.length > 0;
+    const open = treeOpen(key);
+    const row = el('div', { class: 'tree-row tree-proj' });
+    row.appendChild(el('span', { class: 'tree-pre', text: connOf(ancestorsLast, isLast) }));
+    const chev = el('span', { class: 'tree-chev' });
+    if (hasChildren) {
+      chev.textContent = open ? '▾' : '▸';
+      chev.setAttribute('title', open ? 'Replier' : 'Déplier');
+      chev.addEventListener('click', (e) => { e.stopPropagation(); setTreeOpen(key, !open); renderTreeView(); });
+    } else { chev.style.visibility = 'hidden'; }
+    row.appendChild(chev);
+    row.appendChild(iconEl);
+    const nameEl = el('span', { class: 'tree-title tree-projname', text: name });
+    nameEl.addEventListener('click', onName);
+    row.appendChild(nameEl);
+    row.appendChild(el('span', { class: 'tree-count', text: String(count) }));
+    tree.appendChild(row);
+    if (open && hasChildren) {
+      const childAnc = [...ancestorsLast, isLast];
+      const items = [
+        ...memos.map(m => ({ memo: m })),
+        ...kids.map(c => ({ proj: c })),
+      ];
+      items.forEach((it, i) => {
+        const last = i === items.length - 1;
+        if (it.memo) tree.appendChild(memoRow(it.memo, connOf(childAnc, last)));
+        else node(projOpts(it.proj), childAnc, last);
+      });
+    }
+  }
+
+  function projOpts(p) {
+    return {
+      key: p.id,
+      name: p.name,
+      iconEl: comboIcon(p.emoji, p.color, null),
+      memos: activeMemos(p.id),
+      kids: projectChildren(p.id),
+      count: countActive(p.id),
+      onName: () => { state.view = 'memos'; state.memoProject = p.id; renderAll(); },
+    };
+  }
+
+  const roots = state.projects.filter(p => !p.parent_id);
+  const inboxMemos = state.memos.filter(m => !m.project_id && !m.deleted_at);
+  const rootItems = roots.map(p => ({ proj: p }));
+  if (inboxMemos.length) {
+    rootItems.push({ inbox: {
+      key: 'inbox',
+      name: 'Inbox',
+      iconEl: el('span', { class: 'emoji', text: '📥' }),
+      memos: inboxMemos,
+      kids: [],
+      count: inboxMemos.filter(m => !m.done).length,
+      onName: () => { state.view = 'memos'; state.memoProject = 'inbox'; renderAll(); },
+    } });
+  }
+  if (!rootItems.length) {
+    tree.appendChild(el('p', { attrs: { style: 'color:var(--muted);font-size:0.85rem' }, text: 'Aucun projet ni mémo.' }));
+    return;
+  }
+  rootItems.forEach((it, i) => {
+    const last = i === rootItems.length - 1;
+    node(it.proj ? projOpts(it.proj) : it.inbox, [], last);
   });
 }
 
@@ -3204,6 +3766,31 @@ function getQuill() {
 }
 
 let editingAssignees = [];
+let editingLoc = null;
+
+// État du champ 📍 Position de la pop-in mémo.
+function renderMeLoc() {
+  const lbl = document.getElementById('me-loc-label');
+  const clr = document.getElementById('me-loc-clear');
+  if (editingLoc && typeof editingLoc.lat === 'number') {
+    lbl.textContent = editingLoc.label || (editingLoc.lat.toFixed(4) + ', ' + editingLoc.lng.toFixed(4));
+    clr.style.display = '';
+  } else {
+    editingLoc = null;
+    lbl.textContent = 'aucune';
+    clr.style.display = 'none';
+  }
+}
+document.getElementById('me-loc-set').addEventListener('click', () => {
+  capturePosition((loc) => { editingLoc = loc; renderMeLoc(); });
+});
+document.getElementById('me-loc-clear').addEventListener('click', () => { editingLoc = null; renderMeLoc(); });
+document.getElementById('me-loc-addr').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const loc = await geocodeAddress(e.target.value);
+  if (loc) { editingLoc = loc; e.target.value = ''; renderMeLoc(); }
+});
 
 // --- Accès partage : un assigné voit-il ce mémo ? (sinon affichage ambre) ---
 function projectAncestorIds(pid) {
@@ -3280,6 +3867,9 @@ function openMemoEditor(memo) {
   document.getElementById('me-title').value = memo.title || '';
   editingAssignees = [...(memo.assignees || [])];
   renderMePeople();
+  editingLoc = (memo.location && typeof memo.location.lat === 'number') ? { ...memo.location } : null;
+  document.getElementById('me-loc-addr').value = '';
+  renderMeLoc();
   const mc = document.getElementById('me-comments');
   mc.innerHTML = '';
   mc.appendChild(commentsBlockEl(memo));
@@ -3324,7 +3914,7 @@ document.getElementById('memo-edit-save').addEventListener('click', (e) => withB
   if (!text && !title) { await notify('Le mémo doit avoir un titre ou un contenu.', { error: true }); return; }
   let html = text ? q.getSemanticHTML().replace(/&nbsp;|\u00a0/g, ' ') : '';
   memoEditDialog.close();
-  await patchMemo(editingMemoId, { content: html, title, assignees: editingAssignees });
+  await patchMemo(editingMemoId, { content: html, title, assignees: editingAssignees, location: editingLoc });
   editingMemoId = null;
 }));
 
@@ -3426,7 +4016,7 @@ function taskEl(memo) {
   if (prio && prio.color && !memo.done) check.style.borderColor = prio.color;
   row.appendChild(check);
 
-  const content = el('div', { class: 'task-content', attrs: { title: 'Cliquer pour éditer' } });
+  const content = el('div', { class: 'task-content' });
   if (memo.title) {
     const tl = el('div', { class: 'task-title' });
     if (memo.emoji) tl.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
@@ -3437,9 +4027,6 @@ function taskEl(memo) {
   }
   if (memo.content) content.appendChild(contentNode(memo.content, memo));
   wireChecklist(content, memo);
-  content.addEventListener('click', () => {
-    if (!openMemoEditor(memo)) editTaskInline(task, content, memo);
-  });
   row.appendChild(content);
 
   const badges = el('div', { class: 'task-badges' });
@@ -3489,20 +4076,11 @@ function taskEl(memo) {
       },
     }));
   }
-  if (memo.project_id && (state.memoProject === 'all' || memo.project_id !== state.memoProject)) {
-    const proj = state.projects.find(p => p.id === memo.project_id);
-    if (proj) {
-      const pb = el('span', { class: 'proj-badge' });
-      pb.appendChild(comboIcon(proj.emoji, proj.color, null));
-      pb.appendChild(el('span', { text: proj.name }));
-      badges.appendChild(pb);
-    }
-  }
   row.appendChild(badges);
 
   const actions = el('div', { class: 'task-actions' });
   actions.appendChild(el('button', {
-    text: expandedMemos.has(memo.id) ? '▾' : '▸',
+    class: 'texp', icon: expandedMemos.has(memo.id) ? 'chevron-down' : 'chevron-right',
     attrs: { title: 'Date, priorité, sous-tâches' },
     on: { click: () => {
       if (expandedMemos.has(memo.id)) expandedMemos.delete(memo.id);
@@ -3511,16 +4089,33 @@ function taskEl(memo) {
     } },
   }));
   actions.appendChild(el('button', {
+    class: 'tedit', icon: 'pencil', attrs: { title: 'Modifier ce mémo' },
+    on: { click: () => { if (!openMemoEditor(memo)) editTaskInline(task, content, memo); } },
+  }));
+  actions.appendChild(el('button', {
     class: 'tdup', icon: 'copy', attrs: { title: 'Dupliquer ce mémo' },
     on: { click: () => duplicateMemo(memo.id) },
   }));
-  row.appendChild(actions);
   task.appendChild(row);
 
   const thumbs = thumbsEl(memo, expandedMemos.has(memo.id));
   if (thumbs) task.appendChild(thumbs);
 
   if (expandedMemos.has(memo.id)) task.appendChild(taskDetailEl(memo));
+
+  // Pied de carte : projet à gauche, actions (déplier / modifier / dupliquer) à droite.
+  const foot = el('div', { class: 'task-foot' });
+  const footProj = el('div', { class: 'foot-proj' });
+  if (memo.project_id) {
+    const fp = state.projects.find(p => p.id === memo.project_id);
+    if (fp) {
+      footProj.appendChild(comboIcon(fp.emoji, fp.color, null));
+      footProj.appendChild(el('span', { text: fp.name }));
+    }
+  }
+  foot.appendChild(footProj);
+  foot.appendChild(actions);
+  task.appendChild(foot);
 
   task.addEventListener('drop', (e) => {
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
@@ -3798,6 +4393,19 @@ function taskDetailEl(memo) {
   emojiIn.value = memo.emoji || '';
   emojiIn.addEventListener('change', () => patchMemo(memo.id, { emoji: emojiIn.value.trim() }));
   row1.appendChild(emojiIn);
+  // Couleur du point sur la carte (override). Vide = couleur priorité / défaut.
+  row1.appendChild(el('span', { text: '📍', attrs: { title: 'Couleur du point sur la carte' } }));
+  const ptColorIn = el('input', { attrs: { type: 'color', title: 'Couleur du point sur la carte' } });
+  ptColorIn.style.cssText = 'width:2rem;height:1.7rem;padding:0;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer';
+  ptColorIn.value = memo.marker_color || (prioOf(memo.priority) || {}).color || state.mapMarkerColor || '#e53935';
+  ptColorIn.addEventListener('change', () => patchMemo(memo.id, { marker_color: ptColorIn.value }));
+  row1.appendChild(ptColorIn);
+  if (memo.marker_color) {
+    row1.appendChild(el('button', {
+      class: 'prio-btn', text: '↺ couleur', attrs: { title: 'Couleur du point par défaut' },
+      on: { click: () => patchMemo(memo.id, { marker_color: '' }) },
+    }));
+  }
   row1.appendChild(el('span', { text: '🔁' }));
   const recurSel = el('select');
   RECUR_OPTIONS.forEach(([v, label]) => {
@@ -3962,7 +4570,7 @@ function renderBoard() {
     title.appendChild(el('button', {
       class: 'prio-btn', icon: 'map', text: 'Carte (' + mapPoints.length + ')',
       attrs: { title: 'Voir tous les points géolocalisés de cette vue sur une carte' },
-      on: { click: () => openMapDialog(document.getElementById('board-title').textContent.replace(/🗺.*$/, '').trim() || 'Carte', boardMapPoints()) },
+      on: { click: () => openMapDialog(document.getElementById('board-title').textContent.replace(/🗺.*$/, '').trim() || 'Carte', boardMapPoints(), boardMapPoints) },
     }));
   }
   board.appendChild(title);
@@ -4632,10 +5240,12 @@ window.addEventListener('load', syncHeaderHeight);
       if (anim(animate) && labels.length) {
         g.to(labels, { x: -16, autoAlpha: 0, duration: 0.22, ease: 'back.in(2)',
           stagger: 0.015, overwrite: true,
-          onComplete: () => { sb.classList.add('sb-rail'); g.set(labels, { clearProps: 'all' }); syncBtns(); } });
-      } else { sb.classList.add('sb-rail'); syncBtns(); }
+          onComplete: () => { sb.classList.add('sb-rail'); g.set(labels, { clearProps: 'all' }); syncBtns(); renderSidebar(); } });
+      } else { sb.classList.add('sb-rail'); syncBtns(); renderSidebar(); }
     } else {
       sb.classList.remove('sb-rail'); syncBtns();
+      // Re-render : en rail on force tout déplié ; en sortie on restaure les replis de sections/projets.
+      renderSidebar();
       const labels = sb.querySelectorAll('.cat-label, .count');
       if (anim(animate) && labels.length) {
         g.from(labels, { x: -16, autoAlpha: 0, duration: 0.3, ease: 'back.out(1.7)',
@@ -4659,6 +5269,7 @@ window.addEventListener('load', syncHeaderHeight);
 const settingsDialog = document.getElementById('settings-dialog');
 document.getElementById('settings-btn').addEventListener('click', () => {
   document.getElementById('owner-name-input').value = state.ownerName || '';
+  document.getElementById('marker-color-input').value = state.mapMarkerColor || '#e53935';
   renderCatManage();
   renderProjManage();
   renderPrioManage();
@@ -4676,6 +5287,24 @@ document.getElementById('owner-name-save').addEventListener('click', async (e) =
     renderAll();
     notify('Nom enregistré : ' + state.ownerName + '.');
   });
+});
+
+async function saveMarkerColor(color, btn) {
+  await withBusy(btn, async () => {
+    const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ map_marker_color: color }) });
+    state.mapMarkerColor = (r && r.map_marker_color) || color;
+    document.getElementById('marker-color-input').value = state.mapMarkerColor;
+    notify('Couleur des points enregistrée.');
+  });
+}
+
+document.getElementById('marker-color-save').addEventListener('click', (e) => {
+  saveMarkerColor(document.getElementById('marker-color-input').value, e.currentTarget);
+});
+
+document.getElementById('marker-color-reset').addEventListener('click', (e) => {
+  document.getElementById('marker-color-input').value = '#e53935';
+  saveMarkerColor('#e53935', e.currentTarget);
 });
 
 async function renderBackups() {

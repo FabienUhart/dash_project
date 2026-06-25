@@ -113,6 +113,14 @@ button.icon:active { transform: scale(0.94); }
 .sitem.droptarget { outline: 1px dashed var(--accent); color: var(--accent); }
 .sitem .cnt { margin-left: auto; font-size: 0.72rem; opacity: 0.7; flex-shrink: 0; }
 .sitem .slabel { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.sitem .cat-edit {
+  flex-shrink: 0; min-height: 0; width: 1.5rem; height: 1.5rem;
+  margin-left: 0.2rem; padding: 0; border: none; background: none;
+  color: var(--muted); cursor: pointer; border-radius: 5px; opacity: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.sitem:hover .cat-edit, .sitem:focus-within .cat-edit { opacity: 0.7; }
+.sitem .cat-edit:hover { opacity: 1; color: var(--text); background: var(--panel-2); }
 .sdot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem; }
 @media (max-width: 900px) {
@@ -121,6 +129,8 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
     /* Navigation projets collante : épinglée sous le header au défilement (--header-h mesuré en JS). */
     position: sticky; top: var(--header-h, 0px); z-index: 9; background: var(--panel); }
   .sitem { flex-shrink: 0; margin-bottom: 0; }
+  /* Crayon d'édition projet toujours visible au doigt (le survol n'existe pas). */
+  .sitem .cat-edit { opacity: 0.85; }
 }
 .task {
   background: var(--panel);
@@ -142,6 +152,20 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .task-check:disabled { cursor: default; opacity: 0.6; }
 .task.done .task-check { background: var(--green); border-color: var(--green); color: #fff; }
 .task-content { flex: 1; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
+.task-edit {
+  flex-shrink: 0; min-height: 0; width: 1.6rem; height: 1.6rem; margin-left: auto;
+  padding: 0; border: none; background: none; color: var(--muted); cursor: pointer;
+  border-radius: 5px; opacity: 0.55; display: inline-flex; align-items: center; justify-content: center;
+}
+.task:hover .task-edit, .task .task-edit:focus-visible { opacity: 0.9; }
+.task-edit:hover { opacity: 1; color: var(--text); background: var(--panel-2); }
+@media (max-width: 900px) {
+  .task-edit {
+    opacity: 1; width: auto; min-width: 46px; min-height: 40px; padding: 0.25rem 0.6rem;
+    border: 1px solid var(--accent); border-radius: 10px; background: var(--panel-2); color: var(--accent);
+  }
+  .task-edit .ic { width: 1.5em; height: 1.5em; }
+}
 .task.done .task-content { text-decoration: line-through; color: var(--muted); }
 .task-content a { color: var(--accent); }
 .task-content p { margin: 0 0 0.15rem; }
@@ -440,6 +464,9 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 
 <dialog id="map-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.9rem;width:min(920px,96vw);color:var(--text)">
   <h3 id="map-title" style="margin:0 0 0.6rem;font-size:1rem">🗺 Carte</h3>
+  <div id="map-subbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.45rem"></div>
+  <div id="map-groupbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.55rem"></div>
+  <div id="map-selbar" style="display:none;flex-wrap:wrap;gap:0.4rem;align-items:center;margin:0 0 0.55rem;padding:0.45rem 0.55rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px"></div>
   <div style="display:flex;gap:0.6rem;flex-wrap:wrap">
     <div id="map-el" style="flex:1;min-width:260px;height:min(60vh,460px);border-radius:8px;background:var(--panel-2)"></div>
     <div id="map-list" style="width:230px;max-height:min(60vh,460px);overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem"></div>
@@ -1131,7 +1158,12 @@ function renderSidebar() {
         timer = setTimeout(() => { timer = null; select(); }, 250);
       });
       item.addEventListener('contextmenu', (e) => { e.preventDefault(); openProjEditor(proj); });
-      item.title = 'Double-clic ou clic droit pour modifier';
+      item.title = 'Modifier (crayon), double-clic ou clic droit';
+      const eb = el('button', 'cat-edit');
+      eb.appendChild(shareIcon('pencil'));
+      eb.title = 'Modifier ce projet';
+      eb.addEventListener('click', (e) => { e.stopPropagation(); openProjEditor(proj); });
+      item.appendChild(eb);
     } else {
       item.addEventListener('click', select);
     }
@@ -1198,8 +1230,7 @@ function todayStr() {
 let activeMap = null;
 document.getElementById('map-close').addEventListener('click', () => document.getElementById('map-dialog').close());
 
-function openShareMap() {
-  if (typeof L === 'undefined') { notify('Carte indisponible (fichiers Leaflet manquants).', { error: true }); return; }
+function shareMapPoints() {
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
   const points = [];
   scopedMemos().forEach(m => {
@@ -1207,57 +1238,349 @@ function openShareMap() {
     points.push({
       lat: m.location.lat, lng: m.location.lng,
       title: (m.emoji ? m.emoji + ' ' : '') + (isRich(m.content) ? stripTags(m.content) : m.content).slice(0, 60),
+      placeLabel: m.location.label || '',
       sub: m.location.label || '',
-      color: (prios[m.priority] || {}).color || '#4fc3f7',
+      color: m.point_color || (prios[m.priority] || {}).color || DATA.marker_color || '#e53935',
+      kind: 'memo', id: m.id, override: m.point_color || '', groups: m.map_groups || [], project_id: m.project_id || null,
     });
   });
   (DATA.projects || []).forEach(p => {
     if (p.location && (PFILTER === 'all' || p.id === PFILTER || projDescendants(PFILTER).includes(p.id))) {
-      points.push({ lat: p.location.lat, lng: p.location.lng, title: '📁 ' + p.name, sub: p.location.label || '', color: p.color || '#81c784' });
+      points.push({ lat: p.location.lat, lng: p.location.lng, title: '📁 ' + p.name, placeLabel: p.location.label || '', sub: p.location.label || '', color: p.point_color || p.color || '#81c784', kind: 'project', id: p.id, override: p.point_color || '', groups: [] });
     }
   });
+  return points;
+}
+
+// Couleur de projet utilisable comme accent : repli '' si vide/invalide ou quasi-noir.
+function usableProjColor(c) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(c || '')) return '';
+  const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 24 ? '' : c;
+}
+
+const PROV_PALETTE = ['#e57373', '#64b5f6', '#81c784', '#ffb74d', '#ba68c8', '#4db6ac', '#f06292', '#a1887f', '#90a4ae', '#fff176'];
+function provenanceColor(proj) {
+  const c = usableProjColor(proj ? proj.color : '');
+  if (c) return c;
+  const id = proj ? proj.id : 0;
+  return PROV_PALETTE[((id % PROV_PALETTE.length) + PROV_PALETTE.length) % PROV_PALETTE.length];
+}
+
+async function saveShareGroups(p, groups) {
+  const r = await fetch(API + '/memo/' + p.id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: JSON.stringify({ map_groups: groups }),
+  });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); if (e.error) notify(e.error, { error: true }); return; }
+  const obj = (DATA.memos || []).find(x => x.id === p.id);
+  if (obj) obj.map_groups = groups;
+}
+
+const SHARE_UNGROUPED = ' none';
+
+async function saveSharePointColor(p, color) {
+  const url = p.kind === 'memo' ? API + '/memo/' + p.id : API + '/project/' + p.id;
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: JSON.stringify({ marker_color: color }),
+  });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); if (e.error) notify(e.error, { error: true }); return; }
+  const arr = p.kind === 'memo' ? DATA.memos : DATA.projects;
+  const obj = (arr || []).find(x => x.id === p.id);
+  if (obj) obj.point_color = color;
+}
+
+function openShareMap() {
+  if (typeof L === 'undefined') { notify('Carte indisponible (fichiers Leaflet manquants).', { error: true }); return; }
+  const points = shareMapPoints();
   if (!points.length) { notify('Aucun point géolocalisé dans cette vue.'); return; }
+  const editable = !!DATA.can_edit;
   const dlg = document.getElementById('map-dialog');
   document.getElementById('map-title').textContent = '🗺 ' + DATA.title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
   dlg.showModal();
   if (activeMap) { activeMap.remove(); activeMap = null; }
   activeMap = L.map('map-el');
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(activeMap);
-  const latlngs = [];
+  const markerLayer = L.layerGroup().addTo(activeMap);
   const listEl = document.getElementById('map-list');
-  listEl.innerHTML = '';
-  points.forEach(p => {
-    const ll = [p.lat, p.lng];
-    latlngs.push(ll);
-    const marker = L.circleMarker(ll, { radius: 9, color: p.color, weight: 2, fillColor: p.color, fillOpacity: 0.55 })
-      .addTo(activeMap)
-      .bindPopup('<strong>' + p.title.replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : ''));
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.style.cssText = 'display:flex;align-items:flex-start;gap:0.4rem;text-align:left;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer';
-    const dot = document.createElement('span');
-    dot.style.cssText = 'width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:0.25rem;background:' + p.color;
-    row.appendChild(dot);
-    const txt = document.createElement('span');
-    txt.style.cssText = 'min-width:0;overflow-wrap:anywhere';
-    const strong = document.createElement('strong');
-    strong.textContent = p.title;
-    txt.appendChild(strong);
-    if (p.sub) {
-      const sub = document.createElement('div');
-      sub.textContent = p.sub;
-      sub.style.cssText = 'color:var(--muted);font-size:0.72rem';
-      txt.appendChild(sub);
+  const subbar = document.getElementById('map-subbar');
+  const groupbar = document.getElementById('map-groupbar');
+  const selbar = document.getElementById('map-selbar');
+
+  const GKEY = 'shareMapFocus:' + TOKEN + ':' + PFILTER;
+  const SUBKEY = 'shareMapSubFilter:' + TOKEN + ':' + PFILTER;
+  let active, subActive;
+  try { active = new Set(JSON.parse(localStorage.getItem(GKEY) || '[]')); } catch (e) { active = new Set(); }
+  try { subActive = new Set(JSON.parse(localStorage.getItem(SUBKEY) || '[]')); } catch (e) { subActive = new Set(); }
+  const selected = new Set();
+  let current = points;
+
+  const pkey = p => p.kind + ':' + p.id;
+  const persist = () => localStorage.setItem(GKEY, JSON.stringify([...active]));
+  const persistSub = () => localStorage.setItem(SUBKEY, JSON.stringify([...subActive]));
+  const subToken = p => (p.kind === 'memo' ? (p.project_id || 0) : p.id);
+  const subFilterScope = (PFILTER !== 'all');
+  function groupNames(pts) {
+    const s = new Set();
+    pts.forEach(p => (p.groups || []).forEach(g => s.add(g)));
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }
+  function hasUngrouped(pts) { return pts.some(p => !(p.groups && p.groups.length)); }
+  function isGroupFocused(p) {
+    if (!active.size) return true;
+    const gs = (p.groups && p.groups.length) ? p.groups : [SHARE_UNGROUPED];
+    return gs.some(g => active.has(g));
+  }
+  function isSubFocused(p) {
+    if (!subActive.size) return true;
+    return subActive.has(subToken(p));
+  }
+  function isFocused(p) { return isGroupFocused(p) && isSubFocused(p); }
+
+  function renderSubbar() {
+    subbar.innerHTML = '';
+    if (!subFilterScope) { subbar.style.display = 'none'; return; }
+    const present = new Set(current.map(subToken));
+    // Afficher dès qu'au moins un point vient d'un sous-projet descendant
+    // (subToken ≠ projet courant), même s'il n'y a qu'un seul sous-projet.
+    if (![...present].some(t => t !== PFILTER)) { subbar.style.display = 'none'; return; }
+    const ordered = (DATA.projects || []).filter(p => present.has(p.id)).map(p => p.id);
+    present.forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
+    subbar.style.display = 'flex';
+    const lab = document.createElement('span');
+    lab.textContent = 'Sous-projets :';
+    lab.style.cssText = 'font-size:0.78rem;color:var(--muted)';
+    subbar.appendChild(lab);
+    ordered.forEach(t => {
+      const proj = (DATA.projects || []).find(p => p.id === t);
+      const label = proj ? ((proj.emoji ? proj.emoji + ' ' : '') + proj.name) + (t === PFILTER ? ' (ce projet)' : '') : '(sans projet)';
+      const on = subActive.has(t);
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'prio-btn';
+      b.textContent = (on ? '✓ ' : '') + label;
+      b.title = on ? 'Ne plus filtrer sur ce sous-projet' : 'Afficher seulement ce sous-projet';
+      b.style.cssText = 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '');
+      b.addEventListener('click', () => { if (subActive.has(t)) subActive.delete(t); else subActive.add(t); persistSub(); refresh(true); });
+      subbar.appendChild(b);
+    });
+    if (subActive.size) {
+      const r = document.createElement('button');
+      r.type = 'button'; r.className = 'prio-btn'; r.textContent = '↺ tous les sous-projets';
+      r.style.cssText = 'padding:0.1rem 0.45rem';
+      r.addEventListener('click', () => { subActive.clear(); persistSub(); refresh(true); });
+      subbar.appendChild(r);
     }
-    row.appendChild(txt);
-    row.addEventListener('click', () => { activeMap.setView(ll, 16); marker.openPopup(); });
-    listEl.appendChild(row);
-  });
-  setTimeout(() => {
-    activeMap.invalidateSize();
-    if (latlngs.length === 1) activeMap.setView(latlngs[0], 15);
-    else activeMap.fitBounds(latlngs, { padding: [30, 30] });
-  }, 60);
+  }
+
+  function renderGroupbar() {
+    groupbar.innerHTML = '';
+    const names = groupNames(current);
+    if (!names.length) { groupbar.style.display = 'none'; return; }
+    groupbar.style.display = 'flex';
+    const lab = document.createElement('span');
+    lab.textContent = 'Groupes :';
+    lab.style.cssText = 'font-size:0.78rem;color:var(--muted)';
+    groupbar.appendChild(lab);
+    const chip = (label, token) => {
+      const on = active.has(token);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'prio-btn';
+      b.textContent = (on ? '✓ ' : '') + label;
+      b.title = on ? 'Ne plus filtrer sur ce groupe' : 'Afficher seulement ce groupe';
+      b.style.cssText = 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '');
+      b.addEventListener('click', () => { if (active.has(token)) active.delete(token); else active.add(token); persist(); refresh(true); });
+      groupbar.appendChild(b);
+    };
+    names.forEach(n => chip(n, n));
+    if (hasUngrouped(current)) chip('(sans groupe)', SHARE_UNGROUPED);
+    if (active.size) {
+      const r = document.createElement('button');
+      r.type = 'button'; r.className = 'prio-btn'; r.textContent = '↺ tout afficher';
+      r.style.cssText = 'padding:0.1rem 0.45rem';
+      r.addEventListener('click', () => { active.clear(); persist(); refresh(true); });
+      groupbar.appendChild(r);
+    }
+  }
+
+  function renderSelbar() {
+    selbar.innerHTML = '';
+    if (!editable || !selected.size) { selbar.style.display = 'none'; return; }
+    selbar.style.display = 'flex';
+    const lab = document.createElement('span');
+    lab.textContent = selected.size + ' sélectionné' + (selected.size > 1 ? 's' : '');
+    lab.style.cssText = 'font-size:0.8rem;font-weight:600';
+    selbar.appendChild(lab);
+    const input = document.createElement('input');
+    input.type = 'text'; input.placeholder = 'nom du groupe'; input.setAttribute('list', 'share-group-list');
+    input.style.cssText = 'flex:1;min-width:120px;background:var(--panel);border:1px solid var(--border);border-radius:5px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.2rem 0.4rem';
+    const dl = document.createElement('datalist'); dl.id = 'share-group-list';
+    groupNames(current).forEach(n => { const o = document.createElement('option'); o.value = n; dl.appendChild(o); });
+    selbar.appendChild(input); selbar.appendChild(dl);
+    const apply = async () => {
+      const name = input.value.trim();
+      if (!name) return;
+      for (const key of [...selected]) {
+        const p = current.find(x => pkey(x) === key);
+        if (!p || p.kind !== 'memo') continue;
+        const next = Array.from(new Set([...(p.groups || []), name]));
+        await saveShareGroups(p, next);
+      }
+      selected.clear();
+      current = shareMapPoints();
+      refresh(false);
+    };
+    const grp = document.createElement('button');
+    grp.type = 'button'; grp.className = 'primary'; grp.textContent = '＋ Grouper';
+    grp.style.cssText = 'padding:0.2rem 0.6rem';
+    grp.addEventListener('click', apply);
+    selbar.appendChild(grp);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+    const clr = document.createElement('button');
+    clr.type = 'button'; clr.className = 'prio-btn'; clr.textContent = 'Tout décocher';
+    clr.addEventListener('click', () => { selected.clear(); refresh(false); });
+    selbar.appendChild(clr);
+  }
+
+  function draw(pts, fit) {
+    markerLayer.clearLayers();
+    listEl.innerHTML = '';
+    const latlngs = [];
+
+    function buildRow(p, proj, showChip) {
+      const ll = [p.lat, p.lng];
+      const focused = isFocused(p);
+      if (focused) latlngs.push(ll);
+      const mColor = focused ? p.color : '#8a93a0';
+      const marker = L.circleMarker(ll, { radius: focused ? 9 : 6, color: mColor, weight: focused ? 2 : 1, fillColor: mColor, fillOpacity: focused ? 0.55 : 0.18 })
+        .addTo(markerLayer)
+        .bindPopup('<strong>' + p.title.replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : ''));
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:flex-start;gap:0.4rem;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;color:var(--text)' + (focused ? '' : ';opacity:0.4');
+      // Pastille de provenance (couleur du projet + emoji) quand plusieurs projets coexistent.
+      if (showChip) {
+        const accent = proj ? provenanceColor(proj) : 'var(--border)';
+        const chip = document.createElement('span');
+        chip.title = proj ? proj.name : 'sans projet';
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:0.2rem;flex-shrink:0;margin-top:0.18rem;font-size:0.72rem';
+        const cd = document.createElement('span');
+        cd.style.cssText = 'width:9px;height:9px;border-radius:50%;flex-shrink:0;background:' + accent;
+        chip.appendChild(cd);
+        if (proj && proj.emoji) { const e = document.createElement('span'); e.textContent = proj.emoji; chip.appendChild(e); }
+        row.appendChild(chip);
+      }
+      if (editable && p.kind === 'memo') {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selected.has(pkey(p));
+        cb.style.cssText = 'flex-shrink:0;margin-top:0.28rem;cursor:pointer';
+        cb.addEventListener('change', () => { if (cb.checked) selected.add(pkey(p)); else selected.delete(pkey(p)); renderSelbar(); });
+        row.appendChild(cb);
+      }
+      if (editable) {
+        const colorIn = document.createElement('input');
+        colorIn.type = 'color';
+        colorIn.value = p.color;
+        colorIn.title = 'Couleur de ce point';
+        colorIn.style.cssText = 'width:18px;height:18px;padding:0;border:none;background:none;flex-shrink:0;margin-top:0.18rem;cursor:pointer';
+        colorIn.addEventListener('change', async () => { await saveSharePointColor(p, colorIn.value); current = shareMapPoints(); refresh(false); });
+        row.appendChild(colorIn);
+      } else {
+        const dot = document.createElement('span');
+        dot.style.cssText = 'width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:0.25rem;background:' + p.color;
+        row.appendChild(dot);
+      }
+      const txt = document.createElement('button');
+      txt.type = 'button';
+      txt.style.cssText = 'flex:1;min-width:0;overflow-wrap:anywhere;text-align:left;background:none;border:none;padding:0;color:inherit;font:inherit;cursor:pointer';
+      const strong = document.createElement('strong');
+      strong.textContent = p.title;
+      txt.appendChild(strong);
+      if (p.placeLabel) {
+        const sub = document.createElement('div');
+        sub.textContent = p.placeLabel;
+        sub.style.cssText = 'color:var(--muted);font-size:0.72rem';
+        txt.appendChild(sub);
+      }
+      if (p.groups && p.groups.length) {
+        const chips = document.createElement('div');
+        chips.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.2rem;margin-top:0.2rem';
+        p.groups.forEach(g => {
+          const c = document.createElement('span');
+          c.style.cssText = 'display:inline-flex;align-items:center;gap:0.15rem;font-size:0.66rem;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:0.02rem 0.4rem';
+          const gn = document.createElement('span'); gn.textContent = g; c.appendChild(gn);
+          if (editable) {
+            const x = document.createElement('button');
+            x.type = 'button'; x.textContent = '×'; x.title = 'Retirer de « ' + g + ' »';
+            x.style.cssText = 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0;font-size:0.8rem;line-height:1';
+            x.addEventListener('click', async (ev) => { ev.stopPropagation(); await saveShareGroups(p, (p.groups || []).filter(y => y !== g)); current = shareMapPoints(); refresh(false); });
+            c.appendChild(x);
+          }
+          chips.appendChild(c);
+        });
+        txt.appendChild(chips);
+      }
+      txt.addEventListener('click', () => { activeMap.setView(ll, 16); marker.openPopup(); });
+      row.appendChild(txt);
+      if (editable && p.override) {
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.textContent = '↺';
+        reset.title = 'Couleur par défaut';
+        reset.style.cssText = 'flex-shrink:0;padding:0.05rem 0.35rem;background:var(--panel-2);border:1px solid var(--border);border-radius:5px;color:var(--text);cursor:pointer';
+        reset.addEventListener('click', async () => { await saveSharePointColor(p, ''); current = shareMapPoints(); refresh(false); });
+        row.appendChild(reset);
+      }
+      listEl.appendChild(row);
+    }
+
+    // Regroupement par projet d'origine, avec en-têtes de section.
+    const byProj = new Map();
+    pts.forEach(p => { const t = subToken(p); if (!byProj.has(t)) byProj.set(t, []); byProj.get(t).push(p); });
+    const ordered = [];
+    if (byProj.has(PFILTER)) ordered.push(PFILTER);
+    (DATA.projects || []).forEach(pr => { if (pr.id !== PFILTER && byProj.has(pr.id)) ordered.push(pr.id); });
+    [...byProj.keys()].forEach(t => { if (!ordered.includes(t)) ordered.push(t); });
+
+    const multi = ordered.length > 1;
+    ordered.forEach(t => {
+      const proj = (DATA.projects || []).find(pr => pr.id === t);
+      if (multi) {
+        const accent = proj ? provenanceColor(proj) : 'var(--border)';
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;align-items:center;gap:0.35rem;font-size:0.74rem;color:var(--muted);font-weight:600;margin-top:0.4rem;padding:0.1rem 0.2rem 0.1rem 0.35rem;border-left:3px solid ' + accent;
+        const lab = document.createElement('span');
+        lab.textContent = proj ? ((proj.emoji ? proj.emoji + ' ' : '') + proj.name) + (t === PFILTER ? ' (ce projet)' : '') : '(sans projet)';
+        head.appendChild(lab);
+        const cnt = document.createElement('span');
+        cnt.textContent = '· ' + byProj.get(t).length;
+        cnt.style.cssText = 'font-weight:400';
+        head.appendChild(cnt);
+        listEl.appendChild(head);
+      }
+      byProj.get(t).forEach(p => buildRow(p, proj, multi));
+    });
+
+    if (fit) {
+      setTimeout(() => {
+        activeMap.invalidateSize();
+        if (latlngs.length === 1) activeMap.setView(latlngs[0], 15);
+        else if (latlngs.length) activeMap.fitBounds(latlngs, { padding: [30, 30] });
+      }, 60);
+    }
+  }
+
+  function refresh(fit) {
+    renderSubbar();
+    renderGroupbar();
+    renderSelbar();
+    draw(current, fit);
+  }
+
+  refresh(true);
 }
 
 function stripTags(html) {
@@ -1479,6 +1802,13 @@ function render() {
     });
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
     if (memo.due_date) row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })));
+    if (canEditNow()) {
+      const eBtn = el('button', 'task-edit');
+      eBtn.appendChild(shareIcon('pencil'));
+      eBtn.title = 'Modifier ce mémo';
+      eBtn.addEventListener('click', () => openEditor(memo, content, t));
+      row.appendChild(eBtn);
+    }
     t.appendChild(row);
 
     (memo.subtasks || []).forEach((st, i) => {
