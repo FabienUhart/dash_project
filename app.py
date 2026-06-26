@@ -1617,6 +1617,7 @@ def _share_memo_dict(row):
         "content": d["content"],
         "done": d["done"],
         "due_date": d["due_date"],
+        "due_time": d.get("due_time", "") or "",
         "priority": d["priority"],
         "subtasks": d["subtasks"],
         "images": d["images"],
@@ -2420,7 +2421,7 @@ def share_update_memo(token, memo_id):
     raw = request.get_json(silent=True) or {}
     data = {
         k: raw[k]
-        for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
+        for k in ("content", "done", "subtasks", "due_date", "due_time", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
         if k in raw
     }
     if "project_id" in raw and share["kind"] == "project":
@@ -2564,6 +2565,7 @@ def _share_memo_dict_from_payload(d):
         "content": d["content"],
         "done": d["done"],
         "due_date": d["due_date"],
+        "due_time": d.get("due_time", "") or "",
         "priority": d["priority"],
         "subtasks": d["subtasks"],
         "images": d["images"],
