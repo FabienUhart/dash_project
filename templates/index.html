@@ -9,6 +9,11 @@
 <script src="/static/quill.min.js" defer></script>
 <link rel="stylesheet" href="/static/leaflet.css">
 <script src="/static/leaflet.js" defer></script>
+<!-- [PHOTO-CLUSTER] plugin de clustering du calque photo, auto-hébergé ; chargé APRÈS
+     leaflet.js (il étend L). Absent => L.markerClusterGroup undefined => dégradation. -->
+<link rel="stylesheet" href="/static/MarkerCluster.css">
+<link rel="stylesheet" href="/static/MarkerCluster.Default.css">
+<script src="/static/leaflet.markercluster.js" defer></script>
 <script src="/static/gsap.min.js" defer></script>
 <style>
 :root {
@@ -2266,14 +2271,19 @@ async function savePointGroups(p, groups) {
 
 function openMapDialog(title, points, recompute) {
   // Thin wrapper : délègue à runMapDialog (partial) avec le config owner.
+  // [PHOTO-MAP] Calque photo seulement sur un vrai projet (endpoint scopé récursif) ;
+  // pas de bouton 📷 sur all/inbox (loadPhotos absent = pas de calque, spec).
+  const realProject = state.memoProject !== 'all' && state.memoProject !== 'inbox';
   runMapDialog({
     title, points, recompute, editable: !!recompute,
     projects: state.projects, currentProjectId: state.memoProject,
-    subFilterScope: state.memoProject !== 'all' && state.memoProject !== 'inbox',
+    subFilterScope: realProject,
     defaultMarkerColor: state.mapMarkerColor,
     focusKey: 'mapFocus:' + state.memoProject,
     subKey: 'mapSubFilter:' + state.memoProject,
     saveColor: savePointColor, saveGroups: savePointGroups,
+    loadPhotos: realProject ? (() => fetch('/api/projects/' + state.memoProject + '/photos').then(r => r.json())) : null,
+    openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => '/uploads/' + x, downloadUrl: x => '/uploads/' + x, exifUrl: x => '/api/image-exif/' + x }),
   });
 }
 

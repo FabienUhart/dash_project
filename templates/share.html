@@ -10,6 +10,10 @@
 <script src="/share/assets/quill.min.js" defer></script>
 <link rel="stylesheet" href="/share/assets/leaflet.css">
 <script src="/share/assets/leaflet.js" defer></script>
+<!-- [PHOTO-CLUSTER] plugin clustering (invité, whitelist SHARE_ASSETS) ; après leaflet.js. -->
+<link rel="stylesheet" href="/share/assets/MarkerCluster.css">
+<link rel="stylesheet" href="/share/assets/MarkerCluster.Default.css">
+<script src="/share/assets/leaflet.markercluster.js" defer></script>
 <script src="/share/assets/gsap.min.js" defer></script>
 <style>
 :root {
@@ -1256,6 +1260,9 @@ function openShareMap() {
     focusKey: 'shareMapFocus:' + TOKEN + ':' + PFILTER,
     subKey: 'shareMapSubFilter:' + TOKEN + ':' + PFILTER,
     saveColor: saveSharePointColor, saveGroups: saveShareGroups,
+    // [PHOTO-MAP] Calque photo scopé au partage (endpoint /share/<token>/photos).
+    loadPhotos: () => fetch(API + '/photos', { headers: { 'X-Guest-Token': guestToken() } }).then(r => r.json()),
+    openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => API + '/image/' + x, downloadUrl: x => API + '/image/' + x, exifUrl: x => API + '/image-exif/' + x }),
   });
 }
 

@@ -291,11 +291,105 @@ function runMapDialog(cfg) {
     }
   }
 
+  // [PHOTO-MAP] Calque photo optionnel + frise « où on était ». Activé seulement si
+  // cfg.loadPhotos est fourni (carte d'un vrai projet). Lit image_meta via l'endpoint
+  // scopé (déjà géocodé à l'upload) — aucun appel réseau ici. Marqueurs 📷 distincts
+  // des points-mémo, filtrés par le même focus sous-projet/groupe. Clic → openImage.
+  let photoOn = false, photoData = null, photoLayer = null, photoGreyLayer = null, photoBtn = null;
+  const photoMonths = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+  function fmtTaken(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(iso || '');
+    if (!m) return '';
+    let s = parseInt(m[3], 10) + ' ' + (photoMonths[parseInt(m[2], 10) - 1] || '') + ' ' + m[1];
+    if (m[4]) s += ' · ' + m[4] + 'h' + m[5];
+    return s;
+  }
+  // Réutilise isFocused (groupes + sous-projet) en synthétisant un point depuis la photo.
+  function photoFocus(ph) { return isFocused({ kind: 'memo', project_id: ph.project_id, groups: ph.groups || [] }); }
+
+  function drawPhotos() {
+    if (!photoLayer) return;
+    photoLayer.clearLayers();
+    if (photoGreyLayer) photoGreyLayer.clearLayers();
+    (photoData || []).forEach(ph => {
+      if (ph.lat == null || ph.lng == null) return;
+      const focused = photoFocus(ph);
+      const icon = L.divIcon({ className: 'photo-pin', html: '<span style="font-size:16px;line-height:1;opacity:' + (focused ? 1 : 0.35) + '">📷</span>', iconSize: [22, 22], iconAnchor: [11, 11] });
+      // [PHOTO-CLUSTER] Photos en focus → cluster (compteur = photos affichées) ; photos
+      // grisées (hors focus) → calque plain non clusterisé, pour garder leur opacité.
+      const target = (focused || !photoGreyLayer) ? photoLayer : photoGreyLayer;
+      L.marker([ph.lat, ph.lng], { icon, zIndexOffset: 1000 })
+        .addTo(target)
+        .bindPopup('<strong>📷 ' + (ph.label || '').replace(/</g, '&lt;') + '</strong>' + (ph.taken_at ? '<br>' + fmtTaken(ph.taken_at) : ''))
+        .on('click', () => cfg.openImage(ph.filename));
+    });
+  }
+
+  function renderFrieze() {
+    listEl.innerHTML = '';
+    const list = (photoData || []).filter(ph => ph.has_gps || ph.taken_at)
+      .slice().sort((a, b) => (a.taken_at || '￿').localeCompare(b.taken_at || '￿'));
+    if (!list.length) {
+      listEl.appendChild(el('div', { text: 'Aucune photo géolocalisée ou datée dans cette vue.', attrs: { style: 'font-size:0.8rem;color:var(--muted);padding:0.5rem' } }));
+      return;
+    }
+    listEl.appendChild(el('div', { text: '🕘 Où on était', attrs: { style: 'font-size:0.74rem;color:var(--muted);font-weight:600;padding:0.1rem 0.35rem 0.25rem' } }));
+    list.forEach(ph => {
+      const focused = photoFocus(ph);
+      const row = el('button', {
+        attrs: { type: 'button', title: 'Ouvrir la photo', style: 'display:flex;flex-direction:column;align-items:flex-start;gap:0.1rem;width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--border);padding:0.35rem 0.5rem;color:inherit;font:inherit;cursor:pointer' + (focused ? '' : ';opacity:0.4') },
+        on: { click: () => cfg.openImage(ph.filename) },
+      });
+      row.appendChild(el('strong', { text: '📷 ' + (fmtTaken(ph.taken_at) || 'date inconnue'), attrs: { style: 'font-size:0.78rem' } }));
+      row.appendChild(el('span', { text: ph.has_gps ? (ph.label || '') : 'lieu inconnu', attrs: { style: 'font-size:0.72rem;color:var(--muted)' } }));
+      listEl.appendChild(row);
+    });
+  }
+
+  async function togglePhotos() {
+    if (!photoOn) {
+      if (photoData === null) {
+        photoBtn.textContent = '📷 …';
+        try { photoData = await cfg.loadPhotos(); } catch (e) { photoData = []; }
+        if (!Array.isArray(photoData)) photoData = [];
+      }
+      photoOn = true;
+      // [PHOTO-CLUSTER] Cluster si le plugin auto-hébergé est chargé, sinon dégradation
+      // propre vers un layerGroup simple (= comportement [PHOTO-MAP]). Défauts du plugin :
+      // spiderfyOnMaxZoom (éventail au même point exact) + zoomToBoundsOnClick (split zoom).
+      photoLayer = (typeof L.markerClusterGroup === 'function'
+        ? L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 40, spiderfyOnMaxZoom: true, zoomToBoundsOnClick: true })
+        : L.layerGroup()).addTo(activeMap);
+      photoGreyLayer = L.layerGroup().addTo(activeMap);
+    } else {
+      photoOn = false;
+      if (photoLayer) { photoLayer.remove(); photoLayer = null; }
+      if (photoGreyLayer) { photoGreyLayer.remove(); photoGreyLayer = null; }
+    }
+    photoBtn.textContent = photoOn ? '📷 Photos ✓' : '📷 Photos';
+    photoBtn.style.background = photoOn ? 'var(--accent)' : '';
+    photoBtn.style.color = photoOn ? '#10141a' : '';
+    photoBtn.style.borderColor = photoOn ? 'var(--accent)' : '';
+    refresh(false);
+  }
+
+  if (cfg.loadPhotos) {
+    photoBtn = el('button', {
+      class: 'prio-btn', text: '📷 Photos',
+      attrs: { type: 'button', title: 'Afficher les lieux des photos du projet (EXIF)', style: 'padding:0.1rem 0.5rem' },
+      on: { click: togglePhotos },
+    });
+    const bar = el('div', { attrs: { style: 'display:flex;gap:0.35rem;align-items:center;margin:0 0 0.45rem' } }, photoBtn);
+    subbar.parentNode.insertBefore(bar, subbar);
+  }
+
   function refresh(fit) {
     renderSubbar();
     renderGroupbar();
     renderSelbar();
     draw(current, fit);
+    // [PHOTO-MAP] Le calque suit les mêmes filtres ; la frise remplace la liste mémo.
+    if (photoOn) { drawPhotos(); renderFrieze(); }
   }
 
   refresh(true);

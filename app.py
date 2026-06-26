@@ -297,6 +297,24 @@ def init_db():
         )
         """
     )
+    # [PHOTO-MAP] Métadonnées EXIF des images, donnée DÉRIVÉE des fichiers (jamais
+    # exportée, pas de bump de version) : remplie à l'upload + backfill, pour que la
+    # carte du projet lise les lieux/dates sans re-parser/re-géocoder à chaque ouverture.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS image_meta (
+            filename TEXT PRIMARY KEY,
+            memo_id INTEGER,
+            memo_uid TEXT DEFAULT '',
+            lat REAL,
+            lng REAL,
+            label TEXT DEFAULT '',
+            taken_at TEXT DEFAULT '',
+            has_gps INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT
+        )
+        """
+    )
     scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
     if "pin" not in scols:
         conn.execute("ALTER TABLE shares ADD COLUMN pin TEXT DEFAULT ''")
@@ -481,6 +499,62 @@ def _image_exif(name):
         "label": label,
         "datetime": dt,
     }
+
+
+def _record_image_meta(db, name, memo_id, memo_uid):
+    # [PHOTO-MAP] Persiste l'EXIF d'une image à l'ajout (lieu + date de prise de vue),
+    # donnée DÉRIVÉE. Réutilise _image_exif (un seul géocodage par coords, caché).
+    # Idempotent (PK filename via INSERT OR REPLACE). Silencieux : ne bloque jamais
+    # l'upload — un échec d'extraction laisse simplement l'image hors du calque carte.
+    try:
+        meta = _image_exif(name) or {}
+        lat = meta.get("lat")
+        lng = meta.get("lng")
+        db.execute(
+            "INSERT OR REPLACE INTO image_meta "
+            "(filename, memo_id, memo_uid, lat, lng, label, taken_at, has_gps, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                name,
+                memo_id,
+                memo_uid or "",
+                lat,
+                lng,
+                meta.get("label", "") or "",
+                meta.get("datetime", "") or "",
+                1 if lat is not None else 0,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+    except Exception:
+        pass
+
+
+def _forget_image_meta(db, names):
+    # [PHOTO-MAP] Retire les lignes image_meta des fichiers supprimés définitivement
+    # (la donnée dérivée suit le cycle de vie du fichier — pas de marqueur fantôme).
+    # `db` peut être une connexion request (get_db) OU la connexion de _purge_trash.
+    # `names` accepte : un nom seul, une liste de noms, ou une chaîne JSON-liste
+    # (comme memos.images, pour réutiliser _delete_image_files au même endroit).
+    if isinstance(names, str):
+        s = names.strip()
+        if s[:1] in ("[", "{"):
+            try:
+                names = json.loads(s)
+            except Exception:
+                names = []
+        else:
+            names = [names]
+    names = [os.path.basename(str(n)) for n in (names or [])]
+    if not names:
+        return
+    try:
+        placeholders = ",".join("?" * len(names))
+        db.execute(
+            f"DELETE FROM image_meta WHERE filename IN ({placeholders})", names
+        )
+    except Exception:
+        pass
 
 
 def _geocode_search(q):
@@ -889,6 +963,63 @@ def _project_descendants(db, root_id):
                 ids.append(r["id"])
                 queue.append(r["id"])
     return ids
+
+
+def _project_photos(db, memo_ids):
+    # [PHOTO-MAP] Lit le calque photo depuis image_meta (donnée dérivée, déjà géocodée
+    # à l'upload) pour un ensemble de mémos NON corbeille. Aucune écriture, aucun appel
+    # réseau. Renvoie aussi project_id + groups du mémo porteur → le front réutilise le
+    # même focus sous-projet/groupe que les points-mémo. Photos sans GPS incluses (pas
+    # de marqueur côté front, mais listables dans la frise si elles ont une date).
+    if not memo_ids:
+        return []
+    placeholders = ",".join("?" * len(memo_ids))
+    rows = db.execute(
+        f"SELECT im.filename, im.memo_id, im.lat, im.lng, im.label, im.taken_at, "
+        f"im.has_gps, m.project_id, m.map_groups, m.title, m.emoji "
+        f"FROM image_meta im JOIN memos m ON m.id = im.memo_id "
+        f"WHERE im.memo_id IN ({placeholders}) AND COALESCE(m.deleted_at, '') = '' "
+        f"ORDER BY im.taken_at, im.filename",
+        list(memo_ids),
+    ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            groups = json.loads(r["map_groups"] or "[]")
+        except Exception:
+            groups = []
+        out.append({
+            "filename": r["filename"],
+            "memo_id": r["memo_id"],
+            "project_id": r["project_id"],
+            "lat": r["lat"],
+            "lng": r["lng"],
+            "label": r["label"] or "",
+            "taken_at": r["taken_at"] or "",
+            "has_gps": bool(r["has_gps"]),
+            "groups": groups if isinstance(groups, list) else [],
+            "title": (r["emoji"] + " " if r["emoji"] else "") + (r["title"] or ""),
+        })
+    return out
+
+
+@app.route("/api/projects/<int:project_id>/photos", methods=["GET"])
+def project_photos(project_id):
+    # [PHOTO-MAP] Calque photo d'un projet, récursif sur ses sous-projets. Lecture seule.
+    db = get_db()
+    if not _valid_project_id(db, project_id):
+        return jsonify({"error": "not found"}), 404
+    proj_ids = _project_descendants(db, project_id)
+    placeholders = ",".join("?" * len(proj_ids))
+    memo_ids = [
+        r["id"]
+        for r in db.execute(
+            f"SELECT id FROM memos WHERE project_id IN ({placeholders}) "
+            "AND COALESCE(deleted_at, '') = ''",
+            proj_ids,
+        ).fetchall()
+    ]
+    return jsonify(_project_photos(db, memo_ids))
 
 
 def _resolve_parent(db, project_id, parent_value):
@@ -1416,6 +1547,7 @@ def _purge_memo_row(db, memo_id):
     row = db.execute("SELECT images FROM memos WHERE id = ?", (memo_id,)).fetchone()
     if row:
         _delete_image_files(row["images"])
+        _forget_image_meta(db, row["images"])  # [PHOTO-MAP]
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
     db.execute("DELETE FROM memo_comments WHERE memo_id = ?", (memo_id,))
@@ -1534,6 +1666,10 @@ def add_memo_image(memo_id):
         (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
     )
     db.commit()
+    # [PHOTO-MAP] Persiste l'EXIF du fichier (lieu/date) pour le calque carte. Donnée
+    # dérivée : aucune écriture sur le mémo. Géocodage caché, fait ici une seule fois.
+    _record_image_meta(db, name, memo_id, existing["uid"])
+    db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
     return jsonify(_memo_dict(row)), 201
 
@@ -1557,6 +1693,7 @@ def delete_memo_image(memo_id, name):
             os.remove(os.path.join(UPLOAD_DIR, name))
         except OSError:
             pass
+    _forget_image_meta(db, name)  # [PHOTO-MAP] la méta suit le fichier
     db.execute(
         "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
         (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
@@ -2283,7 +2420,8 @@ def delete_comment(comment_id):
     return "", 204
 
 
-SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js", "favicon.svg", "Inter.woff2"}
+SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js", "favicon.svg", "Inter.woff2",
+                "leaflet.markercluster.js", "MarkerCluster.css", "MarkerCluster.Default.css"}  # [PHOTO-CLUSTER]
 
 
 @app.route("/api/geocode")
@@ -2609,6 +2747,9 @@ def share_add_image(token, memo_id):
         (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
     )
     db.commit()
+    # [PHOTO-MAP] Idem côté invité : persiste l'EXIF (scope déjà vérifié plus haut).
+    _record_image_meta(db, name, memo_id, existing["uid"])
+    db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
     return jsonify(_share_memo_dict(row)), 201
 
@@ -2639,6 +2780,7 @@ def share_delete_image(token, memo_id, name):
             os.remove(os.path.join(UPLOAD_DIR, name))
         except OSError:
             pass
+    _forget_image_meta(db, name)  # [PHOTO-MAP] la méta suit le fichier
     db.execute(
         "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
         (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
@@ -2960,6 +3102,20 @@ def share_image_exif(token, name):
     return "", 404
 
 
+@app.route("/share/<token>/photos", methods=["GET"])
+def share_photos(token):
+    # [PHOTO-MAP] Calque photo d'un partage, STRICTEMENT scopé (invariant 5) : même
+    # périmètre que share_image / share_data (jeton + _share_scope_memos), jamais une
+    # image hors partage. Lecture seule, aucune nouvelle capacité publique. Le front
+    # filtre ensuite par sous-projet/groupe comme pour les points-mémo.
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    ids = [r["id"] for r in _share_scope_memos(db, share)]
+    return jsonify(_project_photos(db, ids))
+
+
 # -------------------------------------------------------- export/import
 
 
@@ -3094,6 +3250,7 @@ def _purge_trash():
             r = conn.execute("SELECT images FROM memos WHERE id = ?", (mid,)).fetchone()
             if r:
                 _delete_image_files(r["images"])
+                _forget_image_meta(conn, r["images"])  # [PHOTO-MAP]
             conn.execute("DELETE FROM memos WHERE id = ?", (mid,))
             conn.execute(
                 "DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (mid,)
@@ -3102,6 +3259,51 @@ def _purge_trash():
         conn.commit()
     finally:
         conn.close()
+
+
+def _backfill_image_meta():
+    # [PHOTO-MAP] Remplit image_meta pour les images ajoutées AVANT la feature.
+    # Idempotent : ne traite que les filenames absents de image_meta (skip le reste,
+    # donc une 2e passe ne fait rien). Throttlé : ne dort 1.1 s qu'APRÈS une image
+    # qui a réellement déclenché un appel réseau Nominatim (GPS non encore en cache),
+    # pour ne pas marteler le géocodeur (~1 req/s). Daemon, connexion propre, n'ouvre
+    # jamais le boot : un échec par image est silencieux.
+    time.sleep(20)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+    except Exception:
+        return
+    try:
+        known = {r["filename"] for r in conn.execute(
+            "SELECT filename FROM image_meta"
+        ).fetchall()}
+        rows = conn.execute(
+            "SELECT id, uid, images FROM memos WHERE COALESCE(deleted_at, '') = ''"
+        ).fetchall()
+        for r in rows:
+            try:
+                names = json.loads(r["images"] or "[]")
+            except Exception:
+                names = []
+            for name in names:
+                name = os.path.basename(str(name))
+                if not name or name in known:
+                    continue
+                cache_size = len(_exif_geo_cache)
+                _record_image_meta(conn, name, r["id"], r["uid"])
+                conn.commit()
+                known.add(name)
+                # Géocode réseau réel = le cache a grandi → respecter le débit Nominatim.
+                if len(_exif_geo_cache) > cache_size:
+                    time.sleep(1.1)
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _backup_loop():
@@ -3586,3 +3788,4 @@ def import_links():
 
 init_db()
 threading.Thread(target=_backup_loop, daemon=True).start()
+threading.Thread(target=_backfill_image_meta, daemon=True).start()  # [PHOTO-MAP]
