@@ -254,6 +254,10 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 }
 .task-content li[data-list="checked"] { text-decoration: line-through; color: var(--muted); }
 .badge { font-size: 0.72rem; padding: 0.12rem 0.45rem; border-radius: 4px; background: var(--panel-2); color: var(--muted); white-space: nowrap; flex-shrink: 0; max-width: 13rem; overflow: hidden; text-overflow: ellipsis; }
+/* [PHOTO-UI-CONSISTENCY] La page invité n'a pas de `button {}` de base : .prio-btn doit
+   être autonome (sinon chips carte/photo bruts). Look = cards (token/rayon/hover). */
+.prio-btn { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); padding: 0.12rem 0.5rem; font: inherit; font-size: 0.78rem; border-radius: 4px; cursor: pointer; }
+.prio-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 .subtask { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; margin: 0.25rem 0 0 1.75rem; }
 .subtask input { accent-color: var(--green); }
 .subtask.stdone span { text-decoration: line-through; color: var(--muted); }
@@ -442,17 +446,21 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   font-size: 0.78rem; backdrop-filter: blur(4px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .iv-bar { position: static; z-index: 30; display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); padding: 0.45rem 0.6rem; border-radius: 12px; }
+/* [PHOTO-UI-CONSISTENCY] Boutons d'action photo = look des cards. Source unique
+   runImageViewer + runPhotoView, identique à index.html (parité owner/invité). */
 .iv-btn {
-  width: 2.4rem; height: 2.4rem; min-height: 0; padding: 0; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--panel-2); color: var(--text); font-size: 1.05rem; line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; text-decoration: none;
+  min-width: 44px; min-height: 36px; padding: 0.2rem 0.55rem; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+  font-size: 1.05rem; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
 }
-.iv-btn:hover { border-color: var(--accent); }
+.iv-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
+.iv-btn.iv-accent { color: var(--accent); border-color: var(--accent); }
 .iv-del { background: #f44336; color: #fff; border-color: #f44336; }
 .iv-del:hover { background: #d32f2f; }
 @media (max-width: 900px) {
   .iv-nav { width: 2.2rem; height: 2.2rem; font-size: 1.3rem; }
-  .iv-btn { width: 2.6rem; height: 2.6rem; }
+  .iv-btn { min-height: 44px; }
 }
 #edit-dialog {
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
@@ -565,6 +573,15 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div class="dlg-actions" style="margin-top:0.6rem">
     <button type="button" id="map-close" class="primary">Fermer</button>
   </div>
+</dialog>
+
+<!-- [PHOTO-TEMPLATE-MEMO] Vue « Photos » du projet (invité) — corps par runPhotoView. -->
+<dialog id="photo-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.9rem;width:min(560px,96vw);color:var(--text)">
+  <div id="photo-head" style="display:flex;align-items:center;gap:0.5rem;margin:0 0 0.6rem">
+    <h3 id="photo-title" style="margin:0;font-size:1rem;flex:1;min-width:0">📷 Photos</h3>
+    <button type="button" id="photo-close" class="prio-btn" title="Fermer">✕</button>
+  </div>
+  <div id="photo-body"></div>
 </dialog>
 
 <dialog id="proj-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:1.25rem;width:min(380px,94vw);color:var(--text)">
@@ -1249,9 +1266,10 @@ async function saveSharePointColor(p, color) {
   if (obj) obj.point_color = color;
 }
 
-function openShareMap() {
+function openShareMap(extra) {
   // Thin wrapper : délègue à runMapDialog (partial) avec le config invité (scopé au partage).
-  runMapDialog({
+  // [PHOTO-TEMPLATE-MEMO] `extra` = {autoPhoto, focusFilename} pour « 📍 localiser ».
+  runMapDialog(Object.assign({
     title: DATA.title, points: shareMapPoints(), recompute: shareMapPoints,
     editable: !!DATA.can_edit,
     projects: DATA.projects || [], currentProjectId: PFILTER,
@@ -1263,6 +1281,19 @@ function openShareMap() {
     // [PHOTO-MAP] Calque photo scopé au partage (endpoint /share/<token>/photos).
     loadPhotos: () => fetch(API + '/photos', { headers: { 'X-Guest-Token': guestToken() } }).then(r => r.json()),
     openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => API + '/image/' + x, downloadUrl: x => API + '/image/' + x, exifUrl: x => API + '/image-exif/' + x }),
+  }, extra || {}));
+}
+
+function openSharePhotos() {
+  // [PHOTO-TEMPLATE-MEMO] Vue « Photos » du partage (invité), strictement scopée.
+  // Données = endpoint photos scopé [PHOTO-MAP] ; suppression = route image scopée existante.
+  runPhotoView({
+    title: DATA.title,
+    loadPhotos: () => fetch(API + '/photos', { headers: { 'X-Guest-Token': guestToken() } }).then(r => r.json()),
+    canEdit: !!DATA.can_edit,
+    deletePhoto: (ph) => fetch(API + '/memo/' + ph.memo_id + '/images/' + ph.filename, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }).then(r => r.json().catch(() => ({}))),
+    openMap: (fn) => openShareMap({ autoPhoto: true, focusFilename: fn }),
+    imageUrl: x => API + '/image/' + x, downloadUrl: x => API + '/image/' + x, exifUrl: x => API + '/image-exif/' + x,
   });
 }
 
@@ -1302,7 +1333,16 @@ function renderTiles() {
     const l = el('span', 'tl'); l.append(shareIcon('map'), ' Carte');
     l.style.color = '#4db6ac';
     tile.appendChild(l);
-    tile.addEventListener('click', openShareMap);
+    tile.addEventListener('click', () => openShareMap());
+    tiles.appendChild(tile);
+  }
+  // [PHOTO-TEMPLATE-MEMO] Tuile « 📷 Photos » pour un partage de projet (charge à l'ouverture).
+  if ((DATA.projects || []).length) {
+    const tile = el('div', 'tile');
+    const l = el('span', 'tl', '📷 Photos');
+    l.style.color = '#b08968';
+    tile.appendChild(l);
+    tile.addEventListener('click', openSharePhotos);
     tiles.appendChild(tile);
   }
   const tn = (DATA.trash || []).length;

@@ -31,6 +31,17 @@ function fmtMemoTime(t) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(t || '') ? t.replace(':', 'h') : '';
 }
 
+// [PHOTO-MAP/PHOTO-TEMPLATE-MEMO] Date EXIF d'une photo (ISO `taken_at`) → libellé FR
+// court « 6 nov · 14h30 » (heure omise si absente). Partagé runMapDialog + runPhotoView.
+const PHOTO_MONTHS_FR = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+function fmtTaken(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(iso || '');
+  if (!m) return '';
+  let s = parseInt(m[3], 10) + ' ' + (PHOTO_MONTHS_FR[parseInt(m[2], 10) - 1] || '') + ' ' + m[1];
+  if (m[4]) s += ' · ' + m[4] + 'h' + m[5];
+  return s;
+}
+
 function usableProjColor(c) {
   if (!/^#[0-9a-fA-F]{6}$/.test(c || '')) return '';
   const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
@@ -65,7 +76,10 @@ function runMapDialog(cfg) {
     return;
   }
   const points = cfg.points;
-  if (!points.length) { notify('Aucun élément géolocalisé dans cette vue.'); return; }
+  // [PHOTO-TEMPLATE-MEMO] Ne pas avorter quand on vient localiser une PHOTO (cfg.autoPhoto) :
+  // les points-mémos peuvent être 0 alors que des photos ont un GPS. Le message ne reste
+  // que si rien n'est demandé en calque photo ET aucun point-mémo (vrai « rien de géolocalisé »).
+  if (!points.length && !cfg.autoPhoto) { notify('Aucun élément géolocalisé dans cette vue.'); return; }
   const recompute = cfg.recompute;
   const editable = cfg.editable;
   const projects = cfg.projects || [];
@@ -77,6 +91,9 @@ function runMapDialog(cfg) {
   if (activeMap) { activeMap.remove(); activeMap = null; }
   activeMap = L.map('map-el');
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(activeMap);
+  // [PHOTO-TEMPLATE-MEMO] Vue par défaut si aucun point-mémo (cas localiser-photo) : la carte
+  // doit avoir un centre valide avant que focusPhoto (cfg.focusFilename) ne la recadre.
+  if (!points.length) activeMap.setView([20, 0], 2);
   const markerLayer = L.layerGroup().addTo(activeMap);
   const listEl = document.getElementById('map-list');
   const subbar = document.getElementById('map-subbar');
@@ -296,14 +313,6 @@ function runMapDialog(cfg) {
   // scopé (déjà géocodé à l'upload) — aucun appel réseau ici. Marqueurs 📷 distincts
   // des points-mémo, filtrés par le même focus sous-projet/groupe. Clic → openImage.
   let photoOn = false, photoData = null, photoLayer = null, photoGreyLayer = null, photoBtn = null;
-  const photoMonths = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
-  function fmtTaken(iso) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(iso || '');
-    if (!m) return '';
-    let s = parseInt(m[3], 10) + ' ' + (photoMonths[parseInt(m[2], 10) - 1] || '') + ' ' + m[1];
-    if (m[4]) s += ' · ' + m[4] + 'h' + m[5];
-    return s;
-  }
   // Réutilise isFocused (groupes + sous-projet) en synthétisant un point depuis la photo.
   function photoFocus(ph) { return isFocused({ kind: 'memo', project_id: ph.project_id, groups: ph.groups || [] }); }
 
@@ -392,7 +401,178 @@ function runMapDialog(cfg) {
     if (photoOn) { drawPhotos(); renderFrieze(); }
   }
 
+  // [PHOTO-TEMPLATE-MEMO] Centre la carte sur une photo précise (depuis « 📍 localiser »).
+  function focusPhoto(name) {
+    const p = (photoData || []).find(x => x.filename === name);
+    if (p && p.lat != null) { activeMap.invalidateSize(); activeMap.setView([p.lat, p.lng], 16); }
+  }
+
   refresh(true);
+
+  // [PHOTO-TEMPLATE-MEMO] Ouverture directe sur le calque photo (cfg.autoPhoto), centrée
+  // sur une photo si cfg.focusFilename. N'altère pas l'usage normal (cfg absents = inchangé).
+  if (cfg.loadPhotos && cfg.autoPhoto) {
+    togglePhotos().then(() => { if (cfg.focusFilename) setTimeout(() => focusPhoto(cfg.focusFilename), 80); });
+  }
+}
+
+// [PHOTO-TEMPLATE-MEMO] Vue « Photos » d'un projet (pop-in #photo-dialog), partagée
+// owner/invité (ADR-001). Données = image_meta via cfg.loadPhotos (endpoints scopés
+// [PHOTO-MAP], aucune écriture mémo). Réutilise runImageViewer (plein écran) et, via
+// cfg.openMap, runMapDialog (calque photo). Seule mutation = suppression (cfg.canEdit
+// + cfg.deletePhoto, route image existante). Invariant 8 : pas de GSAP sur le dialog.
+// cfg = { title, loadPhotos:async()=>[...], canEdit, deletePhoto:async(ph)=>{},
+//         openMap:(focusFilename)=>{}, imageUrl(n), downloadUrl(n), exifUrl(n) }
+async function runPhotoView(cfg) {
+  const dlg = document.getElementById('photo-dialog');
+  const body = document.getElementById('photo-body');
+  if (!dlg || !body) return;
+  document.getElementById('photo-title').textContent = '📷 ' + (cfg.title || 'Photos');
+  const closeBtn = document.getElementById('photo-close');
+  if (closeBtn) closeBtn.onclick = () => dlg.close();
+  dlg.showModal();
+
+  const dayKey = ph => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(ph.taken_at || ''); return m ? m[1] : ''; };
+  const hourKey = ph => { const m = /[T ](\d{2}:\d{2})/.exec(ph.taken_at || ''); return m ? m[1] : ''; };
+  const fmtDay = k => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(k || ''); return m ? (parseInt(m[3], 10) + ' ' + (PHOTO_MONTHS_FR[parseInt(m[2], 10) - 1] || '')) : 'sans date'; };
+  const byName = n => photos.find(p => p.filename === n);
+
+  let photos = [], dayFilter = null, expandedDay = null, cur = 0;
+
+  function sortPhotos(arr) {
+    // Datées d'abord (taken_at croissant), « sans date » à la fin.
+    return arr.slice().sort((a, b) => {
+      const ka = dayKey(a) ? a.taken_at : '￿', kb = dayKey(b) ? b.taken_at : '￿';
+      return ka.localeCompare(kb) || a.filename.localeCompare(b.filename);
+    });
+  }
+  function visibleList() {
+    return dayFilter ? photos.filter(p => dayKey(p) === dayFilter) : photos;
+  }
+
+  async function reload() {
+    let data = [];
+    try { data = await cfg.loadPhotos(); } catch (e) { data = []; }
+    photos = sortPhotos(Array.isArray(data) ? data : []);
+    if (dayFilter && !photos.some(p => dayKey(p) === dayFilter)) { dayFilter = null; expandedDay = null; }
+    render();
+  }
+
+  function render() {
+    body.innerHTML = '';
+    if (!photos.length) {
+      body.appendChild(el('div', { text: 'Aucune photo dans ce projet.', attrs: { style: 'color:var(--muted);font-size:0.85rem;padding:1.2rem;text-align:center' } }));
+      return;
+    }
+    const vis = visibleList();
+    if (cur >= vis.length) cur = vis.length - 1;
+    if (cur < 0) cur = 0;
+    const ph = vis[cur];
+
+    // (1) Carrousel
+    const stage = el('div', { attrs: { style: 'position:relative;width:100%;height:min(46vh,300px);border-radius:8px;background:var(--panel-2) center/contain no-repeat;overflow:hidden;display:flex;align-items:center;justify-content:center' } });
+    if (ph) stage.style.backgroundImage = 'url("' + cfg.imageUrl(ph.filename) + '")';
+    const counter = el('span', { text: (cur + 1) + ' / ' + vis.length, attrs: { style: 'position:absolute;top:8px;right:10px;background:#000a;color:#fff;font-size:0.72rem;padding:0.1rem 0.45rem;border-radius:10px' } });
+    stage.appendChild(counter);
+    // [PHOTO-UI-CONSISTENCY] Flèches sur l'image = .iv-nav (overlay rond, comme la visionneuse).
+    const nav = (txt, fn, side) => el('button', { class: 'iv-nav', text: txt, attrs: { type: 'button', style: side + ':8px' }, on: { click: fn } });
+    if (vis.length > 1) {
+      stage.appendChild(nav('‹', () => { cur = (cur - 1 + vis.length) % vis.length; render(); }, 'left'));
+      stage.appendChild(nav('›', () => { cur = (cur + 1) % vis.length; render(); }, 'right'));
+    }
+    if (ph && (ph.label || ph.taken_at)) {
+      const txt = '📷 ' + [ph.label || '', fmtTaken(ph.taken_at)].filter(Boolean).join(' · ');
+      stage.appendChild(el('span', { text: txt, attrs: { style: 'position:absolute;left:8px;bottom:8px;max-width:80%;background:#000b;color:#fff;font-size:0.74rem;padding:0.15rem 0.5rem;border-radius:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+    }
+    body.appendChild(stage);
+
+    // (3) Barre d'options (rotation/zoom vivent dans runImageViewer en plein écran)
+    const bar = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:center;margin:0.5rem 0 0.4rem' } });
+    // [PHOTO-UI-CONSISTENCY] Boutons = .iv-btn (look cards). Principal (plein écran) en
+    // accent (.iv-accent), suppression en danger (.iv-del). Une seule source de vérité.
+    const obtn = (txt, title, fn, cls) => el('button', { class: 'iv-btn' + (cls ? ' ' + cls : ''), text: txt, attrs: { type: 'button', title }, on: { click: fn } });
+    const openFull = () => runImageViewer({
+      images: vis.map(p => p.filename), startIndex: cur,
+      imageUrl: cfg.imageUrl, downloadUrl: cfg.downloadUrl, exifUrl: cfg.exifUrl,
+      canDelete: !!cfg.canEdit,
+      onDelete: async (name) => { const p = byName(name); if (p) { await cfg.deletePhoto(p); await reload(); } },
+    });
+    bar.appendChild(obtn('⤢', 'Plein écran (zoom, rotation)', openFull, 'iv-accent'));
+    if (ph) {
+      const dl = el('a', { class: 'iv-btn', text: '⬇', attrs: { href: cfg.downloadUrl(ph.filename), download: '', title: 'Télécharger' } });
+      bar.appendChild(dl);
+    }
+    if (ph && ph.has_gps) bar.appendChild(obtn('📍', 'Localiser cette photo sur la carte', () => cfg.openMap(ph.filename)));
+    if (cfg.canEdit && ph) {
+      bar.appendChild(obtn('🗑', 'Supprimer cette photo', async () => {
+        if (!(await confirmPopin('Supprimer cette photo ?\nElle sera retirée de son mémo.', { okLabel: 'Supprimer' }))) return;
+        await cfg.deletePhoto(ph); await reload();
+      }, 'iv-del'));
+    }
+    body.appendChild(bar);
+
+    // (5) Vignettes
+    const thumbs = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap;margin:0 0 0.6rem' } });
+    vis.forEach((p, i) => {
+      const t = el('button', { attrs: { type: 'button', title: fmtTaken(p.taken_at) || p.filename, style: 'width:34px;height:34px;border-radius:5px;background:var(--panel-2) center/cover no-repeat;background-image:url("' + cfg.imageUrl(p.filename) + '");cursor:pointer;flex-shrink:0;border:' + (i === cur ? '2px solid var(--accent)' : '1px solid var(--border)') }, on: { click: () => { cur = i; render(); } } });
+      thumbs.appendChild(t);
+    });
+    body.appendChild(thumbs);
+
+    // (6) Frise par dates
+    const dated = photos.filter(p => dayKey(p));
+    const days = [];
+    const counts = {};
+    dated.forEach(p => { const k = dayKey(p); if (!(k in counts)) days.push(k); counts[k] = (counts[k] || 0) + 1; });
+    const undatedN = photos.length - dated.length;
+    if (days.length || undatedN) {
+      const frieze = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:flex-start;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:0.5rem' } });
+      // [PHOTO-UI-CONSISTENCY] Chips = .prio-btn ; sélection = accent standard ; compteur = .badge.
+      const SEL = ';background:var(--accent);border-color:var(--accent);color:#10141a';
+      frieze.appendChild(el('button', { class: 'prio-btn', text: 'Tout', attrs: { type: 'button', style: dayFilter ? '' : SEL }, on: { click: () => { dayFilter = null; expandedDay = null; cur = 0; render(); } } }));
+      days.forEach(k => {
+        const on = dayFilter === k;
+        const wrap = el('div', { attrs: { style: 'display:flex;flex-direction:column;align-items:center;gap:0.15rem' } });
+        const d = el('button', { class: 'prio-btn', attrs: { type: 'button', title: counts[k] + ' photo(s)', style: 'display:inline-flex;align-items:center;gap:0.3rem' + (on ? SEL : '') }, on: { click: () => { dayFilter = on ? null : k; expandedDay = null; cur = 0; render(); } } });
+        d.appendChild(el('span', { text: fmtDay(k) }));
+        d.appendChild(el('span', { class: 'badge', text: String(counts[k]) }));
+        wrap.appendChild(d);
+        // (7) « + » → frise heures si plusieurs photos ce jour-là
+        if (counts[k] > 1) {
+          const exp = expandedDay === k;
+          wrap.appendChild(el('button', { class: 'prio-btn', text: exp ? '−' : '+', attrs: { type: 'button', title: exp ? 'Replier les heures' : 'Déplier par heures' }, on: { click: () => { dayFilter = k; expandedDay = exp ? null : k; cur = 0; render(); } } }));
+        }
+        frieze.appendChild(wrap);
+      });
+      if (undatedN) {
+        const on = dayFilter === '';
+        frieze.appendChild(el('button', { class: 'prio-btn', text: 'sans date · ' + undatedN, attrs: { type: 'button', title: undatedN + ' sans date', style: on ? SEL : '' }, on: { click: () => { dayFilter = on ? null : ''; expandedDay = null; cur = 0; render(); } } }));
+      }
+      body.appendChild(frieze);
+    }
+
+    // (7) Panneau heures
+    if (expandedDay) {
+      const dayPhotos = photos.filter(p => dayKey(p) === expandedDay);
+      const hours = [];
+      const hc = {};
+      dayPhotos.forEach(p => { const h = hourKey(p) || '??'; if (!(h in hc)) { hours.push(h); hc[h] = []; } hc[h].push(p); });
+      const panel = el('div', { attrs: { style: 'margin-top:0.5rem;padding:0.5rem 0.6rem;background:var(--panel-2);border-radius:8px' } });
+      panel.appendChild(el('div', { text: fmtDay(expandedDay) + ' — par heures (' + dayPhotos.length + ' photos)', attrs: { style: 'font-size:0.74rem;color:var(--muted);margin-bottom:0.35rem' } }));
+      const row = el('div', { attrs: { style: 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center' } });
+      hours.forEach(h => {
+        const first = hc[h][0];
+        const b = el('button', { class: 'prio-btn', attrs: { type: 'button', title: hc[h].length + ' photo(s)', style: 'display:inline-flex;align-items:center;gap:0.3rem' }, on: { click: () => { dayFilter = expandedDay; cur = Math.max(0, visibleList().indexOf(first)); render(); } } });
+        b.appendChild(el('span', { text: h.replace(':', 'h') }));
+        if (hc[h].length > 1) b.appendChild(el('span', { class: 'badge', text: String(hc[h].length) }));
+        row.appendChild(b);
+      });
+      panel.appendChild(row);
+      body.appendChild(panel);
+    }
+  }
+
+  await reload();
 }
 
 function setTheme(t) {
