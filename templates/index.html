@@ -1329,7 +1329,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </form>
 </dialog>
 
-<dialog id="lightbox"><img alt=""></dialog>
+<dialog id="lightbox"></dialog>
 <dialog id="qr-dialog" class="qr-dialog">
   <div class="qr-box"><img id="qr-img" alt="QR code du lien de partage"></div>
   <div class="qr-url" id="qr-url"></div>
@@ -3553,10 +3553,6 @@ document.getElementById('memo-edit-save').addEventListener('click', (e) => withB
 
 const lightbox = document.getElementById('lightbox');
 lightbox.addEventListener('click', () => lightbox.close());
-function openLightbox(src) {
-  lightbox.querySelector('img').src = src;
-  lightbox.showModal();
-}
 
 const qrDialog = document.getElementById('qr-dialog');
 qrDialog.addEventListener('click', () => qrDialog.close());
