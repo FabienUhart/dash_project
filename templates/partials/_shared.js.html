@@ -507,7 +507,7 @@ function runImageViewer(cfg) {
   if (!dlg || !cfg || !(cfg.images || []).length) return;
   const images = cfg.images.slice();
   let idx = Math.min(Math.max(cfg.startIndex || 0, 0), images.length - 1);
-  let rot = 0, scale = 1;
+  let rot = 0, scale = 1, tx = 0, ty = 0;
 
   dlg.innerHTML = '';
   // Conteneur : stoppe la propagation pour que seul un clic sur le backdrop (le
@@ -538,12 +538,20 @@ function runImageViewer(cfg) {
   const closeBtn = el('button', { class: 'iv-btn iv-close', text: '✕', attrs: { title: 'Fermer' } });
   bar.appendChild(closeBtn);
 
-  function applyTransform() { img.style.transform = 'rotate(' + rot + 'deg) scale(' + scale + ')'; }
+  function applyTransform() { img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + rot + 'deg) scale(' + scale + ')'; }
+  function setScale(s) {
+    scale = Math.min(Math.max(s, 0.25), 5);
+    if (scale <= 1) { tx = 0; ty = 0; }
+    stage.classList.toggle('zoomed', scale > 1);
+    applyTransform();
+  }
   function render() {
     const name = images[idx];
     img.src = cfg.imageUrl(name);
     dl.href = cfg.downloadUrl(name);
-    rot = 0; scale = 1; applyTransform();
+    rot = 0; scale = 1; tx = 0; ty = 0;
+    stage.classList.remove('zoomed');
+    applyTransform();
     indicator.textContent = (idx + 1) + ' / ' + images.length;
     const multi = images.length > 1;
     prev.style.visibility = multi ? '' : 'hidden';
@@ -555,8 +563,8 @@ function runImageViewer(cfg) {
   next.addEventListener('click', () => go(1));
   rotL.addEventListener('click', () => { rot -= 90; applyTransform(); });
   rotR.addEventListener('click', () => { rot += 90; applyTransform(); });
-  zoomIn.addEventListener('click', () => { scale = Math.min(scale * 1.25, 5); applyTransform(); });
-  zoomOut.addEventListener('click', () => { scale = Math.max(scale / 1.25, 0.25); applyTransform(); });
+  zoomIn.addEventListener('click', () => setScale(scale * 1.25));
+  zoomOut.addEventListener('click', () => setScale(scale / 1.25));
   closeBtn.addEventListener('click', () => dlg.close());
   if (delBtn) {
     delBtn.addEventListener('click', async () => {
@@ -569,18 +577,38 @@ function runImageViewer(cfg) {
     });
   }
 
+  // Flèches DANS la scène → restent centrées sur l'image (au-dessus, z-index CSS).
+  stage.appendChild(prev);
+  stage.appendChild(next);
+  stage.appendChild(indicator);
   wrap.appendChild(stage);
-  wrap.appendChild(prev);
-  wrap.appendChild(next);
-  wrap.appendChild(indicator);
   wrap.appendChild(bar);
   dlg.appendChild(wrap);
+
+  // Pan au drag quand zoomé (souris + tactile). Affichage seul, aucun fetch.
+  let panning = false, startX = 0, startY = 0, tx0 = 0, ty0 = 0;
+  stage.addEventListener('pointerdown', (e) => {
+    if (scale <= 1) return;
+    panning = true; startX = e.clientX; startY = e.clientY; tx0 = tx; ty0 = ty;
+    stage.classList.add('grabbing'); img.style.transition = 'none';
+    try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!panning) return;
+    tx = tx0 + (e.clientX - startX); ty = ty0 + (e.clientY - startY); applyTransform();
+  });
+  function endPan() { if (!panning) return; panning = false; stage.classList.remove('grabbing'); img.style.transition = ''; }
+  stage.addEventListener('pointerup', endPan);
+  stage.addEventListener('pointercancel', endPan);
+  // Double-clic = bascule ×1 / ×2 ; molette = zoom.
+  stage.addEventListener('dblclick', () => setScale(scale > 1 ? 1 : 2));
+  stage.addEventListener('wheel', (e) => { e.preventDefault(); setScale(scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
 
   const onKey = (e) => {
     if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
-    else if (e.key === '+' || e.key === '=') { scale = Math.min(scale * 1.25, 5); applyTransform(); }
-    else if (e.key === '-') { scale = Math.max(scale / 1.25, 0.25); applyTransform(); }
+    else if (e.key === '+' || e.key === '=') { setScale(scale * 1.25); }
+    else if (e.key === '-') { setScale(scale / 1.25); }
   };
   dlg.addEventListener('keydown', onKey);
   dlg.addEventListener('close', function cleanup() {

@@ -415,10 +415,12 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 /* [IMAGE-CAROUSEL] visionneuse carrousel */
 #lightbox { background: transparent; border: none; padding: 0; width: auto; max-width: 92vw; max-height: 92vh; }
 .iv-wrap { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
-.iv-stage { display: flex; align-items: center; justify-content: center; max-width: 92vw; max-height: 82vh; overflow: visible; }
-.iv-img { max-width: 92vw; max-height: 82vh; border-radius: 8px; display: block; cursor: default; transition: transform 0.15s ease; }
+.iv-stage { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 92vw; max-width: 1100px; height: 78vh; overflow: hidden; touch-action: none; }
+.iv-img { position: relative; z-index: 1; max-width: 100%; max-height: 100%; border-radius: 8px; display: block; user-select: none; -webkit-user-drag: none; transition: transform 0.12s ease; }
+.iv-stage.zoomed { cursor: grab; }
+.iv-stage.grabbing { cursor: grabbing; }
 .iv-nav {
-  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 30;
   width: 2.6rem; height: 2.6rem; border-radius: 50%; border: none;
   background: rgba(0,0,0,0.55); color: #fff; font-size: 1.6rem; line-height: 1; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -427,10 +429,10 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .iv-prev { left: 0.5rem; }
 .iv-next { right: 0.5rem; }
 .iv-indicator {
-  position: absolute; top: 0.6rem; left: 50%; transform: translateX(-50%); z-index: 2;
+  position: absolute; top: 0.6rem; left: 50%; transform: translateX(-50%); z-index: 30;
   background: rgba(0,0,0,0.6); color: #fff; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem;
 }
-.iv-bar { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.iv-bar { position: static; z-index: 30; display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); padding: 0.45rem 0.6rem; border-radius: 12px; }
 .iv-btn {
   width: 2.4rem; height: 2.4rem; min-height: 0; padding: 0; border-radius: 8px; border: 1px solid var(--border);
   background: var(--panel-2); color: var(--text); font-size: 1.05rem; line-height: 1; cursor: pointer;
