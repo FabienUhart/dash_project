@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import re
 
+import exifread
 import requests
 import urllib3
 from flask import (
