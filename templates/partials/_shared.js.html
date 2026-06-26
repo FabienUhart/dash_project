@@ -499,7 +499,9 @@ function setupMentions(quill, getNames, onPick) {
 // Pure / sans état hors `cfg` ; tout le spécifique page passe par cfg, donc le
 // périmètre invité ne s'élargit pas. Construit le DOM dans le <dialog id="lightbox">.
 //   cfg = { images:[name], startIndex, imageUrl(name), downloadUrl(name),
-//           canDelete:bool, onDelete:async name=>{} }
+//           canDelete:bool, onDelete:async name=>{}, exifUrl?(name) }
+// [IMAGE-EXIF] exifUrl optionnel : URL renvoyant {lat,lng,label,datetime} lus à la
+// volée côté serveur. Affichage SEUL (badge 📷), aucune écriture mémo.
 // Rotation/zoom = AFFICHAGE SEUL (transform CSS, non persisté, aucun fetch),
 // remis à zéro à chaque navigation et fermeture. Pas de GSAP sur le dialog (invariant 8).
 function runImageViewer(cfg) {
@@ -520,6 +522,18 @@ function runImageViewer(cfg) {
   const prev = el('button', { class: 'iv-nav iv-prev', text: '‹', attrs: { title: 'Précédente', 'aria-label': 'Image précédente' } });
   const next = el('button', { class: 'iv-nav iv-next', text: '›', attrs: { title: 'Suivante', 'aria-label': 'Image suivante' } });
   const indicator = el('span', { class: 'iv-indicator' });
+  // [IMAGE-EXIF] badge métadonnées photo (lieu · date), masqué tant qu'aucune donnée.
+  const exifBadge = el('div', { class: 'iv-exif' });
+  exifBadge.style.display = 'none';
+  let exifSeq = 0;
+  function fmtExifDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(iso || '');
+    if (!m) return '';
+    const months = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+    let s = parseInt(m[3], 10) + ' ' + (months[parseInt(m[2], 10) - 1] || '') + ' ' + m[1];
+    if (m[4]) s += ' · ' + m[4] + 'h' + m[5];
+    return s;
+  }
 
   // Barre d'options
   const bar = el('div', { class: 'iv-bar' });
@@ -556,6 +570,21 @@ function runImageViewer(cfg) {
     const multi = images.length > 1;
     prev.style.visibility = multi ? '' : 'hidden';
     next.style.visibility = multi ? '' : 'hidden';
+    // [IMAGE-EXIF] récupère les métadonnées de l'image courante (jeton de course :
+    // ignore une réponse arrivée après une navigation). Aucune écriture mémo.
+    exifBadge.style.display = 'none';
+    exifBadge.textContent = '';
+    if (cfg.exifUrl) {
+      const seq = ++exifSeq;
+      fetch(cfg.exifUrl(name)).then((r) => r.ok ? r.json() : null).then((d) => {
+        if (seq !== exifSeq || !d) return;
+        const place = d.label || (d.lat != null ? d.lat.toFixed(4) + ', ' + d.lng.toFixed(4) : '');
+        const parts = [place, fmtExifDate(d.datetime)].filter(Boolean);
+        if (!parts.length) return;
+        exifBadge.textContent = '📷 ' + parts.join(' · ');
+        exifBadge.style.display = '';
+      }).catch(() => {});
+    }
   }
   function go(d) { idx = (idx + d + images.length) % images.length; render(); }
 
@@ -581,6 +610,7 @@ function runImageViewer(cfg) {
   stage.appendChild(prev);
   stage.appendChild(next);
   stage.appendChild(indicator);
+  stage.appendChild(exifBadge);
   wrap.appendChild(stage);
   wrap.appendChild(bar);
   dlg.appendChild(wrap);
