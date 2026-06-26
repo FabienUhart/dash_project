@@ -55,6 +55,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 ## Quick wins
 
+- 🎯 **[MEMO-TIME] — ACTIF (spec validée 26 juin 2026)** : spec verrouillée → [docs/specs/MEMO-TIME-optional-time-on-memos.md](docs/specs/MEMO-TIME-optional-time-on-memos.md) (score 100/100). Décisions figées : tri intra-jour = mémos **sans heure d'abord** puis horaires croissants ; format **« 14h30 »/« 14h00 »** (minutes toujours affichées) ; heure dans le badge absolu uniquement, pas dans les dates relatives. Prochaine étape : plan/build. Détail original ci-dessous.
 - **[MEMO-TIME] Heure optionnelle sur les mémos** : à côté du `due_date` (`<input type="date">`), ajouter un `<input type="time">` facultatif. Stockage **additif et non destructif** : nouvelle colonne `memos.due_time` (`TEXT DEFAULT ''`, format `"HH:mm"` ou `""` = pas d'heure), jamais toucher au `due_date` existant. Affichage : « 📅 6 nov · 14h30 » quand l'heure est présente, « 📅 6 nov » sinon. Tri intra-journée par heure dans les sections (Aujourd'hui/À venir). Export/import **v18** additif (compat v1→v17 : champ absent = `""`, upsert non destructif comme les autres champs). Ne pas changer la récurrence (reste basée sur la date ; l'heure peut être recopiée telle quelle par `_next_due`). Le plus rapide des trois ci-dessous, et prérequis utile pour l'agenda.
 
 - **Raccourcis clavier 1-9** : ouvrir directement les 9 premiers liens de la catégorie active.

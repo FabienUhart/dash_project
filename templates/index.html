@@ -2778,7 +2778,8 @@ function renderTreeView() {
     // Colonnes de métadonnées (masquées en mobile via CSS).
     const meta = el('div', { class: 'tree-meta' });
     const di = dueInfo(m.due_date);
-    meta.appendChild(el('span', { class: 'tcol tcol-due ' + (di ? di.cls : ''), text: di ? '📅 ' + di.label : '' }));
+    const dt = fmtMemoTime(m.due_time);
+    meta.appendChild(el('span', { class: 'tcol tcol-due ' + (di ? di.cls : ''), text: di ? '📅 ' + di.label + (dt ? ' · ' + dt : '') : '' }));
     const asg = m.assignees || [];
     meta.appendChild(el('span', { class: 'tcol tcol-asg', text: asg.length ? '👤 ' + asg[0] + (asg.length > 1 ? ' +' + (asg.length - 1) : '') : '' }));
     meta.appendChild(el('span', { class: 'tcol tcol-loc', text: m.location ? '📍 ' + ((m.location.label || '').slice(0, 18)) : '' }));
@@ -3633,7 +3634,10 @@ function taskEl(memo) {
 
   const badges = el('div', { class: 'task-badges' });
   const due = dueInfo(memo.due_date);
-  if (due && !memo.done) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label }));
+  if (due && !memo.done) {
+    const t = fmtMemoTime(memo.due_time);
+    badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label + (t ? ' · ' + t : '') }));
+  }
   if (memo.recurrence && !memo.done) {
     badges.appendChild(el('span', { class: 'badge', text: '🔁 ' + (RECUR_SHORT[memo.recurrence] || memo.recurrence), attrs: { title: 'Tâche récurrente — replanifiée automatiquement quand cochée' } }));
   }
@@ -3907,6 +3911,10 @@ function taskDetailEl(memo) {
   dateIn.addEventListener('change', () => patchMemo(memo.id, { due_date: dateIn.value }));
   row1.appendChild(dateIn);
   if (memo.due_date) {
+    const timeIn = el('input', { attrs: { type: 'time', title: 'Heure (optionnelle)' } });
+    timeIn.value = memo.due_time || '';
+    timeIn.addEventListener('change', () => patchMemo(memo.id, { due_time: timeIn.value }));
+    row1.appendChild(timeIn);
     row1.appendChild(el('button', {
       text: '× date', class: 'prio-btn', attrs: { title: "Retirer l'échéance" },
       on: { click: () => patchMemo(memo.id, { due_date: '' }) },
@@ -4315,6 +4323,13 @@ function renderBoard() {
     { key: 'sec-upcoming', filter: 'scheduled', title: 'À VENIR', items: pending.filter(m => m.due_date && m.due_date > today) },
     { key: 'sec-nodate', filter: null, title: 'SANS DATE', items: pending.filter(m => !m.due_date) },
   ];
+
+  // Tri intra-jour : date croissante, puis mémos sans heure d'abord, puis heure croissante.
+  const byTime = (a, b) =>
+    (a.due_date || '').localeCompare(b.due_date || '') ||
+    ((a.due_time ? 1 : 0) - (b.due_time ? 1 : 0)) ||
+    (a.due_time || '').localeCompare(b.due_time || '');
+  sections.forEach(s => s.items.sort(byTime));
 
   if (state.memoFilter === 'done') {
     const wrap = el('div', { class: 'memo-section' });

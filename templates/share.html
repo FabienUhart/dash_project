@@ -1318,7 +1318,8 @@ function renderShareTreeView() {
     const meta = el('div', 'tree-meta');
     let dueTxt = '', dueCls = '';
     if (m.due_date) {
-      dueTxt = '📅 ' + new Date(m.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      const dt = fmtMemoTime(m.due_time);
+      dueTxt = '📅 ' + new Date(m.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (dt ? ' · ' + dt : '');
       if (m.due_date < today) dueCls = ' due-late'; else if (m.due_date === today) dueCls = ' due-today';
     }
     meta.appendChild(el('span', 'tcol tcol-due' + dueCls, dueTxt));
@@ -1436,6 +1437,11 @@ function render() {
   list.innerHTML = '';
   if (FILTER === 'trash') { renderShareTrash(list); return; }
   const visible = visibleShareMemos();
+  // Tri intra-jour : date croissante, puis mémos sans heure d'abord, puis heure croissante.
+  visible.sort((a, b) =>
+    (a.due_date || '').localeCompare(b.due_date || '') ||
+    ((a.due_time ? 1 : 0) - (b.due_time ? 1 : 0)) ||
+    (a.due_time || '').localeCompare(b.due_time || ''));
   if (!visible.length) {
     list.appendChild(el('div', 'empty', 'Rien dans cette vue. 🎉'));
     return;
@@ -1511,7 +1517,10 @@ function render() {
       row.appendChild(ab);
     });
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
-    if (memo.due_date) row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })));
+    if (memo.due_date) {
+      const dt = fmtMemoTime(memo.due_time);
+      row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (dt ? ' · ' + dt : '')));
+    }
     if (canEditNow()) {
       const eBtn = el('button', 'task-edit');
       eBtn.appendChild(shareIcon('pencil'));
@@ -1665,6 +1674,15 @@ function render() {
       dateIn.title = 'Échéance';
       dateIn.addEventListener('change', () => put(memo.id, { due_date: dateIn.value }));
       tools.appendChild(dateIn);
+
+      if (memo.due_date) {
+        const timeIn = document.createElement('input');
+        timeIn.type = 'time';
+        timeIn.value = memo.due_time || '';
+        timeIn.title = 'Heure (optionnelle)';
+        timeIn.addEventListener('change', () => put(memo.id, { due_time: timeIn.value }));
+        tools.appendChild(timeIn);
+      }
 
       const prios = DATA.priorities || [];
       const pBtn = document.createElement('button');

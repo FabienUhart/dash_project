@@ -26,13 +26,14 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "17"
+APP_VERSION = "18"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
 BACKUP_KEEP_DAYS = int(os.environ.get("BACKUP_KEEP_DAYS", "7"))
 ALLOWED_IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
 SAFE_IMG_NAME = re.compile(r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp)$")
+DUE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _looks_like_image(head, ext):
@@ -264,6 +265,8 @@ def init_db():
         conn.execute("ALTER TABLE projects ADD COLUMN marker_color TEXT DEFAULT ''")
     if "map_groups" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN map_groups TEXT DEFAULT '[]'")
+    if "due_time" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN due_time TEXT DEFAULT ''")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS memo_comments (
@@ -1065,6 +1068,11 @@ def _clean_description(value):
     return re.sub(r"[<>]", "", str(value or "")).strip()[:1000]
 
 
+def _clean_due_time(value):
+    v = str(value or "").strip()
+    return v if DUE_TIME_RE.match(v) else ""
+
+
 @app.route("/api/memos", methods=["GET"])
 def list_memos():
     db = get_db()
@@ -1111,9 +1119,9 @@ def create_memo():
     uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, priority, subtasks, project_id, recurrence, emoji, location, "
+        "done, due_date, due_time, priority, subtasks, project_id, recurrence, emoji, location, "
         "title, assignees, marker_color, map_groups) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -1122,6 +1130,7 @@ def create_memo():
             now,
             1 if data.get("done") else 0,
             (data.get("due_date") or "").strip(),
+            _clean_due_time(data.get("due_time")) if (data.get("due_date") or "").strip() else "",
             _valid_priority(db, data.get("priority")),
             _subtasks_json(data.get("subtasks")),
             _valid_project_id(db, data.get("project_id")),
@@ -1140,7 +1149,7 @@ def create_memo():
 
 
 def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
-                   title="", assignees_json="[]"):
+                   title="", assignees_json="[]", due_time=""):
     try:
         subs = json.loads(subtasks_json or "[]")
     except Exception:
@@ -1153,6 +1162,7 @@ def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
         "content": content,
         "done": bool(done),
         "due_date": due_date or "",
+        "due_time": due_time or "",
         "priority": priority or 0,
         "subtasks": subs,
         "recurrence": recurrence or "",
@@ -1173,6 +1183,7 @@ def _log_revision(db, memo_row, after, editor, share_id=None):
         memo_row["content"], memo_row["done"], memo_row["due_date"],
         memo_row["priority"], memo_row["subtasks"], memo_row["recurrence"],
         _row_get(memo_row, "title"), _row_get(memo_row, "assignees", "[]"),
+        _row_get(memo_row, "due_time"),
     )
     if before == after:
         return
@@ -1223,6 +1234,11 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
         if "recurrence" in data
         else (existing["recurrence"] or "")
     )
+    due_time = (
+        _clean_due_time(data.get("due_time"))
+        if "due_time" in data
+        else _row_get(existing, "due_time")
+    )
 
     now = datetime.now(timezone.utc).isoformat()
     was_done = bool(existing["done"])
@@ -1248,8 +1264,10 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             (existing["uid"] or "",),
         )
 
+    if not due_date:
+        due_time = ""
     after = _memo_snapshot(content, done, due_date, priority, subtasks, recurrence,
-                           title, assignees)
+                           title, assignees, due_time)
     _log_revision(db, existing, after, editor, share_id)
 
     emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
@@ -1269,13 +1287,14 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
         else (_row_get(existing, "map_groups", "[]") or "[]")
     )
     db.execute(
-        "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
+        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, subtasks=?, "
         "project_id=?, recurrence=?, emoji=?, location=?, title=?, assignees=?, "
         "marker_color=?, map_groups=?, updated_at=? WHERE id=?",
         (
             content,
             done,
             due_date,
+            due_time,
             priority,
             subtasks,
             project_id,
@@ -1381,12 +1400,13 @@ def duplicate_memo(memo_id):
     new_title = (title + " (copie)") if title else ""
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, priority, subtasks, project_id, recurrence, emoji, location, "
+        "done, due_date, due_time, priority, subtasks, project_id, recurrence, emoji, location, "
         "title, assignees) "
-        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             src["content"], max_pos + 1, now, str(uuid.uuid4()), now,
-            _row_get(src, "due_date", ""), _row_get(src, "priority", 0),
+            _row_get(src, "due_date", ""), _row_get(src, "due_time", ""),
+            _row_get(src, "priority", 0),
             _row_get(src, "subtasks", "[]"), _row_get(src, "project_id"),
             _row_get(src, "recurrence", ""), _row_get(src, "emoji", ""),
             _row_get(src, "location", ""), new_title, _row_get(src, "assignees", "[]"),
@@ -1597,6 +1617,7 @@ def _share_memo_dict(row):
         "content": d["content"],
         "done": d["done"],
         "due_date": d["due_date"],
+        "due_time": d.get("due_time", "") or "",
         "priority": d["priority"],
         "subtasks": d["subtasks"],
         "images": d["images"],
@@ -2024,15 +2045,17 @@ def memo_restore(memo_id):
         json.dumps(snap.get("assignees") if snap.get("assignees") is not None
                    else json.loads(_row_get(existing, "assignees", "[]") or "[]"),
                    ensure_ascii=False),
+        _clean_due_time(snap.get("due_time")) if snap.get("due_date") else "",
     )
     _log_revision(db, existing, after, "moi (restauration)")
     db.execute(
-        "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
+        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, subtasks=?, "
         "recurrence=?, title=?, assignees=?, updated_at=? WHERE id=?",
         (
             after["content"],
             1 if after["done"] else 0,
             after["due_date"],
+            after["due_time"],
             after["priority"],
             json.dumps(after["subtasks"], ensure_ascii=False),
             after["recurrence"],
@@ -2400,7 +2423,7 @@ def share_update_memo(token, memo_id):
     raw = request.get_json(silent=True) or {}
     data = {
         k: raw[k]
-        for k in ("content", "done", "subtasks", "due_date", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
+        for k in ("content", "done", "subtasks", "due_date", "due_time", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
         if k in raw
     }
     if "project_id" in raw and share["kind"] == "project":
@@ -2544,6 +2567,7 @@ def _share_memo_dict_from_payload(d):
         "content": d["content"],
         "done": d["done"],
         "due_date": d["due_date"],
+        "due_time": d.get("due_time", "") or "",
         "priority": d["priority"],
         "subtasks": d["subtasks"],
         "images": d["images"],
@@ -2894,7 +2918,7 @@ def _build_export(db):
         "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
     return {
-        "version": 17,
+        "version": 18,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -3318,6 +3342,7 @@ def import_links():
             assignees = _assignees_json(memo.get("assignees"))
             memo_marker = _clean_hex_color(memo.get("marker_color"), "")
             memo_groups = _map_groups_json(memo.get("map_groups"))
+            memo_time = _clean_due_time(memo.get("due_time")) if due_date else ""
         else:
             content = str(memo).strip()
             uid = ""
@@ -3336,6 +3361,7 @@ def import_links():
             assignees = "[]"
             memo_marker = ""
             memo_groups = "[]"
+            memo_time = ""
         if not content and not title:
             continue
 
@@ -3344,11 +3370,14 @@ def import_links():
             if updated and updated > (existing["updated_at"] or ""):
                 merged_images = images if images != "[]" else (existing["images"] or "[]")
                 merged_marker = memo_marker or _row_get(existing, "marker_color")
+                merged_time = memo_time or _row_get(existing, "due_time")
+                if not due_date:
+                    merged_time = ""
                 db.execute(
-                    "UPDATE memos SET content=?, done=?, due_date=?, priority=?, "
+                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
                     "title=?, assignees=?, marker_color=?, map_groups=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, updated, existing["id"]),
+                    (content, done, due_date, merged_time, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -3364,10 +3393,10 @@ def import_links():
         new_uid = uid or str(uuid.uuid4())
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-            "done, due_date, priority, subtasks, project_id, images, recurrence, emoji, location, "
+            "done, due_date, due_time, priority, subtasks, project_id, images, recurrence, emoji, location, "
             "title, assignees, marker_color, map_groups) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups),
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
