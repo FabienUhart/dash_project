@@ -1502,6 +1502,16 @@ def serve_upload(filename):
     return send_from_directory(UPLOAD_DIR, name, max_age=86400)
 
 
+@app.route("/api/image-exif/<name>")
+def image_exif(name):
+    # [IMAGE-EXIF] Métadonnées photo lues à la volée (propriétaire). Lecture seule,
+    # rien stocké. Symétrique de /uploads/<name> : tout fichier valide est lisible.
+    name = os.path.basename(name)
+    if not SAFE_IMG_NAME.match(name):
+        return "", 404
+    return jsonify(_image_exif(name) or {})
+
+
 @app.route("/api/memos/<int:memo_id>/images", methods=["POST"])
 def add_memo_image(memo_id):
     db = get_db()
@@ -2924,6 +2934,27 @@ def share_image(token, name):
         try:
             if name in json.loads(row["images"] or "[]"):
                 return send_from_directory(UPLOAD_DIR, name, max_age=3600)
+        except Exception:
+            continue
+    return "", 404
+
+
+@app.route("/share/<token>/image-exif/<name>")
+def share_image_exif(token, name):
+    # [IMAGE-EXIF] Métadonnées photo à la volée pour un invité — MÊME contrôle de
+    # scope que share_image (invariant 5) : le fichier doit appartenir à un mémo du
+    # partage, sinon 404. Aucune fuite d'EXIF hors périmètre, aucune nouvelle capacité.
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return "", 404
+    name = os.path.basename(name)
+    if not SAFE_IMG_NAME.match(name):
+        return "", 404
+    for row in _share_scope_memos(db, share):
+        try:
+            if name in json.loads(row["images"] or "[]"):
+                return jsonify(_image_exif(name) or {})
         except Exception:
             continue
     return "", 404
