@@ -412,6 +412,37 @@ dialog::backdrop { background: rgba(6,9,12,0.78); backdrop-filter: blur(3px); }
 }
 dialog:not(#lightbox) { box-shadow: var(--shadow-lg); }
 dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom-out; }
+/* [IMAGE-CAROUSEL] visionneuse carrousel */
+#lightbox { background: transparent; border: none; padding: 0; width: auto; max-width: 92vw; max-height: 92vh; }
+.iv-wrap { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+.iv-stage { display: flex; align-items: center; justify-content: center; max-width: 92vw; max-height: 82vh; overflow: visible; }
+.iv-img { max-width: 92vw; max-height: 82vh; border-radius: 8px; display: block; cursor: default; transition: transform 0.15s ease; }
+.iv-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 2.6rem; height: 2.6rem; border-radius: 50%; border: none;
+  background: rgba(0,0,0,0.55); color: #fff; font-size: 1.6rem; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.iv-nav:hover { background: rgba(0,0,0,0.8); }
+.iv-prev { left: 0.5rem; }
+.iv-next { right: 0.5rem; }
+.iv-indicator {
+  position: absolute; top: 0.6rem; left: 50%; transform: translateX(-50%); z-index: 2;
+  background: rgba(0,0,0,0.6); color: #fff; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem;
+}
+.iv-bar { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.iv-btn {
+  width: 2.4rem; height: 2.4rem; min-height: 0; padding: 0; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--text); font-size: 1.05rem; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; text-decoration: none;
+}
+.iv-btn:hover { border-color: var(--accent); }
+.iv-del { background: #f44336; color: #fff; border-color: #f44336; }
+.iv-del:hover { background: #d32f2f; }
+@media (max-width: 900px) {
+  .iv-nav { width: 2.2rem; height: 2.2rem; font-size: 1.3rem; }
+  .iv-btn { width: 2.6rem; height: 2.6rem; }
+}
 #edit-dialog {
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
   border: 1px solid var(--border);
@@ -421,6 +452,10 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   color: var(--text);
 }
 #edit-dialog h3 { margin: 0 0 0.8rem; font-size: 1rem; }
+#confirm-dialog { background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px; padding: 1.25rem; width: min(420px, 94vw); }
+#confirm-dialog h3 { margin: 0 0 0.6rem; font-size: 1rem; }
+.dlg-actions button.confirm-danger { background: #f44336; color: #fff; border-color: #f44336; }
+.dlg-actions button.confirm-danger:hover { background: #d32f2f; border-color: #d32f2f; }
 .dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.8rem; }
 .dlg-actions button {
   border-radius: var(--radius-sm); padding: 0.45rem 0.9rem; font: inherit; cursor: pointer; font-weight: 500;
@@ -505,7 +540,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 </main>
 </div>
 <footer>Page de partage — les modifications sont visibles par le propriétaire.<br>Dashboard v{{ version }} · créé par Fabien U.</footer>
-<dialog id="lightbox"><img alt=""></dialog>
+<dialog id="lightbox"></dialog>
 
 <dialog id="map-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.9rem;width:min(920px,96vw);color:var(--text)">
   <h3 id="map-title" style="margin:0 0 0.6rem;font-size:1rem">🗺 Carte</h3>
@@ -563,6 +598,15 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <p id="notify-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
   <div class="dlg-actions">
     <button type="button" id="notify-ok" class="primary">OK</button>
+  </div>
+</dialog>
+
+<dialog id="confirm-dialog">
+  <h3 id="confirm-title">Confirmer la suppression</h3>
+  <p id="confirm-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
+  <div class="dlg-actions">
+    <button type="button" id="confirm-no">Annuler</button>
+    <button type="button" id="confirm-yes" class="confirm-danger">Supprimer</button>
   </div>
 </dialog>
 
@@ -691,6 +735,29 @@ function notify(message, { title = 'ℹ️ Info', error = false } = {}) {
     const done = () => { dlg.close(); ok.onclick = dlg.oncancel = null; resolve(); };
     ok.onclick = done;
     dlg.oncancel = (e) => { e.preventDefault(); done(); };
+    dlg.showModal();
+  });
+}
+
+// Miroir du confirmPopin propriétaire (index.html) — requis par runImageViewer
+// (suppression d'image dans le carrousel) côté invité éditeur.
+function confirmPopin(message, { title = 'Confirmer la suppression', okLabel = 'Supprimer', danger = true } = {}) {
+  return new Promise(resolve => {
+    const dlg = document.getElementById('confirm-dialog');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-msg').textContent = message;
+    const yes = document.getElementById('confirm-yes');
+    const no = document.getElementById('confirm-no');
+    yes.textContent = okLabel;
+    yes.className = danger ? 'confirm-danger' : 'primary';
+    const done = (val) => {
+      dlg.close();
+      yes.onclick = no.onclick = dlg.oncancel = null;
+      resolve(val);
+    };
+    yes.onclick = () => done(true);
+    no.onclick = () => done(false);
+    dlg.oncancel = (e) => { e.preventDefault(); done(false); };
     dlg.showModal();
   });
 }
@@ -1642,9 +1709,18 @@ function render() {
         img.src = API + '/image/' + name;
         img.loading = 'lazy';
         img.addEventListener('click', () => {
-          const lb = document.getElementById('lightbox');
-          lb.querySelector('img').src = img.src;
-          lb.showModal();
+          runImageViewer({
+            images: memo.images, startIndex: memo.images.indexOf(name),
+            imageUrl: (n) => API + '/image/' + n,
+            downloadUrl: (n) => API + '/image/' + n,
+            canDelete: canEditNow(),
+            onDelete: async (n) => {
+              const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, {
+                method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
+              });
+              if (r.ok) await load();
+            },
+          });
         });
         wrap.appendChild(img);
         if (canEditNow()) {

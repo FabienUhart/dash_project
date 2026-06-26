@@ -866,6 +866,36 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   display: block;
   cursor: zoom-out;
 }
+/* [IMAGE-CAROUSEL] visionneuse carrousel */
+.iv-wrap { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+.iv-stage { display: flex; align-items: center; justify-content: center; max-width: 92vw; max-height: 82vh; overflow: visible; }
+.iv-img { max-width: 92vw; max-height: 82vh; border-radius: 8px; display: block; cursor: default; transition: transform 0.15s ease; }
+.iv-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 2.6rem; height: 2.6rem; border-radius: 50%; border: none;
+  background: rgba(0,0,0,0.55); color: #fff; font-size: 1.6rem; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.iv-nav:hover { background: rgba(0,0,0,0.8); }
+.iv-prev { left: 0.5rem; }
+.iv-next { right: 0.5rem; }
+.iv-indicator {
+  position: absolute; top: 0.6rem; left: 50%; transform: translateX(-50%); z-index: 2;
+  background: rgba(0,0,0,0.6); color: #fff; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem;
+}
+.iv-bar { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.iv-btn {
+  width: 2.4rem; height: 2.4rem; min-height: 0; padding: 0; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--text); font-size: 1.05rem; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; text-decoration: none;
+}
+.iv-btn:hover { border-color: var(--accent); }
+.iv-del { background: var(--red); color: #fff; border-color: var(--red); }
+.iv-del:hover { background: #d32f2f; }
+@media (max-width: 900px) {
+  .iv-nav { width: 2.2rem; height: 2.2rem; font-size: 1.3rem; }
+  .iv-btn { width: 2.6rem; height: 2.6rem; }
+}
 #done-section summary {
   cursor: pointer;
   font-size: 0.78rem;
@@ -1299,7 +1329,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </form>
 </dialog>
 
-<dialog id="lightbox"><img alt=""></dialog>
+<dialog id="lightbox"></dialog>
 <dialog id="qr-dialog" class="qr-dialog">
   <div class="qr-box"><img id="qr-img" alt="QR code du lien de partage"></div>
   <div class="qr-url" id="qr-url"></div>
@@ -3523,10 +3553,6 @@ document.getElementById('memo-edit-save').addEventListener('click', (e) => withB
 
 const lightbox = document.getElementById('lightbox');
 lightbox.addEventListener('click', () => lightbox.close());
-function openLightbox(src) {
-  lightbox.querySelector('img').src = src;
-  lightbox.showModal();
-}
 
 const qrDialog = document.getElementById('qr-dialog');
 qrDialog.addEventListener('click', () => qrDialog.close());
@@ -3567,7 +3593,16 @@ function thumbsEl(memo, editable) {
   images.forEach(name => {
     const tw = el('div', { class: 'thumb-wrap' });
     const img = el('img', { attrs: { src: `/uploads/${name}`, alt: '', loading: 'lazy' } });
-    img.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(`/uploads/${name}`); });
+    img.addEventListener('click', (e) => {
+      e.stopPropagation();
+      runImageViewer({
+        images, startIndex: images.indexOf(name),
+        imageUrl: (n) => `/uploads/${n}`,
+        downloadUrl: (n) => `/uploads/${n}`,
+        canDelete: !!editable,
+        onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
+      });
+    });
     tw.appendChild(img);
     if (editable) {
       tw.appendChild(el('button', {
