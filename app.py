@@ -2045,15 +2045,17 @@ def memo_restore(memo_id):
         json.dumps(snap.get("assignees") if snap.get("assignees") is not None
                    else json.loads(_row_get(existing, "assignees", "[]") or "[]"),
                    ensure_ascii=False),
+        _clean_due_time(snap.get("due_time")) if snap.get("due_date") else "",
     )
     _log_revision(db, existing, after, "moi (restauration)")
     db.execute(
-        "UPDATE memos SET content=?, done=?, due_date=?, priority=?, subtasks=?, "
+        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, subtasks=?, "
         "recurrence=?, title=?, assignees=?, updated_at=? WHERE id=?",
         (
             after["content"],
             1 if after["done"] else 0,
             after["due_date"],
+            after["due_time"],
             after["priority"],
             json.dumps(after["subtasks"], ensure_ascii=False),
             after["recurrence"],
@@ -2916,7 +2918,7 @@ def _build_export(db):
         "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
     return {
-        "version": 17,
+        "version": 18,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -3340,6 +3342,7 @@ def import_links():
             assignees = _assignees_json(memo.get("assignees"))
             memo_marker = _clean_hex_color(memo.get("marker_color"), "")
             memo_groups = _map_groups_json(memo.get("map_groups"))
+            memo_time = _clean_due_time(memo.get("due_time")) if due_date else ""
         else:
             content = str(memo).strip()
             uid = ""
@@ -3358,6 +3361,7 @@ def import_links():
             assignees = "[]"
             memo_marker = ""
             memo_groups = "[]"
+            memo_time = ""
         if not content and not title:
             continue
 
@@ -3366,11 +3370,14 @@ def import_links():
             if updated and updated > (existing["updated_at"] or ""):
                 merged_images = images if images != "[]" else (existing["images"] or "[]")
                 merged_marker = memo_marker or _row_get(existing, "marker_color")
+                merged_time = memo_time or _row_get(existing, "due_time")
+                if not due_date:
+                    merged_time = ""
                 db.execute(
-                    "UPDATE memos SET content=?, done=?, due_date=?, priority=?, "
+                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
                     "title=?, assignees=?, marker_color=?, map_groups=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, updated, existing["id"]),
+                    (content, done, due_date, merged_time, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -3386,10 +3393,10 @@ def import_links():
         new_uid = uid or str(uuid.uuid4())
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-            "done, due_date, priority, subtasks, project_id, images, recurrence, emoji, location, "
+            "done, due_date, due_time, priority, subtasks, project_id, images, recurrence, emoji, location, "
             "title, assignees, marker_color, map_groups) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups),
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
