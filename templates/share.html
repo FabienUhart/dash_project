@@ -1720,6 +1720,7 @@ function render() {
             images: memo.images, startIndex: memo.images.indexOf(name),
             imageUrl: (n) => API + '/image/' + n,
             downloadUrl: (n) => API + '/image/' + n,
+            exifUrl: (n) => API + '/image-exif/' + n,
             canDelete: canEditNow(),
             onDelete: async (n) => {
               const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, {

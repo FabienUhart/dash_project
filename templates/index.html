@@ -3606,6 +3606,7 @@ function thumbsEl(memo, editable) {
         images, startIndex: images.indexOf(name),
         imageUrl: (n) => `/uploads/${n}`,
         downloadUrl: (n) => `/uploads/${n}`,
+        exifUrl: (n) => `/api/image-exif/${n}`,
         canDelete: !!editable,
         onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
       });
