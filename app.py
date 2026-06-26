@@ -407,6 +407,82 @@ def _reverse_geocode(lat, lng):
         return ""
 
 
+# [IMAGE-EXIF] Lecture EXIF à la volée (jamais stockée, jamais exportée).
+# Cache mémoire (lat,lng arrondis) -> label pour ne pas marteler Nominatim
+# (mémorise aussi "" : un échec ne sera pas re-tenté). Non persistant — vidé au
+# redémarrage, ce qui est conforme au contrat (rien en base).
+_exif_geo_cache = {}
+
+
+def _exif_dms_to_deg(value, ref):
+    # value = liste de 3 Ratio exifread [deg, min, sec] ; ref = 'N'/'S'/'E'/'W'.
+    try:
+        d, m, s = [float(x.num) / float(x.den) for x in value.values]
+        deg = d + m / 60.0 + s / 3600.0
+        if str(ref).strip().upper() in ("S", "W"):
+            deg = -deg
+        return deg
+    except Exception:
+        return None
+
+
+def _image_exif(name):
+    # Renvoie {lat,lng,label,datetime} pour un fichier image déjà validé, ou None
+    # si illisible / sans GPS ni date de prise de vue (no-op silencieux).
+    path = os.path.join(UPLOAD_DIR, name)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "rb") as f:
+            tags = exifread.process_file(f, details=False)
+    except Exception:
+        return None
+    if not tags:
+        return None
+
+    lat = lng = None
+    try:
+        glat = tags.get("GPS GPSLatitude")
+        glng = tags.get("GPS GPSLongitude")
+        if glat is not None and glng is not None:
+            lat = _exif_dms_to_deg(glat, tags.get("GPS GPSLatitudeRef", "N"))
+            lng = _exif_dms_to_deg(glng, tags.get("GPS GPSLongitudeRef", "E"))
+            if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                lat = lng = None
+    except Exception:
+        lat = lng = None
+
+    dt = ""
+    try:
+        raw = tags.get("EXIF DateTimeOriginal") or tags.get("Image DateTime")
+        if raw:
+            # Format EXIF "YYYY:MM:DD HH:MM:SS" -> ISO "YYYY-MM-DDTHH:MM:SS".
+            d_part, _, t_part = str(raw).strip().partition(" ")
+            d_iso = d_part.replace(":", "-")
+            dt = (d_iso + "T" + t_part).strip("T")
+    except Exception:
+        dt = ""
+
+    if lat is None and not dt:
+        return None
+
+    label = ""
+    if lat is not None:
+        key = (round(lat, 4), round(lng, 4))
+        if key in _exif_geo_cache:
+            label = _exif_geo_cache[key]
+        else:
+            label = _reverse_geocode(lat, lng)
+            _exif_geo_cache[key] = label
+
+    return {
+        "lat": round(lat, 6) if lat is not None else None,
+        "lng": round(lng, 6) if lng is not None else None,
+        "label": label,
+        "datetime": dt,
+    }
+
+
 def _geocode_search(q):
     try:
         r = requests.get(
