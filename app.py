@@ -26,13 +26,14 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "17"
+APP_VERSION = "18"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
 BACKUP_KEEP_DAYS = int(os.environ.get("BACKUP_KEEP_DAYS", "7"))
 ALLOWED_IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
 SAFE_IMG_NAME = re.compile(r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp)$")
+DUE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _looks_like_image(head, ext):
@@ -264,6 +265,8 @@ def init_db():
         conn.execute("ALTER TABLE projects ADD COLUMN marker_color TEXT DEFAULT ''")
     if "map_groups" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN map_groups TEXT DEFAULT '[]'")
+    if "due_time" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN due_time TEXT DEFAULT ''")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS memo_comments (
@@ -1063,6 +1066,11 @@ def _clean_title(value):
 
 def _clean_description(value):
     return re.sub(r"[<>]", "", str(value or "")).strip()[:1000]
+
+
+def _clean_due_time(value):
+    v = str(value or "").strip()
+    return v if DUE_TIME_RE.match(v) else ""
 
 
 @app.route("/api/memos", methods=["GET"])
