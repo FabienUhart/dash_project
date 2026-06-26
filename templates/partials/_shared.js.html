@@ -494,4 +494,101 @@ function setupMentions(quill, getNames, onPick) {
     else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(); }
   }, true);
 }
+
+// [IMAGE-CAROUSEL] Visionneuse carrousel partagée (ADR-001, modèle runMapDialog).
+// Pure / sans état hors `cfg` ; tout le spécifique page passe par cfg, donc le
+// périmètre invité ne s'élargit pas. Construit le DOM dans le <dialog id="lightbox">.
+//   cfg = { images:[name], startIndex, imageUrl(name), downloadUrl(name),
+//           canDelete:bool, onDelete:async name=>{} }
+// Rotation/zoom = AFFICHAGE SEUL (transform CSS, non persisté, aucun fetch),
+// remis à zéro à chaque navigation et fermeture. Pas de GSAP sur le dialog (invariant 8).
+function runImageViewer(cfg) {
+  const dlg = document.getElementById('lightbox');
+  if (!dlg || !cfg || !(cfg.images || []).length) return;
+  const images = cfg.images.slice();
+  let idx = Math.min(Math.max(cfg.startIndex || 0, 0), images.length - 1);
+  let rot = 0, scale = 1;
+
+  dlg.innerHTML = '';
+  // Conteneur : stoppe la propagation pour que seul un clic sur le backdrop (le
+  // <dialog> lui-même) ferme via le handler de la page ; les contrôles ne ferment pas.
+  const wrap = el('div', { class: 'iv-wrap', on: { click: (e) => e.stopPropagation() } });
+
+  const img = el('img', { class: 'iv-img', attrs: { alt: '' } });
+  const stage = el('div', { class: 'iv-stage' }, img);
+
+  const prev = el('button', { class: 'iv-nav iv-prev', text: '‹', attrs: { title: 'Précédente', 'aria-label': 'Image précédente' } });
+  const next = el('button', { class: 'iv-nav iv-next', text: '›', attrs: { title: 'Suivante', 'aria-label': 'Image suivante' } });
+  const indicator = el('span', { class: 'iv-indicator' });
+
+  // Barre d'options
+  const bar = el('div', { class: 'iv-bar' });
+  const dl = el('a', { class: 'iv-btn', text: '⬇', attrs: { download: '', title: 'Télécharger' } });
+  const rotL = el('button', { class: 'iv-btn', text: '↺', attrs: { title: 'Pivoter à gauche' } });
+  const rotR = el('button', { class: 'iv-btn', text: '↻', attrs: { title: 'Pivoter à droite' } });
+  const zoomOut = el('button', { class: 'iv-btn', text: '－', attrs: { title: 'Dézoomer' } });
+  const zoomIn = el('button', { class: 'iv-btn', text: '＋', attrs: { title: 'Zoomer' } });
+  bar.appendChild(dl); bar.appendChild(rotL); bar.appendChild(rotR);
+  bar.appendChild(zoomOut); bar.appendChild(zoomIn);
+  let delBtn = null;
+  if (cfg.canDelete) {
+    delBtn = el('button', { class: 'iv-btn iv-del', text: '🗑', attrs: { title: 'Supprimer' } });
+    bar.appendChild(delBtn);
+  }
+  const closeBtn = el('button', { class: 'iv-btn iv-close', text: '✕', attrs: { title: 'Fermer' } });
+  bar.appendChild(closeBtn);
+
+  function applyTransform() { img.style.transform = 'rotate(' + rot + 'deg) scale(' + scale + ')'; }
+  function render() {
+    const name = images[idx];
+    img.src = cfg.imageUrl(name);
+    dl.href = cfg.downloadUrl(name);
+    rot = 0; scale = 1; applyTransform();
+    indicator.textContent = (idx + 1) + ' / ' + images.length;
+    const multi = images.length > 1;
+    prev.style.visibility = multi ? '' : 'hidden';
+    next.style.visibility = multi ? '' : 'hidden';
+  }
+  function go(d) { idx = (idx + d + images.length) % images.length; render(); }
+
+  prev.addEventListener('click', () => go(-1));
+  next.addEventListener('click', () => go(1));
+  rotL.addEventListener('click', () => { rot -= 90; applyTransform(); });
+  rotR.addEventListener('click', () => { rot += 90; applyTransform(); });
+  zoomIn.addEventListener('click', () => { scale = Math.min(scale * 1.25, 5); applyTransform(); });
+  zoomOut.addEventListener('click', () => { scale = Math.max(scale / 1.25, 0.25); applyTransform(); });
+  closeBtn.addEventListener('click', () => dlg.close());
+  if (delBtn) {
+    delBtn.addEventListener('click', async () => {
+      if (!(await confirmPopin('Supprimer cette image ?'))) return;
+      await cfg.onDelete(images[idx]);
+      images.splice(idx, 1);
+      if (!images.length) { dlg.close(); return; }
+      if (idx >= images.length) idx = images.length - 1;
+      render();
+    });
+  }
+
+  wrap.appendChild(stage);
+  wrap.appendChild(prev);
+  wrap.appendChild(next);
+  wrap.appendChild(indicator);
+  wrap.appendChild(bar);
+  dlg.appendChild(wrap);
+
+  const onKey = (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+    else if (e.key === '+' || e.key === '=') { scale = Math.min(scale * 1.25, 5); applyTransform(); }
+    else if (e.key === '-') { scale = Math.max(scale / 1.25, 0.25); applyTransform(); }
+  };
+  dlg.addEventListener('keydown', onKey);
+  dlg.addEventListener('close', function cleanup() {
+    dlg.removeEventListener('keydown', onKey);
+    dlg.removeEventListener('close', cleanup);
+  });
+
+  render();
+  dlg.showModal();
+}
 </script>
