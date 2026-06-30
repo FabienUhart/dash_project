@@ -3004,6 +3004,10 @@ def hub_data(hub_token):
             ).fetchall()
         ],
         "marker_color": _map_marker_color(db),
+        # [HUB-TOKEN-REFRESH] jetons par dossier rafraîchis à CHAQUE chargement (pas qu'à approve)
+        # → un dossier ajouté après coup devient éditable sans re-saisir le code. L'invité est
+        # déjà prouvé (hubProof) ; on ne fait que reposer des guest_token qu'il a droit d'avoir.
+        "folders": _hub_folders(db, hub["email"]),
     })
 
 

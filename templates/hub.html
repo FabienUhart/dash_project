@@ -311,11 +311,28 @@ themeBtn.addEventListener('click', () => { const next = document.documentElement
 
 // ── écritures routées par item : token de l'item + son guest_token ──
 function gtFor(token) { try { return localStorage.getItem('dashguest:' + token) || ''; } catch (e) { return ''; } }
-async function api(token, path, opts) {
+// [HUB-TOKEN-REFRESH] (re)pose les guest_token par dossier — appelé à chaque chargement.
+function persistFolderTokens(folders) {
+  (folders || []).forEach(f => { if (f.token && f.guest_token) { try { localStorage.setItem('dashguest:' + f.token, f.guest_token); } catch (e) {} } });
+}
+// Rafraîchit les jetons depuis le serveur (preuve déjà détenue). Renvoie true si OK.
+async function refreshTokens() {
+  try {
+    const r = await fetch(HUB_BASE + '/data', { headers: { 'X-Guest-Token': hubProof() } });
+    if (!r.ok) return false;
+    const d = await r.json(); persistFolderTokens(d.folders); return true;
+  } catch (e) { return false; }
+}
+async function api(token, path, opts, _retried) {
   opts = opts || {}; opts.headers = Object.assign({ 'X-Guest-Token': gtFor(token) }, opts.headers || {});
   if (opts.body && !(opts.body instanceof FormData)) opts.headers['Content-Type'] = 'application/json';
   const r = await fetch('/share/' + token + path, opts);
-  if (r.status === 403) { notify('Action non autorisée (lecture seule).', { error: true }); }
+  // 403 alors qu'on a un can_edit côté UI → jeton manquant/périmé (ex. dossier ajouté après coup).
+  // Rafraîchir les jetons en silence et réessayer UNE fois avant d'alerter (jamais « lecture seule »).
+  if (r.status === 403 && !_retried) {
+    if (await refreshTokens() && gtFor(token)) return api(token, path, opts, true);
+  }
+  if (r.status === 403) notify('Session expirée — re-saisis ton code.', { error: true });
   return r;
 }
 async function putMemo(m, body) { const r = await api(m.share_token, '/memo/' + m.id, { method: 'PUT', body: JSON.stringify(body) }); if (r.ok) await reload(); return r; }
@@ -332,7 +349,7 @@ async function approve() {
   if (!r.ok) { const e = await r.json().catch(() => ({})); errEl.textContent = e.error || 'code invalide';
     document.getElementById('pin').value = ''; document.getElementById('pin').focus(); return; }
   const data = await r.json();
-  (data.folders || []).forEach(f => { try { localStorage.setItem('dashguest:' + f.token, f.guest_token); } catch (e) {} });
+  persistFolderTokens(data.folders);
   if (data.folders && data.folders.length) { try { localStorage.setItem('dashhubproof:' + HUB_TOKEN, data.folders[0].guest_token); } catch (e) {} }
   try { localStorage.setItem('dashhubfolders:' + HUB_TOKEN, JSON.stringify(data.folders || [])); } catch (e) {}
   await loadDash(data.folders || []);
@@ -353,6 +370,7 @@ async function loadDash(knownFolders) {
   } catch (e) {
     fallbackLauncher(knownFolders); return;   // dégradation gracieuse → lanceur
   }
+  persistFolderTokens(data.folders);  // [HUB-TOKEN-REFRESH] dossiers ajoutés après coup deviennent éditables
   DATA = data;
   document.getElementById('code-screen').hidden = true;
   document.getElementById('dash').hidden = false;
@@ -361,7 +379,7 @@ async function loadDash(knownFolders) {
 }
 async function reload() {
   const r = await fetch(HUB_BASE + '/data', { headers: { 'X-Guest-Token': hubProof() } });
-  if (r.ok) { DATA = await r.json(); render(); }
+  if (r.ok) { DATA = await r.json(); persistFolderTokens(DATA.folders); render(); }
 }
 function showCode() { document.getElementById('dash').hidden = true; document.getElementById('code-screen').hidden = false;
   document.getElementById('pin').focus(); }

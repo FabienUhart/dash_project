@@ -10,6 +10,7 @@ _Rien en attente — voir le backlog plus bas._
 
 ## Fait (juin 2026)
 
+- [x] [V19.8.16] `[HUB-TOKEN-REFRESH]` Dossier ajouté à un invité déjà connecté désormais éditable sans re-saisir le code : `/share/hub/<token>/data` renvoie les `folders` + `guest_token`, reposés à chaque chargement (`persistFolderTokens`) ; 403 sur item `can_edit` → refresh silencieux + retry + message « session expirée » (plus « lecture seule » à tort). Sécurité inchangée (serveur revalide scope+can_edit).
 - [x] [V19.8.15] `[HUB-ROUTE-PREFIX]` Routes du hub déplacées de `/g/<token>` vers `/share/hub/<token>` → couvertes par le bypass Authelia `/share/*` (aucun changement Caddy). URL régénérée partout (`/api/hubs`, e-mail, QR), `hub.html` lit le token en dernier segment, pas de collision avec `/share/<token>`. Pas de migration, export inchangé.
 - [x] [V19.8.14] `[HUB-EMAIL-INVITE]` Envoi du lien-hub + code par e-mail à un invité (bouton ✉️ dans 🔗 Partages). SMTP via `.env` uniquement (secret hors base/export/front/logs), route owner-only `POST /api/hubs/<token>/send-invite` (destinataire forcé = e-mail du hub, starttls 587, rate-limit 5/min), `/api/settings` n'expose que `smtp_enabled`. `env_file required:false`, `.env.example` en placeholders, `python-dotenv`. Export inchangé. Invariants 5/6/9.
 - [x] [V19.7.13] `[SHARE-BOARD-FIX]` Régression critique : board `/share` vide (`ReferenceError: projIcon is not defined`) — `projIcon` était nichée dans `renderShareTreeView` mais le fil d'Ariane des cards l'appelle depuis `render()`. Hoist top-level (définition unique). Frontend pur.
