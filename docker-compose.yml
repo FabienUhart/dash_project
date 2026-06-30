@@ -6,4 +6,9 @@ services:
       - "8099:8099"
     volumes:
       - ./data:/app/data
+    # [HUB-EMAIL-INVITE] Secrets SMTP via .env (gitignoré). required:false → `up` marche
+    # même sans .env (feature désactivée tant que SMTP_PASS est vide).
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped

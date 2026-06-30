@@ -3,15 +3,27 @@ import hmac
 import json
 import os
 import secrets
+import smtplib
 import sqlite3
+import ssl
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+from email.message import EmailMessage
+from email.utils import parseaddr
 from urllib.parse import urlparse
 
 import re
+
+# [HUB-EMAIL-INVITE] Charge .env en dev (os.environ déjà rempli par env_file en Docker).
+# Secret SMTP lu UNIQUEMENT depuis l'environnement — jamais en base/export/front/logs.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 import exifread
 import requests
@@ -1953,6 +1965,67 @@ def _hub_pin_fail(hub_token):
     _HUB_PIN_ATTEMPTS.setdefault(hub_token, []).append(time.time())
 
 
+# ───────────────────────── [HUB-EMAIL-INVITE] envoi du lien-hub par e-mail ─────────────────────────
+# Secret SMTP lu UNIQUEMENT depuis l'environnement. Jamais stocké en base, jamais exporté,
+# jamais renvoyé au front, jamais loggué (ni SMTP_PASS ni le code en clair).
+
+def _smtp_config():
+    """Config SMTP depuis l'env. Renvoie None si SMTP_PASS vide (feature désactivée)."""
+    pwd = (os.environ.get("SMTP_PASS") or "").strip()
+    if not pwd:
+        return None
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    if not host:
+        return None
+    try:
+        port = int((os.environ.get("SMTP_PORT") or "587").strip())
+    except ValueError:
+        port = 587
+    user = (os.environ.get("SMTP_USER") or "").strip()
+    sender = (os.environ.get("SMTP_FROM") or user or "").strip()
+    if not sender:
+        return None
+    return {"host": host, "port": port, "user": user, "pwd": pwd, "from": sender}
+
+
+# Rate-limit des envois (anti-abus). Fenêtre glissante en mémoire, par worker.
+_INVITE_SENT = []
+_INVITE_MAX = 5
+_INVITE_WINDOW = 60  # secondes
+
+
+def _invite_throttled():
+    now = time.time()
+    _INVITE_SENT[:] = [t for t in _INVITE_SENT if now - t < _INVITE_WINDOW]
+    return len(_INVITE_SENT) >= _INVITE_MAX
+
+
+def _send_hub_invite(cfg, to_email, name, hub_url, pin):
+    """Envoie le lien-hub + code à l'e-mail DU HUB (jamais un destinataire libre du client).
+    starttls sur 587. Lève en cas d'échec SMTP (le secret n'apparaît jamais dans le message)."""
+    greeting = name.strip() if (name or "").strip() else "Bonjour"
+    body = (
+        f"{greeting},\n\n"
+        f"Vous avez accès à des dossiers partagés sur le Dashboard.\n\n"
+        f"Votre lien personnel (tous vos dossiers, à garder) :\n  {hub_url}\n\n"
+        f"Votre code d'accès à 4 chiffres : {pin}\n\n"
+        f"Ouvrez le lien, saisissez le code une fois, et vous accédez à tout.\n"
+        f"Ce lien et ce code sont personnels — ne les partagez pas.\n"
+    )
+    msg = EmailMessage()
+    msg["Subject"] = "Vos dossiers partagés — Dashboard"
+    msg["From"] = cfg["from"]
+    msg["To"] = to_email
+    msg.set_content(body)  # set_content gère l'échappement/encodage (pas d'injection d'en-têtes)
+    with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as s:
+        s.ehlo()
+        s.starttls(context=ssl.create_default_context())
+        s.ehlo()
+        if cfg["user"]:
+            s.login(cfg["user"], cfg["pwd"])
+        s.send_message(msg)
+
+
 def _share_memo_dict(row):
     d = _memo_dict(row)
     return {
@@ -2199,7 +2272,12 @@ def _map_marker_color(db):
 def get_settings():
     db = get_db()
     return jsonify(
-        {"owner_name": _owner_name(db), "map_marker_color": _map_marker_color(db)}
+        {
+            "owner_name": _owner_name(db),
+            "map_marker_color": _map_marker_color(db),
+            # [HUB-EMAIL-INVITE] booléen seulement — JAMAIS le secret SMTP.
+            "smtp_enabled": _smtp_config() is not None,
+        }
     )
 
 
@@ -2373,6 +2451,33 @@ def rotate_hub_pin(hub_token):
     db.execute("UPDATE guest_hubs SET pin = ? WHERE id = ?", (new_pin, hub["id"]))
     db.commit()
     return jsonify({"hub_token": hub_token, "pin": new_pin})
+
+
+@app.route("/api/hubs/<hub_token>/send-invite", methods=["POST"])
+def send_hub_invite(hub_token):
+    # [HUB-EMAIL-INVITE] Envoie le lien-hub + code à l'e-mail DE CE HUB (jamais un destinataire
+    # libre du client → pas de relais ouvert). Owner-only (derrière Authelia). Secret hors base.
+    cfg = _smtp_config()
+    if not cfg:
+        return jsonify({"error": "SMTP non configuré (renseigner SMTP_* dans .env)"}), 400
+    if _invite_throttled():
+        return jsonify({"error": "trop d'envois, réessaie dans une minute"}), 429
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    if not hub:
+        return jsonify({"error": "hub introuvable"}), 404
+    to_email = parseaddr(hub["email"] or "")[1].strip().lower()  # destinataire = e-mail du hub, point.
+    if "@" not in to_email:
+        return jsonify({"error": "e-mail du hub invalide"}), 400
+    hub_url = request.host_url.rstrip("/") + "/g/" + hub["hub_token"]
+    try:
+        _send_hub_invite(cfg, to_email, hub["name"] or "", hub_url, hub["pin"] or "")
+    except Exception:
+        # Ne jamais exposer/loguer le secret ni le détail SMTP brut.
+        app.logger.warning("send-invite: échec SMTP pour le hub %s", hub["id"])
+        return jsonify({"error": "échec de l'envoi (voir la configuration SMTP)"}), 502
+    _INVITE_SENT.append(time.time())
+    return jsonify({"ok": True, "email": to_email})
 
 
 @app.route("/api/activity", methods=["GET"])

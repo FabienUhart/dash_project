@@ -1701,6 +1701,7 @@ const state = {
   memoProject: 'all',
   searchScope: 'all',
   ownerName: 'Fabien',
+  smtpEnabled: false,
   mapMarkerColor: '#e53935',
 };
 
@@ -1805,7 +1806,7 @@ async function loadAll() {
       && !state.projects.some(p => p.id === state.memoProject)) {
     state.memoProject = 'all';
   }
-  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; } catch (e) {}
+  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; state.smtpEnabled = !!(s && s.smtp_enabled); } catch (e) {}
   renderAll();
   if (state.view === 'links') loadStatus();
 }
@@ -3201,6 +3202,21 @@ async function renderShares() {
         icon: 'qr', attrs: { title: 'QR du lien unique' },
         on: { click: () => openQr(hubUrl, { kind: 'project', target: dispName + ' — tous ses dossiers', can_edit: false, pin: hub.pin }) },
       }));
+      // [HUB-EMAIL-INVITE] Envoi du lien-hub + code par e-mail à l'invité (vers son e-mail enregistré).
+      const sendBtn = el('button', {
+        text: '✉️ Envoyer',
+        attrs: state.smtpEnabled
+          ? { title: 'Envoyer le lien et le code à ' + email + ' par e-mail' }
+          : { disabled: '', title: 'SMTP non configuré — renseigner SMTP_* dans .env' },
+      });
+      if (state.smtpEnabled) sendBtn.addEventListener('click', async () => {
+        if (!(await confirmPopin('Envoyer le lien et le code à ' + email + ' par e-mail ?', { okLabel: 'Envoyer' }))) return;
+        try {
+          const r = await api('/api/hubs/' + hub.hub_token + '/send-invite', { method: 'POST' });
+          notify('Envoyé à ' + (r.email || email) + '.');
+        } catch (e) { notify(e.message || 'Échec de l\'envoi.', { error: true }); }
+      });
+      hubRow.appendChild(sendBtn);
       hubRow.appendChild(el('button', {
         text: '↻ lien', attrs: { title: 'Régénérer le lien (nouvelle URL, accès et code conservés)' },
         on: { click: async () => {
