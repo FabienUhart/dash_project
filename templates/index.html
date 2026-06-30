@@ -704,7 +704,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   box-shadow: var(--shadow);
   transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
 }
-.task:hover { border-left-color: var(--accent); box-shadow: var(--shadow-lg); transform: translateX(2px); }
+.task:hover { border-left-color: var(--accent); box-shadow: var(--shadow-lg); transform: translate(2px, -2px); }
 .task.dragging { opacity: 0.4; }
 .task .task-row { display: flex; align-items: flex-start; gap: 0.6rem; }
 .task-check {
@@ -773,6 +773,47 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .task .task-actions button:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 /* Déplier et modifier = actions principales, mises en avant en bleu d'accent. */
 .task .task-actions .texp, .task .task-actions .tedit { color: var(--accent); border-color: var(--accent); }
+/* === [CARD-REDESIGN] cards mémo resserrées === */
+/* Extrait tronqué à 3 lignes sur la card (contenu complet dans l'éditeur / au déplier). */
+.task .task-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.task .task-badges:empty { display: none; }
+/* Chip de priorité (couleur = couleur de la priorité, texte via textOn()). */
+.prio-chip { font-size: 0.66rem; font-weight: 700; border-radius: 4px; padding: 0.05rem 0.4rem; line-height: 1.45; white-space: nowrap; }
+/* Pastilles d'initiales d'assignés, empilées avec léger chevauchement. */
+.asg-stack { display: inline-flex; align-items: center; }
+.asg-stack .asg-av { margin-left: -6px; }
+.asg-stack .asg-av:first-child { margin-left: 0; }
+.asg-av {
+  width: 1.35rem; height: 1.35rem; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.6rem; font-weight: 700; line-height: 1;
+  background: var(--panel-2); color: var(--assignee);
+  border: 1px solid var(--assignee); box-shadow: 0 0 0 2px var(--panel);
+}
+.asg-av.noaccess { color: var(--warn); border-color: var(--warn); }
+/* Miniature normalisée + overlay « +N » quand la card est repliée. */
+.task-thumbs.thumbs-collapsed img { height: 88px; width: 120px; max-width: none; }
+.task-thumbs .thumb-more {
+  position: absolute; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6); color: #fff;
+  font-size: 0.7rem; font-weight: 700; padding: 0.05rem 0.4rem;
+  border-radius: 6px 0 6px 0; pointer-events: none;
+}
+/* Menu ⋯ d'actions secondaires (Dupliquer). */
+.task-more { position: relative; display: inline-flex; }
+/* Séparateur léger entre zones du détail déplié [EXPAND-DETAIL-REORG]. */
+.detail-sep { align-self: stretch; border-left: 1px solid var(--border); margin: 0 0.2rem; }
+.task-detail .task-crumb { font-size: 0.82rem; color: var(--muted); flex-wrap: wrap; }
+.task-detail .task-crumb .me-crumb-node { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Réinitialise le look « bouton d'action » hérité pour les items du popover (qui sont
+   des descendants de .task-actions) → retrouve l'apparence card-menu. */
+.task-more .card-menu button { min-width: 0; min-height: 0; padding: 0.4rem 0.6rem; border: none; background: none; color: var(--text); justify-content: flex-start; border-radius: 6px; }
+.task-more .card-menu button:hover { background: var(--panel); border-color: transparent; color: var(--text); }
+/* Survol : actions révélées sur pointeur fin (toujours visibles au tactile via les overrides mobile). */
+@media (hover: hover) and (pointer: fine) {
+  .task .task-actions { opacity: 0; transition: opacity 0.15s var(--ease); }
+  .task:hover .task-actions, .task:focus-within .task-actions { opacity: 1; }
+}
 .task-detail { margin: 0.55rem 0 0.15rem 1.75rem; display: flex; flex-direction: column; gap: 0.45rem; }
 .task-detail .detail-row { display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
 .task-detail input[type="date"] {
@@ -1003,37 +1044,43 @@ aside#memo-panel {
 .task-content .ql-ui { display: none; }
 .task-content li[data-list="checked"], .task-content li[data-list="unchecked"] {
   list-style: none;
-  position: relative;
-  padding-left: 1.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-left: 0;
+  margin-left: 0;
   cursor: pointer;
   border-radius: 4px;
-  margin-left: -1.3rem;
 }
+.task-content li[data-list]:empty::before { display: none; }
 .task-content li[data-list="checked"]:hover, .task-content li[data-list="unchecked"]:hover { background: var(--panel-2); }
 .task-content li[data-list="unchecked"]::before {
   content: '';
-  position: absolute;
-  left: 0.25rem;
-  top: 0.3em;
-  width: 0.85em;
-  height: 0.85em;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  font-size: 0.85em;
+  width: 1em;
+  height: 1em;
+  margin-top: 0.25em;
   border: 2px solid var(--muted);
   border-radius: 4px;
 }
 .task-content li[data-list="checked"]::before {
   content: '✓';
-  position: absolute;
-  left: 0.25rem;
-  top: 0.05em;
-  width: 0.85em;
-  height: 0.85em;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  width: 1em;
+  height: 1em;
+  margin-top: 0.25em;
   background: var(--green);
   border: 2px solid var(--green);
   border-radius: 4px;
   color: #fff;
-  font-size: 0.8em;
-  line-height: 1.1;
-  text-align: center;
+  line-height: 1;
 }
 .task-content li[data-list="checked"] { text-decoration: line-through; color: var(--muted); }
 
@@ -1113,6 +1160,18 @@ dialog input, dialog textarea, dialog select {
 dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem; }
 .me-head { display: flex; align-items: center; gap: 0.5rem; position: relative; margin-bottom: 1rem; }
 .me-head h3 { flex: 1; }
+.me-context { margin-bottom: 0.75rem; padding: 0.5rem 0.6rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 0.3rem; }
+.me-context:empty { display: none; }
+.me-crumb { display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem; font-size: 0.82rem; color: var(--text); min-width: 0; }
+.me-crumb .me-sep { color: var(--muted); }
+.me-crumb .me-crumb-node { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-meta { font-size: 0.78rem; color: var(--muted); }
+.me-acc > summary { cursor: pointer; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin: 0.5rem 0 0.2rem; list-style: none; user-select: none; }
+.me-acc > summary::-webkit-details-marker { display: none; }
+.me-acc > summary::after { content: ' ▸'; }
+.me-acc[open] > summary::after { content: ' ▾'; }
+.me-versions { min-width: 44px; min-height: 36px; padding: 0.2rem 0.6rem; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); color: var(--muted); margin-right: auto; cursor: pointer; }
+.me-versions:hover { background: var(--panel); color: var(--text); }
 .icon-btn { background: none; border: 1px solid transparent; color: var(--muted); cursor: pointer; font-size: 1.2rem; line-height: 1; border-radius: 6px; padding: 0.1rem 0.5rem; }
 .icon-btn:hover { background: var(--panel-2); color: var(--text); }
 .card-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 6; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; display: flex; flex-direction: column; min-width: 9.5rem; }
@@ -1224,8 +1283,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   /* En mobile, la barre de projets du haut n'affiche pas le crayon : il fait doublon
      avec le bouton « Modifier » de l'en-tête du projet une fois qu'on entre dedans. */
   .cat-item .cat-edit { display: none; }
-  /* Pied de carte un peu plus généreux + chips plus gros et duplicata masqué. */
-  .task .task-actions .tdup { display: none; }
+  /* Pied de carte un peu plus généreux + chips plus gros. Actions toujours visibles
+     (le survol n'existe pas au doigt ; le mode responsive DevTools rapporte un pointeur fin). */
+  .task .task-actions { opacity: 1; }
   .task .task-actions button { min-width: 46px; min-height: 40px; padding: 0.25rem 0.6rem; }
   .task .task-actions .ic { width: 1.5em; height: 1.5em; }
   /* Vue Partages : rangées en multi-lignes pour que le nom/arbre prenne toute la largeur
@@ -1468,6 +1528,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <button type="button" id="memo-edit-delete" class="danger-item">🗑 Supprimer</button>
     </div>
   </div>
+  <div id="me-context" class="me-context"></div>
   <label class="me-label" for="me-title">Titre <span style="font-weight:400">(optionnel)</span></label>
   <input id="me-title" type="text" placeholder="Titre du mémo…" maxlength="200" autocomplete="off"
          style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem">
@@ -1483,9 +1544,12 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <button type="button" id="me-loc-clear" class="prio-btn" style="display:none">×</button>
     <span id="me-loc-label" style="font-size:0.8rem;color:var(--muted)">aucune</span>
   </div>
-  <label class="me-label">Commentaires</label>
-  <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
+  <details id="me-comments-acc" class="me-acc">
+    <summary id="me-comments-sum">💬 Commentaires</summary>
+    <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
+  </details>
   <div class="actions">
+    <button type="button" id="memo-edit-versions" class="me-versions">📜 Voir les versions</button>
     <button type="button" id="memo-edit-cancel">Annuler</button>
     <button type="button" id="memo-edit-save" class="primary">Sauver</button>
   </div>
@@ -3418,6 +3482,7 @@ document.getElementById('share-add-rw').addEventListener('click', async () => {
 const memoEditDialog = document.getElementById('memo-edit-dialog');
 let quillInstance = null;
 let editingMemoId = null;
+let editingMemo = null;
 
 function getQuill() {
   if (typeof Quill === 'undefined') return null;
@@ -3541,10 +3606,44 @@ function renderMePeople() {
   wrap.appendChild(input);
 }
 
+function renderMeContext(memo) {
+  const box = document.getElementById('me-context');
+  box.innerHTML = '';
+  // Fil d'Ariane « 📌 Projet : A › B › C » (📥 Inbox si pas de projet)
+  const crumb = el('div', { class: 'me-crumb' });
+  crumb.appendChild(el('span', { class: 'me-sep', text: '📌' }));
+  const ancIds = projectAncestorIds(memo.project_id).reverse(); // racine → feuille
+  const projs = ancIds.map(id => state.projects.find(p => p.id === id)).filter(Boolean);
+  if (!projs.length) {
+    crumb.appendChild(el('span', { class: 'me-crumb-node', text: '📥 Inbox' }));
+  } else {
+    projs.forEach((p, i) => {
+      if (i) crumb.appendChild(el('span', { class: 'me-sep', text: '›' }));
+      const node = el('span', { class: 'me-crumb-node' });
+      node.appendChild(comboIcon(p.emoji, usableProjColor(p.color), '📁'));
+      node.appendChild(el('span', { text: ' ' + p.name }));
+      crumb.appendChild(node);
+    });
+  }
+  box.appendChild(crumb);
+  // Ligne méta « 🕒 Créé par @… le … à hh:mm » (masquée si pas de date de création)
+  if (memo.created_at) {
+    const d = new Date(memo.created_at);
+    if (!isNaN(d)) {
+      const who = memo.created_by_display || state.ownerName || 'Fabien';
+      const date = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      box.appendChild(el('div', { class: 'me-meta', text: `🕒 Créé par @${who} le ${date} à ${time}` }));
+    }
+  }
+}
+
 function openMemoEditor(memo) {
   const q = getQuill();
   if (!q) return false;
   editingMemoId = memo.id;
+  editingMemo = memo;
+  renderMeContext(memo);
   document.getElementById('me-title').value = memo.title || '';
   editingAssignees = [...(memo.assignees || [])];
   renderMePeople();
@@ -3554,6 +3653,10 @@ function openMemoEditor(memo) {
   const mc = document.getElementById('me-comments');
   mc.innerHTML = '';
   mc.appendChild(commentsBlockEl(memo));
+  const acc = document.getElementById('me-comments-acc');
+  acc.open = false;
+  document.getElementById('me-comments-sum').textContent =
+    '💬 Commentaires' + (memo.comment_count ? ` (${memo.comment_count})` : '');
   q.setContents([]);
   if (isRichHTML(memo.content)) {
     q.clipboard.dangerouslyPasteHTML(0, memo.content);
@@ -3567,6 +3670,11 @@ function openMemoEditor(memo) {
 }
 
 document.getElementById('memo-edit-cancel').addEventListener('click', () => memoEditDialog.close());
+memoEditDialog.addEventListener('close', () => { editingMemo = null; });
+document.getElementById('memo-edit-versions').addEventListener('click', () => {
+  if (!editingMemo) return;
+  openRevisions(editingMemo);
+});
 document.getElementById('memo-edit-delete').addEventListener('click', async () => {
   if (editingMemoId == null) return;
   const id = editingMemoId;
@@ -3586,6 +3694,10 @@ const memoMenuBtn = document.getElementById('memo-menu-btn');
 memoMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); memoMenu.hidden = !memoMenu.hidden; });
 document.addEventListener('click', (e) => {
   if (!memoMenu.hidden && !memoMenu.contains(e.target) && e.target !== memoMenuBtn) memoMenu.hidden = true;
+});
+// Ferme tout menu ⋯ de card ouvert au clic ailleurs (le toggle stoppe la propagation). [CARD-REDESIGN]
+document.addEventListener('click', () => {
+  document.querySelectorAll('.task-more .card-menu:not([hidden])').forEach(m => { m.hidden = true; });
 });
 document.getElementById('memo-edit-save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
   const q = getQuill();
@@ -3634,11 +3746,13 @@ async function uploadMemoImages(memoId, files) {
   await loadAll();
 }
 
-function thumbsEl(memo, editable) {
+function thumbsEl(memo, editable, collapsed = false) {
   const images = memo.images || [];
   if (!images.length) return null;
-  const wrap = el('div', { class: 'task-thumbs' });
-  images.forEach(name => {
+  // Repliée : une seule miniature normalisée + overlay « +N ». Dépliée : toutes. [CARD-REDESIGN]
+  const shown = collapsed ? images.slice(0, 1) : images;
+  const wrap = el('div', { class: 'task-thumbs' + (collapsed ? ' thumbs-collapsed' : '') });
+  shown.forEach(name => {
     const tw = el('div', { class: 'thumb-wrap' });
     const img = el('img', { attrs: { src: `/uploads/${name}`, alt: '', loading: 'lazy' } });
     img.addEventListener('click', (e) => {
@@ -3653,7 +3767,10 @@ function thumbsEl(memo, editable) {
       });
     });
     tw.appendChild(img);
-    if (editable) {
+    if (collapsed && images.length > 1) {
+      tw.appendChild(el('span', { class: 'thumb-more', text: '+' + (images.length - 1) }));
+    }
+    if (editable && !collapsed) {
       tw.appendChild(el('button', {
         class: 'thumb-del', text: '×', attrs: { title: "Supprimer l'image" },
         on: { click: async (e) => {
@@ -3691,8 +3808,17 @@ function taskEl(memo) {
     class: 'task' + (memo.done ? ' done-task' : ''),
     attrs: { 'data-memo-id': memo.id, draggable: 'true' },
   });
+  const expanded = expandedMemos.has(memo.id);
   const prio = prioOf(memo.priority);
-  if (prio && prio.color && !memo.done) task.style.borderLeftColor = prio.color;
+  // Bordure gauche = priorité, sinon couleur du projet (rien si done). [CARD-REDESIGN]
+  if (!memo.done) {
+    let leftCol = (prio && prio.color) ? prio.color : '';
+    if (!leftCol && memo.project_id) {
+      const pj = state.projects.find(p => p.id === memo.project_id);
+      if (pj) leftCol = usableProjColor(pj.color);
+    }
+    if (leftCol) task.style.borderLeftColor = leftCol;
+  }
 
   const row = el('div', { class: 'task-row' });
   const check = el('button', {
@@ -3712,11 +3838,22 @@ function taskEl(memo) {
   } else if (memo.emoji) {
     content.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
   }
-  if (memo.content) content.appendChild(contentNode(memo.content, memo));
+  if (memo.content) {
+    const cn = contentNode(memo.content, memo);
+    if (!expanded) cn.classList.add('task-clamp'); // extrait 3 lignes ; déplier = complet
+    content.appendChild(cn);
+  }
   wireChecklist(content, memo);
   row.appendChild(content);
 
   const badges = el('div', { class: 'task-badges' });
+  // Chip de priorité visible (en plus de la bordure gauche). [CARD-REDESIGN]
+  if (prio && prio.color && !memo.done) {
+    badges.appendChild(el('span', {
+      class: 'prio-chip', text: prio.name || ('P' + memo.priority),
+      attrs: { title: 'Priorité ' + (prio.name || ''), style: 'background:' + prio.color + ';color:' + textOn(prio.color) },
+    }));
+  }
   const due = dueInfo(memo.due_date);
   if (due && !memo.done) {
     const t = fmtMemoTime(memo.due_time);
@@ -3726,14 +3863,19 @@ function taskEl(memo) {
     badges.appendChild(el('span', { class: 'badge', text: '🔁 ' + (RECUR_SHORT[memo.recurrence] || memo.recurrence), attrs: { title: 'Tâche récurrente — replanifiée automatiquement quand cochée' } }));
   }
   if (memo.location) badges.appendChild(locBadgeEl(memo.location));
-  (memo.assignees || []).forEach(a => {
-    const noAcc = assigneeNoAccess(a, memo);
-    badges.appendChild(el('span', {
-      class: 'badge',
-      text: (noAcc ? '⚠ @' : '@') + a.replace(/@.*$/, ''),
-      attrs: { title: noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a), style: 'color:' + (noAcc ? 'var(--warn)' : 'var(--assignee)') },
-    }));
-  });
+  // Assignés en pastilles d'initiales (nom complet en tooltip ; ⚠ ambre si sans accès). [CARD-REDESIGN]
+  const asg = memo.assignees || [];
+  if (asg.length) {
+    const stack = el('div', { class: 'asg-stack' });
+    asg.forEach(a => {
+      const noAcc = assigneeNoAccess(a, memo);
+      stack.appendChild(el('span', {
+        class: 'asg-av' + (noAcc ? ' noaccess' : ''), text: initials(a),
+        attrs: { title: (noAcc ? '⚠ ' : '') + a + (noAcc ? ' — ' + NO_ACCESS_TIP : '') },
+      }));
+    });
+    badges.appendChild(stack);
+  }
   if (memo.comment_count) {
     const cb = el('span', {
       class: 'badge',
@@ -3782,16 +3924,24 @@ function taskEl(memo) {
     class: 'tedit', icon: 'pencil', attrs: { title: 'Modifier ce mémo' },
     on: { click: () => { if (!openMemoEditor(memo)) editTaskInline(task, content, memo); } },
   }));
-  actions.appendChild(el('button', {
-    class: 'tdup', icon: 'copy', attrs: { title: 'Dupliquer ce mémo' },
-    on: { click: () => duplicateMemo(memo.id) },
+  // Actions secondaires (Dupliquer) dans un menu ⋯ — seuls déplier/modifier restent visibles. [CARD-REDESIGN]
+  const more = el('div', { class: 'task-more' });
+  const moreBtn = el('button', { class: 'tmore', text: '⋯', attrs: { title: "Plus d'actions", 'aria-label': "Plus d'actions" } });
+  const moreMenu = el('div', { class: 'card-menu', attrs: { hidden: '' } });
+  moreMenu.appendChild(el('button', {
+    text: '⧉ Dupliquer',
+    on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; duplicateMemo(memo.id); } },
   }));
+  moreBtn.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
+  more.appendChild(moreBtn);
+  more.appendChild(moreMenu);
+  actions.appendChild(more);
   task.appendChild(row);
 
-  const thumbs = thumbsEl(memo, expandedMemos.has(memo.id));
+  const thumbs = thumbsEl(memo, expanded, !expanded);
   if (thumbs) task.appendChild(thumbs);
 
-  if (expandedMemos.has(memo.id)) task.appendChild(taskDetailEl(memo));
+  if (expanded) task.appendChild(taskDetailEl(memo));
 
   // Pied de carte : projet à gauche, actions (déplier / modifier / dupliquer) à droite.
   const foot = el('div', { class: 'task-foot' });
@@ -3976,6 +4126,34 @@ function taskDetailEl(memo) {
   const recap = guestRecapEl('memo', memo.id);
   if (recap) detail.appendChild(recap);
 
+  // 1. EN-TÊTE : fil d'Ariane projet + ligne « créé par ». [EXPAND-DETAIL-REORG]
+  const crumb = el('div', { class: 'detail-row task-crumb' });
+  crumb.appendChild(el('span', { text: '📁', attrs: { title: 'Projet' } }));
+  const ancIds = projectAncestorIds(memo.project_id).reverse(); // racine → feuille
+  const crumbProjs = ancIds.map(id => state.projects.find(p => p.id === id)).filter(Boolean);
+  if (!crumbProjs.length) {
+    crumb.appendChild(el('span', { class: 'me-crumb-node', text: '📥 Inbox' }));
+  } else {
+    crumbProjs.forEach((p, i) => {
+      if (i) crumb.appendChild(el('span', { text: '›', attrs: { style: 'color:var(--muted)' } }));
+      const node = el('span', { class: 'me-crumb-node' });
+      node.appendChild(comboIcon(p.emoji, usableProjColor(p.color), '📁'));
+      node.appendChild(el('span', { text: ' ' + p.name }));
+      crumb.appendChild(node);
+    });
+  }
+  detail.appendChild(crumb);
+  if (memo.created_at) {
+    const cd = new Date(memo.created_at);
+    if (!isNaN(cd)) {
+      const who = memo.created_by_display || state.ownerName || 'Fabien';
+      const txt = '👤 Créé par @' + who + ' le '
+        + cd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+        + ' à ' + cd.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      detail.appendChild(el('div', { class: 'detail-row task-crumb', text: txt }));
+    }
+  }
+
   const titleRow = el('div', { class: 'detail-row' });
   titleRow.appendChild(el('span', { text: '🏷', attrs: { title: 'Titre du mémo' } }));
   const titleIn = el('input', { attrs: { type: 'text', placeholder: 'Titre (optionnel)', maxlength: '200' } });
@@ -3988,29 +4166,33 @@ function taskDetailEl(memo) {
 
   detail.appendChild(assigneeRowEl(memo));
 
-  const row1 = el('div', { class: 'detail-row' });
-  row1.appendChild(el('span', { text: '📅' }));
+  // 3. LIGNE PRINCIPALE : [date] | [priorités] | [🎨 Style / Options ▾]. [EXPAND-DETAIL-REORG]
+  const mainRow = el('div', { class: 'detail-row' });
+  // — zone date
+  mainRow.appendChild(el('span', { text: '📅' }));
   const dateIn = el('input', { attrs: { type: 'date' } });
   dateIn.value = memo.due_date || '';
   dateIn.addEventListener('change', () => patchMemo(memo.id, { due_date: dateIn.value }));
-  row1.appendChild(dateIn);
+  mainRow.appendChild(dateIn);
   if (memo.due_date) {
     const timeIn = el('input', { attrs: { type: 'time', title: 'Heure (optionnelle)' } });
     timeIn.value = memo.due_time || '';
     timeIn.addEventListener('change', () => patchMemo(memo.id, { due_time: timeIn.value }));
-    row1.appendChild(timeIn);
-    row1.appendChild(el('button', {
+    mainRow.appendChild(timeIn);
+    mainRow.appendChild(el('button', {
       text: '× date', class: 'prio-btn', attrs: { title: "Retirer l'échéance" },
       on: { click: () => patchMemo(memo.id, { due_date: '' }) },
     }));
   }
-  row1.appendChild(el('span', { icon: 'flag' }));
+  mainRow.appendChild(el('span', { class: 'detail-sep' }));
+  // — zone priorités
+  mainRow.appendChild(el('span', { icon: 'flag' }));
   const noneBtn = el('button', {
     class: 'prio-btn' + (memo.priority === 0 ? ' sel-none' : ''),
     text: 'Aucune',
     on: { click: () => patchMemo(memo.id, { priority: 0 }) },
   });
-  row1.appendChild(noneBtn);
+  mainRow.appendChild(noneBtn);
   state.priorities.forEach(p => {
     const btn = el('button', { class: 'prio-btn', text: p.name, on: { click: () => patchMemo(memo.id, { priority: p.id }) } });
     if (memo.priority === p.id && p.color) {
@@ -4020,29 +4202,44 @@ function taskDetailEl(memo) {
     } else if (p.color) {
       btn.style.color = p.color;
     }
-    row1.appendChild(btn);
+    mainRow.appendChild(btn);
   });
-  const emojiIn = el('input', {
-    attrs: { type: 'text', maxlength: '4', title: 'Emoji du mémo', placeholder: '😀' },
+  mainRow.appendChild(el('span', { class: 'detail-sep' }));
+  // — zone style / options (repli card-menu : contrôles les moins utilisés)
+  const styleWrap = el('div', { class: 'task-more' });
+  const styleMenu = el('div', { class: 'card-menu', attrs: { hidden: '' } });
+  styleMenu.addEventListener('click', (e) => e.stopPropagation()); // garder ouvert pendant l'édition
+  const styleBtn = el('button', {
+    class: 'prio-btn', text: '🎨 Style / Options ▾', attrs: { title: 'Emoji, couleur du point, récurrence, projet' },
   });
+  styleBtn.addEventListener('click', (e) => { e.stopPropagation(); styleMenu.hidden = !styleMenu.hidden; });
+  // emoji
+  const emojiRow = el('div', { class: 'detail-row' });
+  emojiRow.appendChild(el('span', { text: '😀', attrs: { title: 'Emoji du mémo' } }));
+  const emojiIn = el('input', { attrs: { type: 'text', maxlength: '4', title: 'Emoji du mémo', placeholder: '😀' } });
   emojiIn.style.cssText = 'width:2.6rem;text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.95rem;padding:0.15rem';
   emojiIn.value = memo.emoji || '';
   emojiIn.addEventListener('change', () => patchMemo(memo.id, { emoji: emojiIn.value.trim() }));
-  row1.appendChild(emojiIn);
-  // Couleur du point sur la carte (override). Vide = couleur priorité / défaut.
-  row1.appendChild(el('span', { text: '📍', attrs: { title: 'Couleur du point sur la carte' } }));
+  emojiRow.appendChild(emojiIn);
+  styleMenu.appendChild(emojiRow);
+  // couleur du point sur la carte (override). Vide = couleur priorité / défaut.
+  const colorRow = el('div', { class: 'detail-row' });
+  colorRow.appendChild(el('span', { text: '📍', attrs: { title: 'Couleur du point sur la carte' } }));
   const ptColorIn = el('input', { attrs: { type: 'color', title: 'Couleur du point sur la carte' } });
   ptColorIn.style.cssText = 'width:2rem;height:1.7rem;padding:0;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer';
   ptColorIn.value = memo.marker_color || (prioOf(memo.priority) || {}).color || state.mapMarkerColor || '#e53935';
   ptColorIn.addEventListener('change', () => patchMemo(memo.id, { marker_color: ptColorIn.value }));
-  row1.appendChild(ptColorIn);
+  colorRow.appendChild(ptColorIn);
   if (memo.marker_color) {
-    row1.appendChild(el('button', {
+    colorRow.appendChild(el('button', {
       class: 'prio-btn', text: '↺ couleur', attrs: { title: 'Couleur du point par défaut' },
       on: { click: () => patchMemo(memo.id, { marker_color: '' }) },
     }));
   }
-  row1.appendChild(el('span', { text: '🔁' }));
+  styleMenu.appendChild(colorRow);
+  // récurrence
+  const recurRow = el('div', { class: 'detail-row' });
+  recurRow.appendChild(el('span', { text: '🔁', attrs: { title: 'Récurrence' } }));
   const recurSel = el('select');
   RECUR_OPTIONS.forEach(([v, label]) => {
     const opt = el('option', { attrs: { value: v }, text: v === '' ? 'Aucune' : label });
@@ -4051,8 +4248,11 @@ function taskDetailEl(memo) {
   });
   recurSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.18rem 0.3rem';
   recurSel.addEventListener('change', () => patchMemo(memo.id, { recurrence: recurSel.value }));
-  row1.appendChild(recurSel);
-  row1.appendChild(el('span', { text: '📁' }));
+  recurRow.appendChild(recurSel);
+  styleMenu.appendChild(recurRow);
+  // projet
+  const projRow = el('div', { class: 'detail-row' });
+  projRow.appendChild(el('span', { text: '📁', attrs: { title: 'Projet' } }));
   const projSel = el('select');
   projSel.appendChild(el('option', { attrs: { value: '' }, text: 'Inbox' }));
   state.projects.forEach(p => {
@@ -4062,50 +4262,62 @@ function taskDetailEl(memo) {
   });
   projSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.18rem 0.3rem';
   projSel.addEventListener('change', () => patchMemo(memo.id, { project_id: projSel.value ? Number(projSel.value) : null }));
-  row1.appendChild(projSel);
+  projRow.appendChild(projSel);
+  styleMenu.appendChild(projRow);
+  styleWrap.appendChild(styleBtn);
+  styleWrap.appendChild(styleMenu);
+  mainRow.appendChild(styleWrap);
+  detail.appendChild(mainRow);
+
+  // 4. LIGNE D'ACTIONS : Image, Partager, Versions, Ma position. [EXPAND-DETAIL-REORG]
+  const actionRow = el('div', { class: 'detail-row' });
   const fileIn = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: '' } });
   fileIn.style.display = 'none';
   fileIn.addEventListener('change', () => { if (fileIn.files.length) uploadMemoImages(memo.id, [...fileIn.files]); });
-  row1.appendChild(el('button', {
+  actionRow.appendChild(el('button', {
     class: 'prio-btn', icon: 'paperclip', text: 'Image',
     attrs: { title: 'Ajouter une image (ou glisser un fichier sur le mémo)' },
     on: { click: () => fileIn.click() },
   }));
-  row1.appendChild(fileIn);
-  row1.appendChild(el('button', {
+  actionRow.appendChild(fileIn);
+  actionRow.appendChild(el('button', {
     class: 'prio-btn', icon: 'link', text: 'Partager',
     attrs: { title: 'Partager ce mémo par lien (sans compte)' },
     on: { click: () => openShareDialog('memo', memo.id, stripHTML(memo.content).slice(0, 40)) },
   }));
-  row1.appendChild(el('button', {
+  actionRow.appendChild(el('button', {
     class: 'prio-btn', icon: 'history', text: 'Versions',
     attrs: { title: 'Historique des modifications et restauration' },
     on: { click: () => openRevisions(memo) },
   }));
-  row1.appendChild(el('button', {
+  actionRow.appendChild(el('button', {
     class: 'prio-btn', icon: 'map-pin', text: 'Ma position',
     attrs: { title: 'Attacher ta position GPS actuelle à ce mémo' },
     on: { click: () => capturePosition((loc) => patchMemo(memo.id, { location: loc })) },
   }));
+  detail.appendChild(actionRow);
+
+  // 5. BAS : adresse, sous-tâches, commentaires. [EXPAND-DETAIL-REORG]
+  const addrRow = el('div', { class: 'detail-row' });
   const addrIn = el('input', {
     attrs: { type: 'text', placeholder: '📍 Adresse… (Entrée)', title: 'Chercher une adresse et l\'attacher au mémo' },
   });
-  addrIn.style.cssText = 'width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
+  addrIn.style.cssText = 'flex:1;min-width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
   addrIn.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const loc = await geocodeAddress(addrIn.value);
     if (loc) await patchMemo(memo.id, { location: loc });
   });
-  row1.appendChild(addrIn);
+  addrRow.appendChild(addrIn);
   if (memo.location) {
-    row1.appendChild(el('button', {
+    addrRow.appendChild(el('button', {
       class: 'prio-btn', text: '× 📍',
       attrs: { title: 'Retirer la position' },
       on: { click: () => patchMemo(memo.id, { location: null }) },
     }));
   }
-  detail.appendChild(row1);
+  detail.appendChild(addrRow);
 
   const subs = memo.subtasks || [];
   subs.forEach((st, i) => {
@@ -4343,7 +4555,7 @@ function renderBoard() {
   }
 
   const addBar = el('div', { attrs: { id: 'memo-add-bar' } });
-  const txt = el('input', { attrs: { type: 'text', placeholder: '+ Nouveau mémo… (Entrée pour ajouter)' } });
+  const txt = el('input', { attrs: { type: 'text', placeholder: '+ Titre du nouveau mémo… (Entrée)' } });
   const dateIn = el('input', { attrs: { type: 'date', title: 'Échéance (optionnelle)' } });
   let addPrio = 0;
   const prioBtn = el('button', { attrs: { type: 'button', title: 'Priorité — cliquer pour changer' } });
@@ -4377,12 +4589,12 @@ function renderBoard() {
   RECUR_OPTIONS.forEach(([v, label]) => recurSel.appendChild(el('option', { attrs: { value: v }, text: label })));
   const addBtn = el('button', { class: 'primary', text: 'Ajouter' });
   const submit = async () => {
-    const content = txt.value.trim();
-    if (!content) return;
+    const title = txt.value.trim();
+    if (!title) return;
     await api('/api/memos', {
       method: 'POST',
       body: JSON.stringify({
-        content,
+        title,
         due_date: dateIn.value,
         priority: addPrio,
         project_id: projSel.value ? Number(projSel.value) : null,

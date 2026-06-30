@@ -27,7 +27,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "18"
+APP_VERSION = "19"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
@@ -268,6 +268,8 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN map_groups TEXT DEFAULT '[]'")
     if "due_time" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN due_time TEXT DEFAULT ''")
+    if "created_by" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN created_by TEXT DEFAULT ''")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS memo_comments (
@@ -1167,8 +1169,12 @@ def _next_due(due_str, recurrence):
     return nxt.isoformat()
 
 
-def _memo_dict(row):
+def _memo_dict(row, owner_name=None):
     d = dict(row)
+    cb = (d.get("created_by") or "").strip()
+    # '' = propriétaire (résolu à l'affichage, survit au renommage owner) ;
+    # chaîne non vide = identité invité « Nom <email> ».
+    d["created_by_display"] = cb if cb else (owner_name or "")
     try:
         d["subtasks"] = json.loads(d.get("subtasks") or "[]")
     except Exception:
@@ -1301,9 +1307,10 @@ def list_memos():
             "SELECT memo_id, COUNT(*) AS n FROM memo_comments GROUP BY memo_id"
         ).fetchall()
     }
+    owner_name = _owner_name(db)
     out = []
     for row in rows:
-        d = _memo_dict(row)
+        d = _memo_dict(row, owner_name)
         g = guest_last.get(d["id"])
         if g:
             d["guest_editor"] = g["editor"]
@@ -1353,7 +1360,7 @@ def create_memo():
     )
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return jsonify(_memo_dict(row)), 201
+    return jsonify(_memo_dict(row, _owner_name(db))), 201
 
 
 def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
@@ -1853,6 +1860,7 @@ def _share_memo_dict(row):
         "assignees": d.get("assignees", []),
         "point_color": d.get("marker_color", "") or "",
         "map_groups": d.get("map_groups", []),
+        "created_at": d.get("created_at", "") or "",
     }
 
 
@@ -2808,6 +2816,7 @@ def _share_memo_dict_from_payload(d):
         "assignees": d.get("assignees", []),
         "point_color": d.get("marker_color", "") or "",
         "map_groups": d.get("map_groups", []),
+        "created_at": d.get("created_at", "") or "",
     }
 
 
@@ -2839,13 +2848,14 @@ def share_add_memo(token):
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
     now = datetime.now(timezone.utc).isoformat()
     new_uid = str(uuid.uuid4())
+    editor = guest["name"] or guest["email"]
+    created_by = f"{editor} <{guest['email']}>"
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, priority, subtasks, project_id, recurrence, title, assignees) "
-        "VALUES (?, ?, ?, ?, ?, 0, '', 0, '[]', ?, '', ?, ?)",
-        (content, max_pos + 1, now, new_uid, now, target_project, title, assignees),
+        "done, due_date, priority, subtasks, project_id, recurrence, title, assignees, created_by) "
+        "VALUES (?, ?, ?, ?, ?, 0, '', 0, '[]', ?, '', ?, ?, ?)",
+        (content, max_pos + 1, now, new_uid, now, target_project, title, assignees, created_by),
     )
-    editor = guest["name"] or guest["email"]
     db.execute(
         "INSERT INTO memo_revisions (memo_id, memo_uid, editor, share_id, before, after, edited_at) "
         "VALUES (?, ?, ?, ?, NULL, ?, ?)",
@@ -3152,6 +3162,7 @@ def _build_export(db):
     for r in memos:
         d = _memo_dict(r)
         d.pop("id", None)
+        d.pop("created_by_display", None)  # runtime-only, jamais exporté ; created_by (brut) reste
         d["project"] = proj_names.get(d.pop("project_id", None), "")
         out_memos.append(d)
     out_projects = [
@@ -3182,7 +3193,7 @@ def _build_export(db):
         "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
     return {
-        "version": 18,
+        "version": 19,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -3653,6 +3664,7 @@ def import_links():
             memo_marker = _clean_hex_color(memo.get("marker_color"), "")
             memo_groups = _map_groups_json(memo.get("map_groups"))
             memo_time = _clean_due_time(memo.get("due_time")) if due_date else ""
+            memo_created_by = str(memo.get("created_by") or "").strip()[:200]
         else:
             content = str(memo).strip()
             uid = ""
@@ -3672,6 +3684,7 @@ def import_links():
             memo_marker = ""
             memo_groups = "[]"
             memo_time = ""
+            memo_created_by = ""
         if not content and not title:
             continue
 
@@ -3683,11 +3696,13 @@ def import_links():
                 merged_time = memo_time or _row_get(existing, "due_time")
                 if not due_date:
                     merged_time = ""
+                # created_by : enrichir si vide, ne jamais écraser une valeur par un vide plus ancien
+                merged_created_by = memo_created_by or _row_get(existing, "created_by")
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
-                    "title=?, assignees=?, marker_color=?, map_groups=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, merged_time, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, updated, existing["id"]),
+                    "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, updated_at=? WHERE id=?",
+                    (content, done, due_date, merged_time, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -3704,9 +3719,9 @@ def import_links():
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
             "done, due_date, due_time, priority, subtasks, project_id, images, recurrence, emoji, location, "
-            "title, assignees, marker_color, map_groups) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups),
+            "title, assignees, marker_color, map_groups, created_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups, memo_created_by),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)

@@ -31,6 +31,16 @@ function fmtMemoTime(t) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(t || '') ? t.replace(':', 'h') : '';
 }
 
+// Initiales (1-2 lettres) d'un nom libre pour la pastille d'assigné [CARD-REDESIGN].
+// Retire un éventuel « <email> ». Pur, identique owner/invité.
+function initials(name) {
+  const n = (name || '').replace(/\s*<[^>]*>/, '').trim();
+  if (!n) return '?';
+  const parts = n.split(/[\s.\-_]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return n.slice(0, 2).toUpperCase();
+}
+
 // [PHOTO-MAP/PHOTO-TEMPLATE-MEMO] Date EXIF d'une photo (ISO `taken_at`) → libellé FR
 // court « 6 nov · 14h30 » (heure omise si absente). Partagé runMapDialog + runPhotoView.
 const PHOTO_MONTHS_FR = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];

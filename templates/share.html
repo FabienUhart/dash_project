@@ -221,36 +221,42 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .task-content .ql-ui { display: none; }
 .task-content li[data-list="checked"], .task-content li[data-list="unchecked"] {
   list-style: none;
-  position: relative;
-  padding-left: 1.5rem;
-  margin-left: -1.3rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-left: 0;
+  margin-left: 0;
   border-radius: 4px;
 }
+.task-content li[data-list]:empty::before { display: none; }
 .task-content li.cl-edit:hover { background: var(--panel-2); cursor: pointer; }
 .task-content li[data-list="unchecked"]::before {
   content: '';
-  position: absolute;
-  left: 0.25rem;
-  top: 0.3em;
-  width: 0.85em;
-  height: 0.85em;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  font-size: 0.85em;
+  width: 1em;
+  height: 1em;
+  margin-top: 0.25em;
   border: 2px solid var(--muted);
   border-radius: 4px;
 }
 .task-content li[data-list="checked"]::before {
   content: '✓';
-  position: absolute;
-  left: 0.25rem;
-  top: 0.05em;
-  width: 0.85em;
-  height: 0.85em;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85em;
+  width: 1em;
+  height: 1em;
+  margin-top: 0.25em;
   background: var(--green);
   border: 2px solid var(--green);
   border-radius: 4px;
   color: #fff;
-  font-size: 0.8em;
-  line-height: 1.1;
-  text-align: center;
+  line-height: 1;
 }
 .task-content li[data-list="checked"] { text-decoration: line-through; color: var(--muted); }
 .badge { font-size: 0.72rem; padding: 0.12rem 0.45rem; border-radius: 4px; background: var(--panel-2); color: var(--muted); white-space: nowrap; flex-shrink: 0; max-width: 13rem; overflow: hidden; text-overflow: ellipsis; }
@@ -279,6 +285,27 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .thumbs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.5rem 0 0.1rem 1.75rem; }
 .thumbs img { height: 72px; max-width: 140px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: zoom-in; }
 .thumb-wrap { position: relative; }
+/* === [CARD-REDESIGN] parité visuelle invité === */
+.task-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.prio-chip { font-size: 0.66rem; font-weight: 700; border-radius: 4px; padding: 0.05rem 0.4rem; line-height: 1.45; white-space: nowrap; flex-shrink: 0; }
+.asg-stack { display: inline-flex; align-items: center; flex-shrink: 0; }
+.asg-stack .asg-av { margin-left: -6px; }
+.asg-stack .asg-av:first-child { margin-left: 0; }
+.asg-av {
+  width: 1.35rem; height: 1.35rem; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.6rem; font-weight: 700; line-height: 1;
+  background: var(--panel-2); color: var(--assignee);
+  border: 1px solid var(--assignee); box-shadow: 0 0 0 2px var(--panel);
+}
+.asg-av.noaccess { color: var(--warn); border-color: var(--warn); }
+.thumbs.thumbs-collapsed img { height: 88px; width: 120px; max-width: none; }
+.thumbs .thumb-more {
+  position: absolute; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6); color: #fff;
+  font-size: 0.7rem; font-weight: 700; padding: 0.05rem 0.4rem;
+  border-radius: 6px 0 6px 0; pointer-events: none;
+}
 .thumb-del {
   position: absolute; top: -6px; right: -6px;
   width: 1.2rem; height: 1.2rem; padding: 0;
@@ -286,6 +313,11 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   background: #f44336; color: #fff; border: none; cursor: pointer;
 }
 .memo-tools { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0 0 1.75rem; }
+/* Détail invité rangé en blocs logiques [EXPAND-DETAIL-REORG]. */
+.memo-tools-row { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; flex-basis: 100%; }
+.memo-tools .task-crumb { font-size: 0.8rem; color: var(--muted); }
+.memo-tools .task-crumb .me-crumb-node { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memo-tools .detail-sep { align-self: stretch; border-left: 1px solid var(--border); margin: 0 0.2rem; }
 .tool-btn {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); font: inherit; font-size: 0.78rem; padding: 0.25rem 0.6rem; cursor: pointer;
@@ -502,6 +534,12 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .mention.noaccess { color: var(--warn); background: rgba(255,183,77,0.16); }
 .q-people { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-top: 0.2rem; }
 .me-label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin: 0.5rem 0 0.2rem; }
+.me-context { margin-bottom: 0.75rem; padding: 0.5rem 0.6rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 0.3rem; }
+.me-context:empty { display: none; }
+.me-crumb { display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem; font-size: 0.82rem; color: var(--text); min-width: 0; }
+.me-crumb .me-sep { color: var(--muted); }
+.me-crumb .me-crumb-node { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-meta { font-size: 0.78rem; color: var(--muted); }
 .assignee-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: var(--assignee); }
 .ql-snow .ql-stroke { stroke: var(--muted); }
 .ql-snow .ql-fill, .ql-snow .ql-stroke.ql-fill { fill: var(--muted); }
@@ -608,6 +646,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 
 <dialog id="edit-dialog">
   <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-pencil"/></svg>Modifier le mémo</h3>
+  <div id="q-context" class="me-context"></div>
   <label class="me-label" for="q-title">Titre <span style="font-weight:400">(optionnel)</span></label>
   <input id="q-title" type="text" placeholder="Titre du mémo…" maxlength="200" autocomplete="off"
          style="width:100%;margin-bottom:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.95rem;font-weight:600;padding:0.45rem 0.6rem;box-sizing:border-box">
@@ -867,6 +906,13 @@ function shareSuggestions() {
 
 // Accès : une personne assignée voit-elle ce partage ? (sinon affichage ambre)
 const NO_ACCESS_TIP = "N'a pas accès à ce partage — ne verra pas ce mémo.";
+// Texte lisible sur un fond coloré (chip de priorité). [CARD-REDESIGN] — identique owner.
+function textOn(hex) {
+  const c = (hex || '').replace('#', '');
+  if (c.length < 6) return '#fff';
+  const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#15191e' : '#fff';
+}
 function shareNoAccess(name) {
   const members = new Set((DATA.members || []).map(n => (n || '').toLowerCase().trim()));
   return !members.has((name || '').toLowerCase().trim());
@@ -979,6 +1025,39 @@ function getShareQuill() {
   return sQuill;
 }
 
+function renderQContext(memo) {
+  const box = document.getElementById('q-context');
+  if (!box) return;
+  box.innerHTML = '';
+  // Fil d'Ariane scopé au partage (📥 Inbox si pas de projet dans le scope).
+  // Lecture seule : pas de « créé par » ni de versions (owner-only, invariant 5).
+  const byId = {};
+  (DATA.projects || []).forEach(p => { byId[p.id] = p; });
+  const chain = [];
+  let cur = memo.project_id, guard = 0;
+  while (cur != null && byId[cur] && guard++ < 50) { chain.push(byId[cur]); cur = byId[cur].parent_id; }
+  chain.reverse(); // racine → feuille
+  const crumb = el('div', { class: 'me-crumb' });
+  crumb.appendChild(el('span', { class: 'me-sep', text: '📌' }));
+  if (!chain.length) {
+    crumb.appendChild(el('span', { class: 'me-crumb-node', text: '📥 Inbox' }));
+  } else {
+    chain.forEach((p, i) => {
+      if (i) crumb.appendChild(el('span', { class: 'me-sep', text: '›' }));
+      crumb.appendChild(el('span', { class: 'me-crumb-node', text: (p.emoji ? p.emoji + ' ' : '') + p.name }));
+    });
+  }
+  box.appendChild(crumb);
+  if (memo.created_at) {
+    const d = new Date(memo.created_at);
+    if (!isNaN(d)) {
+      const date = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      box.appendChild(el('div', { class: 'me-meta', text: `🕒 Créé le ${date} à ${time}` }));
+    }
+  }
+}
+
 function openEditor(memo, contentEl, taskEl) {
   const q = getShareQuill();
   if (!q) {
@@ -1002,6 +1081,7 @@ function openEditor(memo, contentEl, taskEl) {
     return;
   }
   editingId = memo.id;
+  renderQContext(memo);
   const titleEl = document.getElementById('q-title');
   if (titleEl) titleEl.value = memo.title || '';
   editAssignees = [...(memo.assignees || [])];
@@ -1576,7 +1656,15 @@ function render() {
       t.addEventListener('dragend', () => { dragShareMemo = null; });
     }
     const prio = prios[memo.priority];
-    if (prio && prio.color && !memo.done) t.style.borderLeftColor = prio.color;
+    // Bordure gauche = priorité, sinon couleur du projet (rien si done). [CARD-REDESIGN]
+    if (!memo.done) {
+      let leftCol = (prio && prio.color) ? prio.color : '';
+      if (!leftCol && memo.project_id) {
+        const pj = (DATA.projects || []).find(p => p.id === memo.project_id);
+        if (pj) leftCol = usableProjColor(pj.color);
+      }
+      if (leftCol) t.style.borderLeftColor = leftCol;
+    }
 
     const row = el('div', 'task-row');
     const check = el('button', 'task-check', '✓');
@@ -1601,11 +1689,16 @@ function render() {
       em.style.marginRight = '0.35rem';
       content.appendChild(em);
     }
-    if (isRich(memo.content)) content.appendChild(sanitize(memo.content));
-    else content.appendChild(linkifyText(memo.content));
-    content.querySelectorAll('.mention[data-mention]').forEach(sp => {
+    // Extrait dans un wrapper clampable (3 lignes), sauf s'il contient une liste à
+    // cocher : les invités doivent pouvoir cocher tous les items. [CARD-REDESIGN]
+    const exc = el('div', '');
+    if (isRich(memo.content)) exc.appendChild(sanitize(memo.content));
+    else exc.appendChild(linkifyText(memo.content));
+    exc.querySelectorAll('.mention[data-mention]').forEach(sp => {
       if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
     });
+    if (!exc.querySelector('li[data-list]')) exc.classList.add('task-clamp');
+    content.appendChild(exc);
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
       if (!canEditNow()) return;
       li.classList.add('cl-edit');
@@ -1621,6 +1714,13 @@ function render() {
     });
     row.appendChild(content);
 
+    // Chip de priorité visible (en plus de la bordure gauche). [CARD-REDESIGN]
+    if (prio && prio.color && !memo.done) {
+      const pc = el('span', 'prio-chip', prio.name || ('P' + memo.priority));
+      pc.style.cssText = 'background:' + prio.color + ';color:' + textOn(prio.color);
+      pc.title = 'Priorité ' + (prio.name || '');
+      row.appendChild(pc);
+    }
     if (memo.location) {
       const la = el('a', 'badge'); la.append(shareIcon('map-pin'), memo.location.label ? ' ' + memo.location.label : '');
       la.href = 'https://www.openstreetmap.org/?mlat=' + memo.location.lat + '&mlon=' + memo.location.lng + '#map=17/' + memo.location.lat + '/' + memo.location.lng;
@@ -1630,13 +1730,18 @@ function render() {
       la.title = 'Voir sur la carte';
       row.appendChild(la);
     }
-    (memo.assignees || []).forEach(a => {
-      const noAcc = shareNoAccess(a);
-      const ab = el('span', 'badge', (noAcc ? '⚠ @' : '@') + a.replace(/@.*$/, ''));
-      ab.title = noAcc ? (a + ' — ' + NO_ACCESS_TIP) : ('Assigné à ' + a);
-      ab.style.color = noAcc ? 'var(--warn)' : 'var(--assignee)';
-      row.appendChild(ab);
-    });
+    // Assignés en pastilles d'initiales (nom complet en tooltip ; ⚠ ambre si sans accès). [CARD-REDESIGN]
+    const asg = memo.assignees || [];
+    if (asg.length) {
+      const stack = el('div', 'asg-stack');
+      asg.forEach(a => {
+        const noAcc = shareNoAccess(a);
+        const av = el('span', 'asg-av' + (noAcc ? ' noaccess' : ''), initials(a));
+        av.title = (noAcc ? '⚠ ' : '') + a + (noAcc ? ' — ' + NO_ACCESS_TIP : '');
+        stack.appendChild(av);
+      });
+      row.appendChild(stack);
+    }
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
     if (memo.due_date) {
       const dt = fmtMemoTime(memo.due_time);
@@ -1756,8 +1861,9 @@ function render() {
     }
 
     if ((memo.images || []).length) {
-      const th = el('div', 'thumbs');
-      memo.images.forEach(name => {
+      // Une seule miniature normalisée + overlay « +N » ; la visionneuse montre tout. [CARD-REDESIGN]
+      const th = el('div', 'thumbs thumbs-collapsed');
+      memo.images.slice(0, 1).forEach(name => {
         const wrap = el('span', 'thumb-wrap');
         const img = document.createElement('img');
         img.src = API + '/image/' + name;
@@ -1778,19 +1884,9 @@ function render() {
           });
         });
         wrap.appendChild(img);
-        if (canEditNow()) {
-          const del = document.createElement('button');
-          del.className = 'thumb-del';
-          del.textContent = '×';
-          del.title = 'Supprimer cette image';
-          del.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const r = await fetch(API + '/memo/' + memo.id + '/images/' + name, {
-              method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
-            });
-            if (r.ok) await load();
-          });
-          wrap.appendChild(del);
+        if (memo.images.length > 1) {
+          const more = el('span', 'thumb-more', '+' + (memo.images.length - 1));
+          wrap.appendChild(more);
         }
         th.appendChild(wrap);
       });
@@ -1799,12 +1895,43 @@ function render() {
 
     if (canEditNow()) {
       const tools = el('div', 'memo-tools');
+
+      // 1. EN-TÊTE : fil d'Ariane scopé au partage + date de création (lecture). [EXPAND-DETAIL-REORG]
+      const crumb = el('div', 'memo-tools-row task-crumb');
+      crumb.appendChild(el('span', '', '📁'));
+      const byId = {}; (DATA.projects || []).forEach(p => { byId[p.id] = p; });
+      const chain = []; let pcur = memo.project_id, pg = 0;
+      while (pcur != null && byId[pcur] && pg++ < 50) { chain.push(byId[pcur]); pcur = byId[pcur].parent_id; }
+      chain.reverse();
+      if (!chain.length) {
+        crumb.appendChild(el('span', 'me-crumb-node', '📥 Inbox'));
+      } else {
+        chain.forEach((p, i) => {
+          if (i) crumb.appendChild(el('span', '', '›'));
+          const node = el('span', 'me-crumb-node');
+          node.appendChild(projIcon(p));
+          node.appendChild(el('span', '', ' ' + p.name));
+          crumb.appendChild(node);
+        });
+      }
+      tools.appendChild(crumb);
+      if (memo.created_at) {
+        const cd = new Date(memo.created_at);
+        if (!isNaN(cd)) {
+          tools.appendChild(el('div', 'memo-tools-row task-crumb',
+            '🕒 Créé le ' + cd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+            + ' à ' + cd.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })));
+        }
+      }
+
+      // 2. LIGNE PRINCIPALE : date | priorité. [EXPAND-DETAIL-REORG]
+      const mainRow = el('div', 'memo-tools-row');
       const dateIn = document.createElement('input');
       dateIn.type = 'date';
       dateIn.value = memo.due_date || '';
       dateIn.title = 'Échéance';
       dateIn.addEventListener('change', () => put(memo.id, { due_date: dateIn.value }));
-      tools.appendChild(dateIn);
+      mainRow.appendChild(dateIn);
 
       if (memo.due_date) {
         const timeIn = document.createElement('input');
@@ -1812,8 +1939,9 @@ function render() {
         timeIn.value = memo.due_time || '';
         timeIn.title = 'Heure (optionnelle)';
         timeIn.addEventListener('change', () => put(memo.id, { due_time: timeIn.value }));
-        tools.appendChild(timeIn);
+        mainRow.appendChild(timeIn);
       }
+      mainRow.appendChild(el('span', 'detail-sep'));
 
       const prios = DATA.priorities || [];
       const pBtn = document.createElement('button');
@@ -1831,8 +1959,11 @@ function render() {
         const next = ids[(ids.indexOf(memo.priority || 0) + 1) % ids.length];
         put(memo.id, { priority: next });
       });
-      tools.appendChild(pBtn);
+      mainRow.appendChild(pBtn);
+      tools.appendChild(mainRow);
 
+      // 3. LIGNE D'ACTIONS : Photo, Liste, Position, Modifier, Corbeille. [EXPAND-DETAIL-REORG]
+      const actionRow = el('div', 'memo-tools-row');
       const fileIn = document.createElement('input');
       fileIn.type = 'file';
       fileIn.accept = 'image/png,image/jpeg';
@@ -1857,8 +1988,8 @@ function render() {
       photoBtn.append(shareIcon('camera'), ' Photo');
       photoBtn.title = 'Ajouter une photo (JPG ou PNG uniquement)';
       photoBtn.addEventListener('click', () => fileIn.click());
-      tools.appendChild(photoBtn);
-      tools.appendChild(fileIn);
+      actionRow.appendChild(photoBtn);
+      actionRow.appendChild(fileIn);
 
       if (!hasChecklist) {
         const listBtn = document.createElement('button');
@@ -1871,7 +2002,7 @@ function render() {
           tools.before(input);
           input.focus();
         });
-        tools.appendChild(listBtn);
+        actionRow.appendChild(listBtn);
       }
 
       const locBtn = document.createElement('button');
@@ -1887,13 +2018,35 @@ function render() {
           { enableHighAccuracy: true, timeout: 10000 }
         );
       });
-      tools.appendChild(locBtn);
+      actionRow.appendChild(locBtn);
 
+      const eBtn = document.createElement('button');
+      eBtn.className = 'tool-btn';
+      eBtn.append(shareIcon('pencil'), ' Modifier');
+      eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
+      eBtn.addEventListener('click', () => openEditor(memo, content, t));
+      actionRow.appendChild(eBtn);
+
+      const dBtn = document.createElement('button');
+      dBtn.className = 'tool-btn';
+      dBtn.appendChild(shareIcon('trash'));
+      dBtn.title = 'Mettre ce mémo à la corbeille (restaurable depuis la tuile 🗑)';
+      dBtn.addEventListener('click', async () => {
+        const r = await fetch(API + '/memo/' + memo.id, {
+          method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
+        });
+        if (r.ok) await load();
+      });
+      actionRow.appendChild(dBtn);
+      tools.appendChild(actionRow);
+
+      // 4. META : adresse, titre, assignés. [EXPAND-DETAIL-REORG]
+      const metaRow = el('div', 'memo-tools-row');
       const addrIn = document.createElement('input');
       addrIn.type = 'text';
       addrIn.placeholder = '📍 Adresse… (Entrée)';
       addrIn.title = 'Chercher une adresse et l\'attacher au mémo';
-      addrIn.style.cssText = 'width:10rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.78rem;padding:0.25rem 0.45rem';
+      addrIn.style.cssText = 'flex:1;min-width:10rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.78rem;padding:0.25rem 0.45rem';
       addrIn.addEventListener('keydown', async (e) => {
         if (e.key !== 'Enter') return;
         e.preventDefault();
@@ -1905,7 +2058,7 @@ function render() {
         const best = data.results[0];
         await put(memo.id, { location: best });
       });
-      tools.appendChild(addrIn);
+      metaRow.appendChild(addrIn);
 
       const titleIn = document.createElement('input');
       titleIn.type = 'text';
@@ -1916,7 +2069,7 @@ function render() {
       titleIn.style.cssText = 'width:9rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.78rem;font-weight:600;padding:0.25rem 0.45rem';
       titleIn.addEventListener('change', () => put(memo.id, { title: titleIn.value.trim() }));
       titleIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); titleIn.blur(); } });
-      tools.appendChild(titleIn);
+      metaRow.appendChild(titleIn);
 
       const asgIn = document.createElement('input');
       asgIn.type = 'text';
@@ -1943,34 +2096,16 @@ function render() {
         if (!name) return;
         put(memo.id, { assignees: [...(memo.assignees || []), name] });
       });
-      tools.appendChild(asgIn);
+      metaRow.appendChild(asgIn);
       if ((memo.assignees || []).length) {
         const rmBtn = document.createElement('button');
         rmBtn.className = 'tool-btn';
         rmBtn.textContent = '× @';
         rmBtn.title = 'Retirer le dernier assigné (' + memo.assignees[memo.assignees.length - 1] + ')';
         rmBtn.addEventListener('click', () => put(memo.id, { assignees: memo.assignees.slice(0, -1) }));
-        tools.appendChild(rmBtn);
+        metaRow.appendChild(rmBtn);
       }
-
-      const eBtn = document.createElement('button');
-      eBtn.className = 'tool-btn';
-      eBtn.append(shareIcon('pencil'), ' Modifier');
-      eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
-      eBtn.addEventListener('click', () => openEditor(memo, content, t));
-      tools.appendChild(eBtn);
-
-      const dBtn = document.createElement('button');
-      dBtn.className = 'tool-btn';
-      dBtn.appendChild(shareIcon('trash'));
-      dBtn.title = 'Mettre ce mémo à la corbeille (restaurable depuis la tuile 🗑)';
-      dBtn.addEventListener('click', async () => {
-        const r = await fetch(API + '/memo/' + memo.id, {
-          method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
-        });
-        if (r.ok) await load();
-      });
-      tools.appendChild(dBtn);
+      tools.appendChild(metaRow);
       t.appendChild(tools);
     }
     list.appendChild(t);

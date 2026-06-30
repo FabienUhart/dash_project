@@ -2,7 +2,17 @@
 
 Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
+**Versionnage** : chaque tâche est planifiée en ciblant la granularité `VX.Y` (ex. « → prévu pour **V19.1** »). X = version du format d'export, Y = mineure (feature/lot). Les réalisations livrées sont consignées dans `REALISATION.md` avec un tag `[VX.Y.Z]` (Z = compteur de build continu). Voir `CLAUDE.md` § Versionnage.
+
+### En cours / prochain lot
+
+_Rien en attente — voir le backlog plus bas._
+
 ## Fait (juin 2026)
+
+- [x] [V19.2.5] `[EXPAND-DETAIL-REORG]` Réorganisation du détail déplié du mémo : en-tête (fil d'Ariane + « 👤 Créé par … »), assignés pleine largeur, ligne [📅 date] · [priorités] · [🎨 Style / Options ▾] (emoji/couleur/récurrence/projet dans le repli), ligne d'actions, puis adresse/sous-tâches/commentaires. Aucun contrôle retiré, parité invité (frontend pur).
+- [x] [V19.2.4] `[CARD-REDESIGN]` Refonte visuelle des cards de mémo : clamp 3 lignes, chip de priorité, bordure gauche priorité→projet, assignés en initiales, miniature + overlay « +N », lift au survol, Dupliquer dans un menu ⋯ (parité invité, frontend pur).
+- [x] [V19.1.3] `[MEMO-CONTEXT]` En-tête contextuel de la pop-in mémo (fil d'Ariane + « 🕒 Créé par … »), commentaires en accordéon, « 📜 Voir les versions » ; colonne `memos.created_by` → export v19 (parité invité en lecture, owner-only pour l'auteur/versions).
 
 - [x] Catégories (sidebar gauche, drag & drop d'un lien vers une catégorie)
 - [x] Mémos post-it indépendants avec ajout rapide
@@ -62,6 +72,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - **Compteur de clics** : colonne `clicks` sur `links`, tri optionnel "par usage" — les services les plus utilisés remontent tout seuls.
 - **Mode édition verrouillable** : un cadenas dans le header qui masque les boutons éditer/supprimer/drag pour éviter les fausses manips (surtout sur mobile).
 - **Badge favicon "service down"** : si un service est offline, changer le favicon de l'onglet (point rouge) — visible d'un coup d'œil quand le dash est la page d'accueil.
+- **[SUBPROJECT-IN-EDIT] Rattacher un projet à un parent depuis sa pop-in d'édition** (idée dash prod) : choisir le projet parent dans un sélecteur de la pop-in « Modifier le projet », en plus du drag & drop sidebar. Réutilise `_resolve_parent()` (anti-cycle déjà géré). Frontend + petit ajout API.
 
 ## Dette technique / architecture
 
@@ -75,12 +86,20 @@ Gains rapides à fort effet :
 - **[SAVE-INDICATOR] Indicateur « enregistré »** : petit ✓ discret pendant ~1 s à chaque `patch` de mémo (titre, date, priorité) — aujourd'hui les sauvegardes sont silencieuses. Frontend pur.
 - **[EMPTY-STATES] États vides soignés** : projet sans mémo, carte sans point, recherche sans résultat → message amical + bouton d'action (« Ajouter le premier mémo »). Beaucoup de polish pour peu de code, frontend pur.
 - **[SHORTCUT-HELP] Aide raccourcis (`?`)** : overlay listant les raccourcis (`/`, à venir Cmd/K, 1-9…) + focus `/` plus visible. Discoverability quasi nulle aujourd'hui. Frontend pur.
+- **[LESS-BUTTONS] Écran projet/mémos moins chargé en boutons** (idée dash prod) : la profusion de boutons n'a de sens qu'à la **création** ; en consultation, ne montrer que l'essentiel (le reste au survol ou dans un menu ⋯). Frontend pur.
+- **[DRAFT-SAVE] Sauvegarde en brouillon à la sortie d'une édition** (idée dash prod) : si on quitte une édition non enregistrée, garder un **brouillon** récupérable au retour. Le geste qui rassure, comme [UNDO-DELETE] ; recoupe le fix « la saisie invité ne s'efface plus ».
+- ✅ **[MEMO-CREATE-TITLE] FAIT [V18.1.2]** — le champ d'ajout rapide « + Nouveau mémo » envoie le texte saisi dans `title` (création « titre d'abord »), placeholder mis à jour. Frontend pur (`templates/index.html`). _Proposition d'origine :_ revoir le flux pour saisir d'abord le **titre** (les mémos valident déjà avec titre seul depuis v14).
+- **[AUTO-REFRESH-SHARE] Rafraîchir les cards après une action** (idée dash prod) : certaines actions (ex. **création d'un partage**) ne se reflètent pas sans recharger — étendre le rechargement auto existant (15 s) aux cards de partage. Frontend.
+- **[PHOTO-IMPORT-EMPTY] Import direct dans un projet sans photo** (idée dash prod) : cliquer « photo » dans un projet **sans aucune photo** propose directement l'**import** au lieu d'un état vide. Recoupe [EMPTY-STATES] et [PHOTO-TEMPLATE-MEMO]. Frontend.
 
 Moins de clics :
 
 - **[CMD-K] Palette de commandes (Cmd/Ctrl+K)** : sauter à n'importe quel projet/mémo/lien ou créer un mémo, au clavier. Le plus gros saut de confort pour un usage quotidien intensif. Frontend, effort moyen, autonome.
 - **[INLINE-TITLE] Édition inline du titre** d'un mémo sur la carte (double-clic) sans ouvrir la pop-in.
 - **[MOVE-MENU] « Déplacer vers… »** dans le menu au survol d'un mémo (en plus de dupliquer), pour éviter le drag & drop.
+- **[COMMENT-QUICKVIEW] Accès rapide à la conversation depuis un mémo** (idée dash prod) : cliquer un mémo donne un accès direct au **fil de commentaires** sans dérouler tout le détail.
+- **[COMMENT-OPEN] Ouvrir la conversation depuis un commentaire** (idée dash prod) : depuis un commentaire (badge 💬 / cloche 🔔), ouvrir directement le **fil complet** du mémo.
+- **[COMMENT-PIN] Épingle « derniers messages »** (idée dash prod) : indicateur/épingle pour repérer les **derniers commentaires ajoutés** (non lus), au-delà du compteur actuel.
 
 Petites touches de plaisir :
 
@@ -89,6 +108,14 @@ Petites touches de plaisir :
 - **[RELATIVE-DATES] Dates relatives partout** (« dans 3 j », « il y a 2 j ») en complément de la date — déjà partiel via `dueInfo`, à généraliser.
 
 ## Moyens
+
+- **[MENTION-CHECKLIST] Pinguer quelqu'un depuis une liste à cocher** (idée dash prod) : étendre les mentions `@` (déjà dans le corps Quill et les commentaires) aux **items de liste à cocher** d'un mémo, avec ajout aux assignés comme ailleurs. Réutilise l'infra mentions ; effort moyen (blot Quill `list` + menu d'autocomplétion sur les items).
+- **[ONE-LINK-MULTI] Un seul lien pour plusieurs projets partagés** (idée dash prod) : un lien unique donnant accès à deux projets (ou plus) plutôt qu'un lien par projet. À cadrer avec l'invariant 5 (un token = un scope) : nécessite un token multi-cibles ou un regroupement de partages côté `shares`. Effort moyen, touche le backend de partage.
+- **[IMAGE-LAZY-LOAD] Images chargées à la lecture, qualité moindre** (idée dash prod) : lazy load des images + **miniatures dégradées** générées côté serveur pour soulager le Zimaboard (aujourd'hui les fichiers sont servis pleine taille). Recoupe [IMAGE-CAROUSEL] et la note perf de [PHOTO-TEMPLATE-MEMO] ; attention au coût de génération de thumbnails (Pillow lourd sur le Zimaboard) — à cadrer.
+- **[MAP-ROUTES] Trajets en pointillés sur la carte** (idée dash prod) : relier les points d'un parcours par une **polyline pointillée** Leaflet (itinéraire de voyage), en complément du calque photo [PHOTO-MAP]. Carte uniquement, frontend ; ordre des points à définir (`taken_at` / `due_date` / manuel). Aucun changement d'export.
+- **[PROJECT-TABS] Projet avec sous-projets en onglets** (idée dash prod) : afficher les sous-projets (et récursivement les leurs) en **onglets** dans le board d'un projet, en plus de l'arbre sidebar. Réutilise `projects.parent_id`. Effort élevé (refonte du board), frontend ; aucun changement de schéma/export.
+
+
 
 - ✅ **[IMAGE-EXIF] FAIT (juin 2026)** — réalisé en **badge lecture seule** (lieu + date EXIF dans la visionneuse), **sans écriture mémo** (spec volontairement réduite vs la proposition initiale de pré-remplissage). EXIF lu à la volée côté serveur (`ExifRead`), per-image, non stocké, export inchangé. _Proposition d'origine ci-dessous._ À l'upload d'une image, lire l'**EXIF** (coordonnées **GPS** + **date/heure de prise de vue**) et **proposer** de renseigner la **localisation** (`location` du mémo, point sur la carte) et l'**heure** (`due_time`). Brique nouvelle : extraction EXIF **côté serveur** dans la route d'upload existante, via une lib **légère et pure Python** (`exifread` — pas Pillow, trop lourd pour le Zimaboard) à ajouter à `requirements.txt`. Réutilise l'existant : `_reverse_geocode(lat, lng)` (GPS → label « nom, ville »), les champs `location` et `due_time`. **Aucun changement du format d'export.**
   - **Décisions (reco, à confirmer en spec AIDD)** : (1) **suggérer, ne jamais écraser** — popin « 📷 Photo prise à *[lieu]* le *[date · heure]* — Lieu / Date / Les deux / Ignorer » ; ne remplacer une localisation/date déjà présente que sur confirmation ; (2) la **date EXIF = prise de vue ≠ échéance** : pré-remplir `due_date`/`due_time` **seulement si vides** (ou trancher pour une notion « date de la photo » distincte — plus lourd, change l'export) ; (3) **multi-images** : la 1re avec données, ou demander ; (4) **sans EXIF** (captures d'écran, WhatsApp/Messenger strippent l'EXIF) → **no-op silencieux**, jamais intrusif ; (5) **invités** inclus (extraction via la route d'upload invité existante, dans le scope du partage).
@@ -156,7 +183,7 @@ Petites touches de plaisir :
 
 ## Plus ambitieux
 
-- **PWA** : manifest + service worker → installable sur mobile, icône sur l'écran d'accueil, cache hors-ligne de la dernière vue. **Important (demande Fabien)** : gérer le hors-ligne en écriture — file d'attente locale (outbox IndexedDB) des modifications faites sans réseau, synchronisées automatiquement au retour de la connexion (cocher des courses dans un magasin sans 4G).
+- **PWA** (redemandé sur le dash prod, mémo « Compliqué ») : manifest + service worker → installable sur mobile, icône sur l'écran d'accueil, cache hors-ligne de la dernière vue. **Important (demande Fabien)** : gérer le hors-ligne en écriture — file d'attente locale (outbox IndexedDB) des modifications faites sans réseau, synchronisées automatiquement au retour de la connexion (cocher des courses dans un magasin sans 4G).
 - **Audios sur les mémos** : bouton 🎤 (MediaRecorder), upload validé par signature comme les images, lecteur sur la card. Sans transcription (Zimaboard trop léger pour Whisper) — pièce jointe vocale simple.
 - **Widgets de services** : pour certains services connus, afficher une info en plus du statut (espace disque du NAS, nombre de téléchargements en cours, capteurs Home Assistant via leurs APIs).
 - **Multi-profils** : page d'accueil différente par navigateur/contexte (perso / boulot) via un paramètre `?profile=`.
