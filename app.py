@@ -1,4 +1,5 @@
 import calendar
+import hmac
 import json
 import os
 import secrets
@@ -192,6 +193,20 @@ def init_db():
         CREATE TABLE IF NOT EXISTS app_state (
             key TEXT PRIMARY KEY,
             value TEXT DEFAULT ''
+        )
+        """
+    )
+    # [ONE-LINK-MULTI] Un hub par e-mail invité : agrège ses shares (un seul lien + un seul
+    # code, stables). Additif, jamais exporté. Réutilise shares/share_guests tels quels.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS guest_hubs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            name TEXT DEFAULT '',
+            hub_token TEXT NOT NULL UNIQUE,
+            pin TEXT DEFAULT '',
+            created_at TEXT DEFAULT ''
         )
         """
     )
@@ -1841,6 +1856,103 @@ def _share_by_token(db, token):
     return db.execute("SELECT * FROM shares WHERE token = ?", (token,)).fetchone()
 
 
+# ───────────────────────── [ONE-LINK-MULTI] hubs invité ─────────────────────────
+# Le lien appartient à la personne (e-mail), pas au dossier. Un hub agrège les
+# share_guests d'un e-mail sous un seul hub_token + un seul pin (invariant 5 :
+# n'expose jamais plus que l'union de ses shares ; chaque /share garde son scope).
+
+def _hub_by_token(db, hub_token):
+    if not hub_token or len(hub_token) < 16:
+        return None
+    return db.execute(
+        "SELECT * FROM guest_hubs WHERE hub_token = ?", (hub_token,)
+    ).fetchone()
+
+
+def _ensure_hub(db, email, name=""):
+    """Garantit le hub d'un e-mail (idempotent). Crée hub_token + pin à la 1re fois ;
+    ne change jamais un hub_token/pin existant. Met à jour le nom si fourni (cosmétique)."""
+    email = (email or "").strip().lower()
+    if not email or "@" not in email or len(email) > 120:
+        return None
+    name = (name or "").strip()[:60]
+    row = db.execute("SELECT * FROM guest_hubs WHERE email = ?", (email,)).fetchone()
+    if row:
+        if name and name != (row["name"] or ""):
+            db.execute("UPDATE guest_hubs SET name = ? WHERE id = ?", (name, row["id"]))
+            db.commit()
+            row = db.execute("SELECT * FROM guest_hubs WHERE id = ?", (row["id"],)).fetchone()
+        return row
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "INSERT INTO guest_hubs (email, name, hub_token, pin, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (email, name, secrets.token_urlsafe(24), f"{secrets.randbelow(10000):04d}", now),
+    )
+    db.commit()
+    return db.execute("SELECT * FROM guest_hubs WHERE email = ?", (email,)).fetchone()
+
+
+def _hub_folders(db, email):
+    """Liste des accès (share_guests) d'un e-mail, joints à leur share. Cibles supprimées
+    exclues. Renvoie de quoi ouvrir chaque /share sans re-code (guest_token inclus)."""
+    email = (email or "").strip().lower()
+    rows = db.execute(
+        "SELECT g.guest_token, g.status, s.token, s.kind, s.target_id, s.can_edit "
+        "FROM share_guests g JOIN shares s ON s.id = g.share_id "
+        "WHERE lower(g.email) = ? ORDER BY g.id",
+        (email,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        if r["kind"] == "memo":
+            t = db.execute(
+                "SELECT content, title, emoji FROM memos WHERE id = ? "
+                "AND COALESCE(deleted_at,'') = ''", (r["target_id"],)
+            ).fetchone()
+            if not t:
+                continue
+            label = _row_get(t, "title") or _text_excerpt(t["content"], 60)
+            emoji, color = _row_get(t, "emoji"), ""
+        else:
+            t = db.execute(
+                "SELECT name, emoji, color FROM projects WHERE id = ?", (r["target_id"],)
+            ).fetchone()
+            if not t:
+                continue
+            label, emoji, color = t["name"], _row_get(t, "emoji"), _row_get(t, "color")
+        out.append({
+            "token": r["token"],
+            "guest_token": r["guest_token"],
+            "label": label,
+            "emoji": emoji or "",
+            "color": color or "",
+            "kind": r["kind"],
+            "can_edit": bool(r["can_edit"]),
+            "url": f"/share/{r['token']}",
+        })
+    return out
+
+
+# Throttle des tentatives de PIN par hub_token (le PIN du hub déverrouille TOUS les
+# dossiers de la personne → cible sensible). Fenêtre glissante en mémoire (best-effort
+# par worker ; le plafond share_guests reste la garde dure côté écriture).
+_HUB_PIN_ATTEMPTS = {}
+_HUB_PIN_MAX = 10
+_HUB_PIN_WINDOW = 600  # secondes
+
+
+def _hub_pin_throttled(hub_token):
+    now = time.time()
+    hits = [t for t in _HUB_PIN_ATTEMPTS.get(hub_token, []) if now - t < _HUB_PIN_WINDOW]
+    _HUB_PIN_ATTEMPTS[hub_token] = hits
+    return len(hits) >= _HUB_PIN_MAX
+
+
+def _hub_pin_fail(hub_token):
+    _HUB_PIN_ATTEMPTS.setdefault(hub_token, []).append(time.time())
+
+
 def _share_memo_dict(row):
     d = _memo_dict(row)
     return {
@@ -1966,9 +2078,11 @@ def grant_guest_project():
             (share_id, email, name, secrets.token_urlsafe(24), now, now),
         )
     db.commit()
+    hub = _ensure_hub(db, email, name)  # [ONE-LINK-MULTI] garantit le hub de l'e-mail
     return jsonify({
         "share_id": share_id, "token": token, "pin": pin, "can_edit": bool(can_edit),
         "project": proj["name"], "reused": reused, "url": f"/share/{token}",
+        "hub_token": hub["hub_token"] if hub else "", "hub_pin": hub["pin"] if hub else "",
     })
 
 
@@ -2178,10 +2292,87 @@ def rename_guest():
 
 @app.route("/api/guests/<int:guest_id>", methods=["DELETE"])
 def delete_guest(guest_id):
+    # Suppression (a) : retire UN accès dossier d'un invité. Le hub & le code restent,
+    # le dossier disparaît simplement de sa page hub (et son /share cesse pour lui).
     db = get_db()
     db.execute("DELETE FROM share_guests WHERE id = ?", (guest_id,))
     db.commit()
     return "", 204
+
+
+# ───────────────── [ONE-LINK-MULTI] gestion des hubs (owner-only, derrière Authelia) ─────────────────
+
+@app.route("/api/hubs", methods=["GET"])
+def list_hubs():
+    """Un hub par e-mail (créé à la volée pour les invités historiques — idempotent).
+    Sert l'en-tête « par personne » de 🔗 Partages : lien-hub + code + accès."""
+    db = get_db()
+    emails = [
+        r["email"] for r in db.execute(
+            "SELECT DISTINCT lower(email) AS email FROM share_guests WHERE email != ''"
+        ).fetchall()
+    ]
+    out = {}
+    for email in emails:
+        name = ""
+        nrow = db.execute(
+            "SELECT name FROM share_guests WHERE lower(email) = ? AND COALESCE(name,'') != '' "
+            "ORDER BY id LIMIT 1", (email,)
+        ).fetchone()
+        if nrow:
+            name = nrow["name"]
+        hub = _ensure_hub(db, email, name)
+        if not hub:
+            continue
+        out[email] = {
+            "email": email,
+            "name": hub["name"] or "",
+            "hub_token": hub["hub_token"],
+            "pin": hub["pin"] or "",
+            "url": f"/g/{hub['hub_token']}",
+            "folders_count": len(_hub_folders(db, email)),
+        }
+    return jsonify(list(out.values()))
+
+
+@app.route("/api/hubs/<hub_token>", methods=["DELETE"])
+def delete_hub(hub_token):
+    # Suppression (b) : RETIRER L'INVITÉ — coupe tout. Supprime tous ses share_guests
+    # ET le hub → lien mort. Les shares (dossiers) subsistent pour d'autres invités.
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    if not hub:
+        return jsonify({"error": "hub introuvable"}), 404
+    db.execute("DELETE FROM share_guests WHERE lower(email) = ?", (hub["email"],))
+    db.execute("DELETE FROM guest_hubs WHERE id = ?", (hub["id"],))
+    db.commit()
+    return "", 204
+
+
+@app.route("/api/hubs/<hub_token>/rotate", methods=["POST"])
+def rotate_hub(hub_token):
+    # (c) Régénérer le LIEN : nouveau hub_token, accès & code conservés. Nouvelle URL à renvoyer.
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    if not hub:
+        return jsonify({"error": "hub introuvable"}), 404
+    new_token = secrets.token_urlsafe(24)
+    db.execute("UPDATE guest_hubs SET hub_token = ? WHERE id = ?", (new_token, hub["id"]))
+    db.commit()
+    return jsonify({"hub_token": new_token, "url": f"/g/{new_token}", "pin": hub["pin"] or ""})
+
+
+@app.route("/api/hubs/<hub_token>/rotate-pin", methods=["POST"])
+def rotate_hub_pin(hub_token):
+    # (d) Régénérer le CODE : nouveau pin, lien & accès conservés. Découplé de (c).
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    if not hub:
+        return jsonify({"error": "hub introuvable"}), 404
+    new_pin = f"{secrets.randbelow(10000):04d}"
+    db.execute("UPDATE guest_hubs SET pin = ? WHERE id = ?", (new_pin, hub["id"]))
+    db.commit()
+    return jsonify({"hub_token": hub_token, "pin": new_pin})
 
 
 @app.route("/api/activity", methods=["GET"])
@@ -2470,6 +2661,244 @@ def share_page(token):
     return render_template("share.html", version=APP_VERSION)
 
 
+# ───────────── [ONE-LINK-MULTI] routes publiques du hub (bypass Authelia) ─────────────
+
+@app.route("/g/<hub_token>")
+def hub_page(hub_token):
+    # Shell statique : aucune donnée invité dans le HTML (la liste vient de /approve après PIN).
+    if not _hub_by_token(get_db(), hub_token):
+        return "Lien invalide ou révoqué.", 404
+    return render_template("hub.html", version=APP_VERSION)
+
+
+@app.route("/g/<hub_token>/approve", methods=["POST"])
+def hub_approve(hub_token):
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    # Réponse 403 générique et indiscernable (hub inexistant ≡ pin faux) → pas d'énumération.
+    if not hub:
+        return jsonify({"error": "code invalide"}), 403
+    if _hub_pin_throttled(hub_token):
+        return jsonify({"error": "trop de tentatives, réessaie plus tard"}), 429
+    data = request.get_json(silent=True) or {}
+    pin = (str(data.get("pin") or "")).strip()
+    # Comparaison à temps constant (anti-timing).
+    if not pin or not hmac.compare_digest(pin, hub["pin"] or ""):
+        _hub_pin_fail(hub_token)
+        return jsonify({"error": "code invalide"}), 403
+    # Cascade d'approbation : UNIQUEMENT les share_guests de CET e-mail (jamais d'un autre).
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "UPDATE share_guests SET status = 'approved', "
+        "approved_at = CASE WHEN COALESCE(approved_at,'')='' THEN ? ELSE approved_at END "
+        "WHERE lower(email) = ? AND status != 'approved'",
+        (now, (hub["email"] or "").strip().lower()),
+    )
+    db.commit()
+    return jsonify({"name": hub["name"] or "", "folders": _hub_folders(db, hub["email"])})
+
+
+def _hub_approved_shares(db, email):
+    """Shares APPROUVÉS de cet e-mail, enrichis du scope (anti-chevauchement). UNIQUEMENT
+    cet e-mail (invariant 5). Chaque share : token, can_edit, kind, target, desc_set, spec."""
+    email = (email or "").strip().lower()
+    rows = db.execute(
+        "SELECT s.id, s.token, s.kind, s.target_id, s.can_edit "
+        "FROM shares s JOIN share_guests g ON g.share_id = s.id "
+        "WHERE lower(g.email) = ? AND g.status = 'approved' ORDER BY s.id",
+        (email,),
+    ).fetchall()
+    out = []
+    seen = set()
+    for r in rows:
+        if r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        if r["kind"] == "project":
+            desc = set(_project_descendants(db, r["target_id"]))
+            spec = len(desc)
+        else:
+            desc = set()
+            spec = 0  # un share mémo est le plus spécifique possible
+        out.append({
+            "id": r["id"], "token": r["token"], "can_edit": bool(r["can_edit"]),
+            "kind": r["kind"], "target_id": r["target_id"], "desc": desc, "spec": spec,
+        })
+    return out
+
+
+def _hub_winner(covering):
+    """Share gagnant pour un item couvert par plusieurs shares : can_edit > spécificité > id."""
+    return sorted(
+        covering, key=lambda s: (0 if s["can_edit"] else 1, s["spec"], s["id"])
+    )[0]
+
+
+def _hub_proof_guest(db, hub):
+    """Preuve d'accès au hub : un guest_token APPROUVÉ dont l'e-mail == celui du hub.
+    JAMAIS de confiance au hub_token seul (il est dans l'URL). Renvoie la row ou None."""
+    gtok = (request.headers.get("X-Guest-Token") or "").strip()
+    if not gtok:
+        return None
+    return db.execute(
+        "SELECT * FROM share_guests WHERE guest_token = ? AND status = 'approved' "
+        "AND lower(email) = ?",
+        (gtok, (hub["email"] or "").strip().lower()),
+    ).fetchone()
+
+
+@app.route("/g/<hub_token>/data")
+def hub_data(hub_token):
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    if not hub:
+        return jsonify({"error": "invalid"}), 404
+    # Pas de master token : preuve = guest_token approuvé de CET e-mail (sinon 403, écran code).
+    if not _hub_proof_guest(db, hub):
+        return jsonify({"error": "code requis"}), 403
+    shares = _hub_approved_shares(db, hub["email"])
+    proj_shares = [s for s in shares if s["kind"] == "project"]
+    memo_shares = [s for s in shares if s["kind"] == "memo"]
+
+    all_p = {
+        r["id"]: r for r in db.execute(
+            "SELECT id, name, emoji, color, parent_id, location, description, marker_color FROM projects"
+        ).fetchall()
+    }
+    proj_names = {
+        pid: ((p["emoji"] + " ") if p["emoji"] else "") + p["name"]
+        for pid, p in all_p.items()
+    }
+
+    # ── Union des projets (dédup par id), tagués du share gagnant ──
+    union_pids = set()
+    for s in proj_shares:
+        union_pids |= s["desc"]
+    projects = []
+    for pid in union_pids:
+        p = all_p.get(pid)
+        if not p:
+            continue
+        covering = [s for s in proj_shares if pid in s["desc"]]
+        win = _hub_winner(covering)
+        parent = p["parent_id"] if p["parent_id"] in union_pids else None  # jamais de parent hors union
+        projects.append({
+            "id": p["id"], "name": p["name"], "emoji": p["emoji"], "color": p["color"],
+            "parent_id": parent, "location": _parse_location(p["location"]),
+            "description": _row_get(p, "description"), "point_color": _row_get(p, "marker_color"),
+            "share_token": win["token"], "can_edit": win["can_edit"],
+        })
+
+    # ── Union des mémos (dédup par id), tagués du share gagnant ──
+    def _cover_memo(memo_pid, memo_id):
+        cov = [s for s in proj_shares if memo_pid in s["desc"]]
+        cov += [s for s in memo_shares if s["target_id"] == memo_id]
+        return cov
+
+    def _collect_memos(deleted):
+        rows_by_id = {}
+        for s in shares:
+            share = {"kind": s["kind"], "target_id": s["target_id"]}
+            for r in _share_scope_memos(db, share, deleted=deleted):
+                rows_by_id[r["id"]] = r
+        return rows_by_id
+
+    rows_by_id = _collect_memos(False)
+    memo_ids = list(rows_by_id.keys())
+    comments_by_memo = {}
+    if memo_ids:
+        ph = ",".join("?" * len(memo_ids))
+        crows = db.execute(
+            f"SELECT * FROM memo_comments WHERE memo_id IN ({ph}) ORDER BY created_at, id",
+            memo_ids,
+        ).fetchall()
+        cseen = _comment_seen_map(db, [c["id"] for c in crows])
+        for c in crows:
+            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen))
+    memos = []
+    for mid, r in rows_by_id.items():
+        covering = _cover_memo(r["project_id"], mid)
+        if not covering:
+            continue  # sécurité : jamais un mémo hors des shares de l'e-mail
+        win = _hub_winner(covering)
+        d = _share_memo_dict(r)
+        d["project"] = proj_names.get(r["project_id"], "")
+        d["comments"] = comments_by_memo.get(mid, [])
+        d["share_token"] = win["token"]
+        d["can_edit"] = win["can_edit"]
+        memos.append(d)
+
+    # ── Racines (sidebar) : une par share ──
+    roots = []
+    for s in shares:
+        if s["kind"] == "project":
+            p = all_p.get(s["target_id"])
+            if not p:
+                continue
+            roots.append({
+                "share_token": s["token"], "can_edit": s["can_edit"], "kind": "project",
+                "root_id": s["target_id"],
+                "label": p["name"], "emoji": p["emoji"], "color": p["color"],
+            })
+        else:
+            m = db.execute(
+                "SELECT content, title, emoji FROM memos WHERE id = ? AND COALESCE(deleted_at,'')=''",
+                (s["target_id"],),
+            ).fetchone()
+            if not m:
+                continue
+            roots.append({
+                "share_token": s["token"], "can_edit": s["can_edit"], "kind": "memo",
+                "memo_id": s["target_id"],
+                "label": _row_get(m, "title") or _text_excerpt(m["content"], 60),
+                "emoji": _row_get(m, "emoji"), "color": "",
+            })
+
+    # ── Corbeille (union des shares can_edit), taguée du share gagnant ──
+    trash = []
+    del_rows = _collect_memos(True)
+    for mid, r in del_rows.items():
+        covering = [s for s in _cover_memo(r["project_id"], mid) if s["can_edit"]]
+        if not covering:
+            continue
+        win = _hub_winner(covering)
+        td = _share_memo_dict(r)
+        td["deleted_at"] = _row_get(r, "deleted_at", "")
+        td["share_token"] = win["token"]
+        td["can_edit"] = True
+        trash.append(td)
+
+    # ── Membres : union (propriétaire + invités approuvés de tous ses shares) ──
+    members = [_owner_name(db)]
+    share_ids = [s["id"] for s in shares]
+    if share_ids:
+        ph = ",".join("?" * len(share_ids))
+        for g in db.execute(
+            f"SELECT DISTINCT name, email FROM share_guests "
+            f"WHERE share_id IN ({ph}) AND status = 'approved'",
+            share_ids,
+        ).fetchall():
+            label = g["name"] or g["email"]
+            if label and label not in members:
+                members.append(label)
+
+    return jsonify({
+        "kind": "hub",
+        "name": hub["name"] or "",
+        "roots": roots,
+        "projects": projects,
+        "memos": memos,
+        "trash": trash,
+        "members": members,
+        "priorities": [
+            dict(r) for r in db.execute(
+                "SELECT id, name, color FROM priorities ORDER BY position, id"
+            ).fetchall()
+        ],
+        "marker_color": _map_marker_color(db),
+    })
+
+
 @app.route("/share/<token>/data")
 def share_data(token):
     db = get_db()
@@ -2607,6 +3036,7 @@ def share_register(token):
                 (now, existing["id"]),
             )
             db.commit()
+        _ensure_hub(db, email, name)  # [ONE-LINK-MULTI]
         return jsonify(
             {"guest_token": existing["guest_token"], "status": "approved", "email": email}
         )
@@ -2621,6 +3051,7 @@ def share_register(token):
         (share["id"], email, name, gtoken, now, now),
     )
     db.commit()
+    _ensure_hub(db, email, name)  # [ONE-LINK-MULTI]
     return jsonify({"guest_token": gtoken, "status": "approved", "email": email}), 201
 
 

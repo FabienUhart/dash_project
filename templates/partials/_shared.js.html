@@ -74,6 +74,66 @@ function provenanceColor(proj) {
   return PROV_PALETTE[((id % PROV_PALETTE.length) + PROV_PALETTE.length) % PROV_PALETTE.length];
 }
 
+// Pop-in « Déplacer vers… » mutualisée [MOVE-TO] (ADR-001). Arbre de projets cliquable ;
+// tout ce qui diffère est passé dans `cfg`. Markup `#move-dialog` présent sur les deux pages.
+// cfg = { subtitle, projects (liste {id,name,emoji,color,parent_id}), topLabel ('📥 Inbox…' /
+//         '🌳 Racine…'), currentValue (id ou null = emplacement actuel), disabledIds (Set,
+//         exclusions anti-cycle), iconOf(p)→node, onPick(valueOuNull) }.
+// Dépend de globals des deux pages : el, treeConnector. Entrée animée en CSS (pas de GSAP — invariant 8).
+function runMoveDialog(cfg) {
+  const dlg = document.getElementById('move-dialog');
+  document.getElementById('move-title').textContent = 'Déplacer vers…';
+  document.getElementById('move-sub').textContent = cfg.subtitle || '';
+  const listEl = document.getElementById('move-list');
+  const searchEl = document.getElementById('move-search');
+  searchEl.value = '';
+  const projects = cfg.projects || [];
+  const disabled = cfg.disabledIds || new Set();
+  const inList = new Set(projects.map(p => p.id));
+  const childrenOf = (id) => projects.filter(p => p.parent_id === id);
+  const roots = projects.filter(p => p.parent_id == null || !inList.has(p.parent_id));
+  const pick = (val) => { dlg.close(); cfg.onPick(val); };
+  function rowEl(label, iconNode, opts) {
+    const row = el('div', { class: 'move-row' + (opts.disabled ? ' disabled' : '') + (opts.current ? ' current' : '') });
+    if (opts.pre != null) row.appendChild(el('span', { class: 'sb-tree', text: opts.pre }));
+    if (iconNode) row.appendChild(iconNode);
+    row.appendChild(el('span', { class: 'move-name', text: label }));
+    if (opts.current) row.appendChild(el('span', { class: 'badge', text: 'actuel' }));
+    if (!opts.disabled && !opts.current) row.addEventListener('click', () => pick(opts.value));
+    return row;
+  }
+  function draw() {
+    const q = searchEl.value.trim().toLowerCase();
+    listEl.innerHTML = '';
+    // Ligne « top » (Inbox / Racine) — absente côté invité : déplacer hors scope est interdit (invariant 5).
+    if (cfg.topLabel && (!q || cfg.topLabel.toLowerCase().includes(q))) {
+      listEl.appendChild(rowEl(cfg.topLabel, null, { value: null, current: cfg.currentValue == null }));
+    }
+    if (q) {
+      // Recherche : liste plate des projets dont le nom correspond (sans connecteurs).
+      projects.filter(p => p.name.toLowerCase().includes(q)).forEach(p => {
+        listEl.appendChild(rowEl(p.name, cfg.iconOf(p), { value: p.id, current: cfg.currentValue === p.id, disabled: disabled.has(p.id) }));
+      });
+    } else {
+      const walk = (p, ancestorsLast, isLast) => {
+        listEl.appendChild(rowEl(p.name, cfg.iconOf(p), {
+          value: p.id, current: cfg.currentValue === p.id, disabled: disabled.has(p.id),
+          pre: treeConnector(ancestorsLast, isLast),
+        }));
+        const kids = childrenOf(p.id);
+        kids.forEach((c, i) => walk(c, [...ancestorsLast, isLast], i === kids.length - 1));
+      };
+      roots.forEach((p, i) => walk(p, [], i === roots.length - 1));
+    }
+    if (!listEl.children.length) listEl.appendChild(el('div', { class: 'empty', text: 'Aucun projet.' }));
+  }
+  searchEl.oninput = draw;
+  document.getElementById('move-cancel').onclick = () => dlg.close();
+  draw();
+  dlg.showModal();
+  searchEl.focus();
+}
+
 // Pop-in carte mutualisée (ADR-001 item 4). Une seule implémentation owner/invité ;
 // tout ce qui diffère est passé dans `cfg` (accès données, persistance, sauvegardes).
 // cfg = { title, points, recompute, editable, projects, currentProjectId,

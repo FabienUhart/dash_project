@@ -803,6 +803,17 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .task-more { position: relative; display: inline-flex; }
 /* Séparateur léger entre zones du détail déplié [EXPAND-DETAIL-REORG]. */
 .detail-sep { align-self: stretch; border-left: 1px solid var(--border); margin: 0 0.2rem; }
+/* Pop-in « Déplacer vers… » [MOVE-TO]. */
+.move-sub { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-search { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: inherit; padding: 0.45rem 0.6rem; margin-bottom: 0.5rem; }
+.move-list { max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 0.25rem; }
+.move-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.5rem; border-radius: 6px; cursor: pointer; }
+.move-row:hover { background: var(--panel-2); }
+.move-row .sb-tree { color: var(--muted); white-space: pre; font-family: ui-monospace, monospace; flex-shrink: 0; }
+.move-row .move-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-row.disabled { opacity: 0.4; cursor: not-allowed; }
+.move-row.current { cursor: default; }
+.move-row.disabled:hover, .move-row.current:hover { background: none; }
 .task-detail .task-crumb { font-size: 0.82rem; color: var(--muted); flex-wrap: wrap; }
 .task-detail .task-crumb .me-crumb-node { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Réinitialise le look « bouton d'action » hérité pour les items du popover (qui sont
@@ -950,8 +961,13 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .iv-del { background: var(--red); color: #fff; border-color: var(--red); }
 .iv-del:hover { background: #d32f2f; }
 @media (max-width: 900px) {
-  .iv-nav { width: 2.2rem; height: 2.2rem; font-size: 1.3rem; }
-  .iv-btn { min-height: 44px; }
+  /* [PHOTO-VIEWER-MOBILE] Barre photo : boutons CARRÉS homogènes. La règle tactile
+     (button{min-height:44px}) les étirait en ovale → on fige width=height + min-height:0
+     (même correctif que .task-check/.thumb-del/la barre Quill). Fond/bordure conservés
+     (var(--panel-2)/var(--border)) pour rester lisibles sur la barre noire translucide. */
+  .iv-bar { gap: 0.3rem; padding: 0.4rem 0.5rem; }
+  .iv-btn { width: 44px; height: 44px; min-width: 0; min-height: 0; padding: 0; font-size: 1.2rem; }
+  .iv-nav { width: 2.6rem; height: 2.6rem; min-width: 0; min-height: 0; font-size: 1.4rem; }
 }
 #done-section summary {
   cursor: pointer;
@@ -1487,11 +1503,22 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
 </dialog>
 
+<dialog id="move-dialog">
+  <div class="me-head"><h3 id="move-title">Déplacer vers…</h3></div>
+  <p id="move-sub" class="move-sub"></p>
+  <input id="move-search" type="text" class="move-search" placeholder="Rechercher un projet…" autocomplete="off">
+  <div id="move-list" class="move-list"></div>
+  <div class="actions">
+    <button type="button" id="move-cancel">Annuler</button>
+  </div>
+</dialog>
+
 <dialog id="create-dialog">
   <div class="me-head">
     <h3 id="create-title">Nouveau projet</h3>
     <button type="button" id="create-menu-btn" class="icon-btn" title="Actions" aria-label="Actions" style="display:none">⋯</button>
     <div id="create-menu" class="card-menu" hidden>
+      <button type="button" id="create-move">↗ Déplacer vers…</button>
       <button type="button" id="create-delete" class="danger-item">🗑 Supprimer</button>
     </div>
   </div>
@@ -2121,6 +2148,7 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
   document.getElementById('create-menu').hidden = true;
+  document.getElementById('create-move').style.display = (item && kind === 'project') ? '' : 'none';
   createLoc = item ? parseLoc(item.location) : null;
   refreshCreateLoc();
   const suggest = document.getElementById('emoji-suggest');
@@ -2168,6 +2196,14 @@ document.getElementById('create-delete').addEventListener('click', async () => {
   editingItem = null;
   await loadAll();
   if (settingsDialog.open) { renderCatManage(); renderProjManage(); renderPrioManage(); }
+});
+document.getElementById('create-move').addEventListener('click', () => {
+  if (!editingItem || createKind !== 'project') return;
+  const proj = editingItem;
+  document.getElementById('create-menu').hidden = true;
+  createDialog.close();
+  editingItem = null;
+  openMoveProject(proj);
 });
 const createMenu = document.getElementById('create-menu');
 const createMenuBtn = document.getElementById('create-menu-btn');
@@ -3094,9 +3130,10 @@ async function renderShares() {
   title.appendChild(el('span', { icon: 'link', text: 'Partages & activité' }));
   board.appendChild(title);
 
-  const [shares, guests, activity] = await Promise.all([
-    api('/api/shares'), api('/api/guests'), api('/api/activity'),
+  const [shares, guests, activity, hubs] = await Promise.all([
+    api('/api/shares'), api('/api/guests'), api('/api/activity'), api('/api/hubs'),
   ]);
+  const hubByEmail = new Map((hubs || []).map(h => [h.email, h]));
   const rerender = () => { renderShares(); refreshActivityBadge(); };
 
   const pending = guests.filter(g => g.status === 'pending');
@@ -3147,6 +3184,49 @@ async function renderShares() {
       } },
     }));
     card.appendChild(head);
+    // [ONE-LINK-MULTI] En-tête de personne : UN lien-hub (un seul lien + un seul code, à vie)
+    // + actions (b) retirer, (c) régénérer lien, (d) régénérer code. Découplées.
+    const hub = hubByEmail.get((email || '').toLowerCase());
+    if (hub) {
+      const hubUrl = location.origin + '/g/' + hub.hub_token;
+      const hubRow = el('div', { class: 'guest-row', attrs: { style: 'gap:0.4rem;flex-wrap:wrap;background:var(--panel-2);border-radius:8px;padding:0.4rem 0.55rem' } });
+      hubRow.appendChild(el('span', { text: '🔗', attrs: { title: 'Lien unique de cette personne (tous ses dossiers)' } }));
+      hubRow.appendChild(el('span', { class: 'grow', attrs: { style: 'font-size:0.8rem;color:var(--muted);word-break:break-all' }, text: hubUrl }));
+      hubRow.appendChild(el('span', { class: 'rev-meta', text: 'Code ' + (hub.pin || '—') }));
+      hubRow.appendChild(el('button', {
+        text: '📋', attrs: { title: 'Copier le lien unique' },
+        on: { click: async (e) => { try { await navigator.clipboard.writeText(hubUrl); e.target.textContent = '✓'; setTimeout(() => { e.target.textContent = '📋'; }, 1200); } catch (_) {} } },
+      }));
+      hubRow.appendChild(el('button', {
+        icon: 'qr', attrs: { title: 'QR du lien unique' },
+        on: { click: () => openQr(hubUrl, { kind: 'project', target: dispName + ' — tous ses dossiers', can_edit: false, pin: hub.pin }) },
+      }));
+      hubRow.appendChild(el('button', {
+        text: '↻ lien', attrs: { title: 'Régénérer le lien (nouvelle URL, accès et code conservés)' },
+        on: { click: async () => {
+          if (!(await confirmPopin('Régénérer le LIEN de ' + dispName + ' ?\nL\'ancienne URL cessera de marcher ; les accès et le code restent. Il faudra renvoyer la nouvelle URL.', { okLabel: 'Régénérer le lien' }))) return;
+          await api('/api/hubs/' + hub.hub_token + '/rotate', { method: 'POST' });
+          rerender(); notify('Lien régénéré — renvoie la nouvelle URL.');
+        } },
+      }));
+      hubRow.appendChild(el('button', {
+        text: '↻ code', attrs: { title: 'Régénérer le code (nouveau PIN, lien et accès conservés)' },
+        on: { click: async () => {
+          if (!(await confirmPopin('Régénérer le CODE de ' + dispName + ' ?\nLe lien reste le même ; il faudra renvoyer le nouveau code.', { okLabel: 'Régénérer le code' }))) return;
+          const r = await api('/api/hubs/' + hub.hub_token + '/rotate-pin', { method: 'POST' });
+          rerender(); notify('Nouveau code : ' + r.pin);
+        } },
+      }));
+      hubRow.appendChild(el('button', {
+        class: 'g-reject', text: '⏏ Retirer', attrs: { title: 'Retirer l\'invité : coupe TOUS ses accès, le lien meurt' },
+        on: { click: async () => {
+          if (!(await confirmPopin('Retirer complètement ' + dispName + ' ?\nTous ses accès sont coupés et son lien meurt. Re-partager créera un nouveau lien + code.', { okLabel: 'Tout couper', danger: true }))) return;
+          await api('/api/hubs/' + hub.hub_token, { method: 'DELETE' });
+          await loadAll(); rerender(); notify('Invité retiré.');
+        } },
+      }));
+      card.appendChild(hubRow);
+    }
     accs.forEach(g => {
       const row = el('div', { class: 'guest-row' });
       row.appendChild(el('span', { text: g.kind === 'memo' ? '📝' : '📁' }));
@@ -3801,6 +3881,35 @@ async function duplicateMemo(id) {
   await loadAll();
 }
 
+// [MOVE-TO] Déplacer un mémo (cibles = projets + Inbox) via la pop-in mutualisée.
+function openMoveMemo(memo) {
+  runMoveDialog({
+    subtitle: memo.title || stripHTML(memo.content).slice(0, 60) || '(sans titre)',
+    projects: state.projects,
+    topLabel: '📥 Inbox (sans projet)',
+    currentValue: memo.project_id || null,
+    disabledIds: new Set(),
+    iconOf: (p) => comboIcon(p.emoji, usableProjColor(p.color), '📁'),
+    onPick: (val) => patchMemo(memo.id, { project_id: val }),
+  });
+}
+
+// [MOVE-TO] Re-parenter un projet (cibles = projets + Racine ; son propre sous-arbre grisé).
+function openMoveProject(proj) {
+  runMoveDialog({
+    subtitle: proj.name,
+    projects: state.projects,
+    topLabel: '🌳 Racine (aucun parent)',
+    currentValue: proj.parent_id || null,
+    disabledIds: new Set([proj.id, ...projectDescendants(proj.id)]),
+    iconOf: (p) => comboIcon(p.emoji, usableProjColor(p.color), '📁'),
+    onPick: async (val) => {
+      await api(`/api/projects/${proj.id}`, { method: 'PUT', body: JSON.stringify({ parent_id: val }) });
+      await loadAll();
+    },
+  });
+}
+
 /* ------------------------------------------------ mémos : vue board */
 
 function taskEl(memo) {
@@ -3928,6 +4037,10 @@ function taskEl(memo) {
   const more = el('div', { class: 'task-more' });
   const moreBtn = el('button', { class: 'tmore', text: '⋯', attrs: { title: "Plus d'actions", 'aria-label': "Plus d'actions" } });
   const moreMenu = el('div', { class: 'card-menu', attrs: { hidden: '' } });
+  moreMenu.appendChild(el('button', {
+    text: '↗ Déplacer vers…',
+    on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; openMoveMemo(memo); } },
+  }));
   moreMenu.appendChild(el('button', {
     text: '⧉ Dupliquer',
     on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; duplicateMemo(memo.id); } },

@@ -318,6 +318,17 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .memo-tools .task-crumb { font-size: 0.8rem; color: var(--muted); }
 .memo-tools .task-crumb .me-crumb-node { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memo-tools .detail-sep { align-self: stretch; border-left: 1px solid var(--border); margin: 0 0.2rem; }
+/* Pop-in « Déplacer vers… » [MOVE-TO]. */
+.move-sub { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-search { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: inherit; padding: 0.45rem 0.6rem; margin-bottom: 0.5rem; }
+.move-list { max-height: 50vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 0.25rem; }
+.move-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.4rem 0.5rem; border-radius: 6px; cursor: pointer; }
+.move-row:hover { background: var(--panel-2); }
+.move-row .sb-tree { color: var(--muted); white-space: pre; font-family: ui-monospace, monospace; flex-shrink: 0; }
+.move-row .move-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-row.disabled { opacity: 0.4; cursor: not-allowed; }
+.move-row.current { cursor: default; }
+.move-row.disabled:hover, .move-row.current:hover { background: none; }
 .tool-btn {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); font: inherit; font-size: 0.78rem; padding: 0.25rem 0.6rem; cursor: pointer;
@@ -491,8 +502,13 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .iv-del { background: #f44336; color: #fff; border-color: #f44336; }
 .iv-del:hover { background: #d32f2f; }
 @media (max-width: 900px) {
-  .iv-nav { width: 2.2rem; height: 2.2rem; font-size: 1.3rem; }
-  .iv-btn { min-height: 44px; }
+  /* [PHOTO-VIEWER-MOBILE] Barre photo : boutons CARRÉS homogènes. La règle tactile
+     (button{min-height:44px}) les étirait en ovale → on fige width=height + min-height:0
+     (même correctif que .task-check/.thumb-del/la barre Quill). Fond/bordure conservés
+     (var(--panel-2)/var(--border)) pour rester lisibles sur la barre noire translucide. */
+  .iv-bar { gap: 0.3rem; padding: 0.4rem 0.5rem; }
+  .iv-btn { width: 44px; height: 44px; min-width: 0; min-height: 0; padding: 0; font-size: 1.2rem; }
+  .iv-nav { width: 2.6rem; height: 2.6rem; min-width: 0; min-height: 0; font-size: 1.4rem; }
 }
 #edit-dialog {
   background: linear-gradient(180deg, var(--panel-2), var(--panel));
@@ -639,6 +655,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
     <textarea id="pd-desc" rows="2" placeholder="Quelques mots sur le projet…" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit;resize:vertical"></textarea>
   </label>
   <div class="dlg-actions">
+    <button type="button" id="pd-move" style="margin-right:auto">↗ Déplacer vers…</button>
     <button type="button" id="pd-cancel">Annuler</button>
     <button type="button" id="pd-save" class="primary">Enregistrer</button>
   </div>
@@ -674,6 +691,16 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div class="dlg-actions">
     <button type="button" id="confirm-no">Annuler</button>
     <button type="button" id="confirm-yes" class="confirm-danger">Supprimer</button>
+  </div>
+</dialog>
+
+<dialog id="move-dialog">
+  <h3 id="move-title" style="margin:0 0 0.6rem">Déplacer vers…</h3>
+  <p id="move-sub" class="move-sub"></p>
+  <input id="move-search" type="text" class="move-search" placeholder="Rechercher un projet…" autocomplete="off">
+  <div id="move-list" class="move-list"></div>
+  <div class="dlg-actions">
+    <button type="button" id="move-cancel">Annuler</button>
   </div>
 </dialog>
 
@@ -1129,6 +1156,16 @@ let dragShareMemo = null;
 let dragShareProj = null;
 
 function projChildren(pid) { return (DATA.projects || []).filter(p => p.parent_id === pid); }
+// [SHARE-BOARD-FIX] Icône projet (emoji + pastille couleur) — TOP-LEVEL : visible par la sidebar,
+// l'arbre Plan ET le fil d'Ariane des cards du board (sinon ReferenceError, board vide).
+function projIcon(p) {
+  const icon = el('span', '');
+  icon.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0';
+  if (p.emoji) icon.appendChild(el('span', '', p.emoji));
+  if (p.color) { const d = el('span', 'sdot'); d.style.background = p.color; if (p.emoji) { d.style.width = '0.4rem'; d.style.height = '0.4rem'; } icon.appendChild(d); }
+  if (!p.emoji && !p.color) { const d = el('span', 'sdot'); d.style.background = 'var(--gray)'; icon.appendChild(d); }
+  return icon;
+}
 function projDescendants(pid) {
   const out = [];
   const walk = (id) => projChildren(id).forEach(c => { out.push(c.id); walk(c.id); });
@@ -1167,7 +1204,48 @@ function openProjEditor(p) {
   projDialog.showModal();
 }
 
+// [MOVE-TO] Icône de projet pour la pop-in de déplacement (équivalent comboIcon, scopé invité).
+function moveProjIcon(p) {
+  const ic = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0' } });
+  if (p.emoji) ic.appendChild(el('span', { text: p.emoji }));
+  const c = usableProjColor(p.color);
+  if (c) ic.appendChild(el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;background:' + c } }));
+  if (!p.emoji && !c) ic.appendChild(el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;background:var(--gray,#888)' } }));
+  return ic;
+}
+// Déplacer un mémo : cibles = projets DU PARTAGE uniquement (pas d'Inbox = hors scope, invariant 5).
+function openMoveShareMemo(memo) {
+  runMoveDialog({
+    subtitle: memo.title || (isRich(memo.content) ? stripTags(memo.content) : (memo.content || '')).slice(0, 60) || '(sans titre)',
+    projects: DATA.projects || [],
+    topLabel: '',
+    currentValue: memo.project_id || null,
+    disabledIds: new Set(),
+    iconOf: moveProjIcon,
+    onPick: (val) => guestPut(API + '/memo/' + memo.id, { project_id: val }),
+  });
+}
+// Re-parenter un projet : cibles = projets du partage (pas de Racine = hors scope) ; sous-arbre grisé.
+function openMoveShareProject(proj) {
+  runMoveDialog({
+    subtitle: proj.name,
+    projects: DATA.projects || [],
+    topLabel: '',
+    currentValue: proj.parent_id || null,
+    disabledIds: new Set([proj.id, ...projDescendants(proj.id)]),
+    iconOf: moveProjIcon,
+    onPick: (val) => guestPut(API + '/project/' + proj.id, { parent_id: val }),
+  });
+}
+
 document.getElementById('pd-cancel').addEventListener('click', () => projDialog.close());
+document.getElementById('pd-move').addEventListener('click', () => {
+  if (!editingProj) return;
+  const proj = editingProj;
+  projDialog.close();
+  editingProj = null;
+  openMoveShareProject(proj);
+});
 document.getElementById('pd-save').addEventListener('click', async () => {
   if (!editingProj) return;
   const name = document.getElementById('pd-name').value.trim();
@@ -1495,15 +1573,6 @@ function renderShareTreeView() {
     return n;
   };
   const connOf = treeConnector;
-
-  function projIcon(p) {
-    const icon = el('span', '');
-    icon.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0';
-    if (p.emoji) icon.appendChild(el('span', '', p.emoji));
-    if (p.color) { const d = el('span', 'sdot'); d.style.background = p.color; if (p.emoji) { d.style.width = '0.4rem'; d.style.height = '0.4rem'; } icon.appendChild(d); }
-    if (!p.emoji && !p.color) { const d = el('span', 'sdot'); d.style.background = 'var(--gray)'; icon.appendChild(d); }
-    return icon;
-  }
 
   function memoRow(m, conn) {
     const row = el('div', 'tree-row tree-memo');
@@ -2026,6 +2095,14 @@ function render() {
       eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
       eBtn.addEventListener('click', () => openEditor(memo, content, t));
       actionRow.appendChild(eBtn);
+
+      // [MOVE-TO] Déplacer le mémo vers un autre projet du partage (cas tactile).
+      const mvBtn = document.createElement('button');
+      mvBtn.className = 'tool-btn';
+      mvBtn.textContent = '↗ Déplacer';
+      mvBtn.title = 'Déplacer ce mémo vers un autre projet';
+      mvBtn.addEventListener('click', () => openMoveShareMemo(memo));
+      actionRow.appendChild(mvBtn);
 
       const dBtn = document.createElement('button');
       dBtn.className = 'tool-btn';

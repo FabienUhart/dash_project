@@ -1,6 +1,6 @@
 # === LANGUE ===
 
-**Toujours répondre en français**, quelle que soit la langue des skills, prompts, plugins ou specs (AIDD et autres sont en anglais — ça ne change rien : la conversation avec l'utilisateur reste en français). Le code, les noms de variables et les messages de commit techniques peuvent rester en anglais si c'est la convention du projet, mais **toute explication adressée à l'utilisateur est en français**.
+**Toujours répondre en français**, quelle que soit la langue des skills, prompts, plugins ou specs (AIDD et autres sont en anglais — ça ne change rien : la conversation avec l'utilisateur reste en français). Le code, les noms de variables et les messages de commit techniques peuvent rester en anglais si c'est la convention du projet, mais **toute explication adressée à l'utilisateur est en français**. Cela vaut **tout le temps** : récapitulatifs de fin de réalisation, messages d'avancement, plans, questions de clarification — **tout le dialogue avec l'utilisateur est en français**, sans exception.
 
 # === MEMORY BANK ===
 
@@ -77,6 +77,17 @@ DB_PATH=/tmp/test.db flask --app app run -p 8099
 - mémo créé par owner → en-tête affiche le propriétaire (`created_by_display` résolu) ;
 - mémo créé via partage invité (`POST /share/<token>/memos`) → en-tête owner affiche « Nom <email> » ;
 - `GET /api/export` → `version: 19` + `created_by` présent sur chaque mémo (jamais `created_by_display`).
+
+## Process de fin de réalisation
+
+Après **chaque réalisation** (un lot livré et testé — pas à chaque tour de conversation), Claude Code doit, dans l'ordre :
+
+1. **Tester** : `python3 -m py_compile app.py` + les scénarios critiques (voir « Comment tester »), toujours sur une **copie** de la base (`cp data/dashboard.db /tmp/test.db`), jamais sur `data/dashboard.db`.
+2. **Journaliser** : ajouter l'entrée taggée `[VX.Y.Z]` dans `REALISATION.md` (Z = dernier + 1) et basculer l'item correspondant d'`IDEAS.md` en « Fait » (cf. § Versionnage).
+3. **Rebuild local** : lancer **`docker compose up -d --build`** pour que la nouvelle version tourne sur `http://localhost:8099/` et soit immédiatement testable (par Fabien et par l'agent Cowork). Le rebuild local utilise la vraie base (`./data`) : la migration doit donc rester additive et non destructive (invariant 1).
+4. **Ne pas déployer en prod automatiquement** : le déploiement sur le Zimaboard reste **manuel** (`git pull` + `docker compose up -d --build` côté serveur). Ne **pas** committer ni pousser sans demande explicite de Fabien.
+
+(Option « dure » équivalente : un hook `Stop` dans `.claude/settings.local.json` qui lance le rebuild automatiquement — voir le script fourni hors dépôt. Le présent process reste la source de vérité même si le hook n'est pas activé.)
 
 ## Historique des évolutions majeures
 
