@@ -2407,7 +2407,7 @@ def list_hubs():
             "name": hub["name"] or "",
             "hub_token": hub["hub_token"],
             "pin": hub["pin"] or "",
-            "url": f"/g/{hub['hub_token']}",
+            "url": f"/share/hub/{hub['hub_token']}",
             "folders_count": len(_hub_folders(db, email)),
         }
     return jsonify(list(out.values()))
@@ -2437,7 +2437,7 @@ def rotate_hub(hub_token):
     new_token = secrets.token_urlsafe(24)
     db.execute("UPDATE guest_hubs SET hub_token = ? WHERE id = ?", (new_token, hub["id"]))
     db.commit()
-    return jsonify({"hub_token": new_token, "url": f"/g/{new_token}", "pin": hub["pin"] or ""})
+    return jsonify({"hub_token": new_token, "url": f"/share/hub/{new_token}", "pin": hub["pin"] or ""})
 
 
 @app.route("/api/hubs/<hub_token>/rotate-pin", methods=["POST"])
@@ -2469,7 +2469,7 @@ def send_hub_invite(hub_token):
     to_email = parseaddr(hub["email"] or "")[1].strip().lower()  # destinataire = e-mail du hub, point.
     if "@" not in to_email:
         return jsonify({"error": "e-mail du hub invalide"}), 400
-    hub_url = request.host_url.rstrip("/") + "/g/" + hub["hub_token"]
+    hub_url = request.host_url.rstrip("/") + "/share/hub/" + hub["hub_token"]
     try:
         _send_hub_invite(cfg, to_email, hub["name"] or "", hub_url, hub["pin"] or "")
     except Exception:
@@ -2767,8 +2767,11 @@ def share_page(token):
 
 
 # ───────────── [ONE-LINK-MULTI] routes publiques du hub (bypass Authelia) ─────────────
+# [HUB-ROUTE-PREFIX] Préfixe /share/hub/<token> : couvert par le bypass Authelia /share/*
+# (aucun changement Caddy). hub_token = 24 octets aléatoires (jamais "hub"/"data"/"assets"),
+# et le segment statique "hub" distingue de /share/<token> et /share/<token>/data (Werkzeug).
 
-@app.route("/g/<hub_token>")
+@app.route("/share/hub/<hub_token>")
 def hub_page(hub_token):
     # Shell statique : aucune donnée invité dans le HTML (la liste vient de /approve après PIN).
     if not _hub_by_token(get_db(), hub_token):
@@ -2776,7 +2779,7 @@ def hub_page(hub_token):
     return render_template("hub.html", version=APP_VERSION)
 
 
-@app.route("/g/<hub_token>/approve", methods=["POST"])
+@app.route("/share/hub/<hub_token>/approve", methods=["POST"])
 def hub_approve(hub_token):
     db = get_db()
     hub = _hub_by_token(db, hub_token)
@@ -2852,7 +2855,7 @@ def _hub_proof_guest(db, hub):
     ).fetchone()
 
 
-@app.route("/g/<hub_token>/data")
+@app.route("/share/hub/<hub_token>/data")
 def hub_data(hub_token):
     db = get_db()
     hub = _hub_by_token(db, hub_token)

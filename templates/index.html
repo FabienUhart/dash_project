@@ -3189,7 +3189,7 @@ async function renderShares() {
     // + actions (b) retirer, (c) régénérer lien, (d) régénérer code. Découplées.
     const hub = hubByEmail.get((email || '').toLowerCase());
     if (hub) {
-      const hubUrl = location.origin + '/g/' + hub.hub_token;
+      const hubUrl = location.origin + (hub.url || ('/share/hub/' + hub.hub_token));
       const hubRow = el('div', { class: 'guest-row', attrs: { style: 'gap:0.4rem;flex-wrap:wrap;background:var(--panel-2);border-radius:8px;padding:0.4rem 0.55rem' } });
       hubRow.appendChild(el('span', { text: '🔗', attrs: { title: 'Lien unique de cette personne (tous ses dossiers)' } }));
       hubRow.appendChild(el('span', { class: 'grow', attrs: { style: 'font-size:0.8rem;color:var(--muted);word-break:break-all' }, text: hubUrl }));

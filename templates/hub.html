@@ -262,7 +262,9 @@ dialog::backdrop { background: rgba(6,9,12,0.62); }
 
 {% include 'partials/_shared.js.html' %}
 <script>
-const HUB_TOKEN = location.pathname.split('/')[2];
+// [HUB-ROUTE-PREFIX] URL = /share/hub/<token> → le token est le dernier segment.
+const HUB_TOKEN = location.pathname.split('/').filter(Boolean).pop();
+const HUB_BASE = '/share/hub/' + HUB_TOKEN;
 let DATA = null, FOCUS = null, VIEW = 'board';
 let activeMap = null;  // [HUB-MAP-FIX] état carte attendu par runMapDialog (miroir index/share.html)
 const themeBtn = document.getElementById('theme-btn');
@@ -318,7 +320,7 @@ async function api(token, path, opts) {
 }
 async function putMemo(m, body) { const r = await api(m.share_token, '/memo/' + m.id, { method: 'PUT', body: JSON.stringify(body) }); if (r.ok) await reload(); return r; }
 
-// ── proof header pour /g/data ──
+// ── proof header pour /share/hub/<token>/data ──
 function hubProof() { try { return localStorage.getItem('dashhubproof:' + HUB_TOKEN) || ''; } catch (e) { return ''; } }
 
 async function approve() {
@@ -326,7 +328,7 @@ async function approve() {
   const errEl = document.getElementById('hub-error');
   if (!/^\d{4}$/.test(pin)) { errEl.textContent = 'Le code fait 4 chiffres.'; return; }
   errEl.textContent = '';
-  const r = await fetch('/g/' + HUB_TOKEN + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }) });
+  const r = await fetch(HUB_BASE + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }) });
   if (!r.ok) { const e = await r.json().catch(() => ({})); errEl.textContent = e.error || 'code invalide';
     document.getElementById('pin').value = ''; document.getElementById('pin').focus(); return; }
   const data = await r.json();
@@ -344,7 +346,7 @@ async function loadDash(knownFolders) {
   if (!proof) { showCode(); return; }
   let data;
   try {
-    const r = await fetch('/g/' + HUB_TOKEN + '/data', { headers: { 'X-Guest-Token': proof } });
+    const r = await fetch(HUB_BASE + '/data', { headers: { 'X-Guest-Token': proof } });
     if (r.status === 403) { showCode(); return; }
     if (!r.ok) throw new Error('data');
     data = await r.json();
@@ -358,7 +360,7 @@ async function loadDash(knownFolders) {
   render();
 }
 async function reload() {
-  const r = await fetch('/g/' + HUB_TOKEN + '/data', { headers: { 'X-Guest-Token': hubProof() } });
+  const r = await fetch(HUB_BASE + '/data', { headers: { 'X-Guest-Token': hubProof() } });
   if (r.ok) { DATA = await r.json(); render(); }
 }
 function showCode() { document.getElementById('dash').hidden = true; document.getElementById('code-screen').hidden = false;
