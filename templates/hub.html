@@ -359,11 +359,12 @@ document.getElementById('pin').addEventListener('keydown', e => { if (e.key === 
 
 // ── chargement du dashboard agrégé (repli lanceur en cas d'échec) ──
 async function loadDash(knownFolders) {
+  // [HUB-SESSION] toujours tenter /data : le cookie HttpOnly part tout seul (same-origin) ;
+  // le header X-Guest-Token reste en repli si le localStorage l'a encore. Sans session → 403 → écran code.
   const proof = hubProof();
-  if (!proof) { showCode(); return; }
   let data;
   try {
-    const r = await fetch(HUB_BASE + '/data', { headers: { 'X-Guest-Token': proof } });
+    const r = await fetch(HUB_BASE + '/data', { headers: proof ? { 'X-Guest-Token': proof } : {} });
     if (r.status === 403) { showCode(); return; }
     if (!r.ok) throw new Error('data');
     data = await r.json();
@@ -697,8 +698,9 @@ mapDialog.addEventListener('close', () => { if (activeMap) { activeMap.remove();
 document.getElementById('btn-plan').addEventListener('click', () => { VIEW = VIEW === 'plan' ? 'board' : 'plan'; document.getElementById('btn-plan').classList.toggle('primary', VIEW === 'plan'); render(); });
 document.getElementById('search').addEventListener('input', () => { if (VIEW === 'plan') renderPlan(); else renderBoard(); });
 
-// ── init : reprise de session si preuve déjà posée ──
-(function init() { if (hubProof()) loadDash(); else showCode(); })();
+// ── init : toujours tenter /data — cookie de session HttpOnly OU header localStorage
+// ([HUB-SESSION]) ; loadDash affiche l'écran code sur 403 (comportement inchangé sans session).
+(function init() { loadDash(); })();
 </script>
 </body>
 </html>

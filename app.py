@@ -348,6 +348,10 @@ def init_db():
     scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
     if "pin" not in scols:
         conn.execute("ALTER TABLE shares ADD COLUMN pin TEXT DEFAULT ''")
+    # [HUB-SESSION] jeton de session par hub (transporté en cookie HttpOnly) ; '' = aucune session.
+    hcols = {r[1] for r in conn.execute("PRAGMA table_info(guest_hubs)").fetchall()}
+    if "session_token" not in hcols:
+        conn.execute("ALTER TABLE guest_hubs ADD COLUMN session_token TEXT DEFAULT ''")
     for row in conn.execute(
         "SELECT id FROM shares WHERE pin = '' OR pin IS NULL"
     ).fetchall():
@@ -2436,7 +2440,12 @@ def rotate_hub(hub_token):
     if not hub:
         return jsonify({"error": "hub introuvable"}), 404
     new_token = secrets.token_urlsafe(24)
-    db.execute("UPDATE guest_hubs SET hub_token = ? WHERE id = ?", (new_token, hub["id"]))
+    # [HUB-SESSION] Nouveau lien ⇒ nouvelle session : l'ancien cookie (path périmé) n'est plus
+    # jamais envoyé, ET le token serveur change (ceinture + bretelles) → tous re-PIN.
+    db.execute(
+        "UPDATE guest_hubs SET hub_token = ?, session_token = ? WHERE id = ?",
+        (new_token, secrets.token_urlsafe(24), hub["id"]),
+    )
     db.commit()
     return jsonify({"hub_token": new_token, "url": f"/share/hub/{new_token}", "pin": hub["pin"] or ""})
 
@@ -2449,7 +2458,12 @@ def rotate_hub_pin(hub_token):
     if not hub:
         return jsonify({"error": "hub introuvable"}), 404
     new_pin = f"{secrets.randbelow(10000):04d}"
-    db.execute("UPDATE guest_hubs SET pin = ? WHERE id = ?", (new_pin, hub["id"]))
+    # [HUB-SESSION] Nouveau code ⇒ nouvelle session : toutes les sessions cookie retombent
+    # sur l'écran code (révocation globale, tous les appareils).
+    db.execute(
+        "UPDATE guest_hubs SET pin = ?, session_token = ? WHERE id = ?",
+        (new_pin, secrets.token_urlsafe(24), hub["id"]),
+    )
     db.commit()
     return jsonify({"hub_token": hub_token, "pin": new_pin})
 
@@ -2820,6 +2834,20 @@ def hub_page(hub_token):
     return render_template("hub.html", version=APP_VERSION)
 
 
+# [HUB-SESSION] Cookie de session du hub : HttpOnly (illisible en JS), Path scopé à CE hub
+# (deux invités sur le même navigateur coexistent ; jamais envoyé à /share/<token> ni au reste
+# de l'app ; rotation du lien → l'ancien path n'est plus jamais envoyé), 180 j glissants
+# (re-posé à chaque /data prouvé). Secure conditionnel : X-Forwarded-Proto posé par Caddy en
+# prod, absent en HTTP local (localhost:8099) pour rester testable.
+def _set_hub_session_cookie(resp, hub_token, session_token):
+    secure = request.is_secure or (request.headers.get("X-Forwarded-Proto") or "").lower() == "https"
+    resp.set_cookie(
+        "dashhubsession", session_token,
+        max_age=15552000, path=f"/share/hub/{hub_token}",
+        httponly=True, samesite="Lax", secure=secure,
+    )
+
+
 @app.route("/share/hub/<hub_token>/approve", methods=["POST"])
 def hub_approve(hub_token):
     db = get_db()
@@ -2843,8 +2871,18 @@ def hub_approve(hub_token):
         "WHERE lower(email) = ? AND status != 'approved'",
         (now, (hub["email"] or "").strip().lower()),
     )
+    # [HUB-SESSION] Bon PIN → session serveur (un token par hub, partagé par les appareils),
+    # transportée en cookie HttpOnly. Générée au premier besoin, invalidée par rotate/rotate-pin.
+    session_token = _row_get(hub, "session_token") or ""
+    if not session_token:
+        session_token = secrets.token_urlsafe(24)
+        db.execute(
+            "UPDATE guest_hubs SET session_token = ? WHERE id = ?", (session_token, hub["id"])
+        )
     db.commit()
-    return jsonify({"name": hub["name"] or "", "folders": _hub_folders(db, hub["email"])})
+    resp = jsonify({"name": hub["name"] or "", "folders": _hub_folders(db, hub["email"])})
+    _set_hub_session_cookie(resp, hub_token, session_token)
+    return resp
 
 
 def _hub_approved_shares(db, email):
@@ -2883,9 +2921,17 @@ def _hub_winner(covering):
     )[0]
 
 
-def _hub_proof_guest(db, hub):
-    """Preuve d'accès au hub : un guest_token APPROUVÉ dont l'e-mail == celui du hub.
-    JAMAIS de confiance au hub_token seul (il est dans l'URL). Renvoie la row ou None."""
+def _hub_proof(db, hub):
+    """[HUB-SESSION] Preuve d'accès au hub : cookie de session OU header (repli).
+    - cookie `dashhubsession` : comparé (temps constant) au session_token de CE hub —
+      le hub est déjà résolu par hub_token, donc un cookie volé/forgé présenté sur un
+      autre hub échoue ;
+    - header `X-Guest-Token` (existant, inchangé) : un guest_token APPROUVÉ dont
+      l'e-mail == celui du hub. JAMAIS de confiance au hub_token seul (il est dans l'URL)."""
+    cookie = (request.cookies.get("dashhubsession") or "").strip()
+    session_token = _row_get(hub, "session_token") or ""
+    if cookie and session_token and hmac.compare_digest(cookie, session_token):
+        return True
     gtok = (request.headers.get("X-Guest-Token") or "").strip()
     if not gtok:
         return None
@@ -2902,8 +2948,10 @@ def hub_data(hub_token):
     hub = _hub_by_token(db, hub_token)
     if not hub:
         return jsonify({"error": "invalid"}), 404
-    # Pas de master token : preuve = guest_token approuvé de CET e-mail (sinon 403, écran code).
-    if not _hub_proof_guest(db, hub):
+    # Pas de master token : preuve = cookie de session OU guest_token approuvé de CET e-mail
+    # (sinon 403, écran code). [HUB-SESSION] Le cookie n'authentifie QUE cette lecture — la
+    # cascade d'approbation reste réservée au PIN (approve), il ne promeut jamais un pending.
+    if not _hub_proof(db, hub):
         return jsonify({"error": "code requis"}), 403
     shares = _hub_approved_shares(db, hub["email"])
     proj_shares = [s for s in shares if s["kind"] == "project"]
@@ -3031,7 +3079,7 @@ def hub_data(hub_token):
             if label and label not in members:
                 members.append(label)
 
-    return jsonify({
+    resp = jsonify({
         "kind": "hub",
         "name": hub["name"] or "",
         "roots": roots,
@@ -3050,6 +3098,12 @@ def hub_data(hub_token):
         # déjà prouvé (hubProof) ; on ne fait que reposer des guest_token qu'il a droit d'avoir.
         "folders": _hub_folders(db, hub["email"]),
     })
+    # [HUB-SESSION] Expiration glissante : re-pose le cookie à chaque /data prouvé (Max-Age
+    # repart pour 180 j). Le token n'est généré qu'à approve — rien à poser s'il est vide.
+    session_token = _row_get(hub, "session_token") or ""
+    if session_token:
+        _set_hub_session_cookie(resp, hub_token, session_token)
+    return resp
 
 
 @app.route("/share/<token>/data")
