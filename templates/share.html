@@ -2190,7 +2190,10 @@ function render() {
 }
 
 async function load() {
-  const r = await fetch(API + '/data');
+  // [GUEST-EDIT] jeton joint quand il existe : côté serveur il ne sert qu'à poser la
+  // « dernière connexion » de l'invité (header approuvé requis) — la lecture reste identique.
+  const gt = guestToken();
+  const r = await fetch(API + '/data', gt ? { headers: { 'X-Guest-Token': gt } } : {});
   if (!r.ok) {
     document.getElementById('title').textContent = 'Lien invalide ou révoqué';
     document.getElementById('list').innerHTML = '';

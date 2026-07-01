@@ -1503,6 +1503,22 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
 </dialog>
 
+<!-- [GUEST-EDIT] Modifier l'invité (nom + e-mail) — owner-only. Erreur 409/400 inline,
+     saisie conservée (jamais de notify bloquant ici). Entrée du dialog en CSS (invariant 8). -->
+<dialog id="guest-edit-dialog">
+  <h3>Modifier l'invité</h3>
+  <form id="guest-edit-form">
+    <label>Nom<input type="text" name="name" maxlength="60" autocomplete="off" placeholder="Nom de l'invité"></label>
+    <label>E-mail<input type="email" name="email" maxlength="120" autocomplete="off" required></label>
+    <p id="guest-edit-error" style="margin:0;color:var(--red);font-size:0.82rem;display:none"></p>
+    <p style="margin:0;color:var(--muted);font-size:0.78rem">Changer l'e-mail est transparent pour l'invité : lien, code et session inchangés. L'historique (commentaires, créations) garde l'ancienne identité.</p>
+    <div class="actions">
+      <button type="button" id="guest-edit-cancel">Annuler</button>
+      <button type="submit" class="primary">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="move-dialog">
   <div class="me-head"><h3 id="move-title">Déplacer vers…</h3></div>
   <p id="move-sub" class="move-sub"></p>
@@ -2810,6 +2826,22 @@ function fmtWhen(iso) {
     d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
+// [GUEST-EDIT] date relative FR pour « 🕐 vu il y a … » (absolue au survol via fmtWhen).
+function relTimeFr(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'à l\'instant';
+  if (s < 3600) return 'il y a ' + Math.floor(s / 60) + ' min';
+  if (s < 86400) return 'il y a ' + Math.floor(s / 3600) + ' h';
+  const j = Math.floor(s / 86400);
+  if (j < 30) return 'il y a ' + j + ' j';
+  const mo = Math.floor(j / 30);
+  if (mo < 12) return 'il y a ' + mo + ' mois';
+  const an = Math.floor(mo / 12);
+  return 'il y a ' + an + ' an' + (an > 1 ? 's' : '');
+}
+
 let lastActivityKey = null;
 // [AUTO-REFRESH] reload différé : un changement détecté pendant qu'une pop-in
 // est ouverte / une saisie en cours est rejoué à la fermeture (ou au tick suivant).
@@ -3143,6 +3175,40 @@ function revRowEl(r, onChange) {
   return frag;
 }
 
+// [GUEST-EDIT] Pop-in « Modifier l'invité » (remplace le rename inline). Erreur 409/400
+// affichée inline SANS effacer la saisie (même pattern que le formulaire d'accès invité) ;
+// fetch brut (pas api()) pour lire le message d'erreur JSON du serveur.
+function openGuestEditDialog(email, currentName, rerender) {
+  const dlg = document.getElementById('guest-edit-dialog');
+  const form = document.getElementById('guest-edit-form');
+  const err = document.getElementById('guest-edit-error');
+  form.name.value = currentName || '';
+  form.email.value = email;
+  err.style.display = 'none';
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const name = form.name.value.trim();
+    const newEmail = form.email.value.trim().toLowerCase();
+    const r = await fetch('/api/guests/update', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name, new_email: newEmail !== email ? newEmail : '' }),
+    });
+    if (!r.ok) {
+      let msg = 'Erreur ' + r.status;
+      try { msg = (await r.json()).error || msg; } catch (_) {}
+      err.textContent = msg;
+      err.style.display = 'block';
+      return; // saisie conservée
+    }
+    dlg.close();
+    await loadAll();
+    rerender();
+    notify('Invité mis à jour' + (newEmail && newEmail !== email ? ' — nouvel e-mail : ' + newEmail : '') + '.');
+  };
+  document.getElementById('guest-edit-cancel').onclick = () => dlg.close();
+  dlg.showModal();
+}
+
 async function renderShares() {
   const board = document.getElementById('shares-board');
   board.innerHTML = '';
@@ -3180,33 +3246,22 @@ async function renderShares() {
     const dispName = (accs.find(a => a.name) || {}).name || email;
     head.appendChild(el('span', { class: 'grow', attrs: { style: 'font-weight:600' }, text: dispName + (dispName !== email ? ' — ' + email : '') }));
     head.appendChild(el('span', { class: 'rev-meta', text: accs.length + ' accès' }));
+    const hub = hubByEmail.get((email || '').toLowerCase());
+    // [GUEST-EDIT] dernière connexion (une date par personne, depuis /api/hubs — owner-only).
+    const seen = hub && hub.last_seen_at;
+    head.appendChild(el('span', {
+      class: 'badge',
+      attrs: seen ? { title: fmtWhen(seen) } : { title: 'Cet invité ne s\'est encore jamais connecté' },
+      text: seen ? '🕐 vu ' + relTimeFr(seen) : '🕐 jamais connecté',
+    }));
     head.appendChild(el('button', {
       class: 'btn-soft', icon: 'pencil',
-      attrs: { title: 'Renommer cet invité (s\'applique à tous ses accès)' },
-      on: { click: () => {
-        const inp = el('input', { attrs: { type: 'text', value: (accs.find(a => a.name) || {}).name || '', placeholder: 'Nom de l\'invité', maxlength: '60',
-          style: 'flex:1;min-width:140px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.35rem 0.55rem' } });
-        const editRow = el('div', { class: 'share-row' });
-        const save = async () => {
-          const name = inp.value.trim();
-          if (!name) { inp.focus(); return; }
-          await api('/api/guests/rename', { method: 'POST', body: JSON.stringify({ email, name }) });
-          await loadAll();
-          rerender();
-          notify('Invité renommé : ' + name + '.');
-        };
-        const okBtn = el('button', { class: 'btn-soft', text: '✓ Enregistrer', on: { click: save } });
-        const caBtn = el('button', { class: 'btn-soft', text: 'Annuler', on: { click: () => rerender() } });
-        editRow.append(inp, okBtn, caBtn);
-        head.replaceWith(editRow);
-        inp.focus();
-        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') rerender(); });
-      } },
+      attrs: { title: 'Modifier cet invité (nom, e-mail — s\'applique à tous ses accès)' },
+      on: { click: () => openGuestEditDialog(email, (accs.find(a => a.name) || {}).name || '', rerender) },
     }));
     card.appendChild(head);
     // [ONE-LINK-MULTI] En-tête de personne : UN lien-hub (un seul lien + un seul code, à vie)
     // + actions (b) retirer, (c) régénérer lien, (d) régénérer code. Découplées.
-    const hub = hubByEmail.get((email || '').toLowerCase());
     if (hub) {
       const hubUrl = location.origin + (hub.url || ('/share/hub/' + hub.hub_token));
       const hubRow = el('div', { class: 'guest-row', attrs: { style: 'gap:0.4rem;flex-wrap:wrap;background:var(--panel-2);border-radius:8px;padding:0.4rem 0.55rem' } });

@@ -352,6 +352,9 @@ def init_db():
     hcols = {r[1] for r in conn.execute("PRAGMA table_info(guest_hubs)").fetchall()}
     if "session_token" not in hcols:
         conn.execute("ALTER TABLE guest_hubs ADD COLUMN session_token TEXT DEFAULT ''")
+    # [GUEST-EDIT] dernière connexion PAR INVITÉ (une date par personne, pas par dossier).
+    if "last_seen_at" not in hcols:
+        conn.execute("ALTER TABLE guest_hubs ADD COLUMN last_seen_at TEXT DEFAULT ''")
     for row in conn.execute(
         "SELECT id FROM shares WHERE pin = '' OR pin IS NULL"
     ).fetchall():
@@ -1951,6 +1954,37 @@ def _hub_folders(db, email):
     return out
 
 
+def _touch_guest_seen(db, email):
+    """[GUEST-EDIT] Dernière connexion PAR INVITÉ (une date par personne, pas par
+    dossier), posée quand l'invité PROUVE son identité : bon PIN (hub_approve),
+    /data du hub prouvé (cookie ou header), ou X-Guest-Token APPROUVÉ sur un
+    /share/<token>/data direct. Sans hub pour cet e-mail → no-op silencieux.
+    Throttle 5 min : le refresh auto des pages invité tourne toutes les 15 s —
+    sans garde, une écriture SQLite par invité actif toutes les 15 s (inutile
+    sur le Zimaboard). Jamais exposé côté invité (owner-only via /api/hubs)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    hub = db.execute(
+        "SELECT id, last_seen_at FROM guest_hubs WHERE email = ?", (email,)
+    ).fetchone()
+    if not hub:
+        return
+    now = datetime.now(timezone.utc)
+    last = _row_get(hub, "last_seen_at") or ""
+    if last:
+        try:
+            if (now - datetime.fromisoformat(last)).total_seconds() < 300:
+                return
+        except ValueError:
+            pass
+    db.execute(
+        "UPDATE guest_hubs SET last_seen_at = ? WHERE id = ?",
+        (now.isoformat(), hub["id"]),
+    )
+    db.commit()
+
+
 # Throttle des tentatives de PIN par hub_token (le PIN du hub déverrouille TOUS les
 # dossiers de la personne → cible sensible). Fenêtre glissante en mémoire (best-effort
 # par worker ; le plafond share_guests reste la garde dure côté écriture).
@@ -2373,6 +2407,64 @@ def rename_guest():
     return jsonify({"email": email, "name": name, "updated": cur.rowcount})
 
 
+@app.route("/api/guests/update", methods=["POST"])
+def update_guest_identity():
+    """[GUEST-EDIT] Modifie l'identité d'un invité (owner-only) : nom et/ou e-mail.
+    Re-keyage atomique share_guests + guest_hubs (pending inclus, un seul commit) ;
+    collision avec un e-mail déjà invité → 409 sans rien modifier (jamais de fusion
+    silencieuse — invariant 5). Lien (hub_token), code (pin), session (session_token)
+    et guest_token INTACTS : transparent pour l'invité. L'historique (commentaires
+    signés, memos.created_by, memo_revisions.editor) n'est PAS réécrit (comme le
+    renommage existant)."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    name = (str(data.get("name") or "")).strip()[:60]
+    new_email = (str(data.get("new_email") or "")).strip().lower()
+    if not email:
+        return jsonify({"error": "email requis"}), 400
+    db = get_db()
+    has_access = (
+        db.execute(
+            "SELECT 1 FROM share_guests WHERE lower(email) = ? LIMIT 1", (email,)
+        ).fetchone()
+        or db.execute(
+            "SELECT 1 FROM guest_hubs WHERE email = ? LIMIT 1", (email,)
+        ).fetchone()
+    )
+    if not has_access:
+        return jsonify({"error": "invité introuvable"}), 404
+    if new_email == email:
+        new_email = ""
+    if new_email:
+        if "@" not in new_email or len(new_email) > 120:
+            return jsonify({"error": "e-mail invalide"}), 400
+        clash = (
+            db.execute(
+                "SELECT 1 FROM share_guests WHERE lower(email) = ? LIMIT 1", (new_email,)
+            ).fetchone()
+            or db.execute(
+                "SELECT 1 FROM guest_hubs WHERE email = ? LIMIT 1", (new_email,)
+            ).fetchone()
+        )
+        if clash:
+            return jsonify({"error": "cet e-mail a déjà des accès"}), 409
+    updated = 0
+    if name:
+        updated += db.execute(
+            "UPDATE share_guests SET name = ? WHERE lower(email) = ?", (name, email)
+        ).rowcount
+        db.execute("UPDATE guest_hubs SET name = ? WHERE email = ?", (name, email))
+    if new_email:
+        updated += db.execute(
+            "UPDATE share_guests SET email = ? WHERE lower(email) = ?", (new_email, email)
+        ).rowcount
+        db.execute(
+            "UPDATE guest_hubs SET email = ? WHERE email = ?", (new_email, email)
+        )
+    db.commit()
+    return jsonify({"email": new_email or email, "name": name, "updated": updated})
+
+
 @app.route("/api/guests/<int:guest_id>", methods=["DELETE"])
 def delete_guest(guest_id):
     # Suppression (a) : retire UN accès dossier d'un invité. Le hub & le code restent,
@@ -2414,6 +2506,9 @@ def list_hubs():
             "pin": hub["pin"] or "",
             "url": f"/share/hub/{hub['hub_token']}",
             "folders_count": len(_hub_folders(db, email)),
+            # [GUEST-EDIT] dernière connexion (ISO, '' = jamais) — owner-only,
+            # jamais dans share_data/hub_data.
+            "last_seen_at": _row_get(hub, "last_seen_at") or "",
         }
     return jsonify(list(out.values()))
 
@@ -2880,6 +2975,7 @@ def hub_approve(hub_token):
             "UPDATE guest_hubs SET session_token = ? WHERE id = ?", (session_token, hub["id"])
         )
     db.commit()
+    _touch_guest_seen(db, hub["email"])  # [GUEST-EDIT] bon PIN = identité prouvée
     resp = jsonify({"name": hub["name"] or "", "folders": _hub_folders(db, hub["email"])})
     _set_hub_session_cookie(resp, hub_token, session_token)
     return resp
@@ -2953,6 +3049,7 @@ def hub_data(hub_token):
     # cascade d'approbation reste réservée au PIN (approve), il ne promeut jamais un pending.
     if not _hub_proof(db, hub):
         return jsonify({"error": "code requis"}), 403
+    _touch_guest_seen(db, hub["email"])  # [GUEST-EDIT] preuve valide (cookie ou header)
     shares = _hub_approved_shares(db, hub["email"])
     proj_shares = [s for s in shares if s["kind"] == "project"]
     memo_shares = [s for s in shares if s["kind"] == "memo"]
@@ -3112,6 +3209,17 @@ def share_data(token):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
+    # [GUEST-EDIT] dernière connexion : un invité peut n'utiliser que son lien direct
+    # (sans passer par le hub). Header APPROUVÉ uniquement ; sans hub → no-op.
+    gtok = (request.headers.get("X-Guest-Token") or "").strip()
+    if gtok:
+        g = db.execute(
+            "SELECT email FROM share_guests WHERE guest_token = ? AND share_id = ? "
+            "AND status = 'approved'",
+            (gtok, share["id"]),
+        ).fetchone()
+        if g:
+            _touch_guest_seen(db, g["email"])
     rows = _share_scope_memos(db, share)
     memos = []
     proj_names = {}
