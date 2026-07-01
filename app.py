@@ -1,4 +1,5 @@
 import calendar
+import hashlib
 import hmac
 import json
 import os
@@ -2480,6 +2481,39 @@ def send_hub_invite(hub_token):
     return jsonify({"ok": True, "email": to_email})
 
 
+def _data_version(db):
+    """[AUTO-REFRESH] Empreinte cheap de l'état des données visibles du dashboard.
+
+    Change dès qu'une donnée change, quelle que soit l'origine (owner, invité,
+    autre onglet/appareil, API) → le poll du front recharge sur toute variation.
+    Colonnes légères uniquement : le contenu des mémos/liens n'est jamais lu
+    (toute édition bump `updated_at`) ; positions incluses (les reorders ne
+    touchent pas `updated_at`). `app_state` exclut `activity_seen_at` (volatile,
+    propre au badge — sinon « marquer vu » déclencherait un reload inutile).
+    Lecture seule, aucun changement d'export.
+    """
+    h = hashlib.md5()
+    queries = (
+        "SELECT id, position, category_id, updated_at FROM links ORDER BY id",
+        "SELECT id, name, color, emoji, position FROM categories ORDER BY id",
+        "SELECT id, position, project_id, priority, done, due_date, due_time, "
+        "deleted_at, updated_at FROM memos ORDER BY id",
+        "SELECT * FROM projects ORDER BY id",
+        "SELECT * FROM priorities ORDER BY id",
+        "SELECT * FROM shares ORDER BY id",
+        "SELECT id, share_id, email, name, status, approved_at FROM share_guests ORDER BY id",
+        "SELECT id, email, name, pin FROM guest_hubs ORDER BY id",
+        "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_comments",
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM memo_history",
+        "SELECT key, value FROM app_state WHERE key != 'activity_seen_at' ORDER BY key",
+    )
+    for q in queries:
+        for row in db.execute(q):
+            h.update(repr(tuple(row)).encode())
+        h.update(b"|")
+    return h.hexdigest()
+
+
 @app.route("/api/activity", methods=["GET"])
 def activity():
     db = get_db()
@@ -2512,7 +2546,14 @@ def activity():
         "SELECT COUNT(*) FROM memo_comments WHERE share_id IS NOT NULL AND created_at > ?",
         (seen_at,),
     ).fetchone()[0]
-    return jsonify({"pending_guests": pending, "unseen": unseen, "revisions": out_rev})
+    return jsonify(
+        {
+            "pending_guests": pending,
+            "unseen": unseen,
+            "revisions": out_rev,
+            "data_version": _data_version(db),
+        }
+    )
 
 
 @app.route("/api/activity/seen", methods=["POST"])

@@ -2811,6 +2811,9 @@ function fmtWhen(iso) {
 }
 
 let lastActivityKey = null;
+// [AUTO-REFRESH] reload différé : un changement détecté pendant qu'une pop-in
+// est ouverte / une saisie en cours est rejoué à la fermeture (ou au tick suivant).
+let pendingReload = false;
 
 function uiBusy() {
   if (document.querySelector('dialog[open]')) return true;
@@ -2821,23 +2824,39 @@ function uiBusy() {
 
 async function refreshActivityBadge() {
   try {
+    if (pendingReload && !uiBusy()) { pendingReload = false; await loadAll(); }
     const a = await api('/api/activity');
     state.activity = a;
     const badge = document.getElementById('activity-badge');
     const n = (a.pending_guests || 0) + (a.unseen || 0);
     badge.textContent = String(n);
     badge.style.display = n > 0 ? 'block' : 'none';
-    const key = a.revisions.length
+    // [AUTO-REFRESH] data_version couvre TOUT changement de données (autre
+    // onglet/appareil/API), pas seulement l'activité invité (revisions).
+    const key = (a.data_version || '') + '|' + (a.revisions.length
       ? a.revisions[0].edited_at + '|' + a.revisions[0].id + '|' + a.pending_guests
-      : '|' + a.pending_guests;
-    if (lastActivityKey !== null && key !== lastActivityKey && !uiBusy()) {
-      await loadAll();
-    } else if (lastActivityKey !== null && key !== lastActivityKey) {
-      renderSidebar();
+      : '|' + a.pending_guests);
+    if (lastActivityKey !== null && key !== lastActivityKey) {
+      if (!uiBusy()) {
+        await loadAll();
+      } else {
+        pendingReload = true;
+        renderSidebar();
+      }
     }
     lastActivityKey = key;
   } catch (_) {}
 }
+
+// [AUTO-REFRESH] 'close' ne bulle pas → capture au niveau document : dès qu'une
+// pop-in se ferme, on rejoue le reload mis en attente. ⚠️ au moment où 'close'
+// est dispatché, le focus est ENCORE sur l'input de la pop-in (restauration pas
+// faite) → uiBusy() serait true et sauterait le rejeu : on vérifie après un tick.
+document.addEventListener('close', () => {
+  setTimeout(() => {
+    if (pendingReload && !uiBusy()) { pendingReload = false; loadAll(); }
+  }, 100);
+}, true);
 
 document.getElementById('activity-btn').addEventListener('click', () => openSharesView());
 
