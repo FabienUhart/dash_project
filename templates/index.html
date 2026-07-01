@@ -1198,6 +1198,15 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 .settings-section { margin-bottom: 1.25rem; }
 .settings-section h4 { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--muted); letter-spacing: 0.04em; }
 .settings-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+/* [SETTINGS-TABS] onglets de la pop-in Paramètres — chips .prio-btn (invariant 9),
+   dimensions explicites (la règle tactile min-height:44px déformerait les chips). */
+.settings-tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 1.1rem; }
+.settings-tabs .prio-btn { min-height: 0; padding: 0.3rem 0.7rem; }
+.settings-tabs .prio-btn.sel { background: var(--accent); border-color: var(--accent); color: #10141a; }
+.backup-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.65rem; font-size: 0.82rem; margin-bottom: 0.4rem; }
+.backup-status .grow { flex: 1; min-width: 0; }
+.cat-add-line { display: block; width: 100%; margin-top: 0.5rem; padding: 0.35rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; background: transparent; color: var(--muted); font-size: 0.82rem; text-align: left; }
+.cat-add-line:hover { border-color: var(--muted); color: var(--text); background: var(--panel-2); }
 .cat-manage-row {
   display: flex;
   align-items: center;
@@ -1313,6 +1322,14 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   #quill-wrap .ql-container, #quill-wrap .ql-editor { min-height: 130px; }
   #quill-wrap .ql-toolbar { white-space: nowrap; overflow-x: auto; overflow-y: hidden; }
   #quill-wrap .ql-toolbar .ql-formats { display: inline-block; vertical-align: middle; }
+  /* [SETTINGS-TABS] rangée d'onglets sur UNE ligne défilable (pattern barre Quill). */
+  .settings-tabs { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; padding-bottom: 0.2rem; }
+  .settings-tabs .prio-btn { flex: 0 0 auto; }
+}
+@media (pointer: coarse) {
+  /* [SETTINGS-TABS] la règle tactile button{min-height:44px} déformerait les chips
+     (gotcha connu : boutons ronds/ovales) — dimensions explicites, placées APRÈS. */
+  .settings-tabs .prio-btn { min-height: 0; }
 }
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
@@ -1598,88 +1615,120 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </div>
 </dialog>
 
+<!-- [SETTINGS-TABS] Pop-in Paramètres en 5 onglets (chips .prio-btn — invariant 9), un seul
+     panneau visible, onglet actif persisté localStorage `settingsTab`. Sauvegarde AUTO
+     d'Identité/Carte (plus de bouton Enregistrer) → ✓ discret dans l'en-tête (aria-live).
+     Rien n'est retiré : Horloges → Identité ; Historique → Sauvegardes ;
+     Projets + Statuts → Catégories. Entrée du dialog en CSS (invariant 8). -->
 <dialog id="settings-dialog">
-  <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-settings"/></svg>Paramètres</h3>
-  <div class="settings-section">
-    <h4>IDENTITÉ</h4>
-    <div class="settings-row">
-      <input type="text" id="owner-name-input" maxlength="40" placeholder="Ton nom" autocomplete="off"
-             style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.45rem 0.6rem">
-      <button id="owner-name-save" class="primary">Enregistrer</button>
+  <h3 style="display:flex;align-items:center;gap:0.35em"><svg class="ic"><use href="#ic-settings"/></svg>Paramètres
+    <span id="settings-saved" aria-live="polite" style="margin-left:auto;font-size:0.78rem;font-weight:400;color:var(--green);opacity:0;transition:opacity 0.25s"></span>
+  </h3>
+  <div id="settings-tabs" class="settings-tabs" role="tablist">
+    <button type="button" class="prio-btn" data-tab="identity" role="tab">👤 Identité</button>
+    <button type="button" class="prio-btn" data-tab="map" role="tab">🗺️ Carte</button>
+    <button type="button" class="prio-btn" data-tab="backups" role="tab">💾 Sauvegardes</button>
+    <button type="button" class="prio-btn" data-tab="cats" role="tab">🗂️ Catégories</button>
+    <button type="button" class="prio-btn" data-tab="prios" role="tab">🚩 Priorités</button>
+  </div>
+
+  <div class="settings-panel" data-panel="identity">
+    <div class="settings-section">
+      <h4>IDENTITÉ</h4>
+      <div class="settings-row">
+        <input type="text" id="owner-name-input" maxlength="40" placeholder="Ton nom" autocomplete="off"
+               style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.45rem 0.6rem">
+      </div>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        Le nom sous lequel tu apparais dans les mentions <code>@</code>, les assignations et les accusés de lecture (« 👁 vu par… »). Enregistré automatiquement.
+      </p>
     </div>
-    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
-      Le nom sous lequel tu apparais dans les mentions <code>@</code>, les assignations et les accusés de lecture (« 👁 vu par… »).
-    </p>
-  </div>
-  <div class="settings-section">
-    <h4>CARTE</h4>
-    <div class="settings-row" style="align-items:center">
-      <input type="color" id="marker-color-input" value="#e53935"
-             style="width:3rem;height:2.3rem;padding:0.15rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">
-      <button id="marker-color-save" class="primary">Enregistrer</button>
-      <button id="marker-color-reset" title="Revenir au rouge par défaut">Défaut</button>
+    <div class="settings-section">
+      <h4>HORLOGES</h4>
+      <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted)">Fuseau horaire supplémentaire
+        <select id="tz-select" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit"></select>
+      </label>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        L'heure française s'affiche automatiquement quand l'appareil n'est pas sur le fuseau de Paris.
+        Le fuseau choisi ici s'ajoute en plus (réglage propre à cet appareil).
+      </p>
     </div>
-    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
-      Couleur par défaut des points de la carte, utilisée quand un mémo n'a ni priorité ni couleur de projet.
-      Les mémos avec une priorité gardent la couleur de leur priorité.
-    </p>
   </div>
-  <div class="settings-section">
-    <h4>SAUVEGARDE</h4>
-    <div class="settings-row">
-      <button id="export-btn" title="Télécharge liens, catégories et mémos en JSON">⬇ Export JSON</button>
-      <button id="import-btn" title="Importe un JSON (anciennes sauvegardes acceptées)">⬆ Import JSON</button>
-      <input type="file" id="import-file" accept="application/json,.json" style="display:none">
+
+  <div class="settings-panel" data-panel="map">
+    <div class="settings-section">
+      <h4>CARTE</h4>
+      <div class="settings-row" style="align-items:center">
+        <input type="color" id="marker-color-input" value="#e53935"
+               style="width:3rem;height:2.3rem;padding:0.15rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer">
+        <button id="marker-color-reset" title="Revenir au rouge par défaut">Défaut</button>
+      </div>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        Couleur par défaut des points de la carte, utilisée quand un mémo n'a ni priorité ni couleur de projet.
+        Les mémos avec une priorité gardent la couleur de leur priorité. Enregistrée automatiquement.
+      </p>
     </div>
-    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
-      L'export contient les liens, les catégories et les mémos.
-      L'import accepte aussi les anciennes sauvegardes, met à jour les éléments connus et ignore les doublons.
-    </p>
   </div>
-  <div class="settings-section">
-    <h4>SAUVEGARDES AUTOMATIQUES</h4>
-    <div class="settings-row">
-      <button id="backup-now">💾 Sauvegarder maintenant</button>
+
+  <div class="settings-panel" data-panel="backups">
+    <div class="settings-section">
+      <h4>SAUVEGARDE</h4>
+      <div class="settings-row">
+        <button id="export-btn" title="Télécharge liens, catégories et mémos en JSON">⬇ Export JSON</button>
+        <button id="import-btn" title="Importe un JSON (anciennes sauvegardes acceptées)">⬆ Import JSON</button>
+        <input type="file" id="import-file" accept="application/json,.json" style="display:none">
+      </div>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        L'export contient les liens, les catégories et les mémos.
+        L'import accepte aussi les anciennes sauvegardes, met à jour les éléments connus et ignore les doublons.
+      </p>
     </div>
-    <div id="backup-list" style="margin-top:0.5rem;font-size:0.8rem"></div>
-    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
-      Chaque jour : export JSON + copie de la base dans <code>data/backups/</code> (conservés 7 jours).
-      Les images de <code>data/uploads/</code> ne sont pas dupliquées — sauvegarde le dossier <code>data/</code> complet pour un backup externe.
-    </p>
+    <div class="settings-section">
+      <h4>SAUVEGARDES AUTOMATIQUES</h4>
+      <div class="backup-status">
+        <span id="backup-status-text" class="grow">…</span>
+        <button id="backup-now">💾 Sauvegarder maintenant</button>
+      </div>
+      <details id="backup-files" class="me-acc">
+        <summary id="backup-files-summary">Voir les fichiers</summary>
+        <div id="backup-list" style="margin-top:0.5rem;font-size:0.8rem"></div>
+      </details>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        Chaque jour : export JSON + copie de la base dans <code>data/backups/</code> (conservés 7 jours).
+        Les images de <code>data/uploads/</code> ne sont pas dupliquées — sauvegarde le dossier <code>data/</code> complet pour un backup externe.
+      </p>
+    </div>
+    <div class="settings-section">
+      <h4>HISTORIQUE</h4>
+      <button id="purge-history"><svg class="ic" style="margin-right:0.35em"><use href="#ic-trash"/></svg>Vider l'historique</button>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        L'historique des tâches effectuées est conservé sans limite. Cette action le vide définitivement.
+      </p>
+    </div>
   </div>
-  <div class="settings-section">
-    <h4>CATÉGORIES</h4>
-    <div id="cat-manage"></div>
+
+  <div class="settings-panel" data-panel="cats">
+    <div class="settings-section">
+      <h4>CATÉGORIES</h4>
+      <div id="cat-manage"></div>
+    </div>
+    <div class="settings-section">
+      <h4>PROJETS (MÉMOS)</h4>
+      <div id="proj-manage"></div>
+    </div>
+    <div class="settings-section">
+      <h4>STATUTS</h4>
+      <button id="refresh-status"><svg class="ic" style="margin-right:0.35em"><use href="#ic-refresh"/></svg>Rafraîchir les statuts</button>
+    </div>
   </div>
-  <div class="settings-section">
-    <h4>PROJETS (MÉMOS)</h4>
-    <div id="proj-manage"></div>
+
+  <div class="settings-panel" data-panel="prios">
+    <div class="settings-section">
+      <h4>PRIORITÉS</h4>
+      <div id="prio-manage"></div>
+    </div>
   </div>
-  <div class="settings-section">
-    <h4>PRIORITÉS</h4>
-    <div id="prio-manage"></div>
-  </div>
-  <div class="settings-section">
-    <h4>HISTORIQUE</h4>
-    <button id="purge-history"><svg class="ic" style="margin-right:0.35em"><use href="#ic-trash"/></svg>Vider l'historique</button>
-    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
-      L'historique des tâches effectuées est conservé sans limite. Cette action le vide définitivement.
-    </p>
-  </div>
-  <div class="settings-section">
-    <h4>HORLOGES</h4>
-    <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted)">Fuseau horaire supplémentaire
-      <select id="tz-select" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit"></select>
-    </label>
-    <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
-      L'heure française s'affiche automatiquement quand l'appareil n'est pas sur le fuseau de Paris.
-      Le fuseau choisi ici s'ajoute en plus (réglage propre à cet appareil).
-    </p>
-  </div>
-  <div class="settings-section">
-    <h4>STATUTS</h4>
-    <button id="refresh-status"><svg class="ic" style="margin-right:0.35em"><use href="#ic-refresh"/></svg>Rafraîchir les statuts</button>
-  </div>
+
   <div class="actions">
     <button id="settings-close" class="primary">Fermer</button>
   </div>
@@ -5318,6 +5367,34 @@ window.addEventListener('load', syncHeaderHeight);
 /* ------------------------------------------------ settings */
 
 const settingsDialog = document.getElementById('settings-dialog');
+
+// [SETTINGS-TABS] un seul panneau visible ; onglet actif persisté (localStorage `settingsTab`).
+const SETTINGS_TABS = ['identity', 'map', 'backups', 'cats', 'prios'];
+function setSettingsTab(tab) {
+  if (!SETTINGS_TABS.includes(tab)) tab = 'identity';
+  localStorage.setItem('settingsTab', tab);
+  document.querySelectorAll('#settings-tabs .prio-btn').forEach(b => {
+    b.classList.toggle('sel', b.dataset.tab === tab);
+    b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false');
+  });
+  document.querySelectorAll('#settings-dialog .settings-panel').forEach(p => {
+    p.style.display = p.dataset.panel === tab ? '' : 'none';
+  });
+}
+document.querySelectorAll('#settings-tabs .prio-btn').forEach(b => {
+  b.addEventListener('click', () => setSettingsTab(b.dataset.tab));
+});
+
+// [SETTINGS-TABS] feedback de sauvegarde auto : ✓ discret dans l'en-tête (~1,2 s, aria-live).
+let settingsSavedTimer = null;
+function settingsSavedFlash() {
+  const s = document.getElementById('settings-saved');
+  s.textContent = '✓ Enregistré'; // (re)pose le texte → aria-live annonce le changement
+  s.style.opacity = '1';
+  clearTimeout(settingsSavedTimer);
+  settingsSavedTimer = setTimeout(() => { s.style.opacity = '0'; s.textContent = ''; }, 1200);
+}
+
 document.getElementById('settings-btn').addEventListener('click', () => {
   document.getElementById('owner-name-input').value = state.ownerName || '';
   document.getElementById('marker-color-input').value = state.mapMarkerColor || '#e53935';
@@ -5325,44 +5402,62 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   renderProjManage();
   renderPrioManage();
   renderBackups();
+  setSettingsTab(localStorage.getItem('settingsTab') || 'identity');
   settingsDialog.showModal();
 });
 
-document.getElementById('owner-name-save').addEventListener('click', async (e) => {
-  const input = document.getElementById('owner-name-input');
-  const name = input.value.trim();
-  if (!name) { input.focus(); return notify('Le nom ne peut pas être vide.', { error: true }); }
-  await withBusy(e.currentTarget, async () => {
-    const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ owner_name: name }) });
-    state.ownerName = (r && r.owner_name) || name;
-    renderAll();
-    notify('Nom enregistré : ' + state.ownerName + '.');
-  });
+// [SETTINGS-TABS] sauvegarde AUTO du nom (blur / Entrée) — plus de bouton Enregistrer.
+// Vide → on restaure la valeur précédente sans enregistrer.
+const ownerNameInput = document.getElementById('owner-name-input');
+async function saveOwnerName() {
+  const name = ownerNameInput.value.trim();
+  if (!name) { ownerNameInput.value = state.ownerName || ''; return; }
+  if (name === state.ownerName) return;
+  const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ owner_name: name }) });
+  state.ownerName = (r && r.owner_name) || name;
+  renderAll();
+  settingsSavedFlash();
+}
+ownerNameInput.addEventListener('blur', saveOwnerName);
+ownerNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); saveOwnerName(); }
 });
 
-async function saveMarkerColor(color, btn) {
-  await withBusy(btn, async () => {
-    const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ map_marker_color: color }) });
-    state.mapMarkerColor = (r && r.map_marker_color) || color;
-    document.getElementById('marker-color-input').value = state.mapMarkerColor;
-    notify('Couleur des points enregistrée.');
-  });
+// [SETTINGS-TABS] sauvegarde AUTO de la couleur carte (change) ; « Défaut » conservé.
+async function saveMarkerColor(color) {
+  const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ map_marker_color: color }) });
+  state.mapMarkerColor = (r && r.map_marker_color) || color;
+  document.getElementById('marker-color-input').value = state.mapMarkerColor;
+  settingsSavedFlash();
 }
 
-document.getElementById('marker-color-save').addEventListener('click', (e) => {
-  saveMarkerColor(document.getElementById('marker-color-input').value, e.currentTarget);
+document.getElementById('marker-color-input').addEventListener('change', (e) => {
+  saveMarkerColor(e.target.value);
 });
 
-document.getElementById('marker-color-reset').addEventListener('click', (e) => {
+document.getElementById('marker-color-reset').addEventListener('click', () => {
   document.getElementById('marker-color-input').value = '#e53935';
-  saveMarkerColor('#e53935', e.currentTarget);
+  saveMarkerColor('#e53935');
 });
 
 async function renderBackups() {
   const wrap = document.getElementById('backup-list');
+  const status = document.getElementById('backup-status-text');
+  const summary = document.getElementById('backup-files-summary');
   try {
     const data = await api('/api/backups');
     wrap.innerHTML = '';
+    // [SETTINGS-TABS] carte d'état : dernière sauvegarde (relative, absolue au survol) + taille.
+    const last = data.backups[0];
+    if (last) {
+      status.textContent = 'Dernière sauvegarde auto : ' + relTimeFr(last.mtime) + ' · ' + (last.size / 1024).toFixed(0) + ' Ko';
+      status.title = fmtWhen(last.mtime);
+    } else {
+      status.textContent = 'Aucune sauvegarde pour le moment (la première se fait au démarrage).';
+      status.title = '';
+    }
+    const shown = Math.min(data.backups.length, 8);
+    summary.textContent = 'Voir les ' + shown + ' fichier' + (shown > 1 ? 's' : '');
     if (!data.backups.length) {
       wrap.appendChild(el('div', { class: 'empty', text: 'Aucune sauvegarde pour le moment (la première se fait au démarrage).' }));
       return;
@@ -5376,6 +5471,7 @@ async function renderBackups() {
     });
   } catch (_) {
     wrap.textContent = '';
+    status.textContent = '';
   }
 }
 
@@ -5433,9 +5529,7 @@ function renderCatManage() {
     }));
     wrap.appendChild(row);
   });
-  const addBtn = el('button', { text: '+ Catégorie', on: { click: async () => { await addCategory(); renderCatManage(); } } });
-  addBtn.style.marginTop = '0.5rem';
-  wrap.appendChild(addBtn);
+  wrap.appendChild(el('button', { class: 'cat-add-line', text: '＋ Ajouter une catégorie', on: { click: async () => { await addCategory(); renderCatManage(); } } }));
 }
 
 function renderProjManage() {
@@ -5470,9 +5564,7 @@ function renderProjManage() {
     }));
     wrap.appendChild(row);
   });
-  const addBtn = el('button', { text: '+ Projet', on: { click: async () => { await addProject(); renderProjManage(); } } });
-  addBtn.style.marginTop = '0.5rem';
-  wrap.appendChild(addBtn);
+  wrap.appendChild(el('button', { class: 'cat-add-line', text: '＋ Ajouter un projet', on: { click: async () => { await addProject(); renderProjManage(); } } }));
 }
 
 function renderPrioManage() {
@@ -5507,9 +5599,7 @@ function renderPrioManage() {
     }));
     wrap.appendChild(row);
   });
-  const addBtn = el('button', { text: '+ Priorité', on: { click: () => openCreateDialog('priority') } });
-  addBtn.style.marginTop = '0.5rem';
-  wrap.appendChild(addBtn);
+  wrap.appendChild(el('button', { class: 'cat-add-line', text: '＋ Ajouter une priorité', on: { click: () => openCreateDialog('priority') } }));
 }
 
 document.getElementById('export-btn').addEventListener('click', async () => {
