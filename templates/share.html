@@ -128,15 +128,35 @@ button.icon:active { transform: scale(0.94); }
 .sitem .cat-edit:hover { opacity: 1; color: var(--text); background: var(--panel-2); }
 .sitem:hover .cnt, .sitem:focus-within .cnt { opacity: 0; }
 .sdot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-/* arbre `tree` de la sidebar invité + chevrons de repli */
+/* [SIDEBAR-TREE] .sb-tree (connecteurs texte) ne sert PLUS dans la sidebar — conservé
+   pour la pop-in « Déplacer vers… » ; la vue Plan garde .tree-pre. */
 .sb-tree {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre; color: var(--muted); opacity: 0.55;
   font-size: 0.78rem; flex-shrink: 0; line-height: 1;
 }
+/* [SIDEBAR-TREE] chevron DANS la ligne (colonne fixe, feuilles = span vide). */
 .sb-proj-chev {
   width: 1.1rem; flex-shrink: 0; text-align: center;
   color: var(--muted); font-size: 0.85rem; line-height: 1; cursor: pointer;
+}
+/* [SIDEBAR-TREE] enfants dans un conteneur : indentation fixe ~17px/niveau + ligne
+   guide verticale CSS (fini la dérive des connecteurs monospace avec les emojis). */
+.sb-kids { margin-left: 0.8rem; padding-left: 0.25rem; border-left: 1px solid var(--border); }
+/* [SIDEBAR-TREE] desktop : sidebar statique, scroller propre, épinglée sous le header. */
+@media (min-width: 901px) {
+  #snav {
+    position: sticky;
+    top: var(--header-h, 57px);
+    height: calc(100dvh - var(--header-h, 57px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  #snav::-webkit-scrollbar { width: 8px; }
+  #snav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  #snav::-webkit-scrollbar-track { background: transparent; }
 }
 /* vue Plan invité (arbre projets → mémos) */
 #tree-board { max-width: 720px; margin: 0 auto; }
@@ -173,8 +193,10 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   .sitem { flex-shrink: 0; margin-bottom: 0; }
   /* Crayon d'édition projet toujours visible au doigt (le survol n'existe pas). */
   .sitem .cat-edit { opacity: 0.85; }
-  /* Barre horizontale : l'arbre vertical n'a pas de sens → masquer connecteurs/chevrons. */
+  /* Barre horizontale : l'arbre vertical n'a pas de sens → masquer connecteurs/chevrons.
+     [SIDEBAR-TREE] conteneurs .sb-kids aplatis pour rester dans le flux horizontal. */
   .sb-tree, .sb-proj-chev { display: none; }
+  .sb-kids { display: contents; }
   #tree-board { max-width: 100%; }
   .tree-meta { display: none; }
   .tree-pre { font-size: 0.74rem; }
@@ -1308,35 +1330,31 @@ function renderSidebar() {
   // En mobile (barre horizontale) on force le dépli pour que tout reste atteignable.
   const flat = window.matchMedia('(max-width: 900px)').matches;
   const projOpen = (id) => flat || shareSbProjOpen(id);
-  const renderTree = (p, ancestorsLast, isLast) => {
+  // [SIDEBAR-TREE] arbre à indentation fixe (.sb-kids, ligne guide CSS) — plus de
+  // connecteurs texte. UNE seule icône : emoji, sinon pastille couleur.
+  const renderTree = (p, wrap) => {
     const icon = el('span', '');
-    icon.style.cssText = 'display:inline-flex;align-items:center;gap:0.25rem;flex-shrink:0';
+    icon.style.cssText = 'display:inline-flex;align-items:center;flex-shrink:0';
     if (p.emoji) icon.appendChild(el('span', '', p.emoji));
-    if (p.color) {
+    else {
       const d = el('span', 'sdot');
-      d.style.background = p.color;
-      if (p.emoji) { d.style.width = '0.4rem'; d.style.height = '0.4rem'; }
-      icon.appendChild(d);
-    }
-    if (!p.emoji && !p.color) {
-      const d = el('span', 'sdot');
-      d.style.background = 'var(--gray)';
+      d.style.background = usableProjColor(p.color) || 'var(--gray)';
       icon.appendChild(d);
     }
     const count = DATA.memos.filter(m => m.project_id === p.id && !m.done).length;
     const item = mkItem(p.name, icon, count, p.id, 0, p);
+    const lbl = item.querySelector('.slabel');
+    if (lbl) lbl.title = p.name;
 
-    // Connecteurs `tree` + chevron de repli (façon dashboard propriétaire).
+    // Chevron DANS la ligne (colonne fixe) ; feuille = span vide de même largeur.
     const kids = projChildren(p.id);
-    const conn = treeConnector(ancestorsLast, isLast);
     const chev = el('span', 'sb-proj-chev');
     if (kids.length) {
       const open = projOpen(p.id);
       chev.textContent = open ? '▾' : '▸';
       chev.title = open ? 'Replier ce projet' : 'Déplier ce projet';
       chev.addEventListener('click', (e) => { e.stopPropagation(); toggleShareSbProj(p.id); render(); });
-    } else { chev.style.visibility = 'hidden'; }
-    item.insertBefore(el('span', 'sb-tree', conn), item.firstChild);
+    } else { chev.style.cursor = 'default'; }
     item.insertBefore(chev, item.firstChild);
 
     if (canEditNow()) {
@@ -1363,11 +1381,15 @@ function renderSidebar() {
         }
       });
     }
-    nav.appendChild(item);
-    if (projOpen(p.id)) kids.forEach((c, i) => renderTree(c, [...ancestorsLast, isLast], i === kids.length - 1));
+    wrap.appendChild(item);
+    if (kids.length && projOpen(p.id)) {
+      const kw = el('div', 'sb-kids');
+      kids.forEach(c => renderTree(c, kw));
+      wrap.appendChild(kw);
+    }
   };
   const root = (DATA.projects || []).find(p => p.id === DATA.root_id);
-  if (root) renderTree(root, [], true);
+  if (root) renderTree(root, nav);
 }
 
 function todayStr() {

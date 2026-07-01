@@ -69,7 +69,9 @@ header .spacer { flex: 1; }
 #sidebar .sitem.active { background: var(--panel-2); font-weight: 600; }
 #sidebar .sitem .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sidebar .sitem .ro { font-size: 0.66rem; color: var(--muted); flex-shrink: 0; }
-#sidebar .sb-tree { color: var(--muted); white-space: pre; font-family: ui-monospace, monospace; }
+/* [SIDEBAR-TREE] enfants dans un conteneur : indentation fixe ~17px/niveau + ligne
+   guide verticale CSS (plus de connecteurs texte — dérive monospace avec les emojis). */
+#sidebar .sb-kids { margin-left: 0.8rem; padding-left: 0.25rem; border-left: 1px solid var(--border); }
 #sidebar h4 { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
 main { flex: 1; min-width: 0; padding: 1rem; }
 .empty { color: var(--muted); font-style: italic; text-align: center; padding: 2rem 0; }
@@ -426,19 +428,24 @@ function renderSidebar() {
   nav.appendChild(el('h4', { text: 'DOSSIERS PARTAGÉS' }));
   // racines = projets sans parent dans l'union (chaque share projet) ; mémos isolés listés à part
   const roots = (DATA.projects || []).filter(p => p.parent_id == null);
-  const walk = (p, anc, last) => {
+  // [SIDEBAR-TREE] arbre à indentation fixe (.sb-kids, ligne guide CSS) — plus de
+  // connecteurs texte. Icône unique : emoji, sinon pastille couleur. Nom en title.
+  const walk = (p, wrap) => {
     const row = el('div', { class: 'sitem' + (FOCUS === p.id ? ' active' : '') });
-    row.appendChild(el('span', { class: 'sb-tree', text: treeConnector(anc, last) }));
     if (p.emoji) row.appendChild(el('span', { text: p.emoji }));
-    else { const d = el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;background:' + (usableProjColor(p.color) || 'var(--gray)') } }); row.appendChild(d); }
-    row.appendChild(el('span', { class: 'nm', text: p.name }));
+    else { const d = el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;flex-shrink:0;background:' + (usableProjColor(p.color) || 'var(--gray)') } }); row.appendChild(d); }
+    row.appendChild(el('span', { class: 'nm', text: p.name, attrs: { title: p.name } }));
     if (!p.can_edit) row.appendChild(el('span', { class: 'ro', text: '👁' }));
     row.addEventListener('click', () => { FOCUS = p.id; render(); });
-    nav.appendChild(row);
+    wrap.appendChild(row);
     const kids = projChildren(p.id);
-    kids.forEach((c, i) => walk(c, [...anc, last], i === kids.length - 1));
+    if (kids.length) {
+      const kw = el('div', { class: 'sb-kids' });
+      kids.forEach(c => walk(c, kw));
+      wrap.appendChild(kw);
+    }
   };
-  roots.forEach((p, i) => walk(p, [], i === roots.length - 1));
+  roots.forEach(p => walk(p, nav));
   if (!roots.length && !(DATA.memos || []).length) nav.appendChild(el('div', { class: 'empty', text: 'Aucun dossier.' }));
 }
 
