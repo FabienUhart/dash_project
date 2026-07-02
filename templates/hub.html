@@ -509,12 +509,38 @@ function wireChecklist(container, m) {
 function renderBoard() {
   const board = document.getElementById('board'); board.innerHTML = '';
   board.appendChild(addBar());
+  const spb = subProjBar(); if (spb) board.appendChild(spb); // [GUEST-SUBPROJECT]
   const ms = focusedMemos().slice().sort((a, b) => (a.done - b.done) || (a.due_date || '').localeCompare(b.due_date || ''));
   if (!ms.length) { board.appendChild(el('div', { class: 'empty', text: 'Aucun mémo ici.' })); return; }
   ms.forEach(m => board.appendChild(memoCard(m)));
 }
 
 function editableProjects() { return (DATA.projects || []).filter(p => p.can_edit); }
+
+// [GUEST-SUBPROJECT] création de sous-projet depuis le hub (parité share.html) :
+// routée vers le POST /share/<share_token>/projects du dossier PARENT choisi —
+// revalidé serveur (scope du partage + can_edit + invité approuvé), zéro route
+// nouvelle (invariant 5). parent_id = le projet choisi (le serveur ne l'accepte
+// que dans les descendants du partage).
+function subProjBar() {
+  const eps = editableProjects();
+  if (!eps.length) return null;
+  const bar = el('div', { class: 'addbar' });
+  const inp = el('input', { attrs: { type: 'text', placeholder: '+ Nouveau sous-projet (nom)…' } });
+  const sel = el('select', { attrs: { title: 'Dossier parent du sous-projet' } });
+  eps.forEach(p => sel.appendChild(el('option', { attrs: { value: p.id }, text: 'dans ' + (p.emoji ? p.emoji + ' ' : '') + p.name })));
+  if (FOCUS != null && eps.some(p => p.id === FOCUS)) sel.value = String(FOCUS);
+  const add = async () => {
+    const name = inp.value.trim(); if (!name) return;
+    const pid = Number(sel.value); const proj = projById(pid); if (!proj) return;
+    const r = await api(proj.share_token, '/projects', { method: 'POST', body: JSON.stringify({ name, parent_id: pid }) });
+    if (r.ok) { inp.value = ''; await reload(); }
+    else { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true }); }
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+  bar.append(inp, sel, el('button', { class: 'btn', text: '📁 Créer', on: { click: add } }));
+  return bar;
+}
 
 function addBar() {
   const bar = el('div', { class: 'addbar' });
@@ -538,6 +564,7 @@ function addBar() {
 function renderPlan() {
   const board = document.getElementById('board'); board.innerHTML = '';
   board.appendChild(addBar());
+  const spb = subProjBar(); if (spb) board.appendChild(spb); // [GUEST-SUBPROJECT]
   const roots = (DATA.projects || []).filter(p => p.parent_id == null);
   const wrap = el('div');
   const memosOf = (pid) => focusedMemos().filter(m => m.project_id === pid);
