@@ -478,6 +478,27 @@ function renderSidebar() {
   };
   roots.forEach(p => walk(p, nav));
   if (!roots.length && !(DATA.memos || []).length) nav.appendChild(el('div', { class: 'empty', text: 'Aucun dossier.' }));
+
+  // [GUEST-RESEND-LINK] bouton discret : se renvoyer lien + code à l'adresse DÉJÀ
+  // enregistrée (le serveur force le destinataire — rien à saisir). Uniquement dans
+  // le dash connecté (pas l'écran code : pas de preuve à ce stade), masqué si SMTP off.
+  if (DATA && DATA.smtp_enabled) {
+    const btn = el('div', {
+      class: 'sitem',
+      attrs: { style: 'margin-top:1rem;color:var(--muted);font-size:0.8rem', title: 'Recevoir ce lien et le code à votre adresse e-mail enregistrée' },
+    });
+    btn.appendChild(el('span', { text: '📧' }));
+    btn.appendChild(el('span', { class: 'nm', text: 'Recevoir mon lien par e-mail' }));
+    btn.addEventListener('click', async () => {
+      // Le cookie de session part seul (path scopé) ; header en repli si dispo.
+      const proof = hubProof();
+      const r = await fetch(HUB_BASE + '/send-link', { method: 'POST', headers: proof ? { 'X-Guest-Token': proof } : {} });
+      const e = await r.json().catch(() => ({}));
+      if (r.ok) notify('Envoyé ! Vérifie ta boîte mail (et les spams).');
+      else notify(e.error || 'Envoi impossible.', { error: true });
+    });
+    nav.appendChild(btn);
+  }
 }
 
 function dueInfo(m) {

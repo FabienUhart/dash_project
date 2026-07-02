@@ -3194,6 +3194,9 @@ def hub_data(hub_token):
         # → un dossier ajouté après coup devient éditable sans re-saisir le code. L'invité est
         # déjà prouvé (hubProof) ; on ne fait que reposer des guest_token qu'il a droit d'avoir.
         "folders": _hub_folders(db, hub["email"]),
+        # [GUEST-RESEND-LINK] booléen anodin (jamais le secret) : le front masque le bouton
+        # « Recevoir mon lien » si l'envoi d'e-mail n'est pas configuré.
+        "smtp_enabled": _smtp_config() is not None,
     })
     # [HUB-SESSION] Expiration glissante : re-pose le cookie à chaque /data prouvé (Max-Age
     # repart pour 180 j). Le token n'est généré qu'à approve — rien à poser s'il est vide.
@@ -3201,6 +3204,54 @@ def hub_data(hub_token):
     if session_token:
         _set_hub_session_cookie(resp, hub_token, session_token)
     return resp
+
+
+# [GUEST-RESEND-LINK] rate-limit PAR HUB : ~2 envois/heure (fenêtre glissante en mémoire,
+# best-effort par worker — le destinataire forcé reste la garde dure anti-abus).
+_RESEND_SENT = {}
+_RESEND_MAX = 2
+_RESEND_WINDOW = 3600  # secondes
+
+
+def _resend_throttled(hub_id):
+    now = time.time()
+    lst = [t for t in _RESEND_SENT.get(hub_id, []) if now - t < _RESEND_WINDOW]
+    _RESEND_SENT[hub_id] = lst
+    return len(lst) >= _RESEND_MAX
+
+
+@app.route("/share/hub/<hub_token>/send-link", methods=["POST"])
+def hub_send_link(hub_token):
+    """[GUEST-RESEND-LINK] L'invité connecté se renvoie SON lien + code à l'adresse
+    DÉJÀ enregistrée du hub (pas de modification d'adresse par l'invité — identité
+    e-mail owner-only, cf. [GUEST-EDIT]). Route publique sous /share/* (bypass
+    Authelia existant — invariant 5, jamais de nouveau préfixe de premier niveau).
+    Preuve requise (_hub_proof : cookie de session OU X-Guest-Token approuvé) sinon
+    403 générique ; destinataire FORCÉ = e-mail du hub (le corps de la requête est
+    IGNORÉ — jamais une adresse du client) ; rate-limit ~2/h par hub → 429 ;
+    corps mail réutilisé de [HUB-EMAIL-INVITE] ; secret SMTP jamais exposé/logué."""
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    # 403 générique indiscernable (hub inexistant ≡ preuve absente) → pas d'énumération.
+    if not hub or not _hub_proof(db, hub):
+        return jsonify({"error": "accès refusé"}), 403
+    cfg = _smtp_config()
+    if not cfg:
+        return jsonify({"error": "envoi par e-mail non disponible"}), 400
+    if _resend_throttled(hub["id"]):
+        return jsonify({"error": "trop d'envois — réessaie plus tard"}), 429
+    to_email = parseaddr(hub["email"] or "")[1].strip().lower()  # destinataire = e-mail du hub, point.
+    if "@" not in to_email:
+        return jsonify({"error": "envoi impossible"}), 400
+    hub_url = request.host_url.rstrip("/") + "/share/hub/" + hub["hub_token"]
+    try:
+        _send_hub_invite(cfg, to_email, hub["name"] or "", hub_url, hub["pin"] or "")
+    except Exception:
+        # Ne jamais exposer/loguer le secret ni le détail SMTP brut.
+        app.logger.warning("send-link: échec SMTP pour le hub %s", hub["id"])
+        return jsonify({"error": "échec de l'envoi"}), 502
+    _RESEND_SENT.setdefault(hub["id"], []).append(time.time())
+    return jsonify({"ok": True})
 
 
 @app.route("/share/<token>/data")
