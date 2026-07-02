@@ -275,57 +275,161 @@ function runMapDialog(cfg) {
     }
   }
 
+  // [MAP-GROUPS-MENU] Gestion des groupes via un menu explicite : liste ÉPURÉE par
+  // défaut (aucune case permanente), les coches n'apparaissent qu'en mode
+  // Créer/Modifier/Copier (`groupMode`). Écritures = cfg.saveGroups existant
+  // (PUT map_groups scopé — aucune route/champ nouveau, invariant 5).
+  // groupMode = null | { kind: 'create'|'edit'|'copy', origName, name }
+  let groupMode = null;
+
+  function startGroupMode(kind, g) {
+    selected.clear();
+    if (kind !== 'create') {
+      current.forEach(p => { if (p.kind === 'memo' && (p.groups || []).includes(g)) selected.add(pkey(p)); });
+    }
+    groupMode = {
+      kind,
+      origName: kind === 'edit' ? g : null,
+      name: kind === 'create' ? '' : (kind === 'copy' ? g + ' (copie)' : g),
+    };
+    refresh(false);
+  }
+
+  function exitGroupMode() { groupMode = null; selected.clear(); refresh(false); }
+
+  async function applyGroupMode() {
+    const name = (groupMode.name || '').trim();
+    if (!name) { notify('Donne un nom au groupe.', { error: true }); return; }
+    const orig = groupMode.origName; // mode edit : l'ancien nom est ré-étiqueté/retiré
+    for (const p of current) {
+      if (p.kind !== 'memo') continue;
+      const had = p.groups || [];
+      let next = had.slice();
+      if (orig) next = next.filter(x => x !== orig);
+      if (selected.has(pkey(p)) && !next.includes(name)) next.push(name);
+      if (JSON.stringify(next.slice().sort()) !== JSON.stringify(had.slice().sort())) {
+        await cfg.saveGroups(p, next);
+      }
+    }
+    if (orig && orig !== name && active.has(orig)) { active.delete(orig); persist(); } // focus suit le renommage
+    groupMode = null;
+    selected.clear();
+    current = recompute();
+    refresh(false);
+  }
+
+  async function deleteGroup(g) {
+    const ok = await confirmPopin(
+      'Supprimer le groupe « ' + g + ' » ?\nLes points restent — ils ne seront simplement plus étiquetés « ' + g + ' ». Aucun mémo supprimé.',
+      { okLabel: 'Supprimer', danger: true }
+    );
+    if (!ok) return;
+    for (const p of current) {
+      if (p.kind === 'memo' && (p.groups || []).includes(g)) {
+        await cfg.saveGroups(p, (p.groups || []).filter(x => x !== g));
+      }
+    }
+    if (active.has(g)) { active.delete(g); persist(); }
+    current = recompute();
+    refresh(false);
+  }
+
   function renderGroupbar() {
     groupbar.innerHTML = '';
     const names = groupNames(current);
-    if (!names.length) { groupbar.style.display = 'none'; return; }
+    const canManage = editable && current.some(p => p.kind === 'memo');
+    if (!names.length && !canManage) { groupbar.style.display = 'none'; return; }
     groupbar.style.display = 'flex';
-    groupbar.appendChild(el('span', { text: 'Groupes :', attrs: { style: 'font-size:0.78rem;color:var(--muted)' } }));
-    const chip = (label, token) => {
-      const on = active.has(token);
-      groupbar.appendChild(el('button', {
-        class: 'prio-btn', text: (on ? '✓ ' : '') + label,
-        attrs: { type: 'button', title: on ? 'Ne plus filtrer sur ce groupe' : 'Afficher seulement ce groupe',
-          style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
-        on: { click: () => { if (active.has(token)) active.delete(token); else active.add(token); persist(); refresh(true); } },
-      }));
-    };
-    names.forEach(n => chip(n, n));
-    if (hasUngrouped(current)) chip('(sans groupe)', UNGROUPED);
-    if (active.size) {
-      groupbar.appendChild(el('button', {
-        class: 'prio-btn', text: '↺ tout afficher', attrs: { type: 'button', style: 'padding:0.1rem 0.45rem' },
-        on: { click: () => { active.clear(); persist(); refresh(true); } },
-      }));
+    if (names.length) {
+      groupbar.appendChild(el('span', { text: 'Groupes :', attrs: { style: 'font-size:0.78rem;color:var(--muted)' } }));
+      const chip = (label, token) => {
+        const on = active.has(token);
+        groupbar.appendChild(el('button', {
+          class: 'prio-btn', text: (on ? '✓ ' : '') + label,
+          attrs: { type: 'button', title: on ? 'Ne plus filtrer sur ce groupe' : 'Afficher seulement ce groupe',
+            style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+          on: { click: () => { if (active.has(token)) active.delete(token); else active.add(token); persist(); refresh(true); } },
+        }));
+      };
+      names.forEach(n => chip(n, n));
+      if (hasUngrouped(current)) chip('(sans groupe)', UNGROUPED);
+      if (active.size) {
+        groupbar.appendChild(el('button', {
+          class: 'prio-btn', text: '↺ tout afficher', attrs: { type: 'button', style: 'padding:0.1rem 0.45rem' },
+          on: { click: () => { active.clear(); persist(); refresh(true); } },
+        }));
+      }
+    }
+    // [MAP-GROUPS-MENU] bouton « Groupes ▾ » + menu Créer/Modifier/Copier/Supprimer
+    // (façon card-menu — invariant 9, tokens seulement). Gaté editable (invité can_edit,
+    // comme le groupage l'était — le hub lecture n'a pas d'editable → pas de menu).
+    if (canManage) {
+      const wrap = el('span', { attrs: { style: 'position:relative;display:inline-flex;margin-left:auto' } });
+      const btn = el('button', {
+        class: 'prio-btn', text: 'Groupes ▾',
+        attrs: { type: 'button', title: 'Créer, modifier, copier ou supprimer un groupe', style: 'padding:0.1rem 0.5rem' },
+      });
+      const menu = el('div', {
+        attrs: { style: 'position:absolute;top:calc(100% + 4px);right:0;z-index:1200;min-width:180px;'
+          + 'background:var(--panel);border:1px solid var(--border);border-radius:8px;'
+          + 'box-shadow:0 8px 24px rgba(0,0,0,0.35);padding:0.25rem;display:none' } });
+      const mItem = (label, fn, danger) => el('button', {
+        attrs: { type: 'button', style: 'display:block;width:100%;text-align:left;background:none;border:none;'
+          + 'border-radius:6px;padding:0.4rem 0.6rem;color:' + (danger ? 'var(--red)' : 'var(--text)')
+          + ';font:inherit;font-size:0.8rem;cursor:pointer;min-height:36px' },
+        text: label,
+        on: { click: fn, mouseenter: (e) => { e.target.style.background = 'var(--panel-2)'; }, mouseleave: (e) => { e.target.style.background = 'none'; } },
+      });
+      const buildRoot = () => {
+        menu.innerHTML = '';
+        menu.appendChild(mItem('＋ Créer un groupe', () => { menu.style.display = 'none'; startGroupMode('create'); }));
+        if (names.length) {
+          [['✎ Modifier un groupe ▸', 'edit'], ['⧉ Copier un groupe ▸', 'copy'], ['🗑 Supprimer un groupe ▸', 'del']].forEach(([lbl, kind]) => {
+            menu.appendChild(mItem(lbl, () => buildPick(kind), kind === 'del'));
+          });
+        }
+      };
+      const buildPick = (kind) => {
+        menu.innerHTML = '';
+        menu.appendChild(mItem('◂ Retour', buildRoot));
+        names.forEach(g => menu.appendChild(mItem(g, () => {
+          menu.style.display = 'none';
+          if (kind === 'del') deleteGroup(g);
+          else startGroupMode(kind, g);
+        }, kind === 'del')));
+      };
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (menu.style.display === 'none') { buildRoot(); menu.style.display = 'block'; }
+        else menu.style.display = 'none';
+      });
+      wrap.appendChild(btn);
+      wrap.appendChild(menu);
+      groupbar.appendChild(wrap);
     }
   }
 
+  // [MAP-GROUPS-MENU] barre de sélection : visible UNIQUEMENT en mode Créer/Modifier/
+  // Copier — réutilise l'UI existante (cases + champ nom + Valider/Annuler).
   function renderSelbar() {
     selbar.innerHTML = '';
-    if (!editable || !selected.size) { selbar.style.display = 'none'; return; }
+    if (!editable || !groupMode) { selbar.style.display = 'none'; return; }
     selbar.style.display = 'flex';
-    selbar.appendChild(el('span', { text: selected.size + ' sélectionné' + (selected.size > 1 ? 's' : ''), attrs: { style: 'font-size:0.8rem;font-weight:600' } }));
-    const input = el('input', { attrs: { type: 'text', placeholder: 'nom du groupe', list: 'map-group-list', style: 'flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.2rem 0.4rem' } });
+    const titles = {
+      create: '＋ Nouveau groupe',
+      edit: '✎ Modifier « ' + groupMode.origName + ' »',
+      copy: '⧉ Copie de groupe',
+    };
+    selbar.appendChild(el('span', { text: titles[groupMode.kind] + ' — ' + selected.size + ' point' + (selected.size > 1 ? 's' : '') + ' coché' + (selected.size > 1 ? 's' : ''), attrs: { style: 'font-size:0.8rem;font-weight:600' } }));
+    const input = el('input', { attrs: { type: 'text', placeholder: 'nom du groupe', value: groupMode.name, list: 'map-group-list', style: 'flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.2rem 0.4rem' } });
+    input.addEventListener('input', () => { groupMode.name = input.value; });
     const dl = el('datalist', { attrs: { id: 'map-group-list' } });
     groupNames(current).forEach(n => dl.appendChild(el('option', { attrs: { value: n } })));
     selbar.appendChild(input);
     selbar.appendChild(dl);
-    const apply = async () => {
-      const name = input.value.trim();
-      if (!name) return;
-      for (const key of [...selected]) {
-        const p = current.find(x => pkey(x) === key);
-        if (!p || p.kind !== 'memo') continue;
-        const next = Array.from(new Set([...(p.groups || []), name]));
-        await cfg.saveGroups(p, next);
-      }
-      selected.clear();
-      current = recompute();
-      refresh(false);
-    };
-    selbar.appendChild(el('button', { class: 'primary', text: '＋ Grouper', attrs: { type: 'button', style: 'padding:0.2rem 0.6rem' }, on: { click: apply } }));
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
-    selbar.appendChild(el('button', { class: 'prio-btn', text: 'Tout décocher', attrs: { type: 'button' }, on: { click: () => { selected.clear(); refresh(false); } } }));
+    selbar.appendChild(el('button', { class: 'primary', text: '✓ Valider', attrs: { type: 'button', style: 'padding:0.2rem 0.6rem' }, on: { click: applyGroupMode } }));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyGroupMode(); } });
+    selbar.appendChild(el('button', { class: 'prio-btn', text: 'Annuler', attrs: { type: 'button' }, on: { click: exitGroupMode } }));
   }
 
   function draw(pts, fit) {
@@ -395,8 +499,10 @@ function runMapDialog(cfg) {
         if (proj && proj.emoji) chip.appendChild(el('span', { text: proj.emoji }));
         row.appendChild(chip);
       }
-      if (editable && p.kind === 'memo') {
-        const cb = el('input', { attrs: { type: 'checkbox', style: 'flex-shrink:0;margin-top:0.28rem;cursor:pointer' } });
+      // [MAP-GROUPS-MENU] coche visible UNIQUEMENT en mode Créer/Modifier/Copier
+      // (liste épurée par défaut). 18px explicites = utilisable au doigt.
+      if (editable && p.kind === 'memo' && groupMode) {
+        const cb = el('input', { attrs: { type: 'checkbox', style: 'flex-shrink:0;width:18px;height:18px;margin-top:0.22rem;cursor:pointer;accent-color:var(--accent)' } });
         cb.checked = selected.has(pkey(p));
         cb.addEventListener('change', () => { if (cb.checked) selected.add(pkey(p)); else selected.delete(pkey(p)); renderSelbar(); });
         row.appendChild(cb);

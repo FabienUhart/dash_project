@@ -1516,7 +1516,10 @@ function openShareMap(extra) {
   // [PHOTO-TEMPLATE-MEMO] `extra` = {autoPhoto, focusFilename} pour « 📍 localiser ».
   runMapDialog(Object.assign({
     title: DATA.title, points: shareMapPoints(), recompute: shareMapPoints,
-    editable: !!DATA.can_edit,
+    // [MAP-GROUPS-MENU] canEditNow() (lien can_edit ET invité approuvé) — pas seulement le
+    // can_edit du lien : un visiteur anonyme ne voit plus le menu Groupes / les outils
+    // d'édition que le serveur lui refuserait de toute façon (403 sans X-Guest-Token).
+    editable: canEditNow(),
     projects: DATA.projects || [], currentProjectId: PFILTER,
     subFilterScope: PFILTER !== 'all',
     defaultMarkerColor: DATA.marker_color,
