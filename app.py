@@ -41,7 +41,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "19"
+APP_VERSION = "20"
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
@@ -280,6 +280,9 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN location TEXT DEFAULT ''")
     if "location" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN location TEXT DEFAULT ''")
+    # [MAP-TIMELINE] flag « voyage » héritable : NULL = hérite, 1 = voyage, 0 = non.
+    if "is_trip" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN is_trip INTEGER DEFAULT NULL")
     if "title" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN title TEXT DEFAULT ''")
     if "assignees" not in mcols:
@@ -862,12 +865,43 @@ def reorder_categories():
 # -------------------------------------------------------------- projects
 
 
+def _clean_is_trip(value):
+    """[MAP-TIMELINE] Tri-état : 1 = voyage, 0 = non, None = hérite. Jamais autre chose."""
+    if value is True or value == 1:
+        return 1
+    if value is False or value == 0:
+        return 0
+    return None
+
+
+def _resolve_trip(db, project_id):
+    """[MAP-TIMELINE] Résolution « au plus proche » : remonte le projet puis ses
+    ancêtres, le premier is_trip non NULL tranche. Aucun tranché → pas voyage
+    (défaut). Garde anti-cycle (les cycles sont déjà interdits par _resolve_parent)."""
+    seen = set()
+    pid = project_id
+    while pid is not None and pid not in seen:
+        seen.add(pid)
+        row = db.execute(
+            "SELECT parent_id, is_trip FROM projects WHERE id = ?", (pid,)
+        ).fetchone()
+        if not row:
+            return False
+        v = _row_get(row, "is_trip", None)
+        if v == 1:
+            return True
+        if v == 0:
+            return False
+        pid = row["parent_id"]
+    return False
+
+
 @app.route("/api/projects", methods=["GET"])
 def list_projects():
     rows = (
         get_db()
         .execute(
-            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, "
+            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, p.is_trip, "
             "COUNT(CASE WHEN m.done = 0 AND COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
             "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
             "GROUP BY p.id ORDER BY p.position, p.id"
@@ -894,14 +928,15 @@ def create_project():
     emoji = _clean_emoji(data.get("emoji"))
     description = _clean_description(data.get("description"))
     marker_color = _clean_hex_color(data.get("marker_color"), "")
+    is_trip = _clean_is_trip(data.get("is_trip"))  # [MAP-TIMELINE]
     cur = db.execute(
-        "INSERT INTO projects (name, color, position, tags, emoji, description, marker_color) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (name, color, max_pos + 1, tags, emoji, description, marker_color),
+        "INSERT INTO projects (name, color, position, tags, emoji, description, marker_color, is_trip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, color, max_pos + 1, tags, emoji, description, marker_color, is_trip),
     )
     db.commit()
     return (
         jsonify(
-            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags, "emoji": emoji, "description": description, "marker_color": marker_color}
+            {"id": cur.lastrowid, "name": name, "color": color, "position": max_pos + 1, "tags": tags, "emoji": emoji, "description": description, "marker_color": marker_color, "is_trip": is_trip}
         ),
         201,
     )
@@ -947,12 +982,18 @@ def update_project(project_id):
         if "marker_color" in data
         else _row_get(existing, "marker_color")
     )
+    # [MAP-TIMELINE] flag voyage tri-état (owner-only — cette route est derrière Authelia).
+    is_trip = (
+        _clean_is_trip(data.get("is_trip"))
+        if "is_trip" in data
+        else _row_get(existing, "is_trip", None)
+    )
     db.execute(
-        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ? WHERE id = ?",
-        (name, color, tags, emoji, parent_id, location, description, marker_color, project_id),
+        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ?, is_trip = ? WHERE id = ?",
+        (name, color, tags, emoji, parent_id, location, description, marker_color, is_trip, project_id),
     )
     db.commit()
-    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color})
+    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip})
 
 
 @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
@@ -3081,6 +3122,8 @@ def hub_data(hub_token):
             "parent_id": parent, "location": _parse_location(p["location"]),
             "description": _row_get(p, "description"), "point_color": _row_get(p, "marker_color"),
             "share_token": win["token"], "can_edit": win["can_edit"],
+            # [MAP-TIMELINE] booléen résolu serveur (lecture seule côté invité).
+            "trip": _resolve_trip(db, p["id"]),
         })
 
     # ── Union des mémos (dédup par id), tagués du share gagnant ──
@@ -3299,6 +3342,9 @@ def share_data(token):
                         "location": _parse_location(p["location"]),
                         "description": _row_get(p, "description"),
                         "point_color": _row_get(p, "marker_color"),
+                        # [MAP-TIMELINE] booléen RÉSOLU par le serveur (l'arbre du partage
+                        # peut être tronqué au scope) — lecture seule côté invité.
+                        "trip": _resolve_trip(db, p["id"]),
                     }
                 )
     memo_ids = [r["id"] for r in rows]
@@ -3946,7 +3992,7 @@ def _build_export(db):
         "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
     projects = db.execute(
-        "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color FROM projects ORDER BY position, id"
+        "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color, is_trip FROM projects ORDER BY position, id"
     ).fetchall()
     proj_names = {r["id"]: r["name"] for r in projects}
     out_links = []
@@ -3973,6 +4019,8 @@ def _build_export(db):
             "location": _parse_location(r["location"]),
             "description": _row_get(r, "description"),
             "marker_color": _row_get(r, "marker_color"),
+            # [MAP-TIMELINE] v20 : valeur BRUTE non résolue (null = hérite).
+            "is_trip": _row_get(r, "is_trip", None),
         }
         for r in projects
     ]
@@ -3990,7 +4038,7 @@ def _build_export(db):
         "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
     return {
-        "version": 19,
+        "version": 20,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -4210,14 +4258,14 @@ def import_links():
 
     proj_ids = {}
 
-    def ensure_project(name, color="", tags="", emoji="", location=None, description="", marker_color=""):
+    def ensure_project(name, color="", tags="", emoji="", location=None, description="", marker_color="", is_trip=None):
         name = (name or "").strip()
         if not name:
             return None
         if name in proj_ids:
             return proj_ids[name]
         row = db.execute(
-            "SELECT id, color, tags, emoji, location, description, marker_color FROM projects WHERE name = ?", (name,)
+            "SELECT id, color, tags, emoji, location, description, marker_color, is_trip FROM projects WHERE name = ?", (name,)
         ).fetchone()
         if row:
             proj_ids[name] = row["id"]
@@ -4250,13 +4298,21 @@ def import_links():
                     "UPDATE projects SET marker_color = ? WHERE id = ?",
                     (_clean_hex_color(marker_color, ""), row["id"]),
                 )
+            # [MAP-TIMELINE] v20 : upsert non destructif — n'enrichit que si l'existant
+            # n'a PAS tranché (NULL). Un 0/1 local n'est JAMAIS écrasé (ni par NULL,
+            # ni par une autre valeur — le tri-état local fait foi).
+            it = _clean_is_trip(is_trip)
+            if it is not None and _row_get(row, "is_trip", None) is None:
+                db.execute(
+                    "UPDATE projects SET is_trip = ? WHERE id = ?", (it, row["id"])
+                )
         else:
             max_pos = db.execute(
                 "SELECT COALESCE(MAX(position), -1) FROM projects"
             ).fetchone()[0]
             cur = db.execute(
-                "INSERT INTO projects (name, color, position, tags, emoji, location, description, marker_color) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji), _clean_location(location), _clean_description(description), _clean_hex_color(marker_color, "")),
+                "INSERT INTO projects (name, color, position, tags, emoji, location, description, marker_color, is_trip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji), _clean_location(location), _clean_description(description), _clean_hex_color(marker_color, ""), _clean_is_trip(is_trip)),
             )
             proj_ids[name] = cur.lastrowid
         return proj_ids[name]
@@ -4271,6 +4327,7 @@ def import_links():
                 proj.get("location"),
                 proj.get("description") or "",
                 proj.get("marker_color") or "",
+                proj.get("is_trip"),  # [MAP-TIMELINE] v20 — absent (v1→v19) = None = hérite
             )
         else:
             ensure_project(proj)

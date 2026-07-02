@@ -134,11 +134,29 @@ function runMoveDialog(cfg) {
   searchEl.focus();
 }
 
+// [MAP-TIMELINE] Résolution « au plus proche » du flag voyage côté OWNER (arbre
+// complet dispo : byId = id → {is_trip, parent_id}). Les pages invité reçoivent
+// `trip` déjà résolu par le serveur (l'arbre du partage peut être tronqué). Pur.
+function resolveTripLocal(byId, pid) {
+  const seen = new Set();
+  let p = pid != null ? byId(pid) : null;
+  while (p && !seen.has(p.id)) {
+    seen.add(p.id);
+    if (p.is_trip === 1 || p.is_trip === true) return true;
+    if (p.is_trip === 0 || p.is_trip === false) return false;
+    p = p.parent_id != null ? byId(p.parent_id) : null;
+  }
+  return false;
+}
+
 // Pop-in carte mutualisée (ADR-001 item 4). Une seule implémentation owner/invité ;
 // tout ce qui diffère est passé dans `cfg` (accès données, persistance, sauvegardes).
 // cfg = { title, points, recompute, editable, projects, currentProjectId,
 //         subFilterScope, defaultMarkerColor, focusKey, subKey,
-//         saveColor(p,color), saveGroups(p,groups) }
+//         saveColor(p,color), saveGroups(p,groups),
+//         datedPoints():[...], timelineKey }  // [MAP-TIMELINE] mémos datés du
+//         périmètre (GPS OU NON — {kind:'memo', id, project_id, groups, title,
+//         due_date, due_time, lat?, lng?, trip}) + clef localStorage du masquage.
 // Dépend de globals présents sur les deux pages : L (Leaflet), activeMap, notify, el, provenanceColor.
 function runMapDialog(cfg) {
   if (typeof L === 'undefined') {
@@ -178,6 +196,23 @@ function runMapDialog(cfg) {
   let current = points;
 
   const pkey = p => p.kind + ':' + p.id;
+  // [MAP-TIMELINE] état frise : visible par défaut, masquage persisté par projet ;
+  // marqueurs indexés pour que la frise puisse centrer/ouvrir la popup d'un point.
+  const TLKEY = cfg.timelineKey || '';
+  let tlOn = TLKEY ? localStorage.getItem(TLKEY) !== '0' : true;
+  const markersByKey = {};
+  let routeLine = null;
+  const ACCENT = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#4fc3f7').trim() || '#4fc3f7';
+  const tlToday = agendaTodayIso();
+  const tlCompare = (a, b) => (a.due_date || '').localeCompare(b.due_date || '') || agendaDayCompare(a, b);
+  const datedAll = () => (cfg.datedPoints ? cfg.datedPoints() : []).slice().sort(tlCompare);
+  // Bande horizontale SOUS la carte (créée une fois, réutilisée entre ouvertures).
+  let tlEl = document.getElementById('map-timeline');
+  if (!tlEl) {
+    tlEl = el('div', { attrs: { id: 'map-timeline' } });
+    document.getElementById('map-el').insertAdjacentElement('afterend', tlEl);
+  }
+  tlEl.innerHTML = '';
   const persist = () => localStorage.setItem(GKEY, JSON.stringify([...active]));
   const persistSub = () => localStorage.setItem(SUBKEY, JSON.stringify([...subActive]));
   const subToken = p => (p.kind === 'memo' ? (p.project_id || 0) : p.id);
@@ -282,6 +317,7 @@ function runMapDialog(cfg) {
 
   function draw(pts, fit) {
     markerLayer.clearLayers();
+    Object.keys(markersByKey).forEach(k => delete markersByKey[k]); // [MAP-TIMELINE]
     listEl.innerHTML = '';
     const latlngs = [];
 
@@ -291,11 +327,21 @@ function runMapDialog(cfg) {
       if (focused) latlngs.push(ll);
       const dotColor = p.color || cfg.defaultMarkerColor || '#e53935';
       const mColor = focused ? dotColor : '#8a93a0';
+      // [MAP-TIMELINE] reflet par OPACITÉ uniquement (couleurs v16 intactes), seulement
+      // quand la frise est visible : point daté passé estompé, point du jour = halo.
+      let strokeOp = 1, fillOp = focused ? 0.55 : 0.18;
+      if (tlOn && focused && p.kind === 'memo' && p.due_date && p.due_date < tlToday) {
+        strokeOp = 0.45; fillOp = 0.25;
+      }
+      if (tlOn && focused && p.kind === 'memo' && p.due_date === tlToday) {
+        L.circleMarker(ll, { radius: 15, color: ACCENT, weight: 2, opacity: 0.85, fillColor: ACCENT, fillOpacity: 0.08 }).addTo(markerLayer);
+      }
       const marker = L.circleMarker(ll, {
-        radius: focused ? 9 : 6, color: mColor, weight: focused ? 2 : 1, fillColor: mColor, fillOpacity: focused ? 0.55 : 0.18,
+        radius: focused ? 9 : 6, color: mColor, weight: focused ? 2 : 1, opacity: strokeOp, fillColor: mColor, fillOpacity: fillOp,
       }).addTo(markerLayer).bindPopup(
         '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
       );
+      markersByKey[pkey(p)] = { marker, ll };
       const row = el('div', { attrs: { style: 'display:flex;align-items:flex-start;gap:0.4rem;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%' + (focused ? '' : ';opacity:0.4') } });
       if (showChip) {
         const accent = proj ? provenanceColor(proj) : 'var(--border)';
@@ -378,6 +424,75 @@ function runMapDialog(cfg) {
     }
   }
 
+  // ── [MAP-TIMELINE] frise chronologique (tout projet daté) + tracé voyage ──
+
+  // Tracé itinéraire : polyline POINTILLÉE (Leaflet core — invariant 6) reliant dans
+  // l'ordre chronologique les points GPS + datés dont le projet résout à « voyage »,
+  // restreinte au focus courant. Jamais de segment vers un point sans GPS/date/voyage.
+  function drawRoute() {
+    if (routeLine) { routeLine.remove(); routeLine = null; }
+    const pts = current
+      .filter(p => p.kind === 'memo' && p.trip && p.due_date && p.lat != null && isFocused(p))
+      .sort(tlCompare);
+    if (pts.length >= 2) {
+      routeLine = L.polyline(pts.map(p => [p.lat, p.lng]), {
+        dashArray: '6 8', weight: 2.5, color: ACCENT, opacity: 0.8,
+      }).addTo(activeMap);
+    }
+  }
+
+  // Frise : mémos datés du périmètre (GPS OU NON), mêmes filtres focus. Curseur
+  // « aujourd'hui » = barre de progression + repère entre passé et futur ; passées
+  // estompées ✓, étape du jour halo accent, sans-GPS non centrable (style discret).
+  function renderTimeline() {
+    tlEl.innerHTML = '';
+    const dated = datedAll().filter(p => isFocused(p));
+    if (!tlOn || !dated.length) { tlEl.style.display = 'none'; return; }
+    tlEl.style.display = 'block';
+    tlEl.style.cssText += ';margin:0.45rem 0 0;';
+    const past = dated.filter(p => p.due_date < tlToday).length;
+    const pct = Math.round((past / dated.length) * 100);
+    // barre de progression remplie jusqu'à aujourd'hui
+    tlEl.appendChild(el('div', { attrs: { style: 'height:4px;border-radius:999px;background:linear-gradient(90deg,' + ACCENT + ' ' + pct + '%, var(--border) ' + pct + '%);margin:0 0.2rem 0.3rem' } }));
+    const strip = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:stretch;overflow-x:auto;padding:0 0.2rem 0.3rem;-webkit-overflow-scrolling:touch' } });
+    let cursorPlaced = false;
+    const cursor = () => el('div', {
+      attrs: { title: 'Aujourd\'hui', style: 'flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:0.6rem;color:' + ACCENT + ';font-weight:700' },
+    }, el('span', { attrs: { style: 'width:2px;flex:1;background:' + ACCENT + ';border-radius:1px' } }), el('span', { text: 'auj.' }));
+    dated.forEach(p => {
+      if (!cursorPlaced && p.due_date >= tlToday) { strip.appendChild(cursor()); cursorPlaced = true; }
+      const isPast = p.due_date < tlToday;
+      const isToday = p.due_date === tlToday;
+      const hasGps = p.lat != null && p.lng != null;
+      const d = new Date(p.due_date + 'T00:00');
+      const dayLbl = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (p.due_time ? ' ' + fmtMemoTime(p.due_time) : '');
+      const step = el('button', {
+        attrs: {
+          type: 'button',
+          title: (p.title || '') + (hasGps ? '' : ' — sans position (non centrable)'),
+          style: 'flex-shrink:0;max-width:9.5rem;display:flex;flex-direction:column;align-items:flex-start;gap:0.08rem;'
+            + 'background:var(--panel-2);border:1px ' + (hasGps ? 'solid' : 'dashed') + ' var(--border);border-radius:8px;'
+            + 'padding:0.25rem 0.45rem;color:inherit;font:inherit;font-size:0.7rem;text-align:left;'
+            + 'cursor:' + (hasGps ? 'pointer' : 'default') + ';'
+            + (isPast ? 'opacity:0.45;' : '')
+            + (isToday ? 'box-shadow:0 0 0 2px ' + ACCENT + ';' : ''),
+        },
+      });
+      step.appendChild(el('span', { text: (isPast ? '✓ ' : '') + dayLbl, attrs: { style: 'color:var(--muted);font-size:0.64rem;white-space:nowrap' } }));
+      step.appendChild(el('span', { text: p.title || '(mémo)', attrs: { style: 'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600' } }));
+      if (hasGps) {
+        step.addEventListener('click', () => {
+          const mk = markersByKey['memo:' + p.id];
+          activeMap.setView([p.lat, p.lng], 15);
+          if (mk) mk.marker.openPopup();
+        });
+      }
+      strip.appendChild(step);
+    });
+    if (!cursorPlaced) strip.appendChild(cursor()); // tout est passé → curseur en fin
+    tlEl.appendChild(strip);
+  }
+
   // [PHOTO-MAP] Calque photo optionnel + frise « où on était ». Activé seulement si
   // cfg.loadPhotos est fourni (carte d'un vrai projet). Lit image_meta via l'endpoint
   // scopé (déjà géocodé à l'upload) — aucun appel réseau ici. Marqueurs 📷 distincts
@@ -452,13 +567,37 @@ function runMapDialog(cfg) {
     refresh(false);
   }
 
-  if (cfg.loadPhotos) {
-    photoBtn = el('button', {
-      class: 'prio-btn', text: '📷 Photos',
-      attrs: { type: 'button', title: 'Afficher les lieux des photos du projet (EXIF)', style: 'padding:0.1rem 0.5rem' },
-      on: { click: togglePhotos },
-    });
-    const bar = el('div', { attrs: { style: 'display:flex;gap:0.35rem;align-items:center;margin:0 0 0.45rem' } }, photoBtn);
+  // [MAP-TIMELINE] barre d'outils : 📷 (si dispo) + 🕒 Frise (si ≥1 mémo daté).
+  const hasDated = !!(cfg.datedPoints && datedAll().length);
+  let tlBtn = null;
+  // (fix au passage : la barre s'insérait à CHAQUE ouverture sans retrait → doublons)
+  const oldBar = document.getElementById('map-toolbar');
+  if (oldBar) oldBar.remove();
+  if (cfg.loadPhotos || hasDated) {
+    const bar = el('div', { attrs: { id: 'map-toolbar', style: 'display:flex;gap:0.35rem;align-items:center;margin:0 0 0.45rem;flex-wrap:wrap' } });
+    if (cfg.loadPhotos) {
+      photoBtn = el('button', {
+        class: 'prio-btn', text: '📷 Photos',
+        attrs: { type: 'button', title: 'Afficher les lieux des photos du projet (EXIF)', style: 'padding:0.1rem 0.5rem' },
+        on: { click: togglePhotos },
+      });
+      bar.appendChild(photoBtn);
+    }
+    if (hasDated) {
+      const syncTlBtn = () => {
+        tlBtn.textContent = tlOn ? '🕒 Frise ✓' : '🕒 Frise';
+        tlBtn.style.background = tlOn ? 'var(--accent)' : '';
+        tlBtn.style.color = tlOn ? '#10141a' : '';
+        tlBtn.style.borderColor = tlOn ? 'var(--accent)' : '';
+      };
+      tlBtn = el('button', {
+        class: 'prio-btn',
+        attrs: { type: 'button', title: 'Frise chronologique des mémos datés (masquage mémorisé)', style: 'padding:0.1rem 0.5rem' },
+        on: { click: () => { tlOn = !tlOn; if (TLKEY) localStorage.setItem(TLKEY, tlOn ? '1' : '0'); syncTlBtn(); refresh(false); } },
+      });
+      syncTlBtn();
+      bar.appendChild(tlBtn);
+    }
     subbar.parentNode.insertBefore(bar, subbar);
   }
 
@@ -467,6 +606,9 @@ function runMapDialog(cfg) {
     renderGroupbar();
     renderSelbar();
     draw(current, fit);
+    // [MAP-TIMELINE] frise + tracé voyage suivent le même focus que les marqueurs.
+    renderTimeline();
+    drawRoute();
     // [PHOTO-MAP] Le calque suit les mêmes filtres ; la frise remplace la liste mémo.
     if (photoOn) { drawPhotos(); renderFrieze(); }
   }

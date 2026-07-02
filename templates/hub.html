@@ -927,17 +927,34 @@ document.getElementById('ed-del').addEventListener('click', async () => {
 });
 
 // ── carte agrégée (lecture) ──
+// [MAP-TIMELINE] flag voyage : `trip` résolu par le serveur sur le projet du mémo.
+function hubTripOf(projectId) { const p = projById(projectId); return !!(p && p.trip); }
+
 function hubMapPoints() {
   const pts = [];
-  focusedMemos().forEach(m => { if (m.location && typeof m.location.lat === 'number') pts.push({ kind: 'memo', id: m.id, lat: m.location.lat, lng: m.location.lng, placeLabel: m.location.label || '', sub: (m.title || stripTags(m.content).slice(0, 40)), project_id: m.project_id, groups: m.map_groups || [], color: (prioOf(m.priority) || {}).color || '' }); });
+  focusedMemos().forEach(m => { if (m.location && typeof m.location.lat === 'number') pts.push({ kind: 'memo', id: m.id, lat: m.location.lat, lng: m.location.lng, placeLabel: m.location.label || '', sub: (m.title || stripTags(m.content).slice(0, 40)), project_id: m.project_id, groups: m.map_groups || [], color: (prioOf(m.priority) || {}).color || '',
+    due_date: m.due_date || '', due_time: m.due_time || '', trip: hubTripOf(m.project_id) }); }); // [MAP-TIMELINE]
   (DATA.projects || []).forEach(p => { if (p.location && typeof p.location.lat === 'number') pts.push({ kind: 'project', id: p.id, lat: p.location.lat, lng: p.location.lng, placeLabel: p.location.label || '', sub: p.name, project_id: p.id, groups: [], color: usableProjColor(p.color) || '' }); });
   return pts;
+}
+
+// [MAP-TIMELINE] Mémos DATÉS du même périmètre (GPS OU NON) pour la frise.
+function hubDatedPoints() {
+  return focusedMemos().filter(m => m.due_date).map(m => ({
+    kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
+    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)'),
+    due_date: m.due_date, due_time: m.due_time || '',
+    lat: (m.location && typeof m.location.lat === 'number') ? m.location.lat : null,
+    lng: (m.location && typeof m.location.lat === 'number') ? m.location.lng : null,
+    trip: hubTripOf(m.project_id),
+  }));
 }
 document.getElementById('btn-map').addEventListener('click', () => {
   if (typeof L === 'undefined') { notify('Carte indisponible.', { error: true }); return; }
   runMapDialog({ title: DATA.name || 'Mes dossiers', points: hubMapPoints(), recompute: hubMapPoints, editable: false,
     projects: DATA.projects || [], currentProjectId: FOCUS == null ? 'all' : FOCUS, subFilterScope: FOCUS != null,
-    defaultMarkerColor: DATA.marker_color, focusKey: 'hubMapFocus:' + HUB_TOKEN, subKey: 'hubMapSub:' + HUB_TOKEN });
+    defaultMarkerColor: DATA.marker_color, focusKey: 'hubMapFocus:' + HUB_TOKEN, subKey: 'hubMapSub:' + HUB_TOKEN,
+    datedPoints: hubDatedPoints, timelineKey: 'hubMapTimeline:' + HUB_TOKEN }); // [MAP-TIMELINE]
 });
 // [HUB-MAP-CLOSE] Le partial runMapDialog ne câble pas #map-close (chaque page le fait, cf.
 // index.html/share.html). Fermer + détruire l'instance Leaflet (clic, Échap ou backdrop) →

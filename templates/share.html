@@ -1436,6 +1436,13 @@ function todayStr() {
 let activeMap = null;
 document.getElementById('map-close').addEventListener('click', () => document.getElementById('map-dialog').close());
 
+// [MAP-TIMELINE] flag voyage d'un mémo invité : `trip` RÉSOLU par le serveur sur
+// son projet (lecture seule — l'arbre du partage peut être tronqué au scope).
+function shareTripOf(projectId) {
+  const p = (DATA.projects || []).find(x => x.id === projectId);
+  return !!(p && p.trip);
+}
+
 function shareMapPoints() {
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
   const points = [];
@@ -1448,6 +1455,7 @@ function shareMapPoints() {
       sub: m.location.label || '',
       color: m.point_color || (prios[m.priority] || {}).color || DATA.marker_color || '#e53935',
       kind: 'memo', id: m.id, override: m.point_color || '', groups: m.map_groups || [], project_id: m.project_id || null,
+      due_date: m.due_date || '', due_time: m.due_time || '', trip: shareTripOf(m.project_id), // [MAP-TIMELINE]
     });
   });
   (DATA.projects || []).forEach(p => {
@@ -1456,6 +1464,17 @@ function shareMapPoints() {
     }
   });
   return points;
+}
+
+// [MAP-TIMELINE] Mémos DATÉS du même périmètre que shareMapPoints (GPS OU NON).
+function shareDatedPoints() {
+  return scopedMemos().filter(m => m.due_date).map(m => ({
+    kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
+    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)'),
+    due_date: m.due_date, due_time: m.due_time || '',
+    lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
+    trip: shareTripOf(m.project_id),
+  }));
 }
 
 async function saveShareGroups(p, groups) {
@@ -1494,6 +1513,9 @@ function openShareMap(extra) {
     focusKey: 'shareMapFocus:' + TOKEN + ':' + PFILTER,
     subKey: 'shareMapSubFilter:' + TOKEN + ':' + PFILTER,
     saveColor: saveSharePointColor, saveGroups: saveShareGroups,
+    // [MAP-TIMELINE] frise + tracé voyage (trip résolu serveur, lecture seule).
+    datedPoints: shareDatedPoints,
+    timelineKey: 'shareMapTimeline:' + TOKEN + ':' + PFILTER,
     // [PHOTO-MAP] Calque photo scopé au partage (endpoint /share/<token>/photos).
     loadPhotos: () => fetch(API + '/photos', { headers: { 'X-Guest-Token': guestToken() } }).then(r => r.json()),
     openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => API + '/image/' + x, downloadUrl: x => API + '/image/' + x, exifUrl: x => API + '/image-exif/' + x }),

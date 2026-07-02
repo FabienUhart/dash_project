@@ -1627,6 +1627,11 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       </div>
       <span id="create-loc-info" style="font-size:0.78rem;color:var(--muted);margin-top:0.25rem">aucune</span>
     </label>
+    <!-- [MAP-TIMELINE] flag voyage héritable (projets seulement) : Hérité / Oui / Non -->
+    <label id="create-trip-label">✈️ Voyage
+      <div id="create-trip-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
+      <span style="font-size:0.72rem;color:var(--muted)">Un « voyage » trace l'itinéraire chronologique de ses points sur la carte. « Hérité » suit le réglage du projet parent.</span>
+    </label>
     <div class="actions">
       <button type="button" id="create-cancel">Annuler</button>
       <button type="submit" class="primary" id="create-submit">Créer</button>
@@ -2430,6 +2435,7 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-tags-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-desc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
+  document.getElementById('create-trip-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
   document.getElementById('create-menu').hidden = true;
@@ -2446,6 +2452,9 @@ function openCreateDialog(kind, item = null) {
     });
   }
   createForm.reset();
+  // [MAP-TIMELINE] chips voyage : tri-état (null = hérite), valeur héritée affichée.
+  createTrip = item ? (item.is_trip === 1 ? 1 : item.is_trip === 0 ? 0 : null) : null;
+  if (kind === 'project') renderTripChips();
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
@@ -2461,6 +2470,39 @@ function openCreateDialog(kind, item = null) {
   }
   createDialog.showModal();
   createForm.elements.name.focus();
+}
+
+// [MAP-TIMELINE] sélection courante du flag voyage dans la pop-in (null = hérite).
+let createTrip = null;
+function renderTripChips() {
+  const wrap = document.getElementById('create-trip-chips');
+  wrap.innerHTML = '';
+  const byId = (id) => state.projects.find(p => p.id === id);
+  // Valeur héritée = plus proche ANCÊTRE tranché (le réglage propre est ignoré ici).
+  let inherited = 'pas voyage', src = null;
+  let pid = editingItem ? editingItem.parent_id : null;
+  const seen = new Set();
+  while (pid != null && !seen.has(pid)) {
+    seen.add(pid);
+    const p = byId(pid);
+    if (!p) break;
+    if (p.is_trip === 1) { inherited = 'voyage'; src = p; break; }
+    if (p.is_trip === 0) { inherited = 'pas voyage'; src = p; break; }
+    pid = p.parent_id;
+  }
+  const opts = [
+    [null, 'Hérité (' + inherited + (src ? ', via ' + (src.emoji ? src.emoji + ' ' : '') + src.name : '') + ')'],
+    [1, 'Oui'],
+    [0, 'Non'],
+  ];
+  opts.forEach(([v, label]) => {
+    const on = createTrip === v;
+    wrap.appendChild(el('button', {
+      class: 'prio-btn', text: label,
+      attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+      on: { click: () => { createTrip = v; renderTripChips(); } },
+    }));
+  });
 }
 
 function addCategory() { openCreateDialog('category'); }
@@ -2509,6 +2551,7 @@ createForm.addEventListener('submit', async (e) => {
     payload.tags = createForm.elements.tags.value.trim();
     payload.location = createLoc;
     payload.description = createForm.elements.description.value.trim();
+    payload.is_trip = createTrip; // [MAP-TIMELINE] null = hérite, 1 = voyage, 0 = non
   }
   const body = JSON.stringify(payload);
   try {
@@ -2682,6 +2725,9 @@ function openMapDialog(title, points, recompute, extra) {
     focusKey: 'mapFocus:' + state.memoProject,
     subKey: 'mapSubFilter:' + state.memoProject,
     saveColor: savePointColor, saveGroups: savePointGroups,
+    // [MAP-TIMELINE] frise (tout projet daté) + masquage persisté par projet.
+    datedPoints: boardDatedPoints,
+    timelineKey: 'mapTimeline:' + state.memoProject,
     loadPhotos: realProject ? (() => fetch('/api/projects/' + state.memoProject + '/photos').then(r => r.json())) : null,
     openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => '/uploads/' + x, downloadUrl: x => '/uploads/' + x, exifUrl: x => '/api/image-exif/' + x }),
   }, extra || {}));
@@ -2717,9 +2763,10 @@ function boardMapPoints() {
     return scope.has(m.project_id);
   });
   const points = [];
+  const projById = (id) => state.projects.find(p => p.id === id);
   memos.forEach(m => {
     if (!m.location) return;
-    const proj = state.projects.find(p => p.id === m.project_id);
+    const proj = projById(m.project_id);
     points.push({
       lat: m.location.lat,
       lng: m.location.lng,
@@ -2729,6 +2776,9 @@ function boardMapPoints() {
       sub: (m.location.label || '') + (proj ? ' — ' + proj.name : ''),
       color: m.marker_color || (prioOf(m.priority) || {}).color || state.mapMarkerColor || '#e53935',
       kind: 'memo', id: m.id, override: m.marker_color || '', groups: m.map_groups || [], project_id: m.project_id || null,
+      // [MAP-TIMELINE] date + flag voyage résolu (frise, reflet, tracé).
+      due_date: m.due_date || '', due_time: m.due_time || '',
+      trip: resolveTripLocal(projById, m.project_id),
     });
   });
   if (scope && !searchActive) {
@@ -2737,6 +2787,29 @@ function boardMapPoints() {
     if (pl) points.push({ lat: pl.lat, lng: pl.lng, title: '📁 ' + proj.name, placeLabel: pl.label || '', sub: pl.label || '', color: proj.marker_color || proj.color || '#81c784', kind: 'project', id: proj.id, override: proj.marker_color || '', groups: [] });
   }
   return points;
+}
+
+// [MAP-TIMELINE] Mémos DATÉS du même périmètre que boardMapPoints — GPS OU NON
+// (les sans-GPS apparaissent dans la frise, non centrables).
+function boardDatedPoints() {
+  const searchActive = !!parseSearch().q;
+  const scope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
+    ? new Set([state.memoProject, ...projectDescendants(state.memoProject)])
+    : null;
+  const projById = (id) => state.projects.find(p => p.id === id);
+  return visibleMemos().filter(m => {
+    if (!m.due_date) return false;
+    if (searchActive) return true;
+    if (state.memoProject === 'all') return true;
+    if (state.memoProject === 'inbox') return !m.project_id;
+    return scope.has(m.project_id);
+  }).map(m => ({
+    kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
+    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || '(mémo)'),
+    due_date: m.due_date, due_time: m.due_time || '',
+    lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
+    trip: resolveTripLocal(projById, m.project_id),
+  }));
 }
 
 function capturePosition(cb) {
