@@ -1350,12 +1350,14 @@ function renderSidebar() {
   planItem.addEventListener('click', () => { GVIEW = 'plan'; render(); });
   nav.appendChild(planItem);
 
-  // [AGENDA] Vue calendrier mensuelle des échéances du partage.
+  // [AGENDA] Vue calendrier mensuelle des échéances du partage. [AGENDA-PROJECT]
+  // l'item sidebar = agenda GLOBAL du partage : il efface le filtre dossier éventuel.
   const agendaItem = el('div', 'sitem' + (GVIEW === 'agenda' ? ' active' : ''));
   agendaItem.appendChild(el('span', '', '📆'));
   agendaItem.appendChild(el('span', 'slabel', 'Agenda'));
   agendaItem.title = 'Vue Agenda : calendrier mensuel des échéances';
-  agendaItem.addEventListener('click', () => { GVIEW = 'agenda'; render(); });
+  // [AGENDA-SMART-MONTH] global = toujours le mois courant.
+  agendaItem.addEventListener('click', () => { shareAgendaFilter = null; agendaYM = null; agendaSelDay = null; GVIEW = 'agenda'; render(); });
   nav.appendChild(agendaItem);
 
   const pendingAll = DATA.memos.filter(m => !m.done).length;
@@ -1559,6 +1561,33 @@ function renderTiles() {
     tile.addEventListener('click', openSharePhotos);
     tiles.appendChild(tile);
   }
+  // [AGENDA-PROJECT] Tuile « 📆 Agenda » : agenda pré-filtré sur le dossier courant
+  // (PFILTER) + descendants ; sur « Tous » = agenda global du partage (comme la sidebar).
+  if (DATA.kind === 'project') {
+    const tile = el('div', 'tile');
+    const l = el('span', 'tl', '📆 Agenda');
+    l.style.color = '#7986cb';
+    tile.appendChild(l);
+    tile.title = PFILTER !== 'all' ? 'Agenda de ce dossier et de ses sous-dossiers' : 'Agenda du partage';
+    tile.addEventListener('click', () => {
+      shareAgendaFilter = PFILTER !== 'all' ? PFILTER : null;
+      if (shareAgendaFilter != null) {
+        // [AGENDA-SMART-MONTH] atterrir sur un mois utile du dossier filtré.
+        const set = new Set([shareAgendaFilter, ...projDescendants(shareAgendaFilter)]);
+        const start = agendaStartMonth(
+          (DATA.memos || []).filter(m => !m.done && m.due_date && set.has(m.project_id)),
+          agendaTodayIso()
+        );
+        agendaYM = { y: start.y, m: start.m };
+        agendaSelDay = start.day;
+      } else {
+        agendaYM = null; agendaSelDay = null; // global = mois courant
+      }
+      GVIEW = 'agenda';
+      render();
+    });
+    tiles.appendChild(tile);
+  }
   const tn = (DATA.trash || []).length;
   if (DATA.can_edit && tn > 0) {
     const tile = el('div', 'tile' + (FILTER === 'trash' ? ' active' : ''));
@@ -1706,6 +1735,8 @@ function visibleShareMemos() {
    {due_date} existant, revalidé serveur (invariant 5). due_time conservé (PUT partiel).
    Mois affiché non persisté (spec), conservé au re-render (variables module). ── */
 let agendaYM = null, agendaSelDay = null, agendaDragId = null;
+// [AGENDA-PROJECT] filtre dossier courant + descendants (non persisté, comme le mois).
+let shareAgendaFilter = null;
 
 function agendaChipColor(m) {
   const p = (DATA.priorities || []).find(x => x.id === m.priority);
@@ -1743,10 +1774,29 @@ function renderShareAgenda() {
   const today = agendaTodayIso();
   if (!agendaYM) { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; }
   if (!agendaSelDay) agendaSelDay = today;
-  const byDay = agendaGroupByDay((DATA.memos || []).filter(m => !m.done && m.due_date));
+  let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
+  // [AGENDA-PROJECT] mode filtré : dossier courant + descendants (le scope partage
+  // s'applique déjà côté serveur — on ne fait que restreindre l'affichage).
+  let filterProj = null;
+  if (shareAgendaFilter != null) {
+    filterProj = (DATA.projects || []).find(p => p.id === shareAgendaFilter) || null;
+    if (!filterProj) shareAgendaFilter = null;
+    else {
+      const set = new Set([shareAgendaFilter, ...projDescendants(shareAgendaFilter)]);
+      src = src.filter(m => set.has(m.project_id));
+    }
+  }
+  const byDay = agendaGroupByDay(src);
 
   const head = el('div', 'ag-head');
-  head.appendChild(el('h2', '', '📆 ' + agendaMonthLabel(agendaYM.y, agendaYM.m)));
+  head.appendChild(el('h2', '', '📆 ' + agendaMonthLabel(agendaYM.y, agendaYM.m)
+    + (filterProj ? ' — ' + (filterProj.emoji ? filterProj.emoji + ' ' : '') + filterProj.name : '')));
+  if (filterProj) {
+    const clearBtn = el('button', 'prio-btn', '× tout l\'agenda');
+    clearBtn.title = 'Retirer le filtre dossier — revenir à l\'agenda du partage';
+    clearBtn.addEventListener('click', () => { shareAgendaFilter = null; renderShareAgenda(); });
+    head.appendChild(clearBtn);
+  }
   const nav = el('div', 'ag-nav');
   const shift = (d) => { const n = new Date(agendaYM.y, agendaYM.m + d, 1); agendaYM = { y: n.getFullYear(), m: n.getMonth() }; renderShareAgenda(); };
   const navBtn = (txt, fn, title) => { const b = el('button', 'prio-btn', txt); if (title) b.title = title; b.addEventListener('click', fn); return b; };

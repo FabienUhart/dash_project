@@ -2193,11 +2193,13 @@ function renderSidebar() {
     planItem.appendChild(el('span', { class: 'cat-label', text: 'Plan' }));
     nav.appendChild(planItem);
 
-    // [AGENDA] Vue calendrier mensuelle des échéances.
+    // [AGENDA] Vue calendrier mensuelle des échéances. [AGENDA-PROJECT] l'item
+    // sidebar = agenda GLOBAL : il efface le filtre projet éventuel et
+    // [AGENDA-SMART-MONTH] ouvre toujours sur le mois courant.
     const agendaItem = el('div', {
       class: 'cat-item' + (state.view === 'agenda' ? ' active' : ''),
       attrs: { title: 'Vue Agenda : calendrier mensuel des échéances' },
-      on: { click: () => { state.view = 'agenda'; renderAll(); } },
+      on: { click: () => { agendaFilterProj = null; agendaYM = null; agendaSelDay = null; state.view = 'agenda'; renderAll(); } },
     });
     agendaItem.appendChild(emojiIcon('📆'));
     agendaItem.appendChild(el('span', { class: 'cat-label', text: 'Agenda' }));
@@ -2260,6 +2262,8 @@ function renderSidebar() {
 let agendaYM = null;      // mois affiché {y, m}
 let agendaSelDay = null;  // jour du panneau
 let agendaDragId = null;  // mémo en cours de glissement
+// [AGENDA-PROJECT] filtre projet courant + descendants (non persisté, comme le mois).
+let agendaFilterProj = null;
 
 function agendaChipColor(m) {
   const p = prioOf(m.priority);
@@ -2289,10 +2293,32 @@ function renderAgendaView() {
   if (!agendaYM) { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; }
   if (!agendaSelDay) agendaSelDay = today;
   // Terminés masqués, sans date absents ; state.memos exclut déjà la corbeille.
-  const byDay = agendaGroupByDay(state.memos.filter(m => !m.done && m.due_date));
+  let src = state.memos.filter(m => !m.done && m.due_date);
+  // [AGENDA-PROJECT] mode filtré : projet courant + descendants récursifs (même
+  // périmètre que la carte du projet). Projet supprimé entre-temps → retour global.
+  let filterProj = null;
+  if (agendaFilterProj != null) {
+    filterProj = state.projects.find(p => p.id === agendaFilterProj) || null;
+    if (!filterProj) agendaFilterProj = null;
+    else {
+      const set = new Set([agendaFilterProj, ...projectDescendants(agendaFilterProj)]);
+      src = src.filter(m => set.has(m.project_id));
+    }
+  }
+  const byDay = agendaGroupByDay(src);
 
   const head = el('div', { class: 'ag-head' });
-  head.appendChild(el('h2', { text: '📆 ' + agendaMonthLabel(agendaYM.y, agendaYM.m) }));
+  head.appendChild(el('h2', {
+    text: '📆 ' + agendaMonthLabel(agendaYM.y, agendaYM.m)
+      + (filterProj ? ' — ' + (filterProj.emoji ? filterProj.emoji + ' ' : '') + filterProj.name : ''),
+  }));
+  if (filterProj) {
+    head.appendChild(el('button', {
+      class: 'prio-btn', text: '× tout l\'agenda',
+      attrs: { title: 'Retirer le filtre projet — revenir à l\'agenda global' },
+      on: { click: () => { agendaFilterProj = null; renderAgendaView(); } },
+    }));
+  }
   const nav = el('div', { class: 'ag-nav' });
   const shift = (d) => { const n = new Date(agendaYM.y, agendaYM.m + d, 1); agendaYM = { y: n.getFullYear(), m: n.getMonth() }; renderAgendaView(); };
   nav.appendChild(el('button', { class: 'prio-btn', text: '‹', attrs: { title: 'Mois précédent' }, on: { click: () => shift(-1) } }));
@@ -4861,6 +4887,26 @@ function renderBoard() {
         class: 'prio-btn', text: '📷 Photos',
         attrs: { title: 'Parcourir les photos du projet (lieux, dates EXIF)' },
         on: { click: openPhotoView },
+      }));
+      // [AGENDA-PROJECT] Agenda pré-filtré sur ce projet + ses sous-projets (même
+      // périmètre que la carte). L'item sidebar « 📆 Agenda » reste l'agenda global.
+      // [AGENDA-SMART-MONTH] chaque clic ré-évalue le mois d'atterrissage (un projet
+      // à échéances lointaines n'ouvre pas sur un mois vide).
+      title.appendChild(el('button', {
+        class: 'prio-btn', text: '📆 Agenda',
+        attrs: { title: 'Agenda de ce projet et de ses sous-projets' },
+        on: { click: () => {
+          agendaFilterProj = proj.id;
+          const set = new Set([proj.id, ...projectDescendants(proj.id)]);
+          const start = agendaStartMonth(
+            state.memos.filter(m => !m.done && m.due_date && set.has(m.project_id)),
+            agendaTodayIso()
+          );
+          agendaYM = { y: start.y, m: start.m };
+          agendaSelDay = start.day;
+          state.view = 'agenda';
+          renderAll();
+        } },
       }));
     }
   }

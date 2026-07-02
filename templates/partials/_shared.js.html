@@ -1050,4 +1050,21 @@ function agendaTodayIso() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 const AGENDA_DOW = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
+
+// [AGENDA-SMART-MONTH] Mois d'atterrissage à l'OUVERTURE de l'agenda FILTRÉ (un
+// projet à échéances lointaines ne doit pas ouvrir sur un mois vide). Règle :
+// 1. mois courant s'il contient ≥1 mémo du périmètre ; 2. sinon mois du prochain
+// mémo à venir ; 3. sinon mois du mémo passé le plus récent ; 4. sinon mois courant.
+// Renvoie { y, m, day } — day = jour à sélectionner (1er jour à mémos du mois
+// retenu, sinon todayIso). Pur : memos = liste DÉJÀ filtrée (non terminés, datés).
+function agendaStartMonth(memos, todayIso) {
+  const ymOf = (iso) => ({ y: +iso.slice(0, 4), m: +iso.slice(5, 7) - 1 });
+  const cur = ymOf(todayIso);
+  const dates = memos.map(m => m.due_date).filter(Boolean).sort();
+  if (!dates.length) return { ...cur, day: todayIso };
+  if (dates.some(d => d.slice(0, 7) === todayIso.slice(0, 7))) return { ...cur, day: todayIso };
+  const pick = dates.find(d => d >= todayIso) || dates[dates.length - 1];
+  const pfx = pick.slice(0, 7);
+  return { ...ymOf(pick), day: dates.find(d => d.slice(0, 7) === pfx) || todayIso };
+}
 </script>

@@ -560,6 +560,34 @@ function wireChecklist(container, m) {
 
 function renderBoard() {
   const board = document.getElementById('board'); board.innerHTML = '';
+  // [AGENDA-PROJECT] en-tête du dossier courant + bouton 📆 (agenda filtré sur ce
+  // dossier et ses sous-dossiers — même périmètre que le board).
+  if (FOCUS != null) {
+    const fp = projById(FOCUS);
+    if (fp) {
+      const hd = el('div', { class: 'ag-head' });
+      hd.appendChild(el('h2', { text: (fp.emoji ? fp.emoji + ' ' : '') + fp.name }));
+      hd.appendChild(el('button', {
+        class: 'btn', text: '📆 Agenda',
+        attrs: { title: 'Agenda de ce dossier et de ses sous-dossiers', style: 'margin-left:auto' },
+        on: { click: () => {
+          hubAgendaFilter = FOCUS;
+          // [AGENDA-SMART-MONTH] atterrir sur un mois utile du dossier filtré.
+          const set = new Set([FOCUS, ...projDescendants(FOCUS)]);
+          const start = agendaStartMonth(
+            (DATA.memos || []).filter(m => !m.done && m.due_date && set.has(m.project_id)),
+            agendaTodayIso()
+          );
+          agendaYM = { y: start.y, m: start.m };
+          agendaSelDay = start.day;
+          VIEW = 'agenda';
+          syncViewBtns();
+          render();
+        } },
+      }));
+      board.appendChild(hd);
+    }
+  }
   board.appendChild(addBar());
   const spb = subProjBar(); if (spb) board.appendChild(spb); // [GUEST-SUBPROJECT]
   const ms = focusedMemos().slice().sort((a, b) => (a.done - b.done) || (a.due_date || '').localeCompare(b.due_date || ''));
@@ -648,6 +676,9 @@ function renderPlan() {
    (revalidé serveur — invariant 5). due_time conservé (PUT partiel). Mois affiché
    non persisté (spec), conservé au re-render. Mobile ≤900px : liste, pas de D&D. ── */
 let agendaYM = null, agendaSelDay = null, agendaDragMemo = null;
+// [AGENDA-PROJECT] filtre dossier + descendants (indépendant de FOCUS, non persisté).
+// null = agenda GLOBAL (union de tous les dossiers de l'invité).
+let hubAgendaFilter = null;
 
 function agendaChipColor(m) {
   const p = prioOf(m.priority);
@@ -677,10 +708,34 @@ function renderAgendaHub() {
   const today = agendaTodayIso();
   if (!agendaYM) { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; }
   if (!agendaSelDay) agendaSelDay = today;
-  const byDay = agendaGroupByDay(focusedMemos().filter(m => !m.done && m.due_date));
+  // [AGENDA-PROJECT] base = UNION des dossiers (pas FOCUS) + recherche ; le filtre
+  // dossier explicite (bouton 📆 du board) restreint à dossier + descendants.
+  let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
+  const q = (document.getElementById('search').value || '').trim().toLowerCase();
+  if (q) src = src.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
+  let filterProj = null;
+  if (hubAgendaFilter != null) {
+    filterProj = projById(hubAgendaFilter);
+    if (!filterProj) hubAgendaFilter = null;
+    else {
+      const set = new Set([hubAgendaFilter, ...projDescendants(hubAgendaFilter)]);
+      src = src.filter(m => set.has(m.project_id));
+    }
+  }
+  const byDay = agendaGroupByDay(src);
 
   const head = el('div', { class: 'ag-head' });
-  head.appendChild(el('h2', { text: '📆 ' + agendaMonthLabel(agendaYM.y, agendaYM.m) }));
+  head.appendChild(el('h2', {
+    text: '📆 ' + agendaMonthLabel(agendaYM.y, agendaYM.m)
+      + (filterProj ? ' — ' + (filterProj.emoji ? filterProj.emoji + ' ' : '') + filterProj.name : ''),
+  }));
+  if (filterProj) {
+    head.appendChild(el('button', {
+      class: 'btn', text: '× tout l\'agenda',
+      attrs: { title: 'Retirer le filtre dossier — revenir à l\'agenda de tous vos dossiers' },
+      on: { click: () => { hubAgendaFilter = null; renderAgendaHub(); } },
+    }));
+  }
   const nav = el('div', { class: 'ag-nav' });
   const shift = (d) => { const n = new Date(agendaYM.y, agendaYM.m + d, 1); agendaYM = { y: n.getFullYear(), m: n.getMonth() }; renderAgendaHub(); };
   nav.appendChild(el('button', { class: 'btn', text: '‹', attrs: { title: 'Mois précédent' }, on: { click: () => shift(-1) } }));
@@ -896,7 +951,9 @@ function syncViewBtns() {
   document.getElementById('btn-agenda').classList.toggle('primary', VIEW === 'agenda');
 }
 document.getElementById('btn-plan').addEventListener('click', () => { VIEW = VIEW === 'plan' ? 'board' : 'plan'; syncViewBtns(); render(); });
-document.getElementById('btn-agenda').addEventListener('click', () => { VIEW = VIEW === 'agenda' ? 'board' : 'agenda'; syncViewBtns(); render(); });
+// [AGENDA-PROJECT] le bouton header = agenda GLOBAL (union) : efface le filtre dossier
+// et [AGENDA-SMART-MONTH] ouvre toujours sur le mois courant.
+document.getElementById('btn-agenda').addEventListener('click', () => { hubAgendaFilter = null; agendaYM = null; agendaSelDay = null; VIEW = VIEW === 'agenda' ? 'board' : 'agenda'; syncViewBtns(); render(); });
 document.getElementById('search').addEventListener('input', () => { if (VIEW === 'plan') renderPlan(); else if (VIEW === 'agenda') renderAgendaHub(); else renderBoard(); });
 
 // ── init : toujours tenter /data — cookie de session HttpOnly OU header localStorage
