@@ -176,12 +176,19 @@ function runMapDialog(cfg) {
 
   document.getElementById('map-title').textContent = '🗺 ' + cfg.title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
   document.getElementById('map-dialog').showModal();
-  if (activeMap) { activeMap.remove(); activeMap = null; }
+  // [MAP-TRIP-POLISH fix carte noire] démontage robuste : si une exception a laissé une
+  // instance à moitié initialisée, remove() peut jeter et le conteneur rester marqué
+  // (« Map container is being reused ») → try/catch + purge du marqueur Leaflet orphelin.
+  if (activeMap) { try { activeMap.remove(); } catch (e) {} activeMap = null; }
+  const mapCont = document.getElementById('map-el');
+  if (mapCont && mapCont._leaflet_id) { mapCont._leaflet_id = undefined; mapCont.innerHTML = ''; }
   activeMap = L.map('map-el');
+  // Tuiles d'abord, inconditionnellement, PUIS une vue initiale TOUJOURS posée : sans vue,
+  // le renderer SVG n'a pas ses _pxBounds et l'ajout de vecteurs (circleMarker, polyline
+  // du tracé voyage, trip-pins) crashe (`reading 'intersects'`) → carte noire. Le
+  // fitBounds différé de refresh(true) recadre ensuite sur les points.
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(activeMap);
-  // [PHOTO-TEMPLATE-MEMO] Vue par défaut si aucun point-mémo (cas localiser-photo) : la carte
-  // doit avoir un centre valide avant que focusPhoto (cfg.focusFilename) ne la recadre.
-  if (!points.length) activeMap.setView([20, 0], 2);
+  activeMap.setView([20, 0], 2);
   const markerLayer = L.layerGroup().addTo(activeMap);
   const listEl = document.getElementById('map-list');
   const subbar = document.getElementById('map-subbar');
@@ -207,10 +214,13 @@ function runMapDialog(cfg) {
   const tlCompare = (a, b) => (a.due_date || '').localeCompare(b.due_date || '') || agendaDayCompare(a, b);
   const datedAll = () => (cfg.datedPoints ? cfg.datedPoints() : []).slice().sort(tlCompare);
   // Bande horizontale SOUS la carte (créée une fois, réutilisée entre ouvertures).
+  // [MAP-TIMELINE-LAYOUT] insérée APRÈS la row flex carte+liste (jamais dedans) :
+  // la carte garde sa hauteur fixe, la frise vit dans sa propre bande pleine
+  // largeur à défilement horizontal — l'apparition/masquage ne déplace pas la carte.
   let tlEl = document.getElementById('map-timeline');
   if (!tlEl) {
-    tlEl = el('div', { attrs: { id: 'map-timeline' } });
-    document.getElementById('map-el').insertAdjacentElement('afterend', tlEl);
+    tlEl = el('div', { attrs: { id: 'map-timeline', style: 'flex:0 0 auto;width:100%' } });
+    document.getElementById('map-el').parentElement.insertAdjacentElement('afterend', tlEl);
   }
   tlEl.innerHTML = '';
   const persist = () => localStorage.setItem(GKEY, JSON.stringify([...active]));
@@ -321,6 +331,14 @@ function runMapDialog(cfg) {
     listEl.innerHTML = '';
     const latlngs = [];
 
+    // [MAP-TRIP-POLISH] Numérotation chronologique ①② des points VOYAGE en avant
+    // (GPS + datés + trip résolu). Sert aux marqueurs-vignettes ; les points hors
+    // focus retombent sur le marqueur classique grisé.
+    const tripOrder = {};
+    pts.filter(p => p.kind === 'memo' && p.trip && p.due_date && p.lat != null && isFocused(p))
+      .sort(tlCompare)
+      .forEach((p, i) => { tripOrder[pkey(p)] = i + 1; });
+
     function buildRow(p, proj, showChip) {
       const ll = [p.lat, p.lng];
       const focused = isFocused(p);
@@ -336,9 +354,33 @@ function runMapDialog(cfg) {
       if (tlOn && focused && p.kind === 'memo' && p.due_date === tlToday) {
         L.circleMarker(ll, { radius: 15, color: ACCENT, weight: 2, opacity: 0.85, fillColor: ACCENT, fillOpacity: 0.08 }).addTo(markerLayer);
       }
-      const marker = L.circleMarker(ll, {
-        radius: focused ? 9 : 6, color: mColor, weight: focused ? 2 : 1, opacity: strokeOp, fillColor: mColor, fillOpacity: fillOp,
-      }).addTo(markerLayer).bindPopup(
+      // [MAP-TRIP-POLISH] Point VOYAGE en avant → marqueur-vignette rond numéroté
+      // (photo du mémo si dispo, sinon cercle numéroté) — liseré = couleur v16 du
+      // point (dotColor), reflet passé par opacité comme les marqueurs classiques.
+      const stepNo = tripOrder[pkey(p)];
+      let marker;
+      if (stepNo) {
+        const dim = strokeOp < 1 ? 'opacity:0.5;' : '';
+        const inner = p.imgUrl
+          ? '<img src="' + p.imgUrl + '" loading="lazy" alt="" style="width:100%;height:100%;object-fit:cover;display:block">'
+          : '<span style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;font:700 13px system-ui;color:var(--text)">' + stepNo + '</span>';
+        const badge = p.imgUrl
+          ? '<span style="position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;border-radius:999px;background:' + dotColor + ';color:#fff;font:700 10px/16px system-ui;text-align:center;padding:0 3px;box-shadow:0 1px 2px rgba(0,0,0,0.4)">' + stepNo + '</span>'
+          : '';
+        const icon = L.divIcon({
+          className: 'trip-pin',
+          html: '<div style="position:relative;width:34px;height:34px;' + dim + '">'
+            + '<div style="width:100%;height:100%;border-radius:50%;border:3px solid ' + dotColor + ';overflow:hidden;background:var(--panel);box-shadow:0 1px 3px rgba(0,0,0,0.35)">' + inner + '</div>'
+            + badge + '</div>',
+          iconSize: [34, 34], iconAnchor: [17, 17],
+        });
+        marker = L.marker(ll, { icon, zIndexOffset: 500 }).addTo(markerLayer);
+      } else {
+        marker = L.circleMarker(ll, {
+          radius: focused ? 9 : 6, color: mColor, weight: focused ? 2 : 1, opacity: strokeOp, fillColor: mColor, fillOpacity: fillOp,
+        }).addTo(markerLayer);
+      }
+      marker.bindPopup(
         '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
       );
       markersByKey[pkey(p)] = { marker, ll };
@@ -430,14 +472,23 @@ function runMapDialog(cfg) {
   // l'ordre chronologique les points GPS + datés dont le projet résout à « voyage »,
   // restreinte au focus courant. Jamais de segment vers un point sans GPS/date/voyage.
   function drawRoute() {
-    if (routeLine) { routeLine.remove(); routeLine = null; }
+    // [fix carte noire] retrait idempotent : ne retirer que si la couche est réellement
+    // sur la carte (remove() sur une polyline jamais rendue → `reading 'parentNode'`).
+    if (routeLine) {
+      if (activeMap && activeMap.hasLayer(routeLine)) { try { activeMap.removeLayer(routeLine); } catch (e) {} }
+      routeLine = null;
+    }
     const pts = current
       .filter(p => p.kind === 'memo' && p.trip && p.due_date && p.lat != null && isFocused(p))
       .sort(tlCompare);
     if (pts.length >= 2) {
-      routeLine = L.polyline(pts.map(p => [p.lat, p.lng]), {
+      // whenReady : avec la vue initiale posée au setup c'est synchrone ; si la carte
+      // n'était pas prête (course résiduelle), l'ajout est simplement différé.
+      const line = L.polyline(pts.map(p => [p.lat, p.lng]), {
         dashArray: '6 8', weight: 2.5, color: ACCENT, opacity: 0.8,
-      }).addTo(activeMap);
+      });
+      routeLine = line;
+      activeMap.whenReady(() => { if (routeLine === line) line.addTo(activeMap); });
     }
   }
 
@@ -455,6 +506,22 @@ function runMapDialog(cfg) {
     // barre de progression remplie jusqu'à aujourd'hui
     tlEl.appendChild(el('div', { attrs: { style: 'height:4px;border-radius:999px;background:linear-gradient(90deg,' + ACCENT + ' ' + pct + '%, var(--border) ' + pct + '%);margin:0 0.2rem 0.3rem' } }));
     const strip = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:stretch;overflow-x:auto;padding:0 0.2rem 0.3rem;-webkit-overflow-scrolling:touch' } });
+    // [MAP-TRIP-POLISH] chips « Jour 1… » cliquables (si plusieurs jours distincts) :
+    // clic = faire défiler la frise jusqu'à la première étape du jour.
+    const days = [...new Set(dated.map(p => p.due_date))];
+    const firstStepOfDay = {};
+    if (days.length > 1) {
+      const chipsRow = el('div', { attrs: { style: 'display:flex;gap:0.25rem;flex-wrap:wrap;margin:0 0.2rem 0.3rem' } });
+      days.forEach((d, i) => {
+        const lbl = new Date(d + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+        chipsRow.appendChild(el('button', {
+          class: 'prio-btn', text: 'Jour ' + (i + 1),
+          attrs: { type: 'button', title: lbl + ' — aller à ce jour dans la frise', style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + (d === tlToday ? ';border-color:' + ACCENT + ';color:' + ACCENT : '') },
+          on: { click: () => { const s = firstStepOfDay[d]; if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' }); } },
+        }));
+      });
+      tlEl.appendChild(chipsRow);
+    }
     let cursorPlaced = false;
     const cursor = () => el('div', {
       attrs: { title: 'Aujourd\'hui', style: 'flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:0.6rem;color:' + ACCENT + ';font-weight:700' },
@@ -470,7 +537,8 @@ function runMapDialog(cfg) {
         attrs: {
           type: 'button',
           title: (p.title || '') + (hasGps ? '' : ' — sans position (non centrable)'),
-          style: 'flex-shrink:0;max-width:9.5rem;display:flex;flex-direction:column;align-items:flex-start;gap:0.08rem;'
+          // overflow:hidden : les titres longs restent DANS leur étape (pas de chevauchement).
+          style: 'flex-shrink:0;max-width:9.5rem;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;gap:0.08rem;'
             + 'background:var(--panel-2);border:1px ' + (hasGps ? 'solid' : 'dashed') + ' var(--border);border-radius:8px;'
             + 'padding:0.25rem 0.45rem;color:inherit;font:inherit;font-size:0.7rem;text-align:left;'
             + 'cursor:' + (hasGps ? 'pointer' : 'default') + ';'
@@ -478,8 +546,21 @@ function runMapDialog(cfg) {
             + (isToday ? 'box-shadow:0 0 0 2px ' + ACCENT + ';' : ''),
         },
       });
-      step.appendChild(el('span', { text: (isPast ? '✓ ' : '') + dayLbl, attrs: { style: 'color:var(--muted);font-size:0.64rem;white-space:nowrap' } }));
-      step.appendChild(el('span', { text: p.title || '(mémo)', attrs: { style: 'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600' } }));
+      // [MAP-TRIP-POLISH] miniature de la photo du mémo dans l'étape (si dispo).
+      const col = el('span', { attrs: { style: 'display:flex;flex-direction:column;gap:0.08rem;min-width:0' } });
+      col.appendChild(el('span', { text: (isPast ? '✓ ' : '') + dayLbl, attrs: { style: 'color:var(--muted);font-size:0.64rem;white-space:nowrap' } }));
+      col.appendChild(el('span', { text: p.title || '(mémo)', attrs: { style: 'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600' } }));
+      if (p.imgUrl) {
+        const rowWrap = el('span', { attrs: { style: 'display:flex;align-items:center;gap:0.35rem;min-width:0' } });
+        rowWrap.appendChild(el('img', { attrs: { src: p.imgUrl, loading: 'lazy', alt: '', style: 'width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border)' } }));
+        rowWrap.appendChild(col);
+        step.appendChild(rowWrap);
+        step.style.flexDirection = 'row';
+        step.style.alignItems = 'center';
+      } else {
+        step.appendChild(col);
+      }
+      if (!firstStepOfDay[p.due_date]) firstStepOfDay[p.due_date] = step;
       if (hasGps) {
         step.addEventListener('click', () => {
           const mk = markersByKey['memo:' + p.id];
@@ -593,7 +674,9 @@ function runMapDialog(cfg) {
       tlBtn = el('button', {
         class: 'prio-btn',
         attrs: { type: 'button', title: 'Frise chronologique des mémos datés (masquage mémorisé)', style: 'padding:0.1rem 0.5rem' },
-        on: { click: () => { tlOn = !tlOn; if (TLKEY) localStorage.setItem(TLKEY, tlOn ? '1' : '0'); syncTlBtn(); refresh(false); } },
+        // [MAP-TIMELINE-LAYOUT] invalidateSize après (dé)pliage : Leaflet recalcule
+        // proprement si le dialog a changé de hauteur (la carte, elle, ne bouge pas).
+        on: { click: () => { tlOn = !tlOn; if (TLKEY) localStorage.setItem(TLKEY, tlOn ? '1' : '0'); syncTlBtn(); refresh(false); setTimeout(() => activeMap && activeMap.invalidateSize(), 60); } },
       });
       syncTlBtn();
       bar.appendChild(tlBtn);

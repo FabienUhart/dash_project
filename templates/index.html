@@ -2779,6 +2779,8 @@ function boardMapPoints() {
       // [MAP-TIMELINE] date + flag voyage résolu (frise, reflet, tracé).
       due_date: m.due_date || '', due_time: m.due_time || '',
       trip: resolveTripLocal(projById, m.project_id),
+      // [MAP-TRIP-POLISH] 1re photo du mémo, URL résolue owner (invariant 5).
+      imgUrl: (m.images && m.images.length) ? '/uploads/' + m.images[0] : '',
     });
   });
   if (scope && !searchActive) {
@@ -2809,6 +2811,7 @@ function boardDatedPoints() {
     due_date: m.due_date, due_time: m.due_time || '',
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: resolveTripLocal(projById, m.project_id),
+    imgUrl: (m.images && m.images.length) ? '/uploads/' + m.images[0] : '', // [MAP-TRIP-POLISH]
   }));
 }
 

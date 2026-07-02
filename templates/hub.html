@@ -933,7 +933,8 @@ function hubTripOf(projectId) { const p = projById(projectId); return !!(p && p.
 function hubMapPoints() {
   const pts = [];
   focusedMemos().forEach(m => { if (m.location && typeof m.location.lat === 'number') pts.push({ kind: 'memo', id: m.id, lat: m.location.lat, lng: m.location.lng, placeLabel: m.location.label || '', sub: (m.title || stripTags(m.content).slice(0, 40)), project_id: m.project_id, groups: m.map_groups || [], color: (prioOf(m.priority) || {}).color || '',
-    due_date: m.due_date || '', due_time: m.due_time || '', trip: hubTripOf(m.project_id) }); }); // [MAP-TIMELINE]
+    due_date: m.due_date || '', due_time: m.due_time || '', trip: hubTripOf(m.project_id),
+    imgUrl: (m.images && m.images.length) ? '/share/' + m.share_token + '/image/' + m.images[0] : '' }); }); // [MAP-TIMELINE][MAP-TRIP-POLISH]
   (DATA.projects || []).forEach(p => { if (p.location && typeof p.location.lat === 'number') pts.push({ kind: 'project', id: p.id, lat: p.location.lat, lng: p.location.lng, placeLabel: p.location.label || '', sub: p.name, project_id: p.id, groups: [], color: usableProjColor(p.color) || '' }); });
   return pts;
 }
@@ -947,6 +948,7 @@ function hubDatedPoints() {
     lat: (m.location && typeof m.location.lat === 'number') ? m.location.lat : null,
     lng: (m.location && typeof m.location.lat === 'number') ? m.location.lng : null,
     trip: hubTripOf(m.project_id),
+    imgUrl: (m.images && m.images.length) ? '/share/' + m.share_token + '/image/' + m.images[0] : '', // [MAP-TRIP-POLISH]
   }));
 }
 document.getElementById('btn-map').addEventListener('click', () => {

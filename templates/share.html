@@ -1456,6 +1456,8 @@ function shareMapPoints() {
       color: m.point_color || (prios[m.priority] || {}).color || DATA.marker_color || '#e53935',
       kind: 'memo', id: m.id, override: m.point_color || '', groups: m.map_groups || [], project_id: m.project_id || null,
       due_date: m.due_date || '', due_time: m.due_time || '', trip: shareTripOf(m.project_id), // [MAP-TIMELINE]
+      // [MAP-TRIP-POLISH] 1re photo, URL scopée au partage (invariant 5).
+      imgUrl: (m.images && m.images.length) ? API + '/image/' + m.images[0] : '',
     });
   });
   (DATA.projects || []).forEach(p => {
@@ -1474,6 +1476,7 @@ function shareDatedPoints() {
     due_date: m.due_date, due_time: m.due_time || '',
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: shareTripOf(m.project_id),
+    imgUrl: (m.images && m.images.length) ? API + '/image/' + m.images[0] : '', // [MAP-TRIP-POLISH]
   }));
 }
 
