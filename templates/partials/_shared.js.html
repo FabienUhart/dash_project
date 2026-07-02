@@ -993,4 +993,61 @@ function runImageViewer(cfg) {
   render();
   dlg.showModal();
 }
+
+/* ── [AGENDA] helpers purs de la vue calendrier (ADR-001) — aucune dépendance à
+   state/DATA ; le rendu de la vue reste par page (index/share/hub). ── */
+
+// Matrice du mois : semaines lun→dim couvrant tout le mois (month 0-11).
+// Chaque case : { iso: 'YYYY-MM-DD', day, inMonth }.
+function agendaMonthMatrix(year, month) {
+  const first = new Date(year, month, 1);
+  const d = new Date(year, month, 1 - ((first.getDay() + 6) % 7)); // recule au lundi
+  const weeks = [];
+  do {
+    const week = [];
+    for (let i = 0; i < 7; i++) {
+      week.push({
+        iso: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'),
+        day: d.getDate(),
+        inMonth: d.getMonth() === month && d.getFullYear() === year,
+      });
+      d.setDate(d.getDate() + 1);
+    }
+    weeks.push(week);
+  } while (d.getMonth() === month && d.getFullYear() === year && weeks.length < 7);
+  return weeks;
+}
+
+// Tri intra-jour (règle [MEMO-TIME]) : mémos SANS heure d'abord, puis heure croissante.
+function agendaDayCompare(a, b) {
+  const ta = a.due_time || '', tb = b.due_time || '';
+  if (!ta && tb) return -1;
+  if (ta && !tb) return 1;
+  return ta.localeCompare(tb);
+}
+
+// Regroupe des mémos (déjà filtrés par la page : non terminés, avec due_date)
+// par jour ISO, chaque liste triée par agendaDayCompare.
+function agendaGroupByDay(memos) {
+  const map = {};
+  memos.forEach(m => { (map[m.due_date] = map[m.due_date] || []).push(m); });
+  Object.keys(map).forEach(k => map[k].sort(agendaDayCompare));
+  return map;
+}
+
+// Libellés FR.
+function agendaMonthLabel(year, month) {
+  return new Date(year, month, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+}
+function agendaDayLabel(iso) { // « jeudi 2 juillet »
+  return new Date(iso + 'T00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function agendaShortDayLabel(iso) { // « jeu 2 juil »
+  return new Date(iso + 'T00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+function agendaTodayIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+const AGENDA_DOW = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
 </script>

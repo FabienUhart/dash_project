@@ -119,6 +119,31 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .tree-memo { cursor: pointer; }
 .tree-memo .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* [AGENDA] vue calendrier mensuelle — grille CSS maison (invariant 6), tokens (invariant 9) */
+.ag-head { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.6rem; flex-wrap: wrap; }
+.ag-head h2 { margin: 0; font-size: 1.05rem; text-transform: capitalize; }
+.ag-nav { display: flex; gap: 0.3rem; margin-left: auto; }
+.ag-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.ag-dow { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; text-align: center; padding: 0.15rem 0; }
+.ag-cell { min-height: 88px; min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.25rem 0.3rem; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.ag-cell.out { opacity: 0.4; background: transparent; cursor: default; }
+.ag-cell.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ag-cell.sel { background: var(--panel-2); }
+.ag-cell.droptarget { outline: 1px dashed var(--accent); }
+.ag-num { font-size: 0.7rem; color: var(--muted); }
+.ag-cell.today .ag-num { color: var(--accent); font-weight: 700; }
+.ag-chip { display: flex; align-items: center; gap: 0.3rem; min-width: 0; font-size: 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.05rem 0.4rem; }
+.ag-chip .ag-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
+.ag-more { font-size: 0.68rem; color: var(--muted); padding-left: 0.2rem; }
+.ag-day-panel { margin-top: 0.9rem; }
+.ag-day-panel h3 { margin: 0 0 0.4rem; font-size: 0.9rem; text-transform: capitalize; }
+.ag-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border-radius: 8px; cursor: pointer; min-width: 0; }
+.ag-row:hover { background: var(--panel-2); }
+.ag-time { width: 54px; flex-shrink: 0; font-size: 0.75rem; color: var(--muted); }
+.ag-row .ag-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-empty { color: var(--muted); font-size: 0.82rem; font-style: italic; padding: 0.3rem 0.5rem; }
+
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 1.2rem; width: min(620px, 94vw); }
 dialog::backdrop { background: rgba(6,9,12,0.62); }
@@ -206,6 +231,7 @@ dialog::backdrop { background: rgba(6,9,12,0.62); }
     <input id="search" type="text" placeholder="Rechercher…" autocomplete="off">
     <span class="spacer"></span>
     <button class="btn" id="btn-plan">🌳 Plan</button>
+    <button class="btn" id="btn-agenda">📆 Agenda</button>
     <button class="btn" id="btn-map">🗺 Carte</button>
     <button class="btn" id="theme-btn" title="Thème">🌓</button>
   </header>
@@ -416,7 +442,12 @@ function prioOf(id) { return (DATA.priorities || []).find(p => p.id === id) || n
 function projById(id) { return (DATA.projects || []).find(p => p.id === id) || null; }
 
 // ── rendu ──
-function render() { renderSidebar(); if (VIEW === 'plan') renderPlan(); else renderBoard(); }
+function render() {
+  renderSidebar();
+  if (VIEW === 'plan') renderPlan();
+  else if (VIEW === 'agenda') renderAgendaHub();
+  else renderBoard();
+}
 
 function renderSidebar() {
   const nav = document.getElementById('sidebar'); nav.hidden = false; nav.innerHTML = '';
@@ -590,6 +621,115 @@ function renderPlan() {
   board.appendChild(wrap);
 }
 
+/* ── [AGENDA] vue calendrier mensuelle du hub — grille CSS maison (invariant 6),
+   scopée à focusedMemos() (union des dossiers, FOCUS + recherche). D&D par mémo
+   seulement si m.can_edit → putMemo(m, {due_date}) routé sur SON share_token
+   (revalidé serveur — invariant 5). due_time conservé (PUT partiel). Mois affiché
+   non persisté (spec), conservé au re-render. Mobile ≤900px : liste, pas de D&D. ── */
+let agendaYM = null, agendaSelDay = null, agendaDragMemo = null;
+
+function agendaChipColor(m) {
+  const p = prioOf(m.priority);
+  if (p && p.color) return p.color;
+  const proj = projById(m.project_id);
+  return usableProjColor(proj && proj.color) || DATA.marker_color || '#e53935';
+}
+
+function agendaMemoTitle(m) {
+  return (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)');
+}
+
+function agendaRow(m) {
+  const row = el('div', { class: 'ag-row', on: { click: () => openEditor(m) } });
+  row.appendChild(el('span', { class: 'ag-time', text: m.due_time ? fmtMemoTime(m.due_time) : '—' }));
+  const dot = el('span', { class: 'ag-dot' });
+  dot.style.background = agendaChipColor(m);
+  row.appendChild(dot);
+  row.appendChild(el('span', { class: 'ag-t', text: agendaMemoTitle(m), attrs: { title: agendaMemoTitle(m) } }));
+  if (!m.can_edit) row.appendChild(el('span', { class: 'ro', text: '👁' }));
+  return row;
+}
+
+function renderAgendaHub() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  const today = agendaTodayIso();
+  if (!agendaYM) { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; }
+  if (!agendaSelDay) agendaSelDay = today;
+  const byDay = agendaGroupByDay(focusedMemos().filter(m => !m.done && m.due_date));
+
+  const head = el('div', { class: 'ag-head' });
+  head.appendChild(el('h2', { text: '📆 ' + agendaMonthLabel(agendaYM.y, agendaYM.m) }));
+  const nav = el('div', { class: 'ag-nav' });
+  const shift = (d) => { const n = new Date(agendaYM.y, agendaYM.m + d, 1); agendaYM = { y: n.getFullYear(), m: n.getMonth() }; renderAgendaHub(); };
+  nav.appendChild(el('button', { class: 'btn', text: '‹', attrs: { title: 'Mois précédent' }, on: { click: () => shift(-1) } }));
+  nav.appendChild(el('button', { class: 'btn', text: 'Aujourd\'hui', on: { click: () => { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; agendaSelDay = today; renderAgendaHub(); } } }));
+  nav.appendChild(el('button', { class: 'btn', text: '›', attrs: { title: 'Mois suivant' }, on: { click: () => shift(1) } }));
+  head.appendChild(nav);
+  board.appendChild(head);
+
+  // Mobile : liste par jour (jours avec mémos seulement), pas de grille ni D&D.
+  if (window.matchMedia('(max-width: 760px)').matches) {
+    const prefix = agendaYM.y + '-' + String(agendaYM.m + 1).padStart(2, '0');
+    const days = Object.keys(byDay).filter(iso => iso.startsWith(prefix)).sort();
+    if (!days.length) { board.appendChild(el('div', { class: 'ag-empty', text: 'Aucun mémo daté ce mois-ci.' })); return; }
+    days.forEach(iso => {
+      const sec = el('div', { class: 'ag-day-panel' });
+      sec.appendChild(el('h3', { text: agendaShortDayLabel(iso) + ' — ' + byDay[iso].length + ' mémo' + (byDay[iso].length > 1 ? 's' : '') }));
+      byDay[iso].forEach(m => sec.appendChild(agendaRow(m)));
+      board.appendChild(sec);
+    });
+    return;
+  }
+
+  const grid = el('div', { class: 'ag-grid' });
+  AGENDA_DOW.forEach(d => grid.appendChild(el('div', { class: 'ag-dow', text: d })));
+  agendaMonthMatrix(agendaYM.y, agendaYM.m).forEach(week => week.forEach(c => {
+    const cell = el('div', {
+      class: 'ag-cell' + (c.inMonth ? '' : ' out') + (c.iso === today ? ' today' : '') + (c.iso === agendaSelDay && c.inMonth ? ' sel' : ''),
+    });
+    cell.appendChild(el('span', { class: 'ag-num', text: String(c.day) }));
+    const list = byDay[c.iso] || [];
+    list.slice(0, 3).forEach(m => {
+      const label = agendaMemoTitle(m);
+      const chip = el('div', { class: 'ag-chip', attrs: { title: label + (m.due_time ? ' · ' + fmtMemoTime(m.due_time) : '') } });
+      const dot = el('span', { class: 'ag-dot' });
+      dot.style.background = agendaChipColor(m);
+      chip.append(dot, el('span', { class: 'ag-t', text: label }));
+      if (m.can_edit) { // lecture seule = chips non draggables
+        chip.setAttribute('draggable', 'true');
+        chip.addEventListener('dragstart', (e) => { e.stopPropagation(); agendaDragMemo = m; e.dataTransfer.effectAllowed = 'move'; });
+        chip.addEventListener('dragend', () => { agendaDragMemo = null; });
+      }
+      chip.addEventListener('click', (e) => { e.stopPropagation(); openEditor(m); });
+      cell.appendChild(chip);
+    });
+    if (list.length > 3) cell.appendChild(el('span', { class: 'ag-more', text: '+' + (list.length - 3) }));
+    if (c.inMonth) {
+      cell.addEventListener('click', () => { agendaSelDay = c.iso; renderAgendaHub(); });
+      cell.addEventListener('dragover', (e) => { if (!agendaDragMemo) return; e.preventDefault(); cell.classList.add('droptarget'); });
+      cell.addEventListener('dragleave', () => cell.classList.remove('droptarget'));
+      cell.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        cell.classList.remove('droptarget');
+        if (!agendaDragMemo) return;
+        const m = agendaDragMemo;
+        agendaDragMemo = null;
+        await putMemo(m, { due_date: c.iso }); // reload() → re-render (VIEW conservé)
+      });
+    }
+    grid.appendChild(cell);
+  }));
+  board.appendChild(grid);
+
+  const panel = el('div', { class: 'ag-day-panel' });
+  const dayList = byDay[agendaSelDay] || [];
+  panel.appendChild(el('h3', { text: agendaDayLabel(agendaSelDay) + ' — ' + dayList.length + ' mémo' + (dayList.length > 1 ? 's' : '') }));
+  if (!dayList.length) panel.appendChild(el('div', { class: 'ag-empty', text: 'Rien ce jour-là.' }));
+  dayList.forEach(m => panel.appendChild(agendaRow(m)));
+  board.appendChild(panel);
+}
+
 // ── éditeur mémo (routé sur m.share_token) ──
 const edDialog = document.getElementById('ed');
 let edMemo = null, edAssignees = [];
@@ -729,8 +869,14 @@ document.getElementById('btn-map').addEventListener('click', () => {
 const mapDialog = document.getElementById('map-dialog');
 document.getElementById('map-close').addEventListener('click', () => mapDialog.close());
 mapDialog.addEventListener('close', () => { if (activeMap) { activeMap.remove(); activeMap = null; } });
-document.getElementById('btn-plan').addEventListener('click', () => { VIEW = VIEW === 'plan' ? 'board' : 'plan'; document.getElementById('btn-plan').classList.toggle('primary', VIEW === 'plan'); render(); });
-document.getElementById('search').addEventListener('input', () => { if (VIEW === 'plan') renderPlan(); else renderBoard(); });
+// [AGENDA] deux toggles de vue exclusifs (Plan / Agenda) — la classe primary suit VIEW.
+function syncViewBtns() {
+  document.getElementById('btn-plan').classList.toggle('primary', VIEW === 'plan');
+  document.getElementById('btn-agenda').classList.toggle('primary', VIEW === 'agenda');
+}
+document.getElementById('btn-plan').addEventListener('click', () => { VIEW = VIEW === 'plan' ? 'board' : 'plan'; syncViewBtns(); render(); });
+document.getElementById('btn-agenda').addEventListener('click', () => { VIEW = VIEW === 'agenda' ? 'board' : 'agenda'; syncViewBtns(); render(); });
+document.getElementById('search').addEventListener('input', () => { if (VIEW === 'plan') renderPlan(); else if (VIEW === 'agenda') renderAgendaHub(); else renderBoard(); });
 
 // ── init : toujours tenter /data — cookie de session HttpOnly OU header localStorage
 // ([HUB-SESSION]) ; loadDash affiche l'écran code sur 403 (comportement inchangé sans session).
