@@ -1379,6 +1379,15 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   /* [SETTINGS-TABS] rangée d'onglets sur UNE ligne défilable (pattern barre Quill). */
   .settings-tabs { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; padding-bottom: 0.2rem; }
   .settings-tabs .prio-btn { flex: 0 0 auto; }
+  /* [MAP-TIMELINE-MOBILE-ORDER] ordre visuel CARTE → FRISE → LISTE : le dialog passe en
+     flex column, la row carte+liste est aplatie (display:contents) et l'ordre est piloté
+     par `order` (barres/titre = 0 → en tête ; .actions en dernier). Desktop inchangé. */
+  #map-dialog { display: flex; flex-direction: column; overflow-y: auto; max-height: 92vh; } /* l'empilement scrolle, rien n'est clippé */
+  #map-row { display: contents !important; } /* bat le display:flex inline du markup */
+  #map-el { order: 1; flex: 0 0 auto !important; min-width: 0 !important; }
+  #map-timeline { order: 2; }
+  #map-list { order: 3; width: 100% !important; flex: 0 0 auto !important; min-height: 110px; max-height: 38vh !important; margin-top: 0.5rem; } /* flex:0 0 auto + min-height : sans ça, le max-height UA du dialog en flex column compressait la liste à 0x0 */
+  #map-dialog .actions { order: 4; }
 }
 @media (pointer: coarse) {
   /* [SETTINGS-TABS] la règle tactile button{min-height:44px} déformerait les chips
@@ -1539,7 +1548,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <div id="map-subbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.45rem"></div>
   <div id="map-groupbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.55rem"></div>
   <div id="map-selbar" style="display:none;flex-wrap:wrap;gap:0.4rem;align-items:center;margin:0 0 0.55rem;padding:0.45rem 0.55rem;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px"></div>
-  <div style="display:flex;gap:0.6rem;flex-wrap:wrap">
+  <div id="map-row" style="display:flex;gap:0.6rem;flex-wrap:wrap">
     <div id="map-el" style="flex:1;min-width:260px;height:min(60vh,480px);border-radius:8px;background:var(--panel-2)"></div>
     <div id="map-list" style="width:230px;max-height:min(60vh,480px);overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem"></div>
   </div>

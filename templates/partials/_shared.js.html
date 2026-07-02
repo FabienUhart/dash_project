@@ -207,6 +207,9 @@ function runMapDialog(cfg) {
   // marqueurs indexés pour que la frise puisse centrer/ouvrir la popup d'un point.
   const TLKEY = cfg.timelineKey || '';
   let tlOn = TLKEY ? localStorage.getItem(TLKEY) !== '0' : true;
+  // [MAP-DAYCHIP-ACTIVE] jour actif de la frise (un seul, re-clic = désélection,
+  // non persisté — remis à zéro à chaque ouverture de la carte).
+  let tlActiveDay = null;
   const markersByKey = {};
   let routeLine = null;
   const ACCENT = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#4fc3f7').trim() || '#4fc3f7';
@@ -510,14 +513,28 @@ function runMapDialog(cfg) {
     // clic = faire défiler la frise jusqu'à la première étape du jour.
     const days = [...new Set(dated.map(p => p.due_date))];
     const firstStepOfDay = {};
+    if (tlActiveDay && !days.includes(tlActiveDay)) tlActiveDay = null; // jour disparu (focus)
     if (days.length > 1) {
       const chipsRow = el('div', { attrs: { style: 'display:flex;gap:0.25rem;flex-wrap:wrap;margin:0 0.2rem 0.3rem' } });
       days.forEach((d, i) => {
         const lbl = new Date(d + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+        // [MAP-DAYCHIP-ACTIVE] chip ACTIF = fond accent (façon .prio-btn sélectionné) ;
+        // le chip du jour courant garde son accent discret, l'actif prime.
+        const isActive = tlActiveDay === d;
+        const chipStyle = isActive
+          ? ';background:' + ACCENT + ';border-color:' + ACCENT + ';color:#10141a;font-weight:700'
+          : (d === tlToday ? ';border-color:' + ACCENT + ';color:' + ACCENT : '');
         chipsRow.appendChild(el('button', {
-          class: 'prio-btn', text: 'Jour ' + (i + 1),
-          attrs: { type: 'button', title: lbl + ' — aller à ce jour dans la frise', style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + (d === tlToday ? ';border-color:' + ACCENT + ';color:' + ACCENT : '') },
-          on: { click: () => { const s = firstStepOfDay[d]; if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' }); } },
+          class: 'prio-btn', text: (isActive ? '✓ ' : '') + 'Jour ' + (i + 1),
+          attrs: { type: 'button', title: lbl + (isActive ? ' — cliquer pour désélectionner' : ' — mettre ce jour en avant dans la frise'), style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + chipStyle },
+          on: { click: () => {
+            tlActiveDay = isActive ? null : d; // un seul actif, re-clic = désélection
+            renderTimeline();
+            if (tlActiveDay) {
+              const s = tlEl.querySelector('[data-day="' + tlActiveDay + '"]');
+              if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+            }
+          } },
         }));
       });
       tlEl.appendChild(chipsRow);
@@ -533,17 +550,22 @@ function runMapDialog(cfg) {
       const hasGps = p.lat != null && p.lng != null;
       const d = new Date(p.due_date + 'T00:00');
       const dayLbl = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (p.due_time ? ' ' + fmtMemoTime(p.due_time) : '');
+      // [MAP-DAYCHIP-ACTIVE] jour actif : ses étapes ressortent (anneau accent),
+      // les autres jours s'estompent ; sans jour actif, comportement classique.
+      const isActiveDay = tlActiveDay === p.due_date;
+      const dimOtherDay = tlActiveDay && !isActiveDay;
       const step = el('button', {
         attrs: {
           type: 'button',
+          'data-day': p.due_date,
           title: (p.title || '') + (hasGps ? '' : ' — sans position (non centrable)'),
           // overflow:hidden : les titres longs restent DANS leur étape (pas de chevauchement).
           style: 'flex-shrink:0;max-width:9.5rem;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;gap:0.08rem;'
             + 'background:var(--panel-2);border:1px ' + (hasGps ? 'solid' : 'dashed') + ' var(--border);border-radius:8px;'
             + 'padding:0.25rem 0.45rem;color:inherit;font:inherit;font-size:0.7rem;text-align:left;'
             + 'cursor:' + (hasGps ? 'pointer' : 'default') + ';'
-            + (isPast ? 'opacity:0.45;' : '')
-            + (isToday ? 'box-shadow:0 0 0 2px ' + ACCENT + ';' : ''),
+            + (dimOtherDay ? 'opacity:0.35;' : (isPast ? 'opacity:0.45;' : ''))
+            + ((isActiveDay || isToday) ? 'box-shadow:0 0 0 2px ' + ACCENT + ';' : ''),
         },
       });
       // [MAP-TRIP-POLISH] miniature de la photo du mémo dans l'étape (si dispo).
