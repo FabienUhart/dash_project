@@ -8,6 +8,10 @@
 <link rel="icon" type="image/svg+xml" href="/share/assets/favicon.svg">
 <link rel="stylesheet" href="/share/assets/quill.snow.css">
 <script src="/share/assets/quill.min.js" defer></script>
+<!-- [MEMO-TABLES] tableaux dans l'éditeur (quill-table-better 1.2.3, vendorisé) ; chargé
+     APRÈS quill.min.js. Absent => QuillTableBetter undefined => dégradation propre. -->
+<link rel="stylesheet" href="/share/assets/quill-table-better.css">
+<script src="/share/assets/quill-table-better.js" defer></script>
 <link rel="stylesheet" href="/share/assets/leaflet.css">
 <script src="/share/assets/leaflet.js" defer></script>
 <!-- [PHOTO-CLUSTER] plugin clustering (invité, whitelist SHARE_ASSETS) ; après leaflet.js. -->
@@ -623,6 +627,46 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .ql-snow .ql-picker-label:hover, .ql-snow .ql-picker-label.ql-active,
 .ql-snow .ql-picker-item:hover, .ql-snow .ql-picker-item.ql-selected { color: var(--accent); }
 .ql-snow a { color: var(--accent); }
+/* === [MEMO-TABLES] tableaux dans les mémos — tokens (invariant 9), 2 thèmes.
+   Placé en FIN de style pour gagner la cascade sur quill.snow.css (td border #000)
+   et sur quill-table-better.css (menus blancs en dur). === */
+.ql-editor td, .ql-editor th { border-color: var(--border); }
+.ql-editor th { background: var(--panel-2); }
+/* Tableau sur la card : masqué dans l'extrait clampé (3 lignes, spec §4) ; visible en
+   rendu statique aux tokens quand le contenu complet est affiché (card dépliée / non
+   clampée) — sinon un invité lecture seule n'y aurait jamais accès. table-layout:fixed
+   partage la largeur de la card, pas de débordement. */
+.task-content .task-clamp, .task-clamp table { display: none; }
+.task-content table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.task-content td, .task-content th { border: 1px solid var(--border); padding: 2px 5px; word-break: break-word; }
+.task-content th { background: var(--panel-2); }
+/* classes de sélection du module sérialisées dans le contenu : pas d'overlay hors éditeur */
+.task-content .ql-cell-focused::after, .task-content .ql-cell-selected::after,
+.task-content .ql-cell-selected-after::after { content: none; }
+/* UI flottante du module (sélecteur ⊞, menus, formulaire propriétés) aux tokens */
+.ql-table-select-container, .ql-table-dropdown-list, .ql-table-dropdown-properties-list,
+.ql-table-properties-form, .ql-table-border-shadow,
+.ql-table-color-container .color-picker .color-picker-select,
+.ql-table-color-container .color-picker .color-picker-palette {
+  background: var(--panel-2); color: var(--text); border-color: var(--border);
+}
+.label-field-view-input-wrapper > label { background: var(--panel-2); color: var(--muted); }
+.ql-table-properties-form .properties-form-header { color: var(--text); border-bottom-color: var(--border); }
+.ql-table-properties-form .properties-form-action-row > button { background: var(--panel-2); color: var(--text); }
+.ql-table-dropdown:hover, .ql-table-dropdown-properties:hover,
+.ql-table-dropdown-list li:hover, .ql-table-dropdown-properties-list li:hover,
+.ql-table-properties-form .properties-form-action-row > button:hover { background: var(--panel); }
+.ql-table-input, .ql-table-properties-form input { background: var(--bg); color: var(--text); border-color: var(--border); }
+.ql-table-button-disabled { background: var(--panel) !important; } /* !important : bat celui du module */
+@media (max-width: 900px) {
+  /* tableau plus large que la colonne → scroll horizontal, pas d'écrasement */
+  .ql-editor { overflow-x: auto; }
+  .ql-editor table { min-width: 480px; }
+}
+@media (pointer: coarse) {
+  /* gotcha min-height:44px : dimensions explicites sur les petits boutons du module */
+  .ql-table-select-container *, .ql-table-properties-form button { min-height: 0; }
+}
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
@@ -956,7 +1000,7 @@ function sanitize(html) {
   return tpl.content;
 }
 
-function isRich(c) { return /<(p|div|ul|ol|li|br|strong|em|u|s|a|h[1-6]|blockquote|pre|code|span)[\s>/]/i.test(c || ''); }
+function isRich(c) { return /<(p|div|ul|ol|li|br|strong|em|u|s|a|h[1-6]|blockquote|pre|code|span|table)[\s>/]/i.test(c || ''); }
 
 function linkifyText(text) {
   const frag = document.createDocumentFragment();
@@ -1087,7 +1131,7 @@ function getShareQuill() {
     sQuill = new Quill('#q-editor', {
       theme: 'snow',
       placeholder: 'Contenu du mémo… (tape @ pour mentionner)',
-      modules: {
+      modules: applyTableBetter({
         toolbar: [
           [{ header: [1, 2, 3, false] }],
           ['bold', 'italic', 'underline', 'strike'],
@@ -1096,7 +1140,7 @@ function getShareQuill() {
           ['link', 'blockquote'],
           ['clean'],
         ],
-      },
+      }),
     });
     addMentionMatcher(sQuill);
     setupMentions(sQuill, shareSuggestions, (name) => {
@@ -2028,7 +2072,7 @@ function render() {
     exc.querySelectorAll('.mention[data-mention]').forEach(sp => {
       if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
     });
-    if (!exc.querySelector('li[data-list]')) exc.classList.add('task-clamp');
+    if (!exc.querySelector('li[data-list], table')) exc.classList.add('task-clamp'); // [MEMO-TABLES] un tableau reste lisible (lecture seule incluse)
     content.appendChild(exc);
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
       if (!canEditNow()) return;

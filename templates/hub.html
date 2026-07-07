@@ -9,6 +9,10 @@
 <!-- [HUB-INLINE-EDIT] Quill pour l'édition riche inline (mêmes assets que share.html). -->
 <link rel="stylesheet" href="/share/assets/quill.snow.css">
 <script src="/share/assets/quill.min.js" defer></script>
+<!-- [MEMO-TABLES] tableaux dans l'éditeur (quill-table-better 1.2.3, vendorisé) ; chargé
+     APRÈS quill.min.js. Absent => QuillTableBetter undefined => dégradation propre. -->
+<link rel="stylesheet" href="/share/assets/quill-table-better.css">
+<script src="/share/assets/quill-table-better.js" defer></script>
 <link rel="stylesheet" href="/share/assets/leaflet.css">
 <script src="/share/assets/leaflet.js" defer></script>
 <link rel="stylesheet" href="/share/assets/MarkerCluster.css">
@@ -219,6 +223,46 @@ dialog::backdrop { background: rgba(6,9,12,0.62); }
   #map-list { order: 3; width: 100% !important; flex: 0 0 auto !important; min-height: 110px; max-height: 38vh !important; margin-top: 0.5rem; } /* flex:0 0 auto + min-height : sans ça, le max-height UA du dialog en flex column compressait la liste à 0x0 */
   #map-dialog .actions { order: 4; }
 }
+/* === [MEMO-TABLES] tableaux dans les mémos — tokens (invariant 9), 2 thèmes.
+   Placé en FIN de style pour gagner la cascade sur quill.snow.css (td border #000)
+   et sur quill-table-better.css (menus blancs en dur). === */
+.ql-editor td, .ql-editor th { border-color: var(--border); }
+.ql-editor th { background: var(--panel-2); }
+/* Tableau sur la card : masqué dans l'extrait clampé (3 lignes, spec §4) ; visible en
+   rendu statique aux tokens quand le contenu complet est affiché (card dépliée / non
+   clampée) — sinon un invité lecture seule n'y aurait jamais accès. table-layout:fixed
+   partage la largeur de la card, pas de débordement. */
+.task-content.clamp table { display: none; }
+.task-content table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.task-content td, .task-content th { border: 1px solid var(--border); padding: 2px 5px; word-break: break-word; }
+.task-content th { background: var(--panel-2); }
+/* classes de sélection du module sérialisées dans le contenu : pas d'overlay hors éditeur */
+.task-content .ql-cell-focused::after, .task-content .ql-cell-selected::after,
+.task-content .ql-cell-selected-after::after { content: none; }
+/* UI flottante du module (sélecteur ⊞, menus, formulaire propriétés) aux tokens */
+.ql-table-select-container, .ql-table-dropdown-list, .ql-table-dropdown-properties-list,
+.ql-table-properties-form, .ql-table-border-shadow,
+.ql-table-color-container .color-picker .color-picker-select,
+.ql-table-color-container .color-picker .color-picker-palette {
+  background: var(--panel-2); color: var(--text); border-color: var(--border);
+}
+.label-field-view-input-wrapper > label { background: var(--panel-2); color: var(--muted); }
+.ql-table-properties-form .properties-form-header { color: var(--text); border-bottom-color: var(--border); }
+.ql-table-properties-form .properties-form-action-row > button { background: var(--panel-2); color: var(--text); }
+.ql-table-dropdown:hover, .ql-table-dropdown-properties:hover,
+.ql-table-dropdown-list li:hover, .ql-table-dropdown-properties-list li:hover,
+.ql-table-properties-form .properties-form-action-row > button:hover { background: var(--panel); }
+.ql-table-input, .ql-table-properties-form input { background: var(--bg); color: var(--text); border-color: var(--border); }
+.ql-table-button-disabled { background: var(--panel) !important; } /* !important : bat celui du module */
+@media (max-width: 760px) {
+  /* tableau plus large que la colonne → scroll horizontal, pas d'écrasement */
+  .ql-editor { overflow-x: auto; }
+  .ql-editor table { min-width: 480px; }
+}
+@media (pointer: coarse) {
+  /* gotcha min-height:44px : dimensions explicites sur les petits boutons du module */
+  .ql-table-select-container *, .ql-table-properties-form button { min-height: 0; }
+}
 </style>
 </head>
 <body>
@@ -329,7 +373,7 @@ function sanitize(html) {
   }); if (n.tagName === 'A') { n.setAttribute('target', '_blank'); n.setAttribute('rel', 'noopener noreferrer'); } });
   return tpl.content;
 }
-function isRich(c) { return /<(p|div|ul|ol|li|br|strong|em|u|s|a|h[1-6]|blockquote|pre|code|span)[\s>/]/i.test(c || ''); }
+function isRich(c) { return /<(p|div|ul|ol|li|br|strong|em|u|s|a|h[1-6]|blockquote|pre|code|span|table)[\s>/]/i.test(c || ''); }
 function linkify(text) { const frag = document.createDocumentFragment(); const re = /https?:\/\/[^\s<>"]+/g;
   let last = 0, m; while ((m = re.exec(text)) !== null) { frag.appendChild(document.createTextNode(text.slice(last, m.index)));
     const a = el('a', '', m[0].replace(/^https?:\/\//, '')); a.href = m[0]; a.target = '_blank'; a.rel = 'noopener noreferrer';
@@ -829,8 +873,8 @@ function getHubQuill() {
   if (!hubQuill) {
     registerMentionBlot();
     hubQuill = new Quill('#ed-qeditor', { theme: 'snow', placeholder: 'Contenu du mémo… (tape @ pour mentionner)',
-      modules: { toolbar: [[{ header: [1, 2, 3, false] }], ['bold', 'italic', 'underline', 'strike'],
-        [{ color: [] }, { background: [] }], [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }], ['link', 'blockquote'], ['clean']] } });
+      modules: applyTableBetter({ toolbar: [[{ header: [1, 2, 3, false] }], ['bold', 'italic', 'underline', 'strike'],
+        [{ color: [] }, { background: [] }], [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }], ['link', 'blockquote'], ['clean']] }) });
     addMentionMatcher(hubQuill);
     setupMentions(hubQuill, hubSuggestions, (name) => { if (!edAssignees.some(v => v.toLowerCase() === name.toLowerCase())) edAssignees.push(name); renderEdPeople(false); });
   }

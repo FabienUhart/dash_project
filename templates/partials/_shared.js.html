@@ -1051,6 +1051,32 @@ function registerMentionBlot() {
   Quill.__mentionReady = true;
 }
 
+// [MEMO-TABLES] Active le module tableau (quill-table-better vendorisé) sur une config
+// Quill : enregistre le module (une fois), ajoute le bouton ⊞ avant « clean » et les
+// options fr. Sans le fichier vendorisé (QuillTableBetter absent), no-op → l'éditeur
+// fonctionne comme avant, les tableaux existants restent rendus (invariant 6).
+function applyTableBetter(modules) {
+  if (typeof Quill === 'undefined' || typeof QuillTableBetter === 'undefined') return modules;
+  if (!Quill.__tableBetterReady) {
+    Quill.register({ 'modules/table-better': QuillTableBetter }, true);
+    Quill.__tableBetterReady = true;
+  }
+  modules.table = false;
+  modules['table-better'] = {
+    language: 'fr_FR',
+    menus: ['column', 'row', 'merge', 'table', 'cell', 'wrap', 'delete'],
+    toolbarTable: true,
+  };
+  modules.keyboard = { bindings: QuillTableBetter.keyboardBindings };
+  if (Array.isArray(modules.toolbar)) {
+    const tb = modules.toolbar;
+    const last = tb[tb.length - 1];
+    const isClean = Array.isArray(last) && last.length === 1 && last[0] === 'clean';
+    tb.splice(isClean ? tb.length - 1 : tb.length, 0, ['table-better']);
+  }
+  return modules;
+}
+
 function addMentionMatcher(q) {
   const Delta = Quill.import('delta');
   q.clipboard.addMatcher('SPAN', (node, delta) => {

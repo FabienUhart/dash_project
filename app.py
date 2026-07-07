@@ -2916,7 +2916,8 @@ def delete_comment(comment_id):
 
 
 SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js", "favicon.svg", "Inter.woff2",
-                "leaflet.markercluster.js", "MarkerCluster.css", "MarkerCluster.Default.css"}  # [PHOTO-CLUSTER]
+                "leaflet.markercluster.js", "MarkerCluster.css", "MarkerCluster.Default.css",  # [PHOTO-CLUSTER]
+                "quill-table-better.js", "quill-table-better.css"}  # [MEMO-TABLES]
 
 
 @app.route("/api/geocode")
