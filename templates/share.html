@@ -667,6 +667,20 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   /* gotcha min-height:44px : dimensions explicites sur les petits boutons du module */
   .ql-table-select-container *, .ql-table-properties-form button { min-height: 0; }
 }
+/* === [DIALOG-STICKY-ACTIONS] mobile : le pied des pop-ins reste visible sans scroll
+   (les dialogs longs scrollent en interne et noyaient les boutons). Fin de style =
+   gagne la cascade. === */
+@media (max-width: 900px) {
+  dialog .dlg-actions {
+    position: sticky; bottom: 0; z-index: 20;
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding: 0.6rem 0 0.2rem;
+  }
+  /* fix [MAP-TIMELINE-MOBILE-ORDER] : le sélecteur visait .actions, le markup est
+     .dlg-actions — la rangée Fermer restait à order 0 (avant la carte dans le flux),
+     ce qui empêcherait aussi le sticky de coller en bas. */
+  #map-dialog .dlg-actions { order: 4; }
+}
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>

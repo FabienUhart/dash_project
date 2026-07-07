@@ -1,6 +1,6 @@
 # MEMORY BANK — dash_project
 
-**Dernière mise à jour :** 2 juillet 2026 (soir — vague carte v20)
+**Dernière mise à jour :** 7 juillet 2026 ([MEMO-TABLES] livré)
 **Nature :** index de mémoire. La **source canonique** reste `CLAUDE.md` (racine). Ce fichier pointe vers elle, il ne la recopie pas (anti-duplication — cf. ADR-001).
 
 ## Résumé global
@@ -22,9 +22,9 @@ Dashboard personnel auto-hébergé sur un **Zimaboard**, utilisé comme page d'a
 - **`IDEAS.md`** — backlog (quick wins, confort/UX, dette technique, ambitieux), tags `[NOM]` repris par Claude Code.
 - **`patterns.md`** (ici) — conventions transverses + pointeurs.
 
-## État actuel (mise à jour 2 juillet 2026, soir)
+## État actuel (mise à jour 7 juillet 2026)
 
-- **Version courante : V20.4.29** — ⚠️ **format d'export = v20** (première évolution depuis v19 : `projects.is_trip`, cf. invariant 1 de `CLAUDE.md`). `origin/main` = `8e8709f` [MAP-GROUPS-MENU]. Déploiement Zimaboard manuel par Fabien (hard refresh après — HTML autonome caché).
+- **Version courante : V20.6.31** — format d'export toujours **v20**. Derniers lots (**non commités** à la livraison — commit/push = demande explicite Fabien) : `[MEMO-TABLES]` V20.5.30 (tableaux dans l'éditeur Quill des mémos, module `quill-table-better` 1.2.3 vendorisé, helper `applyTableBetter()` du partial, 3 pages, dégradation propre) et `[DIALOG-STICKY-ACTIONS]` V20.6.31 (hotfix mobile : pied des pop-ins en `position:sticky`, 3 pages, + fix du sélecteur `order:4` mort de la carte share/hub) — détail : `REALISATION.md` + historique `CLAUDE.md`. `origin/main` = `d945812`. Déploiement Zimaboard manuel par Fabien (hard refresh après — HTML autonome caché).
 - **Série carte v20 poussée** (détail normatif : `REALISATION.md` § V20 + `CLAUDE.md` invariant 1) :
   - `[MAP-TIMELINE]` `2089bc8` — **bump export v20**, `projects.is_trip` héritable (NULL/1/0, résolution au plus proche ancêtre, `_resolve_trip` serveur / `resolveTripLocal` partial, invités = `trip` résolu lecture seule) ; frise chronologique des mémos datés + curseur « aujourd'hui » + tracé itinéraire pointillé **réservé aux voyages**. Spec `docs/specs/MAP-TIMELINE-trip-timeline-and-route.md`.
   - `[MAP-TRIP-POLISH]` `3219a66` — marqueurs-vignettes photo numérotés ①② chronologiques (voyages), chips « Jour N », miniatures dans la frise ; **+ fix bloquant « carte noire »** (tuiles + `setView` AVANT tout vecteur, `drawRoute` idempotent, démontage try/catch — voir gotcha `patterns.md`).
@@ -32,7 +32,7 @@ Dashboard personnel auto-hébergé sur un **Zimaboard**, utilisé comme page d'a
   - `[MAP-GROUPS-MENU]` `8e8709f` — liste de points épurée (plus de coches permanentes) + menu « Groupes ▾ » créer/modifier/copier/supprimer ; **gate share resserré à `canEditNow()`** (lien can_edit ET invité approuvé — un anonyme ne voit plus les outils d'édition).
 - **Avant la carte (même journée)** : `[AGENDA]`/`[AGENDA-PROJECT]`/`[AGENDA-SMART-MONTH]` (vue calendrier 3 pages, D&D, filtre projet, mois d'atterrissage utile), `[GUEST-RESEND-LINK]`, `[GUEST-SUBPROJECT]`, et la vague V19.8→V19.13 (hub `/share/hub/`, cookie session HttpOnly, `[GUEST-EDIT]`, `[SETTINGS-TABS]`, `[SIDEBAR-TREE]`, `[AUTO-REFRESH]`). Tout est sur `origin/main`, tout validé Cowork/Chrome.
 - **Hub invité** (inchangé) : routes sous `/share/hub/<hub_token>`, cookie HttpOnly `dashhubsession` 180 j (lecture `/data` seulement), écritures par jetons de dossier revalidées serveur ; `_data_version` exclut les volatils (`last_seen_at`/`session_token`/`activity_seen_at`).
-- **Backlog** : `[NOTIFY-EMAIL]` (plomberie SMTP prête), `[VOTES]`, `[TABLES]`, `[TAG-NAV]`, `[IMAGE-TRASH]`, `[IMAGE-LAZY-LOAD]` (si perf vignettes carte), couleur de groupe (écartée de [MAP-GROUPS-MENU]), confort/UX — voir `IDEAS.md` (section « En cours » vide).
+- **Backlog** : prochains lots planifiés `[BOARD-SUBHIDE]` (V20.7) et `[COMMENT-REACTIONS]` (V21.0, ⚠️ bump export v21) — specs verrouillées dans `docs/specs/`. Aussi : `[NOTIFY-EMAIL]` (plomberie SMTP prête), `[TAG-NAV]`, `[IMAGE-TRASH]`, `[IMAGE-LAZY-LOAD]`, couleur de groupe (écartée de [MAP-GROUPS-MENU]), confort/UX — voir `IDEAS.md`.
 
 
 ## Instructions pour Claude

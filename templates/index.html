@@ -1439,6 +1439,17 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
      les petits boutons du formulaire propriétés seraient déformés — dimensions explicites */
   .ql-table-select-container *, .ql-table-properties-form button { min-height: 0; }
 }
+/* === [DIALOG-STICKY-ACTIONS] mobile : le pied des pop-ins reste visible sans scroll
+   (les dialogs longs scrollent en interne et noyaient les boutons — carte : Fermer
+   ~300 px sous la ligne de flottaison). Fin de style = gagne la cascade. Le dialog QR
+   n'a pas de .actions (clic n'importe où = fermer) — non concerné. === */
+@media (max-width: 900px) {
+  dialog .actions {
+    position: sticky; bottom: 0; z-index: 20;
+    background: var(--panel); border-top: 1px solid var(--border);
+    padding: 0.6rem 0 0.2rem;
+  }
+}
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
