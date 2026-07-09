@@ -21,6 +21,7 @@ Dashboard personnel auto-hébergé sur un **Zimaboard**, utilisé comme page d'a
 - **`docs/adr/`** — décisions d'archi. ADR-001 = mutualisation des helpers front owner/invité (Option C, partial Jinja).
 - **`IDEAS.md`** — backlog (quick wins, confort/UX, dette technique, ambitieux), tags `[NOM]` repris par Claude Code.
 - **`patterns.md`** (ici) — conventions transverses + pointeurs.
+- **`dash-cicd-setup.md`** (ici, reference) — infra CI/CD : runner self-hébergé `zimaboard` (systemd, user `casaos`, `~/actions-runner`), dossier de déploiement `/mnt/StorageNaN/home_casaos/Documents/projects/dash_project`, workflows `ci.yml`/`deploy.yml`, process release (tag `VX.Y.Z` = tête de `REALISATION.md`) + rollback + gotcha « tag sur commit sans workflows ».
 
 ## État actuel (mise à jour 9 juillet 2026)
 
