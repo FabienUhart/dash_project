@@ -18,6 +18,14 @@ from urllib.parse import urlparse
 
 import re
 
+# [VOTE-DECISION] Fuseau de l'app pour interpréter vote_deadline (ISO local sans TZ).
+# tzdata (requirements) fournit la base IANA sur python:slim ; repli fixe si absente.
+try:
+    from zoneinfo import ZoneInfo
+    _APP_TZ = ZoneInfo("Europe/Paris")
+except Exception:  # pragma: no cover - repli si tzdata manquante
+    _APP_TZ = timezone(timedelta(hours=1))
+
 # [HUB-EMAIL-INVITE] Charge .env en dev (os.environ déjà rempli par env_file en Docker).
 # Secret SMTP lu UNIQUEMENT depuis l'environnement — jamais en base/export/front/logs.
 try:
@@ -321,6 +329,24 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN due_time TEXT DEFAULT ''")
     if "created_by" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN created_by TEXT DEFAULT ''")
+    # [VOTE-EXCLUDE] Mémo « hors vote » : visible/éditable mais PAS une option du vote.
+    # Additif, non exporté (comme les voix — donnée d'atelier, pas de bump : export v20).
+    if "vote_excluded" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN vote_excluded INTEGER DEFAULT 0")
+    # [VOTE-DECISION] Dossier en mode vote (V1 « choisir un »). Colonnes additives sur
+    # projects, jamais destructif (invariant 1). Absent = vote_enabled=0 → dossier normal.
+    # vote_winner_ids (TEXT JSON) = gel de l'ex æquo §9.a ET marqueur « déjà figé »
+    # ('' = jamais figé, '[]'/'[id,...]' = figé) — sert le snapshot paresseux idempotent.
+    for col, ddl in (
+        ("vote_enabled", "INTEGER DEFAULT 0"),
+        ("vote_mode", "TEXT DEFAULT ''"),
+        ("vote_deadline", "TEXT DEFAULT ''"),
+        ("vote_closed", "INTEGER DEFAULT 0"),
+        ("vote_winner_id", "INTEGER"),
+        ("vote_winner_ids", "TEXT DEFAULT ''"),
+    ):
+        if col not in pcols:
+            conn.execute(f"ALTER TABLE projects ADD COLUMN {col} {ddl}")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS memo_comments (
@@ -367,6 +393,25 @@ def init_db():
             created_at TEXT
         )
         """
+    )
+    # [VOTE-DECISION] Voix (personne, mémo) portées par un dossier. Additif, jamais
+    # exporté en V1 (donnée d'atelier éphémère, précédent comment_seen). L'index unique
+    # (project_id, voter) garantit « single = une voix par (personne, dossier) » en BASE ;
+    # extension V2 multi = échange du seul index (colonnes inchangées, §3.1).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memo_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            memo_id INTEGER NOT NULL,
+            voter TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_memo_votes_single "
+        "ON memo_votes(project_id, voter)"
     )
     scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
     if "pin" not in scols:
@@ -925,17 +970,26 @@ def _resolve_trip(db, project_id):
 
 @app.route("/api/projects", methods=["GET"])
 def list_projects():
-    rows = (
-        get_db()
-        .execute(
-            "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, p.is_trip, "
-            "COUNT(CASE WHEN m.done = 0 AND COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
-            "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
-            "GROUP BY p.id ORDER BY p.position, p.id"
-        )
-        .fetchall()
+    db = get_db()
+    sql = (
+        "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, p.is_trip, "
+        "p.vote_enabled, p.vote_mode, p.vote_deadline, p.vote_closed, p.vote_winner_id, p.vote_winner_ids, "
+        "COUNT(CASE WHEN m.done = 0 AND COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
+        "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
+        "GROUP BY p.id ORDER BY p.position, p.id"
     )
-    return jsonify([dict(r) for r in rows])
+    rows = db.execute(sql).fetchall()
+    # [VOTE-DECISION] gel paresseux du gagnant à la 1re lecture après deadline (§2.7).
+    if [1 for r in rows if r["vote_enabled"] and _ensure_vote_snapshot(db, r)]:
+        db.commit()
+    out = []
+    for r in rows:
+        d = dict(r)
+        for k in ("vote_enabled", "vote_mode", "vote_deadline", "vote_closed", "vote_winner_id", "vote_winner_ids"):
+            d.pop(k, None)
+        d.update(_vote_project_payload(db, r, owner=True))
+        out.append(d)
+    return jsonify(out)
 
 
 @app.route("/api/projects", methods=["POST"])
@@ -1015,12 +1069,132 @@ def update_project(project_id):
         if "is_trip" in data
         else _row_get(existing, "is_trip", None)
     )
+    # [VOTE-DECISION] config du vote (owner-only, derrière Authelia). Additif : activer
+    # ne touche pas les voix ; désactiver les CONSERVE (masquées, restaurées si réactivé).
+    vote_enabled = (
+        (1 if data.get("vote_enabled") else 0)
+        if "vote_enabled" in data
+        else _row_get(existing, "vote_enabled", 0)
+    )
+    vote_mode = (
+        _clean_vote_mode(data.get("vote_mode"))
+        if "vote_mode" in data
+        else (_row_get(existing, "vote_mode", "") or "")
+    )
+    vote_deadline = (
+        _clean_vote_deadline(data.get("vote_deadline"))
+        if "vote_deadline" in data
+        else (_row_get(existing, "vote_deadline", "") or "")
+    )
     db.execute(
-        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ?, is_trip = ? WHERE id = ?",
-        (name, color, tags, emoji, parent_id, location, description, marker_color, is_trip, project_id),
+        "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ?, is_trip = ?, "
+        "vote_enabled = ?, vote_mode = ?, vote_deadline = ? WHERE id = ?",
+        (name, color, tags, emoji, parent_id, location, description, marker_color, is_trip,
+         vote_enabled, vote_mode, vote_deadline, project_id),
     )
     db.commit()
-    return jsonify({"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip})
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip}
+    out.update(_vote_project_payload(db, row, owner=True))
+    return jsonify(out)
+
+
+@app.route("/api/projects/<int:project_id>/vote/close", methods=["POST"])
+def close_vote(project_id):
+    # [VOTE-DECISION] Clôture manuelle owner-only : fige le gagnant immédiatement.
+    # {winner_id} optionnel = arbitrage d'un ex æquo (§9.a). Idempotent.
+    db = get_db()
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    if not row["vote_enabled"]:
+        return jsonify({"error": "pas un vote"}), 400
+    winner_id = None
+    data = request.get_json(silent=True) or {}
+    if data.get("winner_id") not in (None, "", 0):
+        try:
+            winner_id = int(data["winner_id"])
+        except (TypeError, ValueError):
+            winner_id = None
+    _freeze_vote(db, project_id, manual_winner_id=winner_id)
+    db.execute("UPDATE projects SET vote_closed = 1 WHERE id = ?", (project_id,))
+    db.commit()
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    return jsonify(_vote_project_payload(db, row, owner=True))
+
+
+@app.route("/api/projects/<int:project_id>/vote/reopen", methods=["POST"])
+def reopen_vote(project_id):
+    # [VOTE-DECISION] Réouverture owner-only : EXIGE une deadline redéfinie ou effacée
+    # (§2.7) ; refuse une deadline déjà dépassée (400). Efface le gel, conserve les voix.
+    db = get_db()
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    if not row["vote_enabled"]:
+        return jsonify({"error": "pas un vote"}), 400
+    data = request.get_json(silent=True) or {}
+    new_deadline = _clean_vote_deadline(data.get("vote_deadline"))
+    if new_deadline and _deadline_passed(new_deadline):
+        return jsonify({"error": "la nouvelle deadline est déjà dépassée"}), 400
+    db.execute(
+        "UPDATE projects SET vote_closed = 0, vote_winner_id = NULL, vote_winner_ids = '', vote_deadline = ? WHERE id = ?",
+        (new_deadline, project_id),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    return jsonify(_vote_project_payload(db, row, owner=True))
+
+
+@app.route("/api/projects/<int:project_id>/vote/reset", methods=["POST"])
+def reset_vote(project_id):
+    # [VOTE-RESET] Remise à zéro owner-only : supprime TOUTES les voix + efface le gel +
+    # rouvre. Même garde que reopen : deadline redéfinie/effacée (400 si dépassée). La
+    # config (enabled/mode) et les mémos ne sont PAS touchés.
+    db = get_db()
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    if not row["vote_enabled"]:
+        return jsonify({"error": "pas un vote"}), 400
+    data = request.get_json(silent=True) or {}
+    new_deadline = _clean_vote_deadline(data.get("vote_deadline"))
+    if new_deadline and _deadline_passed(new_deadline):
+        return jsonify({"error": "la nouvelle deadline est déjà dépassée"}), 400
+    db.execute("DELETE FROM memo_votes WHERE project_id = ?", (project_id,))
+    db.execute(
+        "UPDATE projects SET vote_closed = 0, vote_winner_id = NULL, vote_winner_ids = '', vote_deadline = ? WHERE id = ?",
+        (new_deadline, project_id),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    return jsonify(_vote_project_payload(db, row, owner=True))
+
+
+@app.route("/api/memos/<int:memo_id>/vote", methods=["POST"])
+def vote_memo(memo_id):
+    # [VOTE-DECISION] Voter (owner, voter = ''). Toggle/retarget single. 400 si le mémo
+    # n'est pas enfant DIRECT d'un dossier au vote ; 409 si le dossier est clos (§9.c).
+    db = get_db()
+    memo = db.execute(
+        "SELECT id, project_id, vote_excluded FROM memos WHERE id = ? AND COALESCE(deleted_at, '') = ''",
+        (memo_id,),
+    ).fetchone()
+    if not memo or not memo["project_id"] or _row_get(memo, "vote_excluded", 0):
+        return jsonify({"error": "pas une option de vote"}), 400  # [VOTE-EXCLUDE]
+    proj = db.execute("SELECT * FROM projects WHERE id = ?", (memo["project_id"],)).fetchone()
+    if not proj or not proj["vote_enabled"]:
+        return jsonify({"error": "pas une option de vote"}), 400
+    if _ensure_vote_snapshot(db, proj):
+        db.commit()
+        proj = db.execute("SELECT * FROM projects WHERE id = ?", (memo["project_id"],)).fetchone()
+    if _vote_is_closed(proj):
+        return jsonify({"error": "vote clos"}), 409
+    _cast_vote(db, proj["id"], memo_id, "")
+    db.commit()
+    pv = _vote_project_payload(db, proj, owner=True)
+    return jsonify({"project_id": proj["id"], "vote": pv,
+                    "options": _vote_options_payload(db, proj["id"], "", _owner_name(db), pv)})
 
 
 @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
@@ -1028,6 +1202,7 @@ def delete_project(project_id):
     db = get_db()
     db.execute("UPDATE memos SET project_id = NULL WHERE project_id = ?", (project_id,))
     db.execute("UPDATE projects SET parent_id = NULL WHERE parent_id = ?", (project_id,))
+    db.execute("DELETE FROM memo_votes WHERE project_id = ?", (project_id,))  # [VOTE-DECISION]
     db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     db.execute(
         "DELETE FROM shares WHERE kind = 'project' AND target_id = ?", (project_id,)
@@ -1052,6 +1227,251 @@ def _valid_project_id(db, project_id):
         return None
     row = db.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
     return row["id"] if row else None
+
+
+# ─────────────────────────── [VOTE-DECISION] vote helpers ───────────────────────────
+# Dossier en mode vote (V1 « choisir un »). État clos DÉRIVÉ à chaque lecture ; gagnant
+# figé PARESSEUSEMENT (snapshot) à la 1re lecture constatant open→closed. Aucun cron.
+
+VOTE_DEADLINE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$")
+
+
+def _clean_vote_deadline(value):
+    """ISO local 'YYYY-MM-DDTHH:mm' (interprété Europe/Paris) ou '' — jamais de HTML."""
+    v = str(value or "").strip()
+    if not v:
+        return ""
+    # tolère les secondes que renvoient certains <input type=datetime-local>
+    if len(v) == 19 and v[16] == ":":
+        v = v[:16]
+    return v if VOTE_DEADLINE_RE.match(v) else ""
+
+
+def _clean_vote_mode(value):
+    return "multi" if str(value or "").strip() == "multi" else "single"
+
+
+def _deadline_passed(deadline):
+    """La deadline (ISO local sans TZ = Europe/Paris, fuseau de l'app) est-elle dépassée ?"""
+    d = str(deadline or "").strip()
+    if not d:
+        return False
+    try:
+        dt = datetime.fromisoformat(d)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_APP_TZ)
+    return datetime.now(timezone.utc) > dt
+
+
+def _vote_is_closed(row):
+    return bool(row["vote_closed"]) or _deadline_passed(row["vote_deadline"])
+
+
+def _voter_email(voter):
+    """Partie e-mail d'un voter « Nom <email> » (identifiant STABLE, survit au renommage).
+    '' pour le propriétaire (voter vide). Sert le match des cascades (§3.1)."""
+    m = re.search(r"<([^<>]+)>\s*$", str(voter or ""))
+    return (m.group(1).strip().lower() if m else "")
+
+
+def _voter_key(voter):
+    """Clé d'identité d'un voter : '' = owner, sinon e-mail (repli chaîne minuscule)."""
+    v = str(voter or "").strip()
+    if not v:
+        return ""
+    return _voter_email(v) or v.lower()
+
+
+def _vote_display_name(voter, owner_name):
+    """Nom AFFICHABLE d'un voter — jamais l'e-mail brut (owner-only, invariant 5)."""
+    v = str(voter or "").strip()
+    if not v:
+        return owner_name
+    m = re.match(r"^(.*?)\s*<[^<>]+>\s*$", v)
+    name = (m.group(1).strip() if m else v)
+    return name or owner_name
+
+
+def _compute_winners(db, project_id):
+    """(winner_id | None, [winner_ids]) selon les voix courantes. Options = mémos enfants
+    DIRECTS non corbeille. Ex æquo → winner_id None, winner_ids = tous les mémos de tête.
+    Zéro voix → (None, [])."""
+    rows = db.execute(
+        "SELECT v.memo_id AS mid, COUNT(*) AS n FROM memo_votes v "
+        "JOIN memos m ON m.id = v.memo_id "
+        "WHERE v.project_id = ? AND m.project_id = ? AND COALESCE(m.deleted_at, '') = '' "
+        "AND COALESCE(m.vote_excluded, 0) = 0 "  # [VOTE-EXCLUDE] un mémo exclu n'est jamais gagnant
+        "GROUP BY v.memo_id",
+        (project_id, project_id),
+    ).fetchall()
+    if not rows:
+        return None, []
+    top = max(r["n"] for r in rows)
+    winners = sorted(r["mid"] for r in rows if r["n"] == top)
+    if not winners:
+        return None, []
+    if len(winners) == 1:
+        return winners[0], winners
+    return None, winners
+
+
+def _freeze_vote(db, project_id, manual_winner_id=None):
+    """Écrit le snapshot du gagnant. manual_winner_id = arbitrage owner d'un ex æquo
+    (§9.a) : n'est retenu que s'il fait partie des mémos de tête. Idempotent au niveau
+    appelant (n'appeler que si pas déjà figé, sauf clôture manuelle)."""
+    winner_id, winner_ids = _compute_winners(db, project_id)
+    if manual_winner_id is not None and manual_winner_id in winner_ids:
+        winner_id, winner_ids = manual_winner_id, [manual_winner_id]
+    db.execute(
+        "UPDATE projects SET vote_winner_id = ?, vote_winner_ids = ? WHERE id = ?",
+        (winner_id, json.dumps(winner_ids), project_id),
+    )
+    return winner_id, winner_ids
+
+
+def _ensure_vote_snapshot(db, row):
+    """Gel PARESSEUX : si le vote est passé open→closed PAR DEADLINE et jamais figé
+    (vote_winner_ids == ''), fige maintenant. Renvoie True si une écriture a eu lieu
+    (l'appelant doit committer). Idempotent : ne refige jamais un gel existant."""
+    if not row["vote_enabled"]:
+        return False
+    if row["vote_closed"]:
+        return False  # clôture manuelle : déjà figée à la clôture
+    if (row["vote_winner_ids"] or "") != "":
+        return False  # déjà figé
+    if not _deadline_passed(row["vote_deadline"]):
+        return False
+    _freeze_vote(db, row["id"])
+    return True
+
+
+def _vote_project_payload(db, row, owner=False):
+    """Payload vote d'un dossier (résolu à la lecture). Suppose le snapshot déjà assuré."""
+    if not row["vote_enabled"]:
+        return {"vote_enabled": False}
+    closed = _vote_is_closed(row)
+    state = "closed" if closed else "open"
+    winner_id, winner_ids = None, []
+    if closed:
+        wr = db.execute(
+            "SELECT vote_winner_id, vote_winner_ids FROM projects WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+        winner_id = wr["vote_winner_id"]
+        try:
+            winner_ids = json.loads(wr["vote_winner_ids"]) if (wr["vote_winner_ids"] or "") else []
+        except Exception:
+            winner_ids = []
+    out = {
+        "vote_enabled": True,
+        "vote_mode": row["vote_mode"] or "single",
+        "vote_deadline": row["vote_deadline"] or "",
+        "vote_state": state,
+        "vote_winner_id": winner_id,
+        "vote_winner_ids": winner_ids,
+    }
+    if owner:
+        out["vote_closed"] = bool(row["vote_closed"])
+    return out
+
+
+def _vote_voters_map(db, project_id):
+    out = {}
+    for r in db.execute(
+        "SELECT memo_id, voter FROM memo_votes WHERE project_id = ?", (project_id,)
+    ).fetchall():
+        out.setdefault(r["memo_id"], []).append(r["voter"])
+    return out
+
+
+def _memo_vote_fields(voters, me, owner_name, pv, memo_id):
+    """Champs vote d'un mémo-option pour l'appelant `me` (voter, '' = owner)."""
+    mine_key = _voter_key(me) if me is not None else "\x00none"
+    return {
+        "vote_count": len(voters),
+        "vote_voters": [_vote_display_name(v, owner_name) for v in voters],
+        "vote_mine": any(_voter_key(v) == mine_key for v in voters),
+        "is_winner": pv["vote_state"] == "closed"
+        and (memo_id == pv["vote_winner_id"] or memo_id in pv["vote_winner_ids"]),
+    }
+
+
+def _find_vote(db, project_id, voter):
+    """Voix existante de `voter` dans le dossier (match par e-mail → robuste au renommage)."""
+    key = _voter_key(voter)
+    for r in db.execute(
+        "SELECT id, memo_id, voter FROM memo_votes WHERE project_id = ?", (project_id,)
+    ).fetchall():
+        if _voter_key(r["voter"]) == key:
+            return r
+    return None
+
+
+def _cast_vote(db, project_id, memo_id, voter):
+    """Single : toggle (re-cliquer sa voix = retirer) / retarget (voter un autre = déplacer)."""
+    now = datetime.now(timezone.utc).isoformat()
+    existing = _find_vote(db, project_id, voter)
+    if existing:
+        if existing["memo_id"] == memo_id:
+            db.execute("DELETE FROM memo_votes WHERE id = ?", (existing["id"],))
+        else:
+            db.execute(
+                "UPDATE memo_votes SET memo_id = ?, voter = ?, created_at = ? WHERE id = ?",
+                (memo_id, voter, now, existing["id"]),
+            )
+    else:
+        db.execute(
+            "INSERT INTO memo_votes (project_id, memo_id, voter, created_at) VALUES (?, ?, ?, ?)",
+            (project_id, memo_id, voter, now),
+        )
+
+
+def _vote_options_payload(db, project_id, me, owner_name, pv):
+    """Liste [{memo_id, vote_count, vote_voters, vote_mine, is_winner}] des options d'un
+    dossier au vote — renvoyée au client après un vote pour patcher l'UI sans recharger."""
+    vmap = _vote_voters_map(db, project_id)
+    opts = []
+    for r in db.execute(
+        "SELECT id FROM memos WHERE project_id = ? AND COALESCE(deleted_at, '') = '' "
+        "AND COALESCE(vote_excluded, 0) = 0 ORDER BY position, id",  # [VOTE-EXCLUDE]
+        (project_id,),
+    ).fetchall():
+        voters = vmap.get(r["id"], [])
+        opts.append({"memo_id": r["id"], **_memo_vote_fields(voters, me, owner_name, pv, r["id"])})
+    return opts
+
+
+def _share_scope_project_ids(db, share):
+    """Dossiers couverts par un partage (pour scoper les cascades de voix)."""
+    if share["kind"] == "project":
+        return _project_descendants(db, share["target_id"])
+    row = db.execute(
+        "SELECT project_id FROM memos WHERE id = ?", (share["target_id"],)
+    ).fetchone()
+    return [row["project_id"]] if row and row["project_id"] else []
+
+
+def _delete_votes_for_email(db, email, project_ids):
+    """Supprime les voix d'un e-mail (match STABLE §3.1), restreintes à `project_ids`
+    (None = tous). Utilisé quand un invité perd un accès (retrait/refus/suppression)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    if project_ids is None:
+        rows = db.execute("SELECT id, voter FROM memo_votes").fetchall()
+    else:
+        if not project_ids:
+            return
+        ph = ",".join("?" * len(project_ids))
+        rows = db.execute(
+            f"SELECT id, voter FROM memo_votes WHERE project_id IN ({ph})",
+            list(project_ids),
+        ).fetchall()
+    for r in rows:
+        if _voter_email(r["voter"]) == email:
+            db.execute("DELETE FROM memo_votes WHERE id = ?", (r["id"],))
 
 
 def _project_descendants(db, root_id):
@@ -1296,6 +1716,7 @@ def _memo_dict(row, owner_name=None):
         d["map_groups"] = []
     d["location"] = _parse_location(d.get("location"))
     d["done"] = bool(d.get("done"))
+    d["vote_excluded"] = bool(d.get("vote_excluded"))  # [VOTE-EXCLUDE]
     return d
 
 
@@ -1411,6 +1832,13 @@ def list_memos():
         ).fetchall()
     }
     owner_name = _owner_name(db)
+    # [VOTE-DECISION] contexte vote : dossiers activés (+ gel paresseux), voix par mémo.
+    enabled = db.execute("SELECT * FROM projects WHERE vote_enabled = 1").fetchall()
+    if [1 for pr in enabled if _ensure_vote_snapshot(db, pr)]:
+        db.commit()
+        enabled = db.execute("SELECT * FROM projects WHERE vote_enabled = 1").fetchall()
+    vpay = {pr["id"]: _vote_project_payload(db, pr, owner=True) for pr in enabled}
+    vmap = {pr["id"]: _vote_voters_map(db, pr["id"]) for pr in enabled}
     out = []
     for row in rows:
         d = _memo_dict(row, owner_name)
@@ -1420,6 +1848,10 @@ def list_memos():
             d["guest_action"] = "created" if g["created"] else "edited"
             d["guest_at"] = g["edited_at"]
         d["comment_count"] = ccounts.get(d["id"], 0)
+        pv = vpay.get(d.get("project_id"))
+        if pv and not d.get("vote_excluded"):  # [VOTE-EXCLUDE] mémo exclu = pas une option
+            voters = vmap[d["project_id"]].get(d["id"], [])
+            d.update(_memo_vote_fields(voters, "", owner_name, pv, d["id"]))
         out.append(d)
     return jsonify(out)
 
@@ -1640,6 +2072,16 @@ def update_memo(memo_id):
     if not existing:
         return jsonify({"error": "not found"}), 404
     payload, status = _perform_memo_update(db, existing, data)
+    # [VOTE-EXCLUDE] owner-only (jamais dans _perform_memo_update → share ne peut pas le poser).
+    # Sortir un mémo du vote supprime ses voix (cohérent : plus une option).
+    if status == 200 and "vote_excluded" in data:
+        excl = 1 if data.get("vote_excluded") else 0
+        db.execute("UPDATE memos SET vote_excluded = ? WHERE id = ?", (excl, memo_id))
+        if excl:
+            db.execute("DELETE FROM memo_votes WHERE memo_id = ?", (memo_id,))
+        db.commit()
+        row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+        payload = _memo_dict(row, _owner_name(db))
     return jsonify(payload), status
 
 
@@ -1661,6 +2103,7 @@ def _purge_memo_row(db, memo_id):
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
     db.execute("DELETE FROM memo_comments WHERE memo_id = ?", (memo_id,))
+    db.execute("DELETE FROM memo_votes WHERE memo_id = ?", (memo_id,))  # [VOTE-DECISION]
 
 
 @app.route("/api/trash", methods=["GET"])
@@ -2153,6 +2596,7 @@ def _share_memo_dict(row):
         "point_color": d.get("marker_color", "") or "",
         "map_groups": d.get("map_groups", []),
         "created_at": d.get("created_at", "") or "",
+        "vote_excluded": bool(d.get("vote_excluded")),  # [VOTE-EXCLUDE] lecture invité (badge)
     }
 
 
@@ -2332,6 +2776,13 @@ def update_share(share_id):
 @app.route("/api/shares/<int:share_id>", methods=["DELETE"])
 def delete_share(share_id):
     db = get_db()
+    share = db.execute("SELECT * FROM shares WHERE id = ?", (share_id,)).fetchone()
+    if share:  # [VOTE-DECISION] les invités perdent l'accès → leurs voix du périmètre partent
+        scope = _share_scope_project_ids(db, share)
+        for g in db.execute(
+            "SELECT email FROM share_guests WHERE share_id = ?", (share_id,)
+        ).fetchall():
+            _delete_votes_for_email(db, g["email"], scope)
     db.execute("DELETE FROM share_guests WHERE share_id = ?", (share_id,))
     db.execute("DELETE FROM shares WHERE id = ?", (share_id,))
     db.commit()
@@ -2538,6 +2989,13 @@ def delete_guest(guest_id):
     # Suppression (a) : retire UN accès dossier d'un invité. Le hub & le code restent,
     # le dossier disparaît simplement de sa page hub (et son /share cesse pour lui).
     db = get_db()
+    g = db.execute(
+        "SELECT sg.email AS email, s.kind AS kind, s.target_id AS target_id "
+        "FROM share_guests sg JOIN shares s ON s.id = sg.share_id WHERE sg.id = ?",
+        (guest_id,),
+    ).fetchone()
+    if g:  # [VOTE-DECISION] cascade des voix de cet accès (scope du partage concerné)
+        _delete_votes_for_email(db, g["email"], _share_scope_project_ids(db, g))
     db.execute("DELETE FROM share_guests WHERE id = ?", (guest_id,))
     db.commit()
     return "", 204
@@ -2589,6 +3047,7 @@ def delete_hub(hub_token):
     hub = _hub_by_token(db, hub_token)
     if not hub:
         return jsonify({"error": "hub introuvable"}), 404
+    _delete_votes_for_email(db, hub["email"], None)  # [VOTE-DECISION] coupe tout → toutes ses voix
     db.execute("DELETE FROM share_guests WHERE lower(email) = ?", (hub["email"],))
     db.execute("DELETE FROM guest_hubs WHERE id = ?", (hub["id"],))
     db.commit()
@@ -2681,6 +3140,9 @@ def _data_version(db):
         "SELECT id, share_id, email, name, status, approved_at FROM share_guests ORDER BY id",
         "SELECT id, email, name, pin FROM guest_hubs ORDER BY id",
         "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_comments",
+        # [VOTE-DECISION] voix ; les flags/état de vote des projets sont déjà couverts par
+        # le « SELECT * FROM projects » ci-dessus (vote_enabled/deadline/closed/winner…).
+        "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_votes",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM memo_history",
         "SELECT key, value FROM app_state WHERE key != 'activity_seen_at' ORDER BY key",
     )
@@ -3180,6 +3642,27 @@ def hub_data(hub_token):
         cseen = _comment_seen_map(db, [c["id"] for c in crows])
         for c in crows:
             comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen))
+    # [VOTE-DECISION] contexte vote de l'union hub (gel paresseux inclus). Identité du
+    # votant = e-mail du hub (le match des voix est par e-mail → robuste au renommage).
+    vote_owner_name = _owner_name(db)
+    me = f"{hub['name'] or hub['email']} <{hub['email']}>"
+    vote_pids = set(union_pids) | {r["project_id"] for r in rows_by_id.values() if r["project_id"]}
+    vpay, vmap = {}, {}
+    if vote_pids:
+        ph = ",".join("?" * len(vote_pids))
+        venabled = db.execute(
+            f"SELECT * FROM projects WHERE vote_enabled = 1 AND id IN ({ph})", list(vote_pids)
+        ).fetchall()
+        if [1 for pr in venabled if _ensure_vote_snapshot(db, pr)]:
+            db.commit()
+            venabled = db.execute(
+                f"SELECT * FROM projects WHERE vote_enabled = 1 AND id IN ({ph})", list(vote_pids)
+            ).fetchall()
+        for pr in venabled:
+            vpay[pr["id"]] = _vote_project_payload(db, pr, owner=False)
+            vmap[pr["id"]] = _vote_voters_map(db, pr["id"])
+    for pr in projects:
+        pr.update(vpay.get(pr["id"], {"vote_enabled": False}))
     memos = []
     for mid, r in rows_by_id.items():
         covering = _cover_memo(r["project_id"], mid)
@@ -3191,6 +3674,10 @@ def hub_data(hub_token):
         d["comments"] = comments_by_memo.get(mid, [])
         d["share_token"] = win["token"]
         d["can_edit"] = win["can_edit"]
+        pv = vpay.get(r["project_id"])
+        if pv and not _row_get(r, "vote_excluded", 0):  # [VOTE-EXCLUDE]
+            voters = vmap[r["project_id"]].get(mid, [])
+            d.update(_memo_vote_fields(voters, me, vote_owner_name, pv, mid))
         memos.append(d)
 
     # ── Racines (sidebar) : une par share ──
@@ -3334,14 +3821,16 @@ def share_data(token):
     # [GUEST-EDIT] dernière connexion : un invité peut n'utiliser que son lien direct
     # (sans passer par le hub). Header APPROUVÉ uniquement ; sans hub → no-op.
     gtok = (request.headers.get("X-Guest-Token") or "").strip()
+    me = None  # [VOTE-DECISION] identité du votant appelant (None = anonyme)
     if gtok:
         g = db.execute(
-            "SELECT email FROM share_guests WHERE guest_token = ? AND share_id = ? "
+            "SELECT name, email FROM share_guests WHERE guest_token = ? AND share_id = ? "
             "AND status = 'approved'",
             (gtok, share["id"]),
         ).fetchone()
         if g:
             _touch_guest_seen(db, g["email"])
+            me = f"{g['name'] or g['email']} <{g['email']}>"
     rows = _share_scope_memos(db, share)
     memos = []
     proj_names = {}
@@ -3386,11 +3875,35 @@ def share_data(token):
         cseen = _comment_seen_map(db, [c["id"] for c in crows])
         for c in crows:
             comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen))
+    # [VOTE-DECISION] contexte vote des dossiers du périmètre (gel paresseux inclus).
+    vote_owner_name = _owner_name(db)
+    vote_pids = {r["project_id"] for r in rows if r["project_id"]}
+    vote_pids |= {p["id"] for p in scope_projects}
+    vpay, vmap = {}, {}
+    if vote_pids:
+        ph = ",".join("?" * len(vote_pids))
+        venabled = db.execute(
+            f"SELECT * FROM projects WHERE vote_enabled = 1 AND id IN ({ph})", list(vote_pids)
+        ).fetchall()
+        if [1 for pr in venabled if _ensure_vote_snapshot(db, pr)]:
+            db.commit()
+            venabled = db.execute(
+                f"SELECT * FROM projects WHERE vote_enabled = 1 AND id IN ({ph})", list(vote_pids)
+            ).fetchall()
+        for pr in venabled:
+            vpay[pr["id"]] = _vote_project_payload(db, pr, owner=False)
+            vmap[pr["id"]] = _vote_voters_map(db, pr["id"])
+    for p in scope_projects:
+        p.update(vpay.get(p["id"], {"vote_enabled": False}))
     for r in rows:
         d = _share_memo_dict(r)
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
             d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(r["id"], [])
+        pv = vpay.get(r["project_id"])
+        if pv and not _row_get(r, "vote_excluded", 0):  # [VOTE-EXCLUDE]
+            voters = vmap[r["project_id"]].get(r["id"], [])
+            d.update(_memo_vote_fields(voters, me, vote_owner_name, pv, r["id"]))
         memos.append(d)
     payload = {
         "projects": scope_projects,
@@ -3415,6 +3928,7 @@ def share_data(token):
         payload["title"] = (proj["emoji"] + " " if proj["emoji"] else "") + proj["name"]
         payload["color"] = proj["color"]
         payload["description"] = _row_get(proj, "description")
+        payload["vote"] = vpay.get(share["target_id"], {"vote_enabled": False})  # [VOTE-DECISION]
     else:
         payload["title"] = "Mémo partagé"
         payload["color"] = ""
@@ -3688,6 +4202,7 @@ def _share_memo_dict_from_payload(d):
         "point_color": d.get("marker_color", "") or "",
         "map_groups": d.get("map_groups", []),
         "created_at": d.get("created_at", "") or "",
+        "vote_excluded": bool(d.get("vote_excluded")),  # [VOTE-EXCLUDE]
     }
 
 
@@ -3911,6 +4426,39 @@ def share_add_comment(token, memo_id):
     row = _insert_comment(db, memo, body, f"{author} <{guest['email']}>", share["id"], parent_id=parent_id, priority=priority)
     db.commit()
     return jsonify(_comment_dict(row)), 201
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/vote", methods=["POST"])
+def share_vote_memo(token, memo_id):
+    # [VOTE-DECISION] Voter côté invité. Route publique sous /share/* (bypass Authelia,
+    # invariant 5). can_edit NON requis (§2.3 : voter n'est pas éditer) mais invité
+    # APPROUVÉ requis + scope revalidé serveur. 409 si le dossier est clos (§9.c).
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    memo = db.execute("SELECT id, project_id, vote_excluded FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not memo or not memo["project_id"] or _row_get(memo, "vote_excluded", 0):
+        return jsonify({"error": "pas une option de vote"}), 400  # [VOTE-EXCLUDE]
+    proj = db.execute("SELECT * FROM projects WHERE id = ?", (memo["project_id"],)).fetchone()
+    if not proj or not proj["vote_enabled"]:
+        return jsonify({"error": "pas une option de vote"}), 400
+    if _ensure_vote_snapshot(db, proj):
+        db.commit()
+        proj = db.execute("SELECT * FROM projects WHERE id = ?", (memo["project_id"],)).fetchone()
+    if _vote_is_closed(proj):
+        return jsonify({"error": "vote clos"}), 409
+    voter = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    _cast_vote(db, proj["id"], memo_id, voter)
+    db.commit()
+    pv = _vote_project_payload(db, proj, owner=False)
+    return jsonify({"project_id": proj["id"], "vote": pv,
+                    "options": _vote_options_payload(db, proj["id"], voter, _owner_name(db), pv)})
 
 
 @app.route("/share/<token>/memo/<int:memo_id>/seen", methods=["POST"])

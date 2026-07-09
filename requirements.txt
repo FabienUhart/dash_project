@@ -4,3 +4,4 @@ requests==2.32.3
 qrcode==7.4.2
 ExifRead==3.0.0
 python-dotenv==1.0.1
+tzdata==2024.1

@@ -893,6 +893,10 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 }
 .prio-btn { padding: 0.12rem 0.5rem; font-size: 0.78rem; border-radius: 4px; }
 .prio-btn.sel-none { background: var(--panel-2); border-color: var(--muted); }
+/* [VOTE-DECISION] chip d'état NON cliquable (<span class="prio-btn">) : le look pilule
+   (fond/bordure/couleur) vient de la règle d'élément `button`, qu'un <span> n'hérite pas
+   → on la réapplique via les mêmes tokens, sans hover/active, cursor default (invariant 9). */
+span.prio-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); display: inline-flex; align-items: center; cursor: default; }
 .subtask { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; }
 .subtask input[type="checkbox"] { accent-color: var(--green); cursor: pointer; }
 .subtask.stdone span { text-decoration: line-through; color: var(--muted); }
@@ -1718,6 +1722,27 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <div id="create-trip-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
       <span style="font-size:0.72rem;color:var(--muted)">Un « voyage » trace l'itinéraire chronologique de ses points sur la carte. « Hérité » suit le réglage du projet parent.</span>
     </label>
+    <!-- [VOTE-DECISION] mode vote (projets seulement) : les mémos directs deviennent les options. -->
+    <label id="create-vote-label">🗳 Vote « choisir un »
+      <div id="create-vote-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
+      <div id="create-vote-config" style="display:none;margin-top:0.4rem">
+        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+          <span style="font-size:0.8rem;color:var(--muted)">Deadline (Europe/Paris, optionnelle)</span>
+          <input type="datetime-local" id="create-vote-deadline"
+                 style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem">
+          <button type="button" id="create-vote-deadline-clear" class="prio-btn" style="display:none">×</button>
+        </div>
+        <div id="create-vote-reopen-row" style="display:none;margin-top:0.4rem">
+          <button type="button" id="create-vote-reopen" class="prio-btn">↻ Rouvrir le vote</button>
+          <span style="font-size:0.72rem;color:var(--muted)">Vote clos — la réouverture exige une deadline redéfinie ou effacée.</span>
+        </div>
+        <div style="margin-top:0.5rem">
+          <button type="button" id="create-vote-reset" class="prio-btn">↺ Remettre à zéro</button>
+          <span style="font-size:0.72rem;color:var(--muted)">Supprime toutes les voix et rouvre (la config est conservée).</span>
+        </div>
+      </div>
+      <span style="font-size:0.72rem;color:var(--muted)">Chaque personne (toi + invités approuvés) choisit un mémo. Deadline atteinte ou clôture manuelle = résultats figés.</span>
+    </label>
     <div class="actions">
       <button type="button" id="create-cancel">Annuler</button>
       <button type="submit" class="primary" id="create-submit">Créer</button>
@@ -2531,6 +2556,7 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-desc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-trip-label').style.display = kind === 'project' ? '' : 'none';
+  document.getElementById('create-vote-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
   document.getElementById('create-menu').hidden = true;
@@ -2550,6 +2576,14 @@ function openCreateDialog(kind, item = null) {
   // [MAP-TIMELINE] chips voyage : tri-état (null = hérite), valeur héritée affichée.
   createTrip = item ? (item.is_trip === 1 ? 1 : item.is_trip === 0 ? 0 : null) : null;
   if (kind === 'project') renderTripChips();
+  // [VOTE-DECISION] état vote de la pop-in projet
+  createVoteEnabled = !!(item && item.vote_enabled);
+  const vdl = document.getElementById('create-vote-deadline');
+  vdl.value = (item && item.vote_deadline) ? item.vote_deadline : '';
+  document.getElementById('create-vote-deadline-clear').style.display = vdl.value ? '' : 'none';
+  const closed = !!(item && item.vote_enabled && item.vote_state === 'closed');
+  document.getElementById('create-vote-reopen-row').style.display = closed ? '' : 'none';
+  if (kind === 'project') renderVoteChips();
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
@@ -2600,6 +2634,48 @@ function renderTripChips() {
   });
 }
 
+// [VOTE-DECISION] chips Activé/Désactivé du vote + révélation de la config.
+let createVoteEnabled = false;
+function renderVoteChips() {
+  const wrap = document.getElementById('create-vote-chips');
+  wrap.innerHTML = '';
+  [[true, 'Activé'], [false, 'Désactivé']].forEach(([v, label]) => {
+    const on = createVoteEnabled === v;
+    wrap.appendChild(el('button', {
+      class: 'prio-btn', text: label,
+      attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+      on: { click: () => { createVoteEnabled = v; renderVoteChips(); } },
+    }));
+  });
+  document.getElementById('create-vote-config').style.display = createVoteEnabled ? '' : 'none';
+}
+document.getElementById('create-vote-deadline').addEventListener('input', (e) => {
+  document.getElementById('create-vote-deadline-clear').style.display = e.target.value ? '' : 'none';
+});
+document.getElementById('create-vote-deadline-clear').addEventListener('click', () => {
+  const vdl = document.getElementById('create-vote-deadline'); vdl.value = '';
+  document.getElementById('create-vote-deadline-clear').style.display = 'none';
+});
+document.getElementById('create-vote-reopen').addEventListener('click', async () => {
+  if (!editingItem || createKind !== 'project') return;
+  const dl = document.getElementById('create-vote-deadline').value || '';
+  try {
+    await api(`/api/projects/${editingItem.id}/vote/reopen`, { method: 'POST', body: JSON.stringify({ vote_deadline: dl }) });
+    createDialog.close(); editingItem = null; await loadAll();
+  } catch (err) { await notify('Réouverture impossible : ' + err.message, { error: true }); }
+});
+document.getElementById('create-vote-reset').addEventListener('click', async () => {
+  // [VOTE-RESET] destructif pour les voix → confirm danger (convention Supprimer).
+  if (!editingItem || createKind !== 'project') return;
+  if (!(await confirmPopin('Toutes les voix seront supprimées. La config (mode, deadline) est conservée.',
+        { title: 'Remettre le vote à zéro ?', okLabel: 'Remettre à zéro', danger: true }))) return;
+  const dl = document.getElementById('create-vote-deadline').value || '';
+  try {
+    await api(`/api/projects/${editingItem.id}/vote/reset`, { method: 'POST', body: JSON.stringify({ vote_deadline: dl }) });
+    createDialog.close(); editingItem = null; await loadAll();
+  } catch (err) { await notify('Remise à zéro impossible : ' + err.message, { error: true }); }
+});
+
 function addCategory() { openCreateDialog('category'); }
 function addProject() { openCreateDialog('project'); }
 
@@ -2647,6 +2723,10 @@ createForm.addEventListener('submit', async (e) => {
     payload.location = createLoc;
     payload.description = createForm.elements.description.value.trim();
     payload.is_trip = createTrip; // [MAP-TIMELINE] null = hérite, 1 = voyage, 0 = non
+    // [VOTE-DECISION] config vote (n'affecte jamais les voix existantes côté serveur)
+    payload.vote_enabled = createVoteEnabled ? 1 : 0;
+    payload.vote_mode = 'single';
+    payload.vote_deadline = createVoteEnabled ? (document.getElementById('create-vote-deadline').value || '') : '';
   }
   const body = JSON.stringify(payload);
   try {
@@ -2820,6 +2900,7 @@ function openMapDialog(title, points, recompute, extra) {
     projects: state.projects, currentProjectId: state.memoProject,
     subFilterScope: realProject,
     defaultMarkerColor: state.mapMarkerColor,
+    winnerIds: voteWinnerIdSet(realProject ? state.projects.find(p => p.id === state.memoProject) : null),
     focusKey: 'mapFocus:' + state.memoProject,
     subKey: 'mapSubFilter:' + state.memoProject,
     saveColor: savePointColor, saveGroups: savePointGroups,
@@ -4455,6 +4536,60 @@ function openMoveProject(proj) {
 
 /* ------------------------------------------------ mémos : vue board */
 
+// [VOTE-DECISION] Contrôles de vote d'un mémo-option (owner). Rien si le dossier n'est
+// pas en mode vote. Ma voix = chip accent ; compteur + votants ; gagnant figé si clos.
+function voteRowEl(memo) {
+  const proj = state.projects.find(p => p.id === memo.project_id);
+  if (!proj || !proj.vote_enabled) return null;
+  const row = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.45rem' } });
+  if (memo.vote_excluded) {  // [VOTE-EXCLUDE] pas une option → badge discret, aucun contrôle
+    row.appendChild(el('span', { class: 'badge', text: '🗳 hors vote', attrs: { title: "Ce mémo n'est pas une option du vote" } }));
+    return row;
+  }
+  const closed = proj.vote_state === 'closed';
+  const mine = !!memo.vote_mine;
+  row.appendChild(el('button', {
+    class: 'prio-btn',
+    text: mine ? '✓ Ma voix' : '🗳 Voter',
+    attrs: Object.assign(
+      { type: 'button', title: closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo') },
+      closed ? { disabled: '' } : {},
+      { style: mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+    ),
+    on: closed ? {} : { click: async (e) => {
+      e.stopPropagation();
+      try { applyVoteResult(await api(`/api/memos/${memo.id}/vote`, { method: 'POST', body: '{}' })); }
+      catch (err) { await notify('Vote impossible : ' + err.message, { error: true }); }
+    } },
+  }));
+  const n = memo.vote_count || 0;
+  row.appendChild(el('span', { class: 'badge', text: n + ' voix' }));
+  const voters = memo.vote_voters || [];
+  if (voters.length) {
+    const stack = el('div', { class: 'asg-stack', attrs: { title: voters.join(', ') } });
+    voters.slice(0, 6).forEach(v => stack.appendChild(el('span', { class: 'asg-av', text: initials(v), attrs: { title: v } })));
+    row.appendChild(stack);
+  }
+  if (closed && memo.is_winner) {
+    row.appendChild(el('span', {
+      class: 'badge', text: voteWinnerText(proj),
+      attrs: { style: 'background:var(--accent);color:#10141a;font-weight:600' },
+    }));
+  }
+  return row;
+}
+
+function applyVoteResult(r) {
+  if (!r || !r.options) { loadAll(); return; }
+  const proj = state.projects.find(p => p.id === r.project_id);
+  if (proj && r.vote) Object.assign(proj, r.vote);
+  r.options.forEach(o => {
+    const m = state.memos.find(x => x.id === o.memo_id);
+    if (m) { m.vote_count = o.vote_count; m.vote_voters = o.vote_voters; m.vote_mine = o.vote_mine; m.is_winner = o.is_winner; }
+  });
+  renderBoard();
+}
+
 function taskEl(memo) {
   const task = el('div', {
     class: 'task' + (memo.done ? ' done-task' : ''),
@@ -4496,6 +4631,8 @@ function taskEl(memo) {
     content.appendChild(cn);
   }
   wireChecklist(content, memo);
+  const vrow = voteRowEl(memo);
+  if (vrow) content.appendChild(vrow);
   row.appendChild(content);
 
   const badges = el('div', { class: 'task-badges' });
@@ -4925,6 +5062,27 @@ function taskDetailEl(memo) {
   mainRow.appendChild(styleWrap);
   detail.appendChild(mainRow);
 
+  // [VOTE-EXCLUDE] case « Hors vote » — visible seulement si le dossier direct est au vote.
+  const voteProj = state.projects.find(p => p.id === memo.project_id);
+  if (voteProj && voteProj.vote_enabled) {
+    const exRow = el('div', { class: 'detail-row' });
+    const lbl = el('label', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer' } });
+    const cb = el('input', { attrs: { type: 'checkbox' } });
+    cb.checked = !!memo.vote_excluded;
+    cb.addEventListener('change', async () => {
+      if (cb.checked && (memo.vote_count || 0) > 0) {
+        const n = memo.vote_count;
+        if (!(await confirmPopin(`Ce mémo a ${n} voix. Le sortir du vote les supprimera.`,
+              { title: 'Sortir du vote ?', okLabel: 'Sortir du vote', danger: true }))) { cb.checked = false; return; }
+      }
+      patchMemo(memo.id, { vote_excluded: cb.checked ? 1 : 0 });
+    });
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', { text: "🗳 Hors vote (ce mémo n'est pas une option)" }));
+    exRow.appendChild(lbl);
+    detail.appendChild(exRow);
+  }
+
   // 4. LIGNE D'ACTIONS : Image, Partager, Versions, Ma position. [EXPAND-DETAIL-REORG]
   const actionRow = el('div', { class: 'detail-row' });
   const fileIn = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: '' } });
@@ -5093,6 +5251,25 @@ function renderBoard() {
           renderAll();
         } },
       }));
+      // [VOTE-DECISION] indicateur + clôture du vote (owner). Config/réouverture = pop-in projet.
+      if (proj.vote_enabled) {
+        title.appendChild(el('span', {
+          class: 'prio-btn', text: voteStatusLabel(proj),  // même gabarit que les boutons voisins, jamais tronqué
+          attrs: { title: voteDeadlineTitle(proj), style: 'cursor:default' },
+        }));
+        if (proj.vote_state === 'open') {
+          title.appendChild(el('button', {
+            class: 'prio-btn', text: '🗳 Clore le vote',
+            attrs: { title: 'Clore le vote maintenant (fige le gagnant)', style: 'background:var(--accent);border-color:var(--accent);color:#10141a' },
+            on: { click: async () => {
+              // Action NON destructive → titre/bouton dédiés, style accent (pas le rouge « Supprimer »).
+              if (!(await confirmPopin('Le gagnant sera figé.', { title: 'Clore le vote ?', okLabel: 'Clore', danger: false }))) return;
+              await api(`/api/projects/${proj.id}/vote/close`, { method: 'POST', body: '{}' });
+              await loadAll();
+            } },
+          }));
+        }
+      }
     }
   }
   const mapPoints = boardMapPoints();

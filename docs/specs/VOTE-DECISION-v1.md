@@ -98,15 +98,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_memo_votes_single
   - **Désactiver le vote** (`vote_enabled=0`) → voix **masquées mais CONSERVÉES** ;
     **réactiver les restaure** telles quelles (jamais de DELETE à la désactivation).
   - **Invité retiré** (retrait/refus d'un accès, DELETE guest) → **ses voix sont
-    supprimées avec son accès** (`DELETE FROM memo_votes WHERE voter = « Nom
-    <email> »` de l'invité retiré, dans le scope concerné). Cohérent : plus d'accès →
-    plus de voix.
+    supprimées avec son accès** (`DELETE FROM memo_votes` du `voter` retiré, dans le
+    scope concerné). **Match sur la partie e-mail du `voter`** (identifiant stable),
+    **pas** sur la chaîne complète « Nom <email> » : un invité **renommé** après avoir
+    voté ([GUEST-EDIT] ne réécrit jamais le `voter` déjà posé) puis retiré serait raté
+    par un match par chaîne. Cohérent : plus d'accès → plus de voix.
 
 ### 3.2 Colonnes additives sur `projects` (le dossier)
 ```
 vote_enabled   INTEGER DEFAULT 0     -- 0/1
 vote_mode      TEXT    DEFAULT ''     -- '' → 'single' résolu ; 'multi' (V2)
-vote_deadline  TEXT    DEFAULT ''     -- ISO 'YYYY-MM-DDTHH:mm' ou '' = pas de deadline
+vote_deadline  TEXT    DEFAULT ''     -- ISO 'YYYY-MM-DDTHH:mm' local ou '' = pas de deadline
+                                      -- l'ISO SANS fuseau s'interprète en Europe/Paris
+                                      -- (fuseau de l'app) → « clôt à 13h » non ambigu
 vote_closed    INTEGER DEFAULT 0     -- 0/1, clôture manuelle owner
 vote_winner_id INTEGER               -- NULL tant qu'ouvert ; figé (snapshot) à la clôture
 ```
@@ -270,6 +274,43 @@ blocage, aucune erreur.
 6. **Export : numéro non figé** ; d'abord trancher au build si les voix/flags sont
    exportés (si non → aucun bump ; si oui → numéro assigné au ship, découplé de
    [COMMENT-REACTIONS], pas de pré-réservation).
+
+## 12. Extensions livrées après V1 (amendements, [V20.7.46])
+
+Validées par Fabien, dans l'esprit de la V1 (export inchangé — voix/config/exclusion =
+donnée d'atelier, **toujours v20**, pas d'entrée d'invariant 1).
+
+### 12.1 [VOTE-RESET] — remise à zéro (owner-only)
+- Route **`POST /api/projects/<id>/vote/reset`** (derrière Authelia) : **supprime toutes
+  les voix** `memo_votes` du dossier, **efface le gel** (`vote_winner_ids=''`,
+  `vote_winner_id=NULL`), **remet `vote_closed=0`** → vote rouvert. **Même garde que
+  reopen** : exige une deadline redéfinie ou effacée (**400** si la deadline fournie est
+  déjà dépassée). Ne touche **ni les mémos ni la config** (`vote_enabled`/`vote_mode`
+  conservés). `_data_version` déjà couvert (`memo_votes` + flags projets).
+- **UI** : bouton **« ↺ Remettre à zéro »** dans la zone config vote de la pop-in projet.
+  Action destructive → **`confirmPopin` en style danger** (`var(--red)`, convention
+  Supprimer), libellé explicite « Toutes les voix seront supprimées ».
+
+### 12.2 [VOTE-EXCLUDE] — mémo « hors vote »
+- Colonne additive **`memos.vote_excluded`** (`INTEGER DEFAULT 0`, migration `init_db()`
+  non destructive). **Non exportée** — trade-off assumé (comme les voix : un ré-import
+  ne restaure pas l'exclusion).
+- **Sémantique** : le mémo reste **visible/éditable** dans le dossier mais **n'est pas une
+  option** — pas de bouton Voter, pas de `vote_count`/`vote_mine`/`vote_voters`, **jamais
+  gagnant** (`_compute_winners`/`_ensure_vote_snapshot` l'ignorent via
+  `COALESCE(vote_excluded,0)=0`).
+- **Serveur** : `POST /api/memos/<id>/vote` **ET** `POST /share/<token>/memo/<id>/vote`
+  → **400** sur un mémo exclu (revalidé serveur, invariant 5). **Exclure un mémo qui a
+  des voix → ses voix sont supprimées** (`DELETE FROM memo_votes WHERE memo_id=?` dans la
+  route owner ; `confirmPopin` front avec le compte si > 0).
+- **Config owner-only** (comme enabled/mode/deadline) : case **« Hors vote »** dans le
+  détail du mémo, **affichée seulement si le dossier direct est en mode vote** ;
+  `PUT /api/memos/<id>` accepte `vote_excluded` **hors** `_perform_memo_update` (donc
+  `share_update_memo` — whitelist — **ne l'accepte pas**). **Invité = lecture seule** :
+  `vote_excluded` exposé dans `_share_memo_dict` (badge « 🗳 hors vote » sur la card),
+  aucun contrôle.
+- **UI 3 pages** : card d'un mémo exclu → ni Voter ni compteur, **badge `.badge`** discret
+  (invariant 9).
 
 ## 11. Invariants touchés
 

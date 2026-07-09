@@ -1,10 +1,12 @@
 # BROUILLON — [VOTE-MATCH] Sondage live d'événement (V3, à scoper)
 
-**Statut : BACKLOG — À SCOPER. NON verrouillé, aucune décision figée.**
+**Statut : BACKLOG — À SCOPER. Toujours AUCUN build.** Les **décisions RGPD/identité**
+sont désormais **figées** (Fabien, juil. 2026 — voir §4bis) ; les **bloquants restants
+du §5** (anti-abus jeton anonyme, push live + charge, contenu e-mails, bornage délégué,
+clôture/anonymisation post-purge) restent **ouverts** → pas de spec verrouillable.
 Position : **après** [VOTE-DECISION] V1 (mode `single`) et **coordination avec**
 [VOTE V2] (multi-intérêts). C'est un **3e axe** du chantier vote, distinct : vote
 **public, live, éphémère** — pas la même population ni le même cycle de vie que V1/V2.
-Ce fichier fige le **cadrage à discuter**, pas des choix.
 
 ---
 
@@ -14,9 +16,11 @@ Ce fichier fige le **cadrage à discuter**, pas des choix.
 **généralisable hors foot**. Un **dossier dédié par événement**. Pendant l'événement,
 l'owner pousse un **flux de micro-votes en direct** ; le public vote « à chaud ».
 
-- **Inscription par e-mail** → **identité = e-mail** (auto-inscription publique, pas
-  forcément l'approbation owner du modèle invité actuel).
-- **Une voix par e-mail**, **vote IMMUABLE** : une fois soumis, **pas de
+- **Identité à deux profils** (e-mail **optionnel**, choix du votant — §4bis) :
+  **A = e-mail** (double opt-in) ou **B = jeton d'appareil anonyme** (repli). Identité
+  = **hash e-mail OU jeton** (jamais l'e-mail en clair persisté). Auto-inscription
+  publique, pas l'approbation owner du modèle invité actuel.
+- **Une voix par personne**, **vote IMMUABLE** : une fois soumis, **pas de
   changement** (⚠️ **diffère de V1** où la voix est modifiable jusqu'à la deadline).
 - **Chaque micro-vote a un délai** (fenêtre courte). **E-mail de confirmation /
   résultat** au participant.
@@ -45,7 +49,8 @@ l'owner pousse un **flux de micro-votes en direct** ; le public vote « à chaud
 
 | Axe | V1 (`single`) | V3 (`match`) |
 |---|---|---|
-| Population | invités **approuvés par l'owner** | **auto-inscription publique par e-mail** |
+| Population | invités **approuvés par l'owner** | **auto-inscription publique** (e-mail double opt-in **ou** jeton anonyme) |
+| Identité stockée | nom + e-mail en clair (invité) | **hash salé** (e-mail) **ou** jeton d'appareil — jamais l'e-mail en clair |
 | Voix | **modifiable** jusqu'à deadline | **immuable** dès soumission |
 | Granularité | 1 vote par dossier | **flux** de micro-votes horodatés |
 | Visibilité votants | noms/avatars | **compteur seul**, jamais de noms |
@@ -61,33 +66,81 @@ mais avec son propre gating et sa propre rétention.
 - **Micro-vote** = une « question » horodatée rattachée au dossier-événement, avec sa
   **fenêtre** (ouverture/fermeture courte) et ses **options** (mémos ou options
   légères inline — à trancher).
-- **Participant** = e-mail vérifié (double opt-in ?), rattaché à la **cohorte** de
-  l'événement (tag). Voix = `(e-mail, option, micro_vote_id)`, **INSERT once, jamais
-  d'UPDATE** (immuabilité en base : pas de retarget, contrainte d'unicité
-  `(micro_vote_id, e-mail)`).
+- **Participant** = **hash salé d'e-mail** (profil A, double opt-in) **ou jeton
+  d'appareil** (profil B), rattaché à la **cohorte** de l'événement (tag). Voix =
+  `(personne_hash, option, micro_vote_id)`, **INSERT once, jamais d'UPDATE**
+  (immuabilité en base : pas de retarget, contrainte d'unicité
+  `(micro_vote_id, personne_hash)`). **Jamais d'e-mail en clair en base** (§4bis).
 - **Cohorte éphémère** : tag d'événement + **rétention bornée** → job de purge
   (voix + e-mails + confirmations) à l'expiration.
 - **Droit d'inviter délégué** : un flag/rôle « peut inviter » distinct de
   l'owner et du `can_edit` (nouveau niveau, à cadrer sous invariant 5).
 
+## 4bis. Décisions figées — identité & RGPD (Fabien, juil. 2026)
+
+Ces choix sont **tranchés** et servent de contrainte à toute spec future. Ils ne
+lèvent PAS tous les bloquants du §5 (voir §5 pour ce qui reste ouvert).
+
+- **Identité à deux profils, e-mail optionnel** (choix du votant) :
+  - **Profil A — e-mail + double opt-in** : à l'inscription, **mail de validation** ;
+    la voix ne compte qu'après clic du lien de confirmation (adresse prouvée).
+  - **Profil B — jeton d'appareil anonyme** : **repli** sans e-mail.
+  - Primitive de voix inchangée : `(personne, option)`, où **`personne` = hash e-mail
+    OU jeton**.
+- **Stockage — e-mail JAMAIS persisté en clair** :
+  - L'e-mail est manipulé **en clair uniquement le temps du flux d'inscription** (pour
+    envoyer le mail de validation), puis **on ne conserve que le hash salé**.
+  - **Sel PAR ÉVÉNEMENT** (un e-mail est peu entropique → sel global rendrait le hash
+    attaquable par dictionnaire ; sel par cohorte cloisonne et casse la corrélation
+    inter-événements).
+  - **Conséquence actée** : **mail possible à l'inscription seulement**. **Pas de
+    ré-e-mail ultérieur** (ex. résultats) — l'adresse est **irrécupérable** après
+    hachage. Si un besoin de mail de résultat émerge, il devra être **envoyé pendant le
+    flux d'inscription** (ex. « tu recevras le résultat » impossible tel quel) **ou
+    remettre en cause ce choix** de stockage.
+- **Transparence — note de confidentialité à l'inscription** (visible avant de voter) :
+  - **finalité unique** = ce vote / cet événement ;
+  - **« jamais revendu »** ;
+  - **suppression après l'événement** (purge de cohorte) ;
+  - **point de contact** pour demander la suppression.
+- **Suppression sur demande** : la personne **fournit son e-mail** → **re-hash** (même
+  sel d'événement) → **DELETE** de la ligne correspondante. (Simple et cohérent avec le
+  stockage haché : pas besoin de conserver l'e-mail pour honorer un droit à l'effacement.)
+
+**Ce que ces décisions RÉSOLVENT** (au §5) :
+- **§5.1 RGPD / rétention / revente** : traité par **hash salé + purge de cohorte +
+  effacement sur demande** (plus de stockage d'e-mails de tiers en clair).
+- **§5.2 anti-abus — partie e-mail** : le **double opt-in** couvre l'exigence « adresse
+  prouvée » (une voix ne compte qu'après confirmation).
+
 ## 5. À SCOPER (questions ouvertes — bloquantes avant toute spec)
 
-1. **RGPD / rétention des e-mails** : base légale (consentement à l'inscription),
-   **durée de rétention** explicite, **purge** (à l'expiration de la cohorte + sur
-   demande de retrait), pas de conservation au-delà de l'événement. Où sont stockés
-   les e-mails, chiffrement au repos ? Mention légale à l'inscription.
-2. **Anti-abus** : **e-mails jetables** (blocage domaines temporaires ?),
-   **double opt-in** (lien de confirmation avant que la voix compte),
-   rate-limiting par IP/e-mail, un vote par e-mail réellement garanti malgré les
-   alias (`+tag`, points Gmail…). Sans ça, « une voix par e-mail » est trivialement
-   contournable.
+> **MAJ juil. 2026** : §5.1 (RGPD) et la **partie e-mail** de §5.2 sont **tranchées**
+> par les décisions du **§4bis**. Ce qui reste **ouvert** ci-dessous est signalé.
+
+1. ✅ **TRANCHÉ (§4bis) — RGPD / rétention des e-mails** : consentement + note de
+   confidentialité à l'inscription ; **jamais d'e-mail en clair persisté** (hash salé
+   par événement) ; **purge de cohorte** à l'expiration ; **effacement sur demande**
+   (re-hash → DELETE). Reste à préciser à la spec : durée de rétention chiffrée (jours)
+   et déclencheur exact de la purge.
+2. **Anti-abus** — **partie e-mail ✅ tranchée** (double opt-in, §4bis : la voix ne
+   compte qu'après confirmation de l'adresse). **RESTE OUVERT** : (a) **anti-abus du
+   profil B (jeton anonyme)** — un même humain sur **plusieurs appareils/navigateurs**
+   génère plusieurs jetons = plusieurs voix ; borner (rate-limit IP, preuve de travail,
+   plafond par événement… ?) sans casser l'anonymat ; (b) e-mails **jetables** / alias
+   (`+tag`, points Gmail…) qui contournent le « une voix par e-mail » **malgré** le
+   double opt-in ; (c) rate-limiting global inscription/vote.
 3. **UI push live** : comment le votant reçoit un nouveau micro-vote « à chaud »
    (poll court ? SSE ? rechargement ?), charge sur le **Zimaboard** avec beaucoup de
    votants simultanés (le reste du produit est mono-utilisateur — c'est un pic de
    charge inédit). Dégradation propre si trop de monde.
-4. **Contenu des e-mails** : gabarits (invitation, confirmation double opt-in,
-   résultat par micro-vote / récap final), fréquence (un e-mail par micro-vote =
-   spam ? digest ?), désinscription (lien opt-out obligatoire).
+4. **Contenu des e-mails** — **OUVERT**, mais **borné par §4bis** : l'adresse étant
+   hachée après le flux, **le seul e-mail possible est celui envoyé pendant
+   l'inscription** (validation double opt-in). **Pas de résultat/récap par e-mail
+   ultérieur** (adresse irrécupérable) — sauf à envoyer un contenu **dans le mail de
+   validation** ou à rouvrir le choix de stockage. À cadrer : gabarit du mail de
+   validation (finalité, note de confidentialité, lien de confirmation, opt-out), et
+   **où** vivent les résultats à défaut d'e-mail (page publique de l'événement ?).
 5. **Droit d'inviter délégué** : modèle de rôle (qui peut promouvoir un délégué,
    révocation), **partage viral borné** (un lien d'invitation ne doit pas ouvrir un
    accès illimité au reste du dashboard — strict scope événement, invariant 5).
@@ -104,8 +157,10 @@ mais avec son propre gating et sa propre rétention.
   l'événement sous `/share/*` (invariant 5), sans jamais exposer le reste du
   dashboard ni les autres données.
 - **Charge live** sur un Zimaboard pensé mono-utilisateur : à mesurer/plafonner.
-- **Coût RGPD** d'un stockage d'e-mails de tiers non-invités : peut être le vrai
-  facteur limitant — à valider avant tout code.
+- **Coût RGPD** d'un stockage d'e-mails de tiers : ✅ **adressé** par le §4bis (aucun
+  e-mail en clair persisté — hash salé par événement, purge, effacement sur demande).
+  Le facteur limitant restant est l'**anti-abus du jeton anonyme** (§5.2) et la
+  **charge live** (§5.3), pas la rétention.
 
 ## 7. Hors périmètre V3 (renvois)
 
@@ -117,6 +172,9 @@ mais avec son propre gating et sa propre rétention.
 
 ## 8. Prochaine étape
 
-Session de **scoping dédiée** sur les 7 questions du §5 (RGPD et anti-abus en
-premier — ce sont les vrais bloquants). Ensuite seulement : décider si V3 se fait, et
-rédiger une spec verrouillable. **Aucun build tant que le §5 n'est pas tranché.**
+§5.1 (RGPD) et la partie e-mail de §5.2 sont **tranchés** (§4bis). **Bloquants
+restants** avant toute spec : **§5.2 anti-abus du jeton anonyme** (multi-appareils),
+**§5.3 push live + charge Zimaboard**, **§5.4 contenu e-mail** (borné mais à cadrer),
+**§5.5 bornage du droit d'inviter délégué**, **§5.7 résultat/clôture/anonymisation
+post-purge**. Session de scoping dédiée sur ces points. **Aucun build tant qu'ils ne
+sont pas tranchés.**

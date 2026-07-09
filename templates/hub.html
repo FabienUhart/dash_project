@@ -167,6 +167,9 @@ dialog::backdrop { background: rgba(6,9,12,0.62); }
 #ed textarea { min-height: 6rem; resize: vertical; }
 .prio-btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
   border-radius: 4px; padding: 0.12rem 0.5rem; font-size: 0.78rem; }
+/* [VOTE-DECISION] chip d'état NON cliquable : la classe porte déjà le look pilule (tokens) ;
+   inline-flex + cursor default pour l'aligner sur les boutons voisins (invariant 9). */
+span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 .chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 12px; padding: 0.1rem 0.5rem; font-size: 0.8rem; color: var(--assignee); }
 .comment { display: flex; gap: 0.5rem; font-size: 0.82rem; padding: 0.3rem 0.5rem; background: var(--bg); border-radius: 6px; margin-top: 0.3rem; }
@@ -626,6 +629,8 @@ function memoCard(m) {
   if (!m.can_edit) badges.appendChild(el('span', { class: 'lock', text: '🔒 lecture' }));
   if (badges.children.length) row.appendChild(badges);
   task.appendChild(row);
+  const vr = hubVoteRow(m);
+  if (vr) task.appendChild(vr);
   if ((m.images || []).length) {
     const th = el('div', { class: 'thumbs' });
     m.images.forEach(name => { const img = el('img', { attrs: { src: '/share/' + m.share_token + '/image/' + name, loading: 'lazy' } });
@@ -636,6 +641,42 @@ function memoCard(m) {
     task.appendChild(th);
   }
   return task;
+}
+
+// [VOTE-DECISION] Contrôles de vote d'un mémo-option (hub). L'invité du hub est déjà
+// approuvé → il peut voter (can_edit NON requis). Résultats/gagnant en lecture si clos.
+function hubVoteRow(m) {
+  const proj = projById(m.project_id);
+  if (!proj || !proj.vote_enabled) return null;
+  const row = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0.15rem 0 0 1.9rem' } });
+  if (m.vote_excluded) {  // [VOTE-EXCLUDE] lecture seule : badge, aucun contrôle
+    row.appendChild(el('span', { class: 'badge', text: '🗳 hors vote', attrs: { title: "Ce mémo n'est pas une option du vote" } }));
+    return row;
+  }
+  const closed = proj.vote_state === 'closed';
+  const mine = !!m.vote_mine;
+  const btn = el('button', {
+    class: 'prio-btn', text: mine ? '✓ Ma voix' : '🗳 Voter',
+    attrs: Object.assign(
+      { type: 'button', title: closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo') },
+      closed ? { disabled: '' } : {},
+      { style: mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+    ),
+  });
+  if (!closed) btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      const r = await api(m.share_token, '/memo/' + m.id + '/vote', { method: 'POST', body: '{}' });
+      if (r.ok) await reload();
+      else { const er = await r.json().catch(() => ({})); notify(er.error || 'Vote impossible.', { error: true }); }
+    } catch (err) { notify('Vote impossible.', { error: true }); }
+  });
+  row.appendChild(btn);
+  const n = m.vote_count || 0;
+  row.appendChild(el('span', { class: 'badge', text: n + ' voix' }));
+  (m.vote_voters || []).slice(0, 6).forEach(v => row.appendChild(el('span', { class: 'asg-av', text: initials(v), attrs: { title: v } })));
+  if (closed && m.is_winner) row.appendChild(el('span', { class: 'badge', text: voteWinnerText(proj), attrs: { style: 'background:var(--accent);color:#10141a;font-weight:600' } }));
+  return row;
 }
 
 function wireChecklist(container, m) {
@@ -659,6 +700,10 @@ function renderBoard() {
     if (fp) {
       const hd = el('div', { class: 'ag-head' });
       hd.appendChild(el('h2', { text: (fp.emoji ? fp.emoji + ' ' : '') + fp.name }));
+      if (fp.vote_enabled) hd.appendChild(el('span', {  // [VOTE-DECISION] badge lecture seule (gabarit .prio-btn)
+        class: 'prio-btn', text: voteStatusLabel(fp),
+        attrs: { title: voteDeadlineTitle(fp), style: 'cursor:default' },
+      }));
       hd.appendChild(el('button', {
         class: 'btn', text: '📆 Agenda',
         attrs: { title: 'Agenda de ce dossier et de ses sous-dossiers', style: 'margin-left:auto' },
@@ -1048,6 +1093,7 @@ document.getElementById('btn-map').addEventListener('click', () => {
   runMapDialog({ title: DATA.name || 'Mes dossiers', points: hubMapPoints(), recompute: hubMapPoints, editable: false,
     projects: DATA.projects || [], currentProjectId: FOCUS == null ? 'all' : FOCUS, subFilterScope: FOCUS != null,
     defaultMarkerColor: DATA.marker_color, focusKey: 'hubMapFocus:' + HUB_TOKEN, subKey: 'hubMapSub:' + HUB_TOKEN,
+    winnerIds: voteWinnerIdSet(FOCUS == null ? null : projById(FOCUS)),  // [VOTE-DECISION]
     datedPoints: hubDatedPoints, timelineKey: 'hubMapTimeline:' + HUB_TOKEN }); // [MAP-TIMELINE]
 });
 // [HUB-MAP-CLOSE] Le partial runMapDialog ne câble pas #map-close (chaque page le fait, cf.

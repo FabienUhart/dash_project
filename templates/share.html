@@ -322,6 +322,10 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
    être autonome (sinon chips carte/photo bruts). Look = cards (token/rayon/hover). */
 .prio-btn { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); padding: 0.12rem 0.5rem; font: inherit; font-size: 0.78rem; border-radius: 4px; cursor: pointer; }
 .prio-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
+/* [VOTE-DECISION] chip d'état NON cliquable : la classe .prio-btn porte déjà le look pilule
+   (fond/bordure/couleur via tokens) ; on neutralise juste hover + cursor (invariant 9). */
+span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
+span.prio-btn:hover { color: var(--muted); background: var(--panel-2); border-color: var(--border); }
 .subtask { display: flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; margin: 0.25rem 0 0 1.75rem; }
 .subtask input { accent-color: var(--green); }
 .subtask.stdone span { text-decoration: line-through; color: var(--muted); }
@@ -1270,6 +1274,59 @@ async function put(memoId, body) {
   else if (r.status === 403) await load();
 }
 
+// [VOTE-DECISION] Voter côté invité : approbation suffit (can_edit NON requis, §2.3).
+async function shareVote(memoId) {
+  const r = await fetch(API + '/memo/' + memoId + '/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: '{}',
+  });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + r.status)); }
+  await load();
+}
+
+// Contrôles de vote d'un mémo-option (invité). Compteurs/résultats visibles pour tous ;
+// bouton Voter réservé à l'invité APPROUVÉ (pas can_edit). Gagnant figé si clos.
+function shareVoteRow(memo) {
+  const proj = (DATA.projects || []).find(p => p.id === memo.project_id);
+  if (!proj || !proj.vote_enabled) return null;
+  const row = el('div', '');
+  row.style.cssText = 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.45rem';
+  if (memo.vote_excluded) {  // [VOTE-EXCLUDE] lecture seule invité : badge, aucun contrôle
+    const b = el('span', 'badge', '🗳 hors vote'); b.title = "Ce mémo n'est pas une option du vote";
+    row.appendChild(b);
+    return row;
+  }
+  const closed = proj.vote_state === 'closed';
+  if (GUEST.status === 'approved') {
+    const mine = !!memo.vote_mine;
+    const btn = el('button', 'prio-btn', mine ? '✓ Ma voix' : '🗳 Voter');
+    btn.type = 'button';
+    btn.disabled = closed;
+    btn.title = closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo');
+    if (mine) btn.style.cssText = 'background:var(--accent);border-color:var(--accent);color:#10141a';
+    if (!closed) btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await shareVote(memo.id); } catch (err) { notify('Vote impossible : ' + err.message, { error: true }); }
+    });
+    row.appendChild(btn);
+  }
+  const n = memo.vote_count || 0;
+  row.appendChild(el('span', 'badge', n + ' voix'));
+  const voters = memo.vote_voters || [];
+  if (voters.length) {
+    const stack = el('div', 'asg-stack'); stack.title = voters.join(', ');
+    voters.slice(0, 6).forEach(v => { const av = el('span', 'asg-av', initials(v)); av.title = v; stack.appendChild(av); });
+    row.appendChild(stack);
+  }
+  if (closed && memo.is_winner) {
+    const w = el('span', 'badge', voteWinnerText(proj));
+    w.style.cssText = 'background:var(--accent);color:#10141a;font-weight:600';
+    row.appendChild(w);
+  }
+  return row;
+}
+
 let FILTER = 'all';
 let PFILTER = 'all';
 let GVIEW = 'board';   // 'board' | 'plan' (vue Plan invité)
@@ -1600,6 +1657,7 @@ function openShareMap(extra) {
     projects: DATA.projects || [], currentProjectId: PFILTER,
     subFilterScope: PFILTER !== 'all',
     defaultMarkerColor: DATA.marker_color,
+    winnerIds: voteWinnerIdSet((DATA.projects || []).find(p => p.id === (PFILTER !== 'all' ? PFILTER : DATA.root_id))),
     focusKey: 'shareMapFocus:' + TOKEN + ':' + PFILTER,
     subKey: 'shareMapSubFilter:' + TOKEN + ':' + PFILTER,
     saveColor: saveSharePointColor, saveGroups: saveShareGroups,
@@ -1989,6 +2047,15 @@ function render() {
     h.appendChild(d);
   }
   h.appendChild(document.createTextNode(DATA.title));
+  // [VOTE-DECISION] badge du dossier actif s'il est en mode vote (lecture seule invité).
+  const _vpid = PFILTER !== 'all' ? PFILTER : DATA.root_id;
+  const _vproj = (DATA.projects || []).find(p => p.id === _vpid);
+  if (_vproj && _vproj.vote_enabled) {
+    const vb = el('span', 'prio-btn', voteStatusLabel(_vproj));  // gabarit .prio-btn, texte complet
+    vb.style.cssText = 'margin-left:0.5rem;cursor:default';
+    vb.title = voteDeadlineTitle(_vproj);
+    h.appendChild(vb);
+  }
   const modeEl = document.getElementById('mode'); modeEl.textContent = '';
   modeEl.append(shareIcon(canEditNow() || DATA.can_edit ? 'pencil' : 'eye'), ' ' + (canEditNow() ? 'modifiable' : (DATA.can_edit ? 'sur validation' : 'lecture seule')));
   const pdesc = document.getElementById('pdesc');
@@ -2120,6 +2187,8 @@ function render() {
         put(memo.id, { content: tpl.innerHTML });
       });
     });
+    const _vr = shareVoteRow(memo);
+    if (_vr) content.appendChild(_vr);
     row.appendChild(content);
 
     // Chip de priorité visible (en plus de la bordure gauche). [CARD-REDESIGN]
