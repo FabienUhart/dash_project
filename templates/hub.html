@@ -525,6 +525,20 @@ function render() {
   if (VIEW === 'plan') renderPlan();
   else if (VIEW === 'agenda') renderAgendaHub();
   else renderBoard();
+  syncMapBtn();
+}
+
+// [MAP-BTN-COUNT] parité owner (index.html renderBoard) : le bouton Carte porte le
+// compteur de points géolocalisés de la vue courante et se masque à 0 (fini le clic
+// qui n'affiche que « Aucun élément géolocalisé »). Même source que le check du clic
+// (hubMapPoints), donc N == ce que la carte afficherait. Rafraîchi à chaque render()
+// → suit dossier / sous-projet / « Tout » / recherche.
+function syncMapBtn() {
+  const btn = document.getElementById('btn-map');
+  if (!btn) return;
+  const n = (typeof L === 'undefined') ? 0 : hubMapPoints().length;
+  btn.hidden = n === 0;
+  btn.textContent = '🗺 Carte (' + n + ')';
 }
 
 function renderSidebar() {
