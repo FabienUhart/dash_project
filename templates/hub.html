@@ -656,7 +656,7 @@ function hubVoteRow(m) {
   const closed = proj.vote_state === 'closed';
   const mine = !!m.vote_mine;
   const btn = el('button', {
-    class: 'prio-btn', text: mine ? '✓ Ma voix' : '🗳 Voter',
+    class: 'prio-btn', text: voteBtnLabel(proj.vote_mode, mine),  // [VOTE-MULTI]
     attrs: Object.assign(
       { type: 'button', title: closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo') },
       closed ? { disabled: '' } : {},

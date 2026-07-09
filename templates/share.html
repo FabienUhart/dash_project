@@ -1300,7 +1300,7 @@ function shareVoteRow(memo) {
   const closed = proj.vote_state === 'closed';
   if (GUEST.status === 'approved') {
     const mine = !!memo.vote_mine;
-    const btn = el('button', 'prio-btn', mine ? '✓ Ma voix' : '🗳 Voter');
+    const btn = el('button', 'prio-btn', voteBtnLabel(proj.vote_mode, mine));  // [VOTE-MULTI]
     btn.type = 'button';
     btn.disabled = closed;
     btn.title = closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo');

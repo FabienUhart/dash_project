@@ -1726,6 +1726,10 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <label id="create-vote-label">🗳 Vote « choisir un »
       <div id="create-vote-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
       <div id="create-vote-config" style="display:none;margin-top:0.4rem">
+        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.4rem">
+          <span style="font-size:0.8rem;color:var(--muted)">Mode</span>
+          <div id="create-vote-mode-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
+        </div>
         <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
           <span style="font-size:0.8rem;color:var(--muted)">Deadline (Europe/Paris, optionnelle)</span>
           <input type="datetime-local" id="create-vote-deadline"
@@ -2578,12 +2582,13 @@ function openCreateDialog(kind, item = null) {
   if (kind === 'project') renderTripChips();
   // [VOTE-DECISION] état vote de la pop-in projet
   createVoteEnabled = !!(item && item.vote_enabled);
+  createVoteMode = (item && item.vote_mode === 'multi') ? 'multi' : 'single';  // [VOTE-MULTI]
   const vdl = document.getElementById('create-vote-deadline');
   vdl.value = (item && item.vote_deadline) ? item.vote_deadline : '';
   document.getElementById('create-vote-deadline-clear').style.display = vdl.value ? '' : 'none';
   const closed = !!(item && item.vote_enabled && item.vote_state === 'closed');
   document.getElementById('create-vote-reopen-row').style.display = closed ? '' : 'none';
-  if (kind === 'project') renderVoteChips();
+  if (kind === 'project') { renderVoteChips(); renderVoteModeChips(); }
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
@@ -2648,6 +2653,20 @@ function renderVoteChips() {
     }));
   });
   document.getElementById('create-vote-config').style.display = createVoteEnabled ? '' : 'none';
+}
+// [VOTE-MULTI] chips de mode « ☝️ Un seul / ☑️ Plusieurs ».
+let createVoteMode = 'single';
+function renderVoteModeChips() {
+  const wrap = document.getElementById('create-vote-mode-chips');
+  wrap.innerHTML = '';
+  [['single', '☝️ Un seul'], ['multi', '☑️ Plusieurs']].forEach(([v, label]) => {
+    const on = createVoteMode === v;
+    wrap.appendChild(el('button', {
+      class: 'prio-btn', text: label,
+      attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+      on: { click: () => { createVoteMode = v; renderVoteModeChips(); } },
+    }));
+  });
 }
 document.getElementById('create-vote-deadline').addEventListener('input', (e) => {
   document.getElementById('create-vote-deadline-clear').style.display = e.target.value ? '' : 'none';
@@ -2725,8 +2744,14 @@ createForm.addEventListener('submit', async (e) => {
     payload.is_trip = createTrip; // [MAP-TIMELINE] null = hérite, 1 = voyage, 0 = non
     // [VOTE-DECISION] config vote (n'affecte jamais les voix existantes côté serveur)
     payload.vote_enabled = createVoteEnabled ? 1 : 0;
-    payload.vote_mode = 'single';
+    payload.vote_mode = createVoteMode;  // [VOTE-MULTI]
     payload.vote_deadline = createVoteEnabled ? (document.getElementById('create-vote-deadline').value || '') : '';
+  }
+  // [VOTE-MULTI] bascule multi→single : avertit (danger) — le serveur purge les voix surnuméraires.
+  if (createKind === 'project' && editingItem && editingItem.vote_mode === 'multi' && createVoteMode === 'single') {
+    const ok = await confirmPopin('Chaque votant ne gardera que sa voix la plus récente ; les autres voix seront supprimées.',
+      { title: 'Passer en « un seul choix » ?', okLabel: 'Passer en un seul', danger: true });
+    if (!ok) { _sb.disabled = false; _sb.style.opacity = ''; return; }
   }
   const body = JSON.stringify(payload);
   try {
@@ -4550,7 +4575,7 @@ function voteRowEl(memo) {
   const mine = !!memo.vote_mine;
   row.appendChild(el('button', {
     class: 'prio-btn',
-    text: mine ? '✓ Ma voix' : '🗳 Voter',
+    text: voteBtnLabel(proj.vote_mode, mine),  // [VOTE-MULTI] case à cocher en multi
     attrs: Object.assign(
       { type: 'button', title: closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo') },
       closed ? { disabled: '' } : {},

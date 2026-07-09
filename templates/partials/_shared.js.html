@@ -68,11 +68,17 @@ function voteStatusLabel(vote) {
   const m = /T(\d{2}):(\d{2})$/.exec(vote.vote_deadline || '');
   return m ? '🗳 Vote · clôt à ' + m[1] + ':' + m[2] : '🗳 Vote ouvert';
 }
-// Tooltip du chip : date complète (« clôt le 9 juil. à 13h00 ») quand une deadline existe.
+// Tooltip du chip : date complète (« clôt le 9 juil. à 13h00 ») + mode multi si applicable.
 function voteDeadlineTitle(vote) {
+  const multi = vote && vote.vote_mode === 'multi' ? ' · plusieurs choix' : '';
   const d = vote && vote.vote_deadline ? fmtVoteDeadline(vote.vote_deadline) : '';
-  if (!d) return 'Ce dossier est en mode vote';
-  return (vote.vote_state === 'closed' ? 'Clôturé — deadline ' : 'Clôt le ') + d;
+  if (!d) return 'Ce dossier est en mode vote' + multi;
+  return (vote.vote_state === 'closed' ? 'Clôturé — deadline ' : 'Clôt le ') + d + multi;
+}
+// Libellé du bouton Voter d'un mémo-option : case à cocher en multi, coche simple en single.
+function voteBtnLabel(mode, mine) {
+  if (mode === 'multi') return mine ? '☑️ Ma voix' : '☐ Voter';
+  return mine ? '✓ Ma voix' : '🗳 Voter';
 }
 function voteWinnerText(vote) {
   return (vote && vote.vote_winner_ids && vote.vote_winner_ids.length > 1) ? '🏆 Ex æquo' : '🏆 Gagnant';

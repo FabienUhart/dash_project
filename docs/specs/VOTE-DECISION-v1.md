@@ -228,7 +228,8 @@ flags de vote entrent-ils dans le payload d'export ?
 ## 8. Hors V1 — « suite »
 
 - **[VOTE V2] mode multi-intérêts** (festival) : `vote_mode='multi'` — **échange
-  d'index unique** (§3.1), UI en sélection multiple. Aucune refonte.
+  d'index unique** (§3.1), UI en sélection multiple. Aucune refonte. **✅ LIVRÉ
+  [V20.8.47]** — voir §12.3.
 - **[VOTE V1.1] création auto de l'événement d'agenda** pour le gagnant à la clôture
   (réutilise `due_date`/`due_time` + [AGENDA]).
 - **[COMMENT-REACTIONS] réactions emoji** sur les commentaires : **spec séparée
@@ -311,6 +312,22 @@ donnée d'atelier, **toujours v20**, pas d'entrée d'invariant 1).
   aucun contrôle.
 - **UI 3 pages** : card d'un mémo exclu → ni Voter ni compteur, **badge `.badge`** discret
   (invariant 9).
+
+### 12.3 [VOTE-MULTI] — mode « plusieurs choix » (V2, [V20.8.47])
+- **Migration additive (§3.1)** : index `UNIQUE(project_id, voter)` **remplacé** par
+  `UNIQUE(project_id, voter, memo_id)` (`init_db()` : DROP `ux_memo_votes_single` +
+  CREATE `ux_memo_votes_multi`, colonnes/lignes intactes, voix existantes préservées). En
+  **single**, unicité une-voix-par-personne **applicative** (`_cast_vote` UPDATE la ligne).
+- **`_cast_vote(…, mode)`** : en **multi**, toggle par **(voter, mémo)** — voter un 2ᵉ
+  mémo n'écrase pas le 1ᵉʳ, re-cliquer retire cette voix-là seulement. Mode résolu depuis
+  `proj.vote_mode`. Gardes inchangées (exclu 400, clos 409, invité approuvé, scope).
+  Gagnant/ex æquo/snapshot : têtes = max voix. Reset/deadline/reopen/exclude compatibles.
+- **Bascule owner** (pop-in projet) : chips « ☝️ Un seul / ☑️ Plusieurs ». single→multi
+  libre ; **multi→single** → `confirmPopin` danger + **purge serveur** `_collapse_votes_to_single`
+  (garde la voix la plus récente par votant, règle « plus récente gagne » §7).
+- **UI 3 pages** : boutons = cases à cocher en multi (« ☑️ Ma voix » / « ☐ Voter »,
+  plusieurs actives), badge d'en-tête inchangé (title « · plusieurs choix »). Parité invité.
+- **Export inchangé (v20)**, zéro route nouvelle. Invariants 1/2/5/8/9.
 
 ## 11. Invariants touchés
 

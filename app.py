@@ -409,9 +409,18 @@ def init_db():
         )
         """
     )
+    # [VOTE-MULTI] V2 : index unique ÉLARGI (project_id, voter, memo_id) → autorise N mémos
+    # par personne (mode multi). En single, l'unicité une-voix-par-personne devient
+    # applicative (`_cast_vote` UPDATE la ligne). Migration additive, colonnes/lignes
+    # intactes : on remplace l'ancien index single s'il existe (les voix single sont déjà
+    # uniques sur (project_id, voter) donc a fortiori sur le triplet → CREATE ne peut pas
+    # échouer sur des données existantes).
+    votes_idx = {r[1] for r in conn.execute("PRAGMA index_list(memo_votes)").fetchall()}
+    if "ux_memo_votes_single" in votes_idx:
+        conn.execute("DROP INDEX ux_memo_votes_single")
     conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_memo_votes_single "
-        "ON memo_votes(project_id, voter)"
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_memo_votes_multi "
+        "ON memo_votes(project_id, voter, memo_id)"
     )
     scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
     if "pin" not in scols:
@@ -1092,6 +1101,10 @@ def update_project(project_id):
         (name, color, tags, emoji, parent_id, location, description, marker_color, is_trip,
          vote_enabled, vote_mode, vote_deadline, project_id),
     )
+    # [VOTE-MULTI] bascule multi→single : purge des voix surnuméraires (garde la + récente
+    # par votant). Le front prévient (confirm danger) ; le serveur applique la règle.
+    if _clean_vote_mode(_row_get(existing, "vote_mode", "")) == "multi" and _clean_vote_mode(vote_mode) == "single":
+        _collapse_votes_to_single(db, project_id)
     db.commit()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip}
@@ -1190,7 +1203,7 @@ def vote_memo(memo_id):
         proj = db.execute("SELECT * FROM projects WHERE id = ?", (memo["project_id"],)).fetchone()
     if _vote_is_closed(proj):
         return jsonify({"error": "vote clos"}), 409
-    _cast_vote(db, proj["id"], memo_id, "")
+    _cast_vote(db, proj["id"], memo_id, "", _clean_vote_mode(proj["vote_mode"]))  # [VOTE-MULTI]
     db.commit()
     pv = _vote_project_payload(db, proj, owner=True)
     return jsonify({"project_id": proj["id"], "vote": pv,
@@ -1409,9 +1422,33 @@ def _find_vote(db, project_id, voter):
     return None
 
 
-def _cast_vote(db, project_id, memo_id, voter):
-    """Single : toggle (re-cliquer sa voix = retirer) / retarget (voter un autre = déplacer)."""
+def _find_vote_for_memo(db, project_id, memo_id, voter):
+    """Voix de `voter` sur CE mémo précis (match par e-mail). [VOTE-MULTI]"""
+    key = _voter_key(voter)
+    for r in db.execute(
+        "SELECT id, voter FROM memo_votes WHERE project_id = ? AND memo_id = ?",
+        (project_id, memo_id),
+    ).fetchall():
+        if _voter_key(r["voter"]) == key:
+            return r
+    return None
+
+
+def _cast_vote(db, project_id, memo_id, voter, mode="single"):
+    """single : toggle (re-cliquer sa voix = retirer) / retarget (voter un autre = déplacer
+    la voix unique). multi : toggle par (voter, mémo) — voter un 2ᵉ mémo n'écrase pas le 1ᵉʳ,
+    re-cliquer retire cette voix-là seulement. [VOTE-MULTI]"""
     now = datetime.now(timezone.utc).isoformat()
+    if mode == "multi":
+        existing = _find_vote_for_memo(db, project_id, memo_id, voter)
+        if existing:
+            db.execute("DELETE FROM memo_votes WHERE id = ?", (existing["id"],))
+        else:
+            db.execute(
+                "INSERT INTO memo_votes (project_id, memo_id, voter, created_at) VALUES (?, ?, ?, ?)",
+                (project_id, memo_id, voter, now),
+            )
+        return
     existing = _find_vote(db, project_id, voter)
     if existing:
         if existing["memo_id"] == memo_id:
@@ -1426,6 +1463,22 @@ def _cast_vote(db, project_id, memo_id, voter):
             "INSERT INTO memo_votes (project_id, memo_id, voter, created_at) VALUES (?, ?, ?, ?)",
             (project_id, memo_id, voter, now),
         )
+
+
+def _collapse_votes_to_single(db, project_id):
+    """[VOTE-MULTI] Bascule multi→single : chaque votant ne garde que sa voix LA PLUS
+    RÉCENTE (created_at), les autres sont supprimées (réutilise « plus récente gagne » §7)."""
+    seen = set()
+    for r in db.execute(
+        "SELECT id, voter FROM memo_votes WHERE project_id = ? "
+        "ORDER BY created_at DESC, id DESC",
+        (project_id,),
+    ).fetchall():
+        k = _voter_key(r["voter"])
+        if k in seen:
+            db.execute("DELETE FROM memo_votes WHERE id = ?", (r["id"],))
+        else:
+            seen.add(k)
 
 
 def _vote_options_payload(db, project_id, me, owner_name, pv):
@@ -4454,7 +4507,7 @@ def share_vote_memo(token, memo_id):
     if _vote_is_closed(proj):
         return jsonify({"error": "vote clos"}), 409
     voter = f"{guest['name'] or guest['email']} <{guest['email']}>"
-    _cast_vote(db, proj["id"], memo_id, voter)
+    _cast_vote(db, proj["id"], memo_id, voter, _clean_vote_mode(proj["vote_mode"]))  # [VOTE-MULTI]
     db.commit()
     pv = _vote_project_payload(db, proj, owner=False)
     return jsonify({"project_id": proj["id"], "vote": pv,
