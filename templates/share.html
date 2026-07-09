@@ -510,6 +510,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 @media (prefers-reduced-motion: reduce) { .sitem:active, .tile:active { transform: none; } }
 dialog { background: transparent; border: none; padding: 0; max-width: 94vw; max-height: 94vh; }
 dialog::backdrop { background: rgba(6,9,12,0.78); backdrop-filter: blur(3px); }
+/* [MAP-CLOSE-UX] En-tête carte : titre + ✕ collés en haut (sticky), fond opaque. */
+.map-head { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.55rem;
+  position: sticky; top: 0; z-index: 25; background: var(--panel); }
+.map-x { flex: 0 0 auto; width: 34px; height: 34px; min-height: 0; padding: 0;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  color: var(--muted); font-size: 1rem; line-height: 1; }
+.map-x:hover { background: var(--bg-elev); color: var(--text); border-color: var(--muted); }
 /* Entrée des pop-ins en CSS. NE PAS animer le <dialog> via GSAP (transform/visibility) :
    poser un transform sur l'élément dialog le sort du top-layer Chromium → perte du
    centrage (position:fixed→absolute) et du ::backdrop. Une animation CSS reste sûre. */
@@ -680,6 +688,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
      .dlg-actions — la rangée Fermer restait à order 0 (avant la carte dans le flux),
      ce qui empêcherait aussi le sticky de coller en bas. */
   #map-dialog .dlg-actions { order: 4; }
+  /* [MAP-CLOSE-UX] carte : fermeture en haut → le pied Fermer ne flotte plus. */
+  #map-dialog .dlg-actions { position: static; background: none; border-top: none; padding: 0; }
 }
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
@@ -729,7 +739,10 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 <dialog id="lightbox"></dialog>
 
 <dialog id="map-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.9rem;width:min(920px,96vw);color:var(--text)">
-  <h3 id="map-title" style="margin:0 0 0.6rem;font-size:1rem">🗺 Carte</h3>
+  <div class="map-head">
+    <h3 id="map-title" style="margin:0;flex:1;min-width:0;font-size:1rem">🗺 Carte</h3>
+    <button type="button" id="map-close-top" class="map-x" aria-label="Fermer">✕</button>
+  </div>
   <div id="map-subbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.45rem"></div>
   <div id="map-groupbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.55rem"></div>
   <div id="map-selbar" style="display:none;flex-wrap:wrap;gap:0.4rem;align-items:center;margin:0 0 0.55rem;padding:0.45rem 0.55rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px"></div>
@@ -1499,7 +1512,13 @@ function todayStr() {
 }
 
 let activeMap = null;
-document.getElementById('map-close').addEventListener('click', () => document.getElementById('map-dialog').close());
+(() => {
+  const dlg = document.getElementById('map-dialog');
+  const closeMap = () => dlg.close();
+  document.getElementById('map-close').addEventListener('click', closeMap);
+  // [MAP-CLOSE-UX] ✕ sticky en haut = même fermeture que le Fermer du pied.
+  document.getElementById('map-close-top').addEventListener('click', closeMap);
+})();
 
 // [MAP-TIMELINE] flag voyage d'un mémo invité : `trip` RÉSOLU par le serveur sur
 // son projet (lecture seule — l'arbre du partage peut être tronqué au scope).

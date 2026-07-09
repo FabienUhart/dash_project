@@ -1205,6 +1205,15 @@ dialog {
   box-shadow: var(--shadow-lg);
 }
 dialog::backdrop { background: rgba(6,9,12,0.62); backdrop-filter: blur(3px); }
+/* [MAP-CLOSE-UX] En-tête carte : titre + ✕ collés en haut du dialog (sticky), fond
+   opaque pour masquer le contenu qui défile dessous. Desktop : ✕ visible aussi. */
+.map-head { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.55rem;
+  position: sticky; top: 0; z-index: 25; background: var(--panel-2); }
+.map-x { flex: 0 0 auto; width: 34px; height: 34px; min-height: 0; padding: 0;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+  color: var(--muted); font-size: 1rem; line-height: 1; }
+.map-x:hover { background: var(--panel-2); color: var(--text); border-color: var(--muted); }
 /* Entrée des pop-ins en CSS. NE PAS animer le <dialog> via GSAP (transform/visibility) :
    poser un transform sur l'élément dialog le sort du top-layer Chromium → perte du
    centrage (position:fixed→absolute) et du ::backdrop. Une animation CSS reste sûre. */
@@ -1453,6 +1462,11 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     background: var(--panel); border-top: 1px solid var(--border);
     padding: 0.6rem 0 0.2rem;
   }
+  /* [MAP-CLOSE-UX] carte : fermeture en haut (✕ sticky) → le pied Fermer ne flotte
+     plus, il reste en fin de flux comme sortie naturelle en bas de liste. */
+  #map-dialog .actions {
+    position: static; background: none; border-top: none; padding: 0;
+  }
 }
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
@@ -1604,7 +1618,10 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="map-dialog" style="width:min(920px,96vw);padding:0.9rem">
-  <h3 id="map-title" style="margin:0 0 0.6rem">🗺 Carte</h3>
+  <div class="map-head">
+    <h3 id="map-title" style="margin:0;flex:1;min-width:0">🗺 Carte</h3>
+    <button type="button" id="map-close-top" class="map-x" aria-label="Fermer">✕</button>
+  </div>
   <div id="map-subbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.45rem"></div>
   <div id="map-groupbar" style="display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center;margin:0 0 0.55rem"></div>
   <div id="map-selbar" style="display:none;flex-wrap:wrap;gap:0.4rem;align-items:center;margin:0 0 0.55rem;padding:0.45rem 0.55rem;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px"></div>
@@ -2762,7 +2779,10 @@ async function geocodeAddress(q) {
 
 let activeMap = null;
 const mapDialog = document.getElementById('map-dialog');
-document.getElementById('map-close').addEventListener('click', () => mapDialog.close());
+const closeMap = () => mapDialog.close();
+document.getElementById('map-close').addEventListener('click', closeMap);
+// [MAP-CLOSE-UX] ✕ sticky en haut = même fermeture que le Fermer du pied.
+document.getElementById('map-close-top').addEventListener('click', closeMap);
 
 async function savePointColor(p, color) {
   // Override de couleur d'un point (mémo ou projet). '' = on efface l'override.

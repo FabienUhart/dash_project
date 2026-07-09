@@ -490,6 +490,10 @@ function runMapDialog(cfg) {
       marker.bindPopup(
         '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
       );
+      // [MAP-MARKER-DAY-SYNC] clic marqueur = sélectionner le jour du point via le MÊME
+      // chemin que le chip « Jour N » (applyDay : filtre + zoom + surlignage de la frise) ;
+      // point sans date → « 🌍 Tous » (applyDay(null)). La popup Leaflet s'ouvre toujours.
+      marker.on('click', () => applyDay(p.due_date || null));
       markersByKey[pkey(p)] = { marker, ll };
       const row = el('div', { attrs: { style: 'display:flex;align-items:flex-start;gap:0.4rem;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%' + (focused ? '' : ';opacity:0.4') } });
       if (showChip) {
