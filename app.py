@@ -41,7 +41,27 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "20"
+APP_VERSION = "20"  # X = version du format d'export (invariant 1)
+
+
+def _build_version():
+    """Version complète de build « X.Y.Z » = premier tag [VX.Y.Z] de REALISATION.md
+    (entrées newest-first, donc le premier rencontré = version courante). Source de
+    vérité UNIQUE (pas de constante à maintenir en double). Repli sur APP_VERSION si
+    le fichier manque (ex. image sans REALISATION.md — mais le Dockerfile le copie)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "REALISATION.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.search(r"\[V(\d+\.\d+\.\d+)\]", line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return APP_VERSION
+
+
+BUILD_VERSION = _build_version()
 DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
@@ -382,7 +402,14 @@ def init_db():
 
 @app.route("/")
 def index():
-    return render_template("index.html", version=APP_VERSION)
+    # Footer owner : version COMPLÈTE de build (X.Y.Z) pour distinguer local/Zimaboard.
+    return render_template("index.html", version=BUILD_VERSION)
+
+
+@app.route("/api/version", methods=["GET"])
+def api_version():
+    # Version courante exposée (même exposition que /api/links, pas d'auth propre).
+    return jsonify({"version": BUILD_VERSION, "export": int(APP_VERSION)})
 
 
 # ---------------------------------------------------------------- links

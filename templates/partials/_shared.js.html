@@ -601,6 +601,32 @@ function runMapDialog(cfg) {
     }
   }
 
+  // [MAP-DAYCHIP-ALL] Recadrage carte sur une liste de latlngs (même logique que le
+  // fit de draw()) : différé pour laisser la carte se dimensionner (invalidateSize).
+  function fitTo(lls) {
+    setTimeout(() => {
+      activeMap.invalidateSize();
+      if (lls.length === 1) activeMap.setView(lls[0], 15);
+      else if (lls.length) activeMap.fitBounds(lls, { padding: [30, 30] });
+    }, 60);
+  }
+  // [MAP-DAYCHIP-ALL] Chemin unique de (dé)sélection de jour de la frise. d = jour ISO
+  // → met le jour en avant + zoome sur ses points ; d = null (chip « 🌍 Tous » OU
+  // re-clic sur le jour actif) → réaffiche tout via refresh(true) et recadre sur
+  // l'ensemble des points (comme au premier rendu). Un seul chemin, pas de doublon.
+  function applyDay(d) {
+    tlActiveDay = d;
+    if (tlActiveDay) {
+      renderTimeline();
+      const s = tlEl.querySelector('[data-day="' + tlActiveDay + '"]');
+      if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
+      fitTo(current.filter(p => isFocused(p) && p.kind === 'memo' && p.due_date === tlActiveDay && p.lat != null && p.lng != null)
+        .map(p => [p.lat, p.lng]));
+    } else {
+      refresh(true); // réaffiche points/segments/frise + fitBounds sur tout l'ensemble
+    }
+  }
+
   // Frise : mémos datés du périmètre (GPS OU NON), mêmes filtres focus. Curseur
   // « aujourd'hui » = barre de progression + repère entre passé et futur ; passées
   // estompées ✓, étape du jour halo accent, sans-GPS non centrable (style discret).
@@ -622,6 +648,15 @@ function runMapDialog(cfg) {
     if (tlActiveDay && !days.includes(tlActiveDay)) tlActiveDay = null; // jour disparu (focus)
     if (days.length > 1) {
       const chipsRow = el('div', { attrs: { style: 'display:flex;gap:0.25rem;flex-wrap:wrap;margin:0 0.2rem 0.3rem' } });
+      // [MAP-DAYCHIP-ALL] chip « 🌍 Tous » en tête : actif quand aucun jour choisi
+      // (état par défaut à l'ouverture) ; clic = réaffiche tout + recadre sur l'ensemble.
+      const allActive = !tlActiveDay;
+      const allStyle = allActive ? ';background:' + ACCENT + ';border-color:' + ACCENT + ';color:#10141a;font-weight:700' : '';
+      chipsRow.appendChild(el('button', {
+        class: 'prio-btn', text: (allActive ? '✓ ' : '') + '🌍 Tous',
+        attrs: { type: 'button', title: allActive ? 'Tous les jours affichés' : 'Réafficher tous les jours et recadrer la carte sur l\'ensemble', style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + allStyle },
+        on: { click: () => applyDay(null) },
+      }));
       days.forEach((d, i) => {
         const lbl = new Date(d + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
         // [MAP-DAYCHIP-ACTIVE] chip ACTIF = fond accent (façon .prio-btn sélectionné) ;
@@ -633,14 +668,9 @@ function runMapDialog(cfg) {
         chipsRow.appendChild(el('button', {
           class: 'prio-btn', text: (isActive ? '✓ ' : '') + 'Jour ' + (i + 1),
           attrs: { type: 'button', title: lbl + (isActive ? ' — cliquer pour désélectionner' : ' — mettre ce jour en avant dans la frise'), style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + chipStyle },
-          on: { click: () => {
-            tlActiveDay = isActive ? null : d; // un seul actif, re-clic = désélection
-            renderTimeline();
-            if (tlActiveDay) {
-              const s = tlEl.querySelector('[data-day="' + tlActiveDay + '"]');
-              if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-            }
-          } },
+          // [MAP-DAYCHIP-ALL] chemin unique : re-clic sur le jour actif = applyDay(null)
+          // → même recadrage global que « 🌍 Tous » (cohérence des deux chemins).
+          on: { click: () => applyDay(isActive ? null : d) },
         }));
       });
       tlEl.appendChild(chipsRow);
