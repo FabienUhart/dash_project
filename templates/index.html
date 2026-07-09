@@ -2005,9 +2005,17 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
+// [SHARES-BADGE] compteurs du badge « Partages » de la sidebar = mêmes valeurs que
+// la vue « Partages & activité » : N = invités (personnes, e-mails distincts),
+// M = accès = lignes « depuis le… » = dossiers/sous-projets partagés (guests.length).
+function shareCounts() {
+  const g = state.guests || [];
+  return { n: new Set(g.map(x => x.email)).size, m: g.length };
+}
+
 async function loadAll() {
-  [state.links, state.categories, state.memos, state.projects, state.history, state.priorities, state.shares, state.trash] = await Promise.all([
-    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'), api('/api/history'), api('/api/priorities'), api('/api/shares'), api('/api/trash'),
+  [state.links, state.categories, state.memos, state.projects, state.history, state.priorities, state.shares, state.trash, state.guests] = await Promise.all([
+    api('/api/links'), api('/api/categories'), api('/api/memos'), api('/api/projects'), api('/api/history'), api('/api/priorities'), api('/api/shares'), api('/api/trash'), api('/api/guests'),
   ]);
   if (state.filterCat !== 'all' && state.filterCat !== 'none'
       && !state.categories.some(c => c.id === state.filterCat)) {
@@ -2085,9 +2093,10 @@ function renderSidebar() {
   const uncat = state.links.filter(l => !l.category_id).length;
   const pendingMemoCount = state.memos.filter(m => !m.done).length;
 
-  const actCount = state.activity
-    ? (state.activity.pending_guests || 0) + (state.activity.unseen || 0)
-    : 0;
+  // [SHARES-BADGE] badge « N · M » (invités · dossiers partagés) — mêmes valeurs que
+  // la vue Partages. L'alerte d'activité (invités en attente) reste sur la cloche
+  // #activity-badge du header, pas ici. Badge neutre .count comme les autres items.
+  const sc = shareCounts();
   const actItem = el('div', {
     class: 'cat-item' + (state.view === 'shares' ? ' active' : ''),
     attrs: { title: 'Liens de partage, invités et modifications' },
@@ -2095,11 +2104,11 @@ function renderSidebar() {
   });
   actItem.appendChild(icon('link'));
   actItem.appendChild(el('span', { class: 'cat-label', text: 'Partages' }));
-  const actBadge = el('span', { class: 'count', text: String(actCount) });
-  if (actCount > 0) {
-    actBadge.style.cssText = 'background:var(--red);color:#fff;border-radius:999px;padding:0.05rem 0.4rem;opacity:1;font-weight:700';
-  }
-  actItem.appendChild(actBadge);
+  actItem.appendChild(el('span', {
+    class: 'count',
+    attrs: { id: 'shares-count', title: sc.n + ' invité' + (sc.n > 1 ? 's' : '') + ' · ' + sc.m + ' dossier' + (sc.m > 1 ? 's' : '') + ' partagé' + (sc.m > 1 ? 's' : '') },
+    text: sc.n + ' · ' + sc.m,
+  }));
   nav.appendChild(actItem);
 
   const trashItem = el('div', {
@@ -3296,6 +3305,17 @@ async function refreshActivityBadge() {
     const n = (a.pending_guests || 0) + (a.unseen || 0);
     badge.textContent = String(n);
     badge.style.display = n > 0 ? 'block' : 'none';
+    // [SHARES-BADGE] rafraîchir le compteur « N · M » de la sidebar (ajout/retrait
+    // d'invité ou de dossier partagé, ou poll auto) sans re-rendre toute la sidebar.
+    try {
+      state.guests = await api('/api/guests');
+      const scEl = document.getElementById('shares-count');
+      if (scEl) {
+        const s = shareCounts();
+        scEl.textContent = s.n + ' · ' + s.m;
+        scEl.title = s.n + ' invité' + (s.n > 1 ? 's' : '') + ' · ' + s.m + ' dossier' + (s.m > 1 ? 's' : '') + ' partagé' + (s.m > 1 ? 's' : '');
+      }
+    } catch (_) {}
     // [AUTO-REFRESH] data_version couvre TOUT changement de données (autre
     // onglet/appareil/API), pas seulement l'activité invité (revisions).
     const key = (a.data_version || '') + '|' + (a.revisions.length
