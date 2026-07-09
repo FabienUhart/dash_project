@@ -216,7 +216,7 @@ dialog::backdrop { background: rgba(6,9,12,0.62); }
   .layout { flex-direction: column; }
   #sidebar { width: 100%; min-height: 0; border-right: none; border-bottom: 1px solid var(--border); }
   /* [MAP-TIMELINE-MOBILE-ORDER] CARTE → FRISE → LISTE (frise collée sous la carte). */
-  #map-dialog { display: flex; flex-direction: column; overflow-y: auto; max-height: 92vh; } /* l'empilement scrolle, rien n'est clippé */
+  #map-dialog[open] { display: flex; flex-direction: column; overflow-y: auto; max-height: 92vh; } /* [open] : sinon on écrase le dialog:not([open]){display:none} du navigateur → carte visible même fermée */
   #map-row { display: contents !important; } /* bat le display:flex inline du markup */
   #map-el { order: 1; flex: 0 0 auto !important; min-width: 0 !important; }
   #map-timeline { order: 2; }

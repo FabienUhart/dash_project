@@ -231,7 +231,7 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
   .tree-pre { font-size: 0.74rem; }
   .tree-chev { width: 1.8rem; height: 1.8rem; font-size: 1.1rem; }
   /* [MAP-TIMELINE-MOBILE-ORDER] CARTE → FRISE → LISTE (frise collée sous la carte). */
-  #map-dialog { display: flex; flex-direction: column; overflow-y: auto; max-height: 92vh; } /* l'empilement scrolle, rien n'est clippé */
+  #map-dialog[open] { display: flex; flex-direction: column; overflow-y: auto; max-height: 92vh; } /* [open] : sinon on écrase le dialog:not([open]){display:none} du navigateur → carte visible même fermée */
   #map-row { display: contents !important; } /* bat le display:flex inline du markup */
   #map-el { order: 1; flex: 0 0 auto !important; min-width: 0 !important; }
   #map-timeline { order: 2; }

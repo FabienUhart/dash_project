@@ -1360,6 +1360,10 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
      les @media n'augmentent pas la spécificité, c'est l'ordre qui tranche) === */
   .task .task-row { flex-wrap: wrap; }
   .task .task-content { flex: 1 1 100%; }
+  /* [MAP-DIALOG-HEADRow] En-tête board (#board-title : titre + Modifier/Partager/Photos/Agenda/Carte)
+     en flex nowrap → débordait le viewport ≤900px (bouton Carte clippé) et rendait la page
+     scrollable horizontalement. On autorise le retour à la ligne. Desktop inchangé. */
+  #board-title { flex-wrap: wrap; row-gap: 0.4rem; }
   .task .task-badges { order: 2; flex-basis: 100%; max-width: 100%; margin-left: 2.1rem; }
   /* Carte visible d'emblée (le survol n'existe pas au doigt). */
   .card .actions { opacity: 1; }
@@ -1386,7 +1390,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   /* [MAP-TIMELINE-MOBILE-ORDER] ordre visuel CARTE → FRISE → LISTE : le dialog passe en
      flex column, la row carte+liste est aplatie (display:contents) et l'ordre est piloté
      par `order` (barres/titre = 0 → en tête ; .actions en dernier). Desktop inchangé. */
-  #map-dialog { display: flex; flex-direction: column; overflow-y: auto; max-height: 92vh; } /* l'empilement scrolle, rien n'est clippé */
+  #map-dialog[open] { display: flex; flex-direction: column; overflow-y: auto; max-height: 92vh; } /* [open] : sinon on écrase le dialog:not([open]){display:none} du navigateur → carte visible même fermée */
   #map-row { display: contents !important; } /* bat le display:flex inline du markup */
   #map-el { order: 1; flex: 0 0 auto !important; min-width: 0 !important; }
   #map-timeline { order: 2; }
@@ -5053,10 +5057,15 @@ function renderBoard() {
   }
   const mapPoints = boardMapPoints();
   if (mapPoints.length) {
+    // Nom de la vue SEULEMENT (pas le textContent du conteneur, qui embarque les
+    // libellés des boutons Modifier/Partager/Photos/Agenda/Carte). [V20.6.34]
+    const mapName = state.memoProject === 'all' ? 'Tous les mémos'
+      : state.memoProject === 'inbox' ? 'Inbox'
+      : ((state.projects.find(p => p.id === state.memoProject) || {}).name || 'Carte');
     title.appendChild(el('button', {
       class: 'prio-btn', icon: 'map', text: 'Carte (' + mapPoints.length + ')',
       attrs: { title: 'Voir tous les points géolocalisés de cette vue sur une carte' },
-      on: { click: () => openMapDialog(document.getElementById('board-title').textContent.replace(/🗺.*$/, '').trim() || 'Carte', boardMapPoints(), boardMapPoints) },
+      on: { click: () => openMapDialog(mapName, boardMapPoints(), boardMapPoints) },
     }));
   }
   board.appendChild(title);

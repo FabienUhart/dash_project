@@ -1,6 +1,6 @@
 # MEMORY BANK — dash_project
 
-**Dernière mise à jour :** 7 juillet 2026 ([MEMO-TABLES] livré)
+**Dernière mise à jour :** 9 juillet 2026 (hotfixes mobile carte V20.6.32→34)
 **Nature :** index de mémoire. La **source canonique** reste `CLAUDE.md` (racine). Ce fichier pointe vers elle, il ne la recopie pas (anti-duplication — cf. ADR-001).
 
 ## Résumé global
@@ -22,9 +22,10 @@ Dashboard personnel auto-hébergé sur un **Zimaboard**, utilisé comme page d'a
 - **`IDEAS.md`** — backlog (quick wins, confort/UX, dette technique, ambitieux), tags `[NOM]` repris par Claude Code.
 - **`patterns.md`** (ici) — conventions transverses + pointeurs.
 
-## État actuel (mise à jour 7 juillet 2026)
+## État actuel (mise à jour 9 juillet 2026)
 
-- **Version courante : V20.6.31** — format d'export toujours **v20**. Derniers lots (commités et poussés le 7 juillet) : `[MEMO-TABLES]` V20.5.30 (tableaux dans l'éditeur Quill des mémos, module `quill-table-better` 1.2.3 vendorisé, helper `applyTableBetter()` du partial, 3 pages, dégradation propre) et `[DIALOG-STICKY-ACTIONS]` V20.6.31 (hotfix mobile : pied des pop-ins en `position:sticky`, 3 pages, + fix du sélecteur `order:4` mort de la carte share/hub) — détail : `REALISATION.md` + historique `CLAUDE.md`. `origin/main` = `3c7047e` [DIALOG-STICKY-ACTIONS]. Déploiement Zimaboard manuel par Fabien (hard refresh après — HTML autonome caché).
+- **Version courante : V20.6.34** — format d'export toujours **v20**. Dernier lot poussé : 3 hotfixes mobile carte (frontend pur, export inchangé) — `[MAP-DIALOG-OPEN-GUARD]` V20.6.32 (`#map-dialog` mobile sans garde `[open]` → carte visible même fermée ; corrigé `#map-dialog[open]` sur les 3 pages), `[MAP-DIALOG-HEADROW]` V20.6.33 (en-tête board `#board-title` flex nowrap → débordement viewport/scroll horizontal ≤900 px ; ajout `flex-wrap:wrap`, id unique déjà présent, share/hub non touchés), `[MAP-DIALOG-TITLE]` V20.6.34 (titre `#map-dialog` reprenait le `textContent` de l'en-tête → libellés boutons parasites ; nom dérivé de `state.memoProject`, share/hub déjà propres via `DATA.title`/`DATA.name`). Détail : `REALISATION.md` § V20. Déploiement Zimaboard manuel par Fabien (hard refresh après — HTML autonome caché).
+- **Avant ces hotfixes (7 juillet, commités/poussés)** : `[MEMO-TABLES]` V20.5.30 (tableaux dans l'éditeur Quill des mémos, module `quill-table-better` 1.2.3 vendorisé, helper `applyTableBetter()` du partial, 3 pages, dégradation propre) et `[DIALOG-STICKY-ACTIONS]` V20.6.31 (pied des pop-ins en `position:sticky`, 3 pages, + fix du sélecteur `order:4` mort de la carte share/hub). `origin/main` avant ce push = `b1c56a8`.
 - **Série carte v20 poussée** (détail normatif : `REALISATION.md` § V20 + `CLAUDE.md` invariant 1) :
   - `[MAP-TIMELINE]` `2089bc8` — **bump export v20**, `projects.is_trip` héritable (NULL/1/0, résolution au plus proche ancêtre, `_resolve_trip` serveur / `resolveTripLocal` partial, invités = `trip` résolu lecture seule) ; frise chronologique des mémos datés + curseur « aujourd'hui » + tracé itinéraire pointillé **réservé aux voyages**. Spec `docs/specs/MAP-TIMELINE-trip-timeline-and-route.md`.
   - `[MAP-TRIP-POLISH]` `3219a66` — marqueurs-vignettes photo numérotés ①② chronologiques (voyages), chips « Jour N », miniatures dans la frise ; **+ fix bloquant « carte noire »** (tuiles + `setView` AVANT tout vecteur, `drawRoute` idempotent, démontage try/catch — voir gotcha `patterns.md`).
