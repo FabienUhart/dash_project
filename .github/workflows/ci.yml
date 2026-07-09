@@ -1,0 +1,59 @@
+name: CI
+
+# Vérifs rapides sur push main + toute pull request. Aucun déploiement.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compilation Python (app.py)
+        run: python -m py_compile app.py
+
+      # Validation syntaxe du JS des templates : on extrait chaque bloc <script>…</script>
+      # attr-less (le partial + les scripts inline des pages ; les libs externes sont en
+      # <script src=…> et sont ignorées), on neutralise le Jinja ({{…}} → 0, {%…%} supprimé)
+      # puis node --check. Échoue si un bloc ne parse pas.
+      - name: Validation syntaxe JS des templates
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, sys, tempfile, os
+          files = [
+              "templates/index.html",
+              "templates/share.html",
+              "templates/hub.html",
+              "templates/partials/_shared.js.html",
+          ]
+          fail = False
+          for f in files:
+              html = open(f, encoding="utf-8").read()
+              blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
+              for i, js in enumerate(blocks):
+                  if not js.strip():
+                      continue
+                  js = re.sub(r"{{.*?}}", "0", js, flags=re.S)   # {{ version }} → 0
+                  js = re.sub(r"{%.*?%}", "", js, flags=re.S)     # {% ... %} supprimé
+                  with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as tmp:
+                      tmp.write(js)
+                      path = tmp.name
+                  r = subprocess.run(["node", "--check", path], capture_output=True, text=True)
+                  os.unlink(path)
+                  if r.returncode != 0:
+                      fail = True
+                      print(f"❌ {f} (bloc script #{i+1}) :\n{r.stderr}", file=sys.stderr)
+                  else:
+                      print(f"✅ {f} (bloc script #{i+1})")
+          sys.exit(1 if fail else 0)
+          PY
+
+      - name: Build de l'image Docker (sans déploiement)
+        run: docker build -t dashboard:ci .

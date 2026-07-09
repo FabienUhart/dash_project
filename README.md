@@ -218,3 +218,31 @@ L'app n'a aucune authentification. En production, elle est servie derrière un r
 ## Déploiement Zimaboard
 
 Le même `docker-compose.yml` tourne tel quel sur le Zimaboard : `git clone` + `docker compose up -d --build`. Le port 8099 y est déjà routé derrière Caddy.
+
+## Release (CI/CD)
+
+Deux workflows GitHub Actions (`.github/workflows/`) :
+
+- **`ci.yml`** — sur push `main` + toute PR, runner GitHub `ubuntu-latest` : `py_compile app.py`, validation syntaxe du JS des templates (`node --check` sur les blocs `<script>` extraits), `docker build`. **Pas de déploiement.**
+- **`deploy.yml`** — sur push d'un **tag `V*.*.*`**, runner **self-hébergé du Zimaboard** (`[self-hosted, zimaboard]`) : `git fetch --tags` + `git checkout <tag>` + `docker compose up -d --build` **dans le dossier persistant** (`.env` + `./data`), puis smoke test (`/api/version` → HTTP 200 **et** version == tag sans le `V`). Aucun secret GitHub (les secrets SMTP restent dans `.env` sur le Zimaboard).
+
+**Publier une version** — le tag doit correspondre à l'entrée en tête de `REALISATION.md` (c'est elle qui alimente `BUILD_VERSION`, donc `/api/version` que le smoke test vérifie) :
+
+```bash
+# 1. journaliser [V20.6.40] en TÊTE de REALISATION.md, commit, push main
+# 2. taguer + pousser le tag → déploiement auto sur le Zimaboard
+git tag V20.6.40
+git push origin V20.6.40
+```
+
+**Rollback** — repointer sur un tag antérieur (re-déclenche le déploiement si on re-pousse le tag, sinon à la main sur le Zimaboard) :
+
+```bash
+# option A — sur le Zimaboard, dans le dossier de déploiement :
+git checkout V20.6.39 && docker compose up -d --build
+
+# option B — re-taguer pour repasser par le pipeline (force le tag sur l'ancien commit) :
+git tag -f V20.6.41 <sha_de_la_bonne_version> && git push -f origin V20.6.41
+```
+
+Le déploiement en prod reste **déclenché manuellement** (par le push d'un tag) : aucun déploiement automatique sur simple push `main`.

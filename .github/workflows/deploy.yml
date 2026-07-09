@@ -1,0 +1,66 @@
+name: Deploy Zimaboard
+
+# Déclenché par un tag de version V*.*.* (ou v*.*.*). Tourne sur le runner
+# self-hébergé du Zimaboard, déploie depuis le dossier PERSISTANT (qui porte .env
+# + ./data), pas depuis le workspace du runner. Aucun secret GitHub requis.
+on:
+  push:
+    tags:
+      - 'V*.*.*'
+      - 'v*.*.*'
+
+# Un seul déploiement à la fois ; on n'annule pas celui en cours, on file d'attente.
+concurrency:
+  group: zimaboard-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, zimaboard]
+    env:
+      # Dossier de déploiement persistant (clone git avec .env + ./data). NE PAS
+      # déployer depuis le workspace du runner (qui n'a ni .env ni la base).
+      DEPLOY_DIR: /mnt/StorageNaN/home_casaos/Documents/projects/dash_project
+    steps:
+      - name: Déployer le tag sur le Zimaboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          EXPECTED="${TAG#[Vv]}"          # tag sans le V/v de tête → version attendue
+          echo "→ Déploiement du tag $TAG (version attendue $EXPECTED) dans $DEPLOY_DIR"
+
+          cd "$DEPLOY_DIR"
+          test -f .env         || { echo "❌ .env absent dans $DEPLOY_DIR"; exit 1; }
+          test -d .git         || { echo "❌ $DEPLOY_DIR n'est pas un clone git"; exit 1; }
+
+          git fetch --tags --force origin
+          git checkout -f "$TAG"          # HEAD détaché sur le tag ; -f ne touche que le suivi (pas .env/.data, gitignorés)
+
+          docker compose up -d --build
+
+      - name: Smoke test (/api/version == tag, HTTP 200)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          EXPECTED="${TAG#[Vv]}"
+
+          # Laisse gunicorn redémarrer (jusqu'à 60 s).
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8099/api/version >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+
+          CODE=$(curl -s -o /tmp/dash_version.json -w '%{http_code}' http://localhost:8099/api/version || true)
+          echo "HTTP $CODE — $(cat /tmp/dash_version.json 2>/dev/null || echo '(pas de réponse)')"
+          test "$CODE" = "200" || { echo "❌ /api/version n'a pas renvoyé 200"; exit 1; }
+
+          VERSION=$(python3 -c "import json;print(json.load(open('/tmp/dash_version.json'))['version'])")
+          echo "→ version servie=$VERSION | attendue=$EXPECTED"
+          test "$VERSION" = "$EXPECTED" || {
+            echo "❌ Mismatch : l'app sert $VERSION mais le tag est $TAG (attendu $EXPECTED).";
+            echo "   Vérifie que REALISATION.md a bien [$TAG.*] en tête (BUILD_VERSION en dépend).";
+            exit 1;
+          }
+          echo "✅ Déploiement $TAG OK (version $VERSION, HTTP 200)."
