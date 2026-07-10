@@ -344,6 +344,11 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 </dialog>
 
 <!-- notify / confirm -->
+<!-- [VOTE-GROUPS] gestion d'un vote nommé (invité hub, ses propres votes). -->
+<dialog id="hub-vote-dialog" style="width:min(560px,94vw);padding:1rem">
+  <h3 id="hvd-title" style="margin:0 0 0.6rem">🗳 Gérer le vote</h3>
+  <div id="hvd-body" style="display:flex;flex-direction:column;gap:0.6rem"></div>
+</dialog>
 <dialog id="notify-dialog"><h3 id="notify-title">Info</h3>
   <p id="notify-msg" style="margin:0 0 1rem;color:var(--muted);white-space:pre-wrap"></p>
   <div class="dlg-actions"><button class="btn primary" id="notify-ok">OK</button></div></dialog>
@@ -645,38 +650,146 @@ function memoCard(m) {
 
 // [VOTE-DECISION] Contrôles de vote d'un mémo-option (hub). L'invité du hub est déjà
 // approuvé → il peut voter (can_edit NON requis). Résultats/gagnant en lecture si clos.
+// [VOTE-GROUPS] scrutin sélectionné dans le board hub (null = vote du dossier). Non persisté.
+let hubSelectedVoteId = null;
+let hubVoteCreate = null;
+let hubVoteBoardPid = null;
+function hubActiveProj() { return FOCUS != null ? projById(FOCUS) : null; }
+function hubSelectedVote() { const p = hubActiveProj(); return (p && hubSelectedVoteId) ? (p.votes || []).find(v => v.id === hubSelectedVoteId) : null; }
+function hubDesc(pid) { const out = [pid]; const walk = (id) => (DATA.projects || []).filter(p => p.parent_id === id).forEach(c => { out.push(c.id); walk(c.id); }); walk(pid); return out; }
+function hubScopeMemos(pid) { const s = new Set(hubDesc(pid)); return (DATA.memos || []).filter(m => s.has(m.project_id)); }
+
 function hubVoteRow(m) {
+  if (hubVoteCreate) {  // mode création : coche d'appartenance
+    const row = el('div', { attrs: { style: 'display:flex;gap:0.45rem;align-items:center;margin:0.15rem 0 0 1.9rem' } });
+    const cb = el('input', { attrs: { type: 'checkbox', style: 'width:18px;height:18px;accent-color:var(--accent)' } });
+    cb.checked = hubVoteCreate.sel.has(m.id);
+    cb.addEventListener('change', () => { if (cb.checked) hubVoteCreate.sel.add(m.id); else hubVoteCreate.sel.delete(m.id); const c = document.getElementById('hvc-count'); if (c) c.textContent = hubVoteCreate.sel.size + ' option(s)'; });
+    const lb = el('label', { attrs: { style: 'display:inline-flex;gap:0.4rem;align-items:center;font-size:0.82rem;color:var(--muted);cursor:pointer' } });
+    lb.appendChild(cb); lb.appendChild(el('span', { text: 'option de ce vote' })); row.appendChild(lb); return row;
+  }
+  const nv = hubSelectedVote();
+  if (nv) {
+    const opt = (nv.options || []).find(o => o.memo_id === m.id);
+    if (!opt) return null;
+    const proj = hubActiveProj();
+    return hubVoteControls(m, { mode: nv.vote_mode, closed: nv.vote_state === 'closed', mine: !!opt.vote_mine, count: opt.vote_count || 0, voters: opt.vote_voters || [], isWinner: nv.vote_state === 'closed' && opt.is_winner, winnerText: voteWinnerText(nv), token: proj && proj.share_token, voteId: nv.id });
+  }
   const proj = projById(m.project_id);
   if (!proj || !proj.vote_enabled) return null;
+  if (m.vote_excluded) { const row = el('div', { attrs: { style: 'margin:0.15rem 0 0 1.9rem' } }); row.appendChild(el('span', { class: 'badge', text: '🗳 hors vote', attrs: { title: "Ce mémo n'est pas une option du vote" } })); return row; }
+  return hubVoteControls(m, { mode: proj.vote_mode, closed: proj.vote_state === 'closed', mine: !!m.vote_mine, count: m.vote_count || 0, voters: m.vote_voters || [], isWinner: proj.vote_state === 'closed' && m.is_winner, winnerText: voteWinnerText(proj), token: m.share_token, voteId: null });
+}
+
+function hubVoteControls(m, o) {
   const row = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0.15rem 0 0 1.9rem' } });
-  if (m.vote_excluded) {  // [VOTE-EXCLUDE] lecture seule : badge, aucun contrôle
-    row.appendChild(el('span', { class: 'badge', text: '🗳 hors vote', attrs: { title: "Ce mémo n'est pas une option du vote" } }));
-    return row;
-  }
-  const closed = proj.vote_state === 'closed';
-  const mine = !!m.vote_mine;
   const btn = el('button', {
-    class: 'prio-btn', text: voteBtnLabel(proj.vote_mode, mine),  // [VOTE-MULTI]
-    attrs: Object.assign(
-      { type: 'button', title: closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo') },
-      closed ? { disabled: '' } : {},
-      { style: mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
-    ),
+    class: 'prio-btn', text: voteBtnLabel(o.mode, o.mine),
+    attrs: Object.assign({ type: 'button', title: o.closed ? 'Vote clos' : (o.mine ? 'Retirer ma voix' : 'Voter pour ce mémo') }, o.closed ? { disabled: '' } : {}, { style: o.mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' }),
   });
-  if (!closed) btn.addEventListener('click', async (e) => {
+  if (!o.closed) btn.addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
-      const r = await api(m.share_token, '/memo/' + m.id + '/vote', { method: 'POST', body: '{}' });
+      const r = await api(o.token, '/memo/' + m.id + '/vote', { method: 'POST', body: JSON.stringify(o.voteId ? { vote_id: o.voteId } : {}) });
       if (r.ok) await reload();
       else { const er = await r.json().catch(() => ({})); notify(er.error || 'Vote impossible.', { error: true }); }
     } catch (err) { notify('Vote impossible.', { error: true }); }
   });
   row.appendChild(btn);
-  const n = m.vote_count || 0;
-  row.appendChild(el('span', { class: 'badge', text: n + ' voix' }));
-  (m.vote_voters || []).slice(0, 6).forEach(v => row.appendChild(el('span', { class: 'asg-av', text: initials(v), attrs: { title: v } })));
-  if (closed && m.is_winner) row.appendChild(el('span', { class: 'badge', text: voteWinnerText(proj), attrs: { style: 'background:var(--accent);color:#10141a;font-weight:600' } }));
+  row.appendChild(el('span', { class: 'badge', text: (o.count || 0) + ' voix' }));
+  (o.voters || []).slice(0, 6).forEach(v => row.appendChild(el('span', { class: 'asg-av', text: initials(v), attrs: { title: v } })));
+  if (o.isWinner) row.appendChild(el('span', { class: 'badge', text: o.winnerText, attrs: { style: 'background:var(--accent);color:#10141a;font-weight:600' } }));
   return row;
+}
+
+// Barre de scrutins (chips + créer + gérer) — hub. Rendue dans renderBoard sous l'en-tête.
+function hubVotesBar() {
+  const proj = hubActiveProj();
+  if (!proj) return null;
+  const votes = proj.votes || [];
+  if (hubVoteCreate) return hubVoteCreateBar(proj);
+  if (!proj.vote_enabled && !votes.length && !proj.can_create_vote) return null;
+  const chip = (label, active, on) => { const b = el('button', { class: 'prio-btn', text: label, attrs: { type: 'button', style: active ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' } }); b.addEventListener('click', on); return b; };
+  const wrap = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0.4rem 0 0.6rem;overflow-x:auto' } });
+  if (proj.vote_enabled) wrap.appendChild(chip('🗳 (dossier)', hubSelectedVoteId === null, () => { hubSelectedVoteId = null; render(); }));
+  votes.forEach(v => {
+    const st = v.vote_state === 'closed' ? ' · clos' : (v.vote_deadline ? ' · clôt' : '');
+    wrap.appendChild(chip('🗳 ' + v.name + st, hubSelectedVoteId === v.id, () => { hubSelectedVoteId = v.id; render(); }));
+    if (v.mine) { const g = el('button', { class: 'prio-btn', text: '⚙', attrs: { type: 'button', title: 'Gérer ce vote' } }); g.addEventListener('click', () => openHubVoteManage(v)); wrap.appendChild(g); }
+  });
+  if (proj.can_create_vote) wrap.appendChild(chip('➕ Créer un vote', false, () => { hubVoteCreate = { name: '', mode: 'single', deadline: '', sel: new Set(), projectId: proj.id, token: proj.share_token }; hubSelectedVoteId = null; render(); }));
+  return wrap;
+}
+function hubVoteCreateBar(proj) {
+  const bar = el('div', { attrs: { style: 'display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin:0.4rem 0 0.6rem;padding:0.5rem 0.6rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px' } });
+  bar.appendChild(el('span', { text: '🗳 Nouveau vote —' }));
+  const nameIn = el('input', { attrs: { type: 'text', placeholder: 'Nom du vote', maxlength: '80', value: hubVoteCreate.name, style: 'flex:1;min-width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.35rem 0.5rem' } });
+  nameIn.addEventListener('input', () => { hubVoteCreate.name = nameIn.value; }); bar.appendChild(nameIn);
+  ['single', 'multi'].forEach(mm => { const b = el('button', { class: 'prio-btn', text: mm === 'single' ? '☝️ Un seul' : '☑️ Plusieurs', attrs: { type: 'button', style: hubVoteCreate.mode === mm ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' } }); b.addEventListener('click', () => { hubVoteCreate.mode = mm; render(); }); bar.appendChild(b); });
+  const dl = el('input', { attrs: { type: 'datetime-local', value: hubVoteCreate.deadline, style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
+  dl.addEventListener('input', () => { hubVoteCreate.deadline = dl.value; }); bar.appendChild(dl);
+  const cnt = el('span', { text: hubVoteCreate.sel.size + ' option(s)', attrs: { id: 'hvc-count', style: 'font-size:0.8rem;color:var(--muted)' } }); bar.appendChild(cnt);
+  const ok = el('button', { class: 'prio-btn', text: '✓ Créer', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' } }); ok.addEventListener('click', submitHubVoteCreate); bar.appendChild(ok);
+  const ca = el('button', { class: 'prio-btn', text: 'Annuler' }); ca.addEventListener('click', () => { hubVoteCreate = null; render(); }); bar.appendChild(ca);
+  return bar;
+}
+async function submitHubVoteCreate() {
+  const name = (hubVoteCreate.name || '').trim();
+  if (!name) { notify('Donne un nom au vote.', { error: true }); return; }
+  if (!hubVoteCreate.sel.size) { notify('Coche au moins une option.', { error: true }); return; }
+  const r = await api(hubVoteCreate.token, '/votes', { method: 'POST', body: JSON.stringify({ name, vote_mode: hubVoteCreate.mode, vote_deadline: hubVoteCreate.deadline || '', memo_ids: [...hubVoteCreate.sel], project_id: hubVoteCreate.projectId }) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible.', { error: true }); return; }
+  hubVoteCreate = null; await reload();
+}
+function openHubVoteManage(v) {
+  const proj = hubActiveProj(); if (!proj) return;
+  const token = proj.share_token;
+  const dlg = document.getElementById('hub-vote-dialog');
+  document.getElementById('hvd-title').textContent = '🗳 ' + v.name;
+  const body = document.getElementById('hvd-body'); body.innerHTML = '';
+  let mode = v.vote_mode; const closed = v.vote_state === 'closed';
+  const sel = new Set((v.options || []).map(o => o.memo_id));
+  const lbl = (t) => el('label', { class: 'me-label', text: t, attrs: { style: 'font-size:0.8rem;color:var(--muted)' } });
+  body.appendChild(lbl('Nom'));
+  const nameIn = el('input', { attrs: { type: 'text', value: v.name, maxlength: '80', style: 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.4rem 0.5rem' } }); body.appendChild(nameIn);
+  body.appendChild(lbl('Mode'));
+  const modeRow = el('div', { attrs: { style: 'display:flex;gap:0.35rem' } });
+  const rm = () => { modeRow.innerHTML = ''; ['single', 'multi'].forEach(mm => { const b = el('button', { class: 'prio-btn', text: mm === 'single' ? '☝️ Un seul' : '☑️ Plusieurs', attrs: { type: 'button', style: mode === mm ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' } }); b.addEventListener('click', () => { mode = mm; rm(); }); modeRow.appendChild(b); }); };
+  rm(); body.appendChild(modeRow);
+  body.appendChild(lbl('Deadline (optionnelle)'));
+  const dl = el('input', { attrs: { type: 'datetime-local', value: v.vote_deadline || '', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem' } }); body.appendChild(dl);
+  body.appendChild(lbl('Options'));
+  const ow = el('div', { attrs: { style: 'max-height:11rem;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.5rem;display:flex;flex-direction:column;gap:0.25rem' } });
+  hubScopeMemos(proj.id).forEach(m => {
+    const r = el('label', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;font-size:0.85rem;cursor:pointer' } });
+    const cb = el('input', { attrs: { type: 'checkbox', style: 'accent-color:var(--accent)' } }); cb.checked = sel.has(m.id);
+    cb.addEventListener('change', () => { if (cb.checked) sel.add(m.id); else sel.delete(m.id); });
+    r.appendChild(cb); r.appendChild(el('span', { text: (m.emoji ? m.emoji + ' ' : '') + (m.title || (m.content || '').replace(/<[^>]*>/g, '').slice(0, 50) || '(sans titre)') })); ow.appendChild(r);
+  });
+  body.appendChild(ow);
+  const post = (path, bodyObj) => api(token, '/votes/' + v.id + (path ? '/' + path : ''), { method: path ? 'POST' : 'PUT', body: JSON.stringify(bodyObj || {}) });
+  const done = async () => { dlg.close(); await reload(); };
+  const actions = el('div', { attrs: { style: 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem' } });
+  const abtn = (label, on, style) => { const b = el('button', { class: 'prio-btn', text: label, attrs: style ? { style } : {} }); b.addEventListener('click', on); return b; };
+  if (!closed) actions.appendChild(abtn('🗳 Clore', async () => { if (!(await confirmPopin('Le gagnant sera figé.', { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
+  else actions.appendChild(abtn('↻ Rouvrir', async () => { const r = await post('reopen', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Réouverture impossible.', { error: true }); }));
+  actions.appendChild(abtn('↺ Reset', async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await post('reset', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
+  actions.appendChild(abtn('🗑 Supprimer', async () => { if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer' }))) return; const r = await api(token, '/votes/' + v.id, { method: 'DELETE' }); if (r.ok) { if (hubSelectedVoteId === v.id) hubSelectedVoteId = null; done(); } else notify('Impossible.', { error: true }); }, 'color:var(--danger)'));
+  body.appendChild(actions);
+  const foot = el('div', { attrs: { style: 'display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.5rem' } });
+  foot.appendChild(abtn('Annuler', () => dlg.close()));
+  const save = el('button', { class: 'prio-btn', text: 'Enregistrer', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' } });
+  save.addEventListener('click', async () => {
+    const name = nameIn.value.trim(); if (!name) { notify('Nom requis.', { error: true }); return; }
+    if (!sel.size) { notify('Au moins une option.', { error: true }); return; }
+    const removed = (v.options || []).some(o => !sel.has(o.memo_id) && (o.vote_count || 0) > 0);
+    const downgrade = v.vote_mode === 'multi' && mode === 'single';
+    if ((removed || downgrade) && !(await confirmPopin(downgrade ? 'Passer en « un seul » : chaque votant garde sa voix la plus récente.' : 'Retirer une option supprimera ses voix.', { title: 'Confirmer', okLabel: 'Confirmer' }))) return;
+    const r = await post('', { name, vote_mode: mode, vote_deadline: dl.value || '', memo_ids: [...sel] });
+    if (r.ok) done(); else { const e = await r.json().catch(() => ({})); notify(e.error || 'Impossible.', { error: true }); }
+  });
+  foot.appendChild(save); body.appendChild(foot);
+  dlg.showModal();
 }
 
 function wireChecklist(container, m) {
@@ -693,6 +806,8 @@ function wireChecklist(container, m) {
 
 function renderBoard() {
   const board = document.getElementById('board'); board.innerHTML = '';
+  // [VOTE-GROUPS] reset de la sélection de scrutin au changement de dossier actif.
+  if (hubVoteBoardPid !== FOCUS) { hubSelectedVoteId = null; hubVoteCreate = null; hubVoteBoardPid = FOCUS; }
   // [AGENDA-PROJECT] en-tête du dossier courant + bouton 📆 (agenda filtré sur ce
   // dossier et ses sous-dossiers — même périmètre que le board).
   if (FOCUS != null) {
@@ -727,6 +842,7 @@ function renderBoard() {
   }
   board.appendChild(addBar());
   const spb = subProjBar(); if (spb) board.appendChild(spb); // [GUEST-SUBPROJECT]
+  const vb = hubVotesBar(); if (vb) board.appendChild(vb); // [VOTE-GROUPS] chips/création/gestion
   const ms = focusedMemos().slice().sort((a, b) => (a.done - b.done) || (a.due_date || '').localeCompare(b.due_date || ''));
   if (!ms.length) { board.appendChild(el('div', { class: 'empty', text: 'Aucun mémo ici.' })); return; }
   ms.forEach(m => board.appendChild(memoCard(m)));

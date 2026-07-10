@@ -1747,11 +1747,22 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       </div>
       <span style="font-size:0.72rem;color:var(--muted)">Chaque personne (toi + invités approuvés) choisit un mémo. Deadline atteinte ou clôture manuelle = résultats figés.</span>
     </label>
+    <!-- [VOTE-GROUPS] permission de création de votes NOMMÉS (héritable) — indépendante du vote du dossier. -->
+    <label id="create-votecreate-label">🗳 Création de votes nommés
+      <div id="create-votecreate-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
+      <span style="font-size:0.72rem;color:var(--muted)">Qui peut créer des votes nommés ici. « Hérité » suit le dossier parent (défaut racine : invités aussi).</span>
+    </label>
     <div class="actions">
       <button type="button" id="create-cancel">Annuler</button>
       <button type="submit" class="primary" id="create-submit">Créer</button>
     </div>
   </form>
+</dialog>
+
+<!-- [VOTE-GROUPS] gestion d'un vote nommé (owner) : nom / mode / deadline / options + actions. -->
+<dialog id="vote-manage-dialog">
+  <div class="me-head"><h3 id="vm-title" style="margin:0">🗳 Gérer le vote</h3></div>
+  <div id="vm-body" style="display:flex;flex-direction:column;gap:0.6rem;margin-top:0.6rem"></div>
 </dialog>
 
 <dialog id="memo-edit-dialog">
@@ -2561,6 +2572,7 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-trip-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-vote-label').style.display = kind === 'project' ? '' : 'none';
+  document.getElementById('create-votecreate-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
   document.getElementById('create-menu').hidden = true;
@@ -2588,7 +2600,8 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-vote-deadline-clear').style.display = vdl.value ? '' : 'none';
   const closed = !!(item && item.vote_enabled && item.vote_state === 'closed');
   document.getElementById('create-vote-reopen-row').style.display = closed ? '' : 'none';
-  if (kind === 'project') { renderVoteChips(); renderVoteModeChips(); }
+  createVoteCreate = item ? (item.vote_create || '') : '';  // [VOTE-GROUPS] permission héritable
+  if (kind === 'project') { renderVoteChips(); renderVoteModeChips(); renderVoteCreateChips(); }
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
@@ -2654,6 +2667,27 @@ function renderVoteChips() {
   });
   document.getElementById('create-vote-config').style.display = createVoteEnabled ? '' : 'none';
 }
+// [VOTE-GROUPS] chips de permission de création de votes nommés (héritable).
+let createVoteCreate = '';
+function renderVoteCreateChips() {
+  const wrap = document.getElementById('create-votecreate-chips');
+  wrap.innerHTML = '';
+  const resolved = (editingItem && editingItem.vote_create_resolved) || 'guests';
+  const opts = [
+    ['', 'Hérité (' + (resolved === 'owner' ? 'owner seul' : 'invités aussi') + ')'],
+    ['owner', 'Owner seul'],
+    ['guests', 'Invités aussi'],
+  ];
+  opts.forEach(([v, label]) => {
+    const on = createVoteCreate === v;
+    wrap.appendChild(el('button', {
+      class: 'prio-btn', text: label,
+      attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+      on: { click: () => { createVoteCreate = v; renderVoteCreateChips(); } },
+    }));
+  });
+}
+
 // [VOTE-MULTI] chips de mode « ☝️ Un seul / ☑️ Plusieurs ».
 let createVoteMode = 'single';
 function renderVoteModeChips() {
@@ -2746,6 +2780,7 @@ createForm.addEventListener('submit', async (e) => {
     payload.vote_enabled = createVoteEnabled ? 1 : 0;
     payload.vote_mode = createVoteMode;  // [VOTE-MULTI]
     payload.vote_deadline = createVoteEnabled ? (document.getElementById('create-vote-deadline').value || '') : '';
+    payload.vote_create = createVoteCreate;  // [VOTE-GROUPS] permission héritable
   }
   // [VOTE-MULTI] bascule multi→single : avertit (danger) — le serveur purge les voix surnuméraires.
   if (createKind === 'project' && editingItem && editingItem.vote_mode === 'multi' && createVoteMode === 'single') {
@@ -4563,49 +4598,103 @@ function openMoveProject(proj) {
 
 // [VOTE-DECISION] Contrôles de vote d'un mémo-option (owner). Rien si le dossier n'est
 // pas en mode vote. Ma voix = chip accent ; compteur + votants ; gagnant figé si clos.
+// [VOTE-GROUPS] Scrutin sélectionné dans le board courant (null = vote du dossier). Non
+// persisté (remis à zéro au changement de projet). Mode création = coches sur les cards.
+let selectedVoteId = null;
+let voteBoardProj = null;      // projet dont dépend selectedVoteId (reset si ça change)
+let voteCreate = null;         // { name, mode, deadline, sel:Set(memoId) } quand on crée
+
+function boardProject() {
+  return (state.memoProject !== 'all' && state.memoProject !== 'inbox')
+    ? state.projects.find(p => p.id === state.memoProject) : null;
+}
+function selectedVote() {
+  const p = boardProject();
+  return (p && selectedVoteId) ? (p.votes || []).find(v => v.id === selectedVoteId) : null;
+}
+
 function voteRowEl(memo) {
+  // Mode création de vote : coche d'appartenance sur les cards du périmètre.
+  if (voteCreate) {
+    const row = el('div', { attrs: { style: 'display:flex;gap:0.45rem;align-items:center;margin-top:0.45rem' } });
+    const cb = el('input', { attrs: { type: 'checkbox', style: 'width:18px;height:18px;cursor:pointer;accent-color:var(--accent)' } });
+    cb.checked = voteCreate.sel.has(memo.id);
+    cb.addEventListener('change', () => { if (cb.checked) voteCreate.sel.add(memo.id); else voteCreate.sel.delete(memo.id); syncVoteCreateBar(); });
+    const lbl = el('label', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:var(--muted);cursor:pointer' } });
+    lbl.appendChild(cb); lbl.appendChild(el('span', { text: 'option de ce vote' }));
+    row.appendChild(lbl);
+    return row;
+  }
+  const nv = selectedVote();
+  if (nv) {  // scrutin nommé sélectionné : seuls ses options portent des contrôles
+    const opt = (nv.options || []).find(o => o.memo_id === memo.id);
+    if (!opt) return null;
+    return namedVoteRow(memo, nv, opt);
+  }
+  // Vote du DOSSIER (comportement V1/V2 inchangé).
   const proj = state.projects.find(p => p.id === memo.project_id);
   if (!proj || !proj.vote_enabled) return null;
   const row = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.45rem' } });
-  if (memo.vote_excluded) {  // [VOTE-EXCLUDE] pas une option → badge discret, aucun contrôle
+  if (memo.vote_excluded) {
     row.appendChild(el('span', { class: 'badge', text: '🗳 hors vote', attrs: { title: "Ce mémo n'est pas une option du vote" } }));
     return row;
   }
   const closed = proj.vote_state === 'closed';
   const mine = !!memo.vote_mine;
-  row.appendChild(el('button', {
-    class: 'prio-btn',
-    text: voteBtnLabel(proj.vote_mode, mine),  // [VOTE-MULTI] case à cocher en multi
-    attrs: Object.assign(
-      { type: 'button', title: closed ? 'Vote clos' : (mine ? 'Retirer ma voix' : 'Voter pour ce mémo') },
-      closed ? { disabled: '' } : {},
-      { style: mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
-    ),
-    on: closed ? {} : { click: async (e) => {
-      e.stopPropagation();
-      try { applyVoteResult(await api(`/api/memos/${memo.id}/vote`, { method: 'POST', body: '{}' })); }
-      catch (err) { await notify('Vote impossible : ' + err.message, { error: true }); }
-    } },
-  }));
-  const n = memo.vote_count || 0;
-  row.appendChild(el('span', { class: 'badge', text: n + ' voix' }));
-  const voters = memo.vote_voters || [];
-  if (voters.length) {
-    const stack = el('div', { class: 'asg-stack', attrs: { title: voters.join(', ') } });
-    voters.slice(0, 6).forEach(v => stack.appendChild(el('span', { class: 'asg-av', text: initials(v), attrs: { title: v } })));
-    row.appendChild(stack);
-  }
-  if (closed && memo.is_winner) {
-    row.appendChild(el('span', {
-      class: 'badge', text: voteWinnerText(proj),
-      attrs: { style: 'background:var(--accent);color:#10141a;font-weight:600' },
-    }));
-  }
+  appendVoteControls(row, {
+    mode: proj.vote_mode, closed, mine, count: memo.vote_count || 0, voters: memo.vote_voters || [],
+    isWinner: closed && memo.is_winner, winnerText: voteWinnerText(proj),
+    onVote: () => api(`/api/memos/${memo.id}/vote`, { method: 'POST', body: '{}' }),
+  });
   return row;
 }
 
+function namedVoteRow(memo, nv, opt) {
+  const row = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.45rem' } });
+  const closed = nv.vote_state === 'closed';
+  appendVoteControls(row, {
+    mode: nv.vote_mode, closed, mine: !!opt.vote_mine, count: opt.vote_count || 0, voters: opt.vote_voters || [],
+    isWinner: closed && opt.is_winner, winnerText: voteWinnerText(nv),
+    onVote: () => api(`/api/memos/${memo.id}/vote`, { method: 'POST', body: JSON.stringify({ vote_id: nv.id }) }),
+  });
+  return row;
+}
+
+// Boutons/compteur/votants/gagnant communs au vote-dossier et aux votes nommés.
+function appendVoteControls(row, o) {
+  row.appendChild(el('button', {
+    class: 'prio-btn', text: voteBtnLabel(o.mode, o.mine),
+    attrs: Object.assign(
+      { type: 'button', title: o.closed ? 'Vote clos' : (o.mine ? 'Retirer ma voix' : 'Voter pour ce mémo') },
+      o.closed ? { disabled: '' } : {},
+      { style: o.mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+    ),
+    on: o.closed ? {} : { click: async (e) => {
+      e.stopPropagation();
+      try { applyVoteResult(await o.onVote()); }
+      catch (err) { await notify('Vote impossible : ' + err.message, { error: true }); }
+    } },
+  }));
+  row.appendChild(el('span', { class: 'badge', text: (o.count || 0) + ' voix' }));
+  if ((o.voters || []).length) {
+    const stack = el('div', { class: 'asg-stack', attrs: { title: o.voters.join(', ') } });
+    o.voters.slice(0, 6).forEach(v => stack.appendChild(el('span', { class: 'asg-av', text: initials(v), attrs: { title: v } })));
+    row.appendChild(stack);
+  }
+  if (o.isWinner) {
+    row.appendChild(el('span', { class: 'badge', text: o.winnerText, attrs: { style: 'background:var(--accent);color:#10141a;font-weight:600' } }));
+  }
+}
+
 function applyVoteResult(r) {
-  if (!r || !r.options) { loadAll(); return; }
+  if (!r) { loadAll(); return; }
+  if (r.vote_id && r.vote) {  // [VOTE-GROUPS] vote nommé : remplace le vote dans son projet
+    const proj = state.projects.find(p => p.id === r.project_id);
+    if (proj) proj.votes = (proj.votes || []).map(v => v.id === r.vote.id ? r.vote : v);
+    renderBoard();
+    return;
+  }
+  if (!r.options) { loadAll(); return; }
   const proj = state.projects.find(p => p.id === r.project_id);
   if (proj && r.vote) Object.assign(proj, r.vote);
   r.options.forEach(o => {
@@ -4613,6 +4702,192 @@ function applyVoteResult(r) {
     if (m) { m.vote_count = o.vote_count; m.vote_voters = o.vote_voters; m.vote_mine = o.vote_mine; m.is_winner = o.is_winner; }
   });
   renderBoard();
+}
+
+// ── [VOTE-GROUPS] chips de scrutin + menu Votes (owner) ─────────────────────────────
+function voteChipsEl(proj) {
+  const votes = proj.votes || [];
+  if (!proj.vote_enabled && !votes.length && !voteCreate) return null;
+  const wrap = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0 0 0.7rem;overflow-x:auto' } });
+  if (voteCreate) return null;  // en création, la barre remplace les chips
+  const mkChip = (label, active, on, title) => el('button', {
+    class: 'prio-btn' + (active ? ' sel' : ''), text: label,
+    attrs: { type: 'button', title: title || '', style: active ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+    on: { click: on },
+  });
+  if (proj.vote_enabled) {
+    wrap.appendChild(mkChip('🗳 (dossier)', selectedVoteId === null, () => { selectedVoteId = null; renderBoard(); }, 'Vote du dossier'));
+  }
+  votes.forEach(v => {
+    const st = v.vote_state === 'closed' ? ' · clos' : (v.vote_deadline ? ' · clôt' : '');
+    wrap.appendChild(mkChip('🗳 ' + v.name + st, selectedVoteId === v.id, () => { selectedVoteId = v.id; renderBoard(); }, voteDeadlineTitle(v)));
+  });
+  return wrap;
+}
+
+function voteMenuEl(proj) {
+  const wrap = el('div', { class: 'task-more', attrs: { style: 'display:inline-block' } });
+  const btn = el('button', { class: 'prio-btn', text: '🗳 Votes ▾', attrs: { title: 'Créer et gérer des votes nommés' } });
+  const menu = el('div', { class: 'card-menu', attrs: { hidden: '' } });
+  menu.appendChild(el('button', { text: '➕ Créer un vote', on: { click: (e) => { e.stopPropagation(); menu.hidden = true; startVoteCreate(proj); } } }));
+  (proj.votes || []).forEach(v => {
+    if (!v.mine) return;  // owner : mine=true sur ses créations ; les votes invités sont gérables aussi
+    menu.appendChild(voteManageEntry(v));
+  });
+  (proj.votes || []).forEach(v => { if (!v.mine) menu.appendChild(voteManageEntry(v)); });  // owner gère aussi les votes invités
+  btn.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
+  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) menu.hidden = true; });
+  wrap.appendChild(btn); wrap.appendChild(menu);
+  return wrap;
+}
+
+function voteManageEntry(v) {
+  return el('button', {
+    text: '⚙ ' + v.name, attrs: { title: 'Gérer ce vote' },
+    on: { click: (e) => { e.stopPropagation(); openVoteManage(v); } },
+  });
+}
+
+function startVoteCreate(proj) {
+  voteCreate = { name: '', mode: 'single', deadline: '', sel: new Set(), projectId: proj.id };
+  selectedVoteId = null;
+  renderBoard();
+}
+function cancelVoteCreate() { voteCreate = null; renderBoard(); }
+
+function voteCreateBarEl() {
+  if (!voteCreate) return null;
+  const bar = el('div', { attrs: { id: 'vote-create-bar', style: 'display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin:0 0 0.7rem;padding:0.5rem 0.6rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px' } });
+  bar.appendChild(el('span', { text: '🗳 Nouveau vote —', attrs: { style: 'font-weight:600;font-size:0.85rem' } }));
+  const nameIn = el('input', { attrs: { type: 'text', placeholder: 'Nom (ex. resto 1er jour midi)', maxlength: '80', value: voteCreate.name, style: 'flex:1;min-width:12rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.35rem 0.5rem' } });
+  nameIn.addEventListener('input', () => { voteCreate.name = nameIn.value; });
+  bar.appendChild(nameIn);
+  ['single', 'multi'].forEach(m => bar.appendChild(el('button', {
+    class: 'prio-btn', text: m === 'single' ? '☝️ Un seul' : '☑️ Plusieurs',
+    attrs: { type: 'button', style: voteCreate.mode === m ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+    on: { click: () => { voteCreate.mode = m; renderBoard(); } },
+  })));
+  const dl = el('input', { attrs: { type: 'datetime-local', value: voteCreate.deadline, title: 'Deadline (optionnelle)', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
+  dl.addEventListener('input', () => { voteCreate.deadline = dl.value; });
+  bar.appendChild(dl);
+  const count = el('span', { attrs: { id: 'vote-create-count', style: 'font-size:0.8rem;color:var(--muted)' }, text: voteCreate.sel.size + ' option(s)' });
+  bar.appendChild(count);
+  bar.appendChild(el('button', {
+    class: 'prio-btn', text: '✓ Créer', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' },
+    on: { click: submitVoteCreate },
+  }));
+  bar.appendChild(el('button', { class: 'prio-btn', text: 'Annuler', on: { click: cancelVoteCreate } }));
+  return bar;
+}
+function syncVoteCreateBar() {
+  const c = document.getElementById('vote-create-count');
+  if (c && voteCreate) c.textContent = voteCreate.sel.size + ' option(s)';
+}
+async function submitVoteCreate() {
+  if (!voteCreate) return;
+  const name = (voteCreate.name || '').trim();
+  if (!name) { await notify('Donne un nom au vote.', { error: true }); return; }
+  if (!voteCreate.sel.size) { await notify('Coche au moins une option.', { error: true }); return; }
+  try {
+    await api(`/api/projects/${voteCreate.projectId}/votes`, { method: 'POST', body: JSON.stringify({
+      name, vote_mode: voteCreate.mode, vote_deadline: voteCreate.deadline || '', memo_ids: [...voteCreate.sel],
+    }) });
+    voteCreate = null;
+    await loadAll();
+  } catch (err) { await notify('Création impossible : ' + err.message, { error: true }); }
+}
+
+// [VOTE-GROUPS] Pop-in de gestion d'un vote nommé (owner ; l'invité utilise la version share).
+function openVoteManage(v) {
+  const proj = boardProject();
+  if (!proj) return;
+  const dlg = document.getElementById('vote-manage-dialog');
+  document.getElementById('vm-title').textContent = '🗳 ' + v.name;
+  const body = document.getElementById('vm-body');
+  body.innerHTML = '';
+  let mode = v.vote_mode;
+  const closed = v.vote_state === 'closed';
+  const sel = new Set((v.options || []).map(o => o.memo_id));
+  const lbl = (t) => el('label', { class: 'me-label', text: t });
+  // Nom
+  body.appendChild(lbl('Nom'));
+  const nameIn = el('input', { attrs: { type: 'text', value: v.name, maxlength: '80', style: 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.4rem 0.5rem' } });
+  body.appendChild(nameIn);
+  // Mode
+  body.appendChild(lbl('Mode'));
+  const modeRow = el('div', { attrs: { style: 'display:flex;gap:0.35rem' } });
+  const renderMode = () => {
+    modeRow.innerHTML = '';
+    ['single', 'multi'].forEach(m => modeRow.appendChild(el('button', {
+      class: 'prio-btn', text: m === 'single' ? '☝️ Un seul' : '☑️ Plusieurs',
+      attrs: { type: 'button', style: mode === m ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+      on: { click: () => { mode = m; renderMode(); } },
+    })));
+  };
+  renderMode();
+  body.appendChild(modeRow);
+  // Deadline
+  body.appendChild(lbl('Deadline (optionnelle)'));
+  const dl = el('input', { attrs: { type: 'datetime-local', value: v.vote_deadline || '', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem' } });
+  body.appendChild(dl);
+  // Options (mémos du périmètre porteur + descendants)
+  body.appendChild(lbl('Options'));
+  const scope = new Set([proj.id, ...projectDescendants(proj.id)]);
+  const optWrap = el('div', { attrs: { style: 'max-height:11rem;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.5rem;display:flex;flex-direction:column;gap:0.25rem' } });
+  state.memos.filter(m => scope.has(m.project_id)).forEach(m => {
+    const r = el('label', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;font-size:0.85rem;cursor:pointer' } });
+    const cb = el('input', { attrs: { type: 'checkbox', style: 'accent-color:var(--accent)' } });
+    cb.checked = sel.has(m.id);
+    cb.addEventListener('change', () => { if (cb.checked) sel.add(m.id); else sel.delete(m.id); });
+    r.appendChild(cb);
+    r.appendChild(el('span', { text: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 50) || '(sans titre)') }));
+    optWrap.appendChild(r);
+  });
+  body.appendChild(optWrap);
+  // Actions
+  const actions = el('div', { attrs: { style: 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem' } });
+  const put = async (extra) => api(`/api/votes/${v.id}`, { method: 'PUT', body: JSON.stringify(extra) });
+  const doAction = async (path, bodyObj) => api(`/api/votes/${v.id}/${path}`, { method: 'POST', body: JSON.stringify(bodyObj || {}) });
+  const reloadClose = async () => { dlg.close(); await loadAll(); };
+  if (!closed) {
+    actions.appendChild(el('button', { class: 'prio-btn', text: '🗳 Clore', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' }, on: { click: async () => {
+      if (!(await confirmPopin('Le gagnant sera figé.', { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
+      await doAction('close'); await reloadClose();
+    } } }));
+  } else {
+    actions.appendChild(el('button', { class: 'prio-btn', text: '↻ Rouvrir', on: { click: async () => {
+      try { await doAction('reopen', { vote_deadline: dl.value || '' }); await reloadClose(); }
+      catch (e) { await notify('Réouverture impossible : ' + e.message, { error: true }); }
+    } } }));
+  }
+  actions.appendChild(el('button', { class: 'prio-btn', text: '↺ Remettre à zéro', on: { click: async () => {
+    if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro', danger: true }))) return;
+    try { await doAction('reset', { vote_deadline: dl.value || '' }); await reloadClose(); }
+    catch (e) { await notify('Impossible : ' + e.message, { error: true }); }
+  } } }));
+  actions.appendChild(el('button', { class: 'prio-btn danger', text: '🗑 Supprimer', on: { click: async () => {
+    if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer', danger: true }))) return;
+    await api(`/api/votes/${v.id}`, { method: 'DELETE' });
+    if (selectedVoteId === v.id) selectedVoteId = null;
+    await reloadClose();
+  } } }));
+  const foot = el('div', { class: 'actions', attrs: { style: 'display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.5rem' } });
+  foot.appendChild(el('button', { text: 'Annuler', on: { click: () => dlg.close() } }));
+  foot.appendChild(el('button', { class: 'primary', text: 'Enregistrer', on: { click: async () => {
+    const name = nameIn.value.trim();
+    if (!name) { await notify('Nom requis.', { error: true }); return; }
+    if (!sel.size) { await notify('Au moins une option.', { error: true }); return; }
+    const removed = (v.options || []).some(o => !sel.has(o.memo_id) && (o.vote_count || 0) > 0);
+    const downgrade = v.vote_mode === 'multi' && mode === 'single';
+    if ((removed || downgrade) && !(await confirmPopin(
+      downgrade ? 'Passer en « un seul » : chaque votant ne gardera que sa voix la plus récente.' : 'Retirer une option supprimera ses voix.',
+      { title: 'Confirmer', okLabel: 'Confirmer', danger: true }))) return;
+    try { await put({ name, vote_mode: mode, vote_deadline: dl.value || '', memo_ids: [...sel] }); await reloadClose(); }
+    catch (e) { await notify('Enregistrement impossible : ' + e.message, { error: true }); }
+  } } }));
+  body.appendChild(actions);
+  body.appendChild(foot);
+  dlg.showModal();
 }
 
 function taskEl(memo) {
@@ -5215,6 +5490,8 @@ function editTaskInline(container, contentDiv, memo) {
 function renderBoard() {
   const board = document.getElementById('memo-board');
   board.innerHTML = '';
+  // [VOTE-GROUPS] sélection de scrutin / mode création non persistés : reset au changement de projet.
+  if (voteBoardProj !== state.memoProject) { selectedVoteId = null; voteCreate = null; voteBoardProj = state.memoProject; }
 
   const searchActive = !!parseSearch().q;
   const projScope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
@@ -5295,6 +5572,8 @@ function renderBoard() {
           }));
         }
       }
+      // [VOTE-GROUPS] menu « 🗳 Votes ▾ » (créer / gérer les votes nommés du dossier).
+      title.appendChild(voteMenuEl(proj));
     }
   }
   const mapPoints = boardMapPoints();
@@ -5311,6 +5590,15 @@ function renderBoard() {
     }));
   }
   board.appendChild(title);
+
+  // [VOTE-GROUPS] barre de création OU chips de scrutin (au-dessus des sections du board).
+  const _bp = boardProject();
+  if (_bp) {
+    const bar = voteCreateBarEl();
+    if (bar) board.appendChild(bar);
+    const chips = voteChipsEl(_bp);
+    if (chips) board.appendChild(chips);
+  }
 
   if (state.memoProject !== 'all' && state.memoProject !== 'inbox') {
     const proj = state.projects.find(p => p.id === state.memoProject);
