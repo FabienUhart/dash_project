@@ -1762,6 +1762,20 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </form>
 </dialog>
 
+<!-- [IMPORT-PREVIEW] Prévisualisation d'import + résolution de conflits (flux « Importer ici »). -->
+<dialog id="import-preview-dialog" style="max-width:640px;width:min(640px,94vw)">
+  <div class="me-head"><h3 id="ipv-title" style="margin:0">Importer ici ?</h3></div>
+  <div id="ipv-dest" style="color:var(--muted);font-size:0.85rem;margin:0.3rem 0 0.6rem"></div>
+  <div id="ipv-alltoggle" style="margin-bottom:0.4rem"></div>
+  <div id="ipv-tree" style="max-height:48vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.6rem"></div>
+  <div id="ipv-legend" style="display:flex;gap:0.9rem;flex-wrap:wrap;font-size:0.72rem;color:var(--muted);margin:0.55rem 0 0.3rem"></div>
+  <div id="ipv-bilan" style="font-size:0.85rem;margin-bottom:0.5rem;color:var(--text)"></div>
+  <div class="actions">
+    <button type="button" id="ipv-cancel">Annuler</button>
+    <button type="button" id="ipv-import" class="primary">Importer</button>
+  </div>
+</dialog>
+
 <!-- [VOTE-GROUPS] gestion d'un vote nommé (owner) : nom / mode / deadline / options + actions. -->
 <dialog id="vote-manage-dialog">
   <div class="me-head"><h3 id="vm-title" style="margin:0">🗳 Gérer le vote</h3></div>
@@ -2795,19 +2809,125 @@ createImportFile.addEventListener('change', async (e) => {
     const nProj = Array.isArray(data.projects) ? data.projects.length : 0;
     const nMemos = Array.isArray(data.memos) ? data.memos.length : 0;
     if (!nProj && !nMemos) { await notify('Aucun dossier ni mémo dans le fichier.', { error: true }); return; }
-    if (!(await confirmPopin(
-      `Importer ${nProj} dossier(s) et ${nMemos} mémo(s) DANS « ${targetName} » ?\nSeuls les dossiers nouveaux y sont rattachés ; l'existant n'est jamais déplacé. Doublons ignorés.`,
-      { title: '⬆ Importer ici', okLabel: 'Importer', danger: false }
-    ))) return;
-    const result = await api('/api/import?target_parent_id=' + targetId, { method: 'POST', body: JSON.stringify(data) });
-    const skipped = (result.skipped || 0) + (result.skipped_memos || 0);
-    let msg = `${result.imported_memos} mémo(s) ajouté(s)`;
-    if (skipped) msg += `, ${skipped} doublon(s) ignoré(s)`;
-    await notify(msg + '.', { title: '⬆ Import terminé' });
-    await loadAll();
+    // [IMPORT-PREVIEW] dry-run (lecture pure) → pop-in de prévisualisation ; rien n'est écrit ici.
+    const report = await api('/api/import?dry_run=1&target_parent_id=' + targetId, { method: 'POST', body: JSON.stringify(data) });
+    openImportPreview(report, data, targetId, targetName, file.name);
   } catch (err) { await notify("Erreur d'import : " + err.message, { error: true }); }
   finally { e.target.value = ''; importTargetId = null; }
 });
+
+// [IMPORT-PREVIEW] Pop-in de prévisualisation : arbre coloré (D2), résolution des conflits
+// (D3), légende + bilan, « Importer N ». Rien n'est écrit avant le clic Importer (D4).
+function openImportPreview(report, fileData, targetId, targetName, fileName) {
+  const dlg = document.getElementById('import-preview-dialog');
+  document.getElementById('ipv-title').textContent = 'Importer « ' + (fileName || 'ce dossier') + ' » ici ?';
+  document.getElementById('ipv-dest').textContent = '📁 Destination : ' + targetName;
+  const tree = document.getElementById('ipv-tree');
+  const legend = document.getElementById('ipv-legend');
+  const bilanEl = document.getElementById('ipv-bilan');
+  const allToggle = document.getElementById('ipv-alltoggle');
+  const importBtn = document.getElementById('ipv-import');
+  const bilan = report.bilan || {};
+  // Teintes via tokens des 2 thèmes (D2) : vert=ajouté, violet=fusion, gris=ignoré, ambre=conflit.
+  const ST = {
+    new: { label: 'ajouté', color: 'var(--green)' },
+    merge: { label: 'fusion', color: 'var(--guest)' },
+    skip: { label: 'identique', color: 'var(--muted)' },
+    conflict: { label: 'conflit', color: 'var(--yellow)' },
+  };
+  const badge = (status) => { const s = ST[status] || ST.skip; return el('span', { text: s.label, attrs: { style: 'font-size:0.66rem;padding:0.05rem 0.45rem;border-radius:10px;border:1px solid ' + s.color + ';color:' + s.color + ';flex-shrink:0' } }); };
+  // Résolutions par conflit — « Ignorer » (skip) pré-sélectionné (D3).
+  const resolutions = {};
+  const conflicts = (report.memos || []).filter(m => m.status === 'conflict');
+  conflicts.forEach(m => { resolutions[m.uid] = 'skip'; });
+  const memosByProj = {};
+  (report.memos || []).forEach(m => { (memosByProj[m.project_name] = memosByProj[m.project_name] || []).push(m); });
+  const renderedUids = new Set();
+
+  function render() {
+    tree.innerHTML = '';
+    // rangée « Tout : … » si > 3 conflits (D3)
+    allToggle.innerHTML = '';
+    if (conflicts.length > 3) {
+      const row = el('div', { attrs: { style: 'display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;font-size:0.78rem' } });
+      row.appendChild(el('span', { text: 'Tout :', attrs: { style: 'color:var(--muted)' } }));
+      [['overwrite', 'Écraser'], ['duplicate', 'Dupliquer'], ['skip', 'Ignorer']].forEach(([v, l]) => {
+        row.appendChild(el('button', { class: 'prio-btn', text: l, attrs: { type: 'button', style: 'padding:0.05rem 0.45rem;font-size:0.72rem' }, on: { click: () => { conflicts.forEach(m => resolutions[m.uid] = v); render(); } } }));
+      });
+      allToggle.appendChild(row);
+    }
+    renderedUids.clear();
+    const renderMemo = (m, depth) => {
+      renderedUids.add(m);
+      const row = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.4rem;padding:0.1rem 0;margin-left:' + (depth * 1.1) + 'rem;font-size:0.85rem' } });
+      row.appendChild(el('span', { text: '📝', attrs: { style: 'opacity:0.65' } }));
+      row.appendChild(el('span', { text: m.title || '(mémo)', attrs: { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+      row.appendChild(badge(m.status));
+      tree.appendChild(row);
+      if (m.status === 'conflict') {
+        const cr = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;margin-left:' + ((depth + 1) * 1.1) + 'rem;padding:0.1rem 0 0.25rem' } });
+        cr.appendChild(el('span', { text: m.conflict_kind === 'trashed' ? '🗑 en corbeille' : 'existe déjà', attrs: { style: 'font-size:0.7rem;color:var(--muted);margin-right:0.2rem' } }));
+        [['overwrite', m.conflict_kind === 'trashed' ? 'Restaurer' : 'Écraser'], ['duplicate', 'Dupliquer'], ['skip', 'Ignorer']].forEach(([v, l]) => {
+          const on = resolutions[m.uid] === v;
+          cr.appendChild(el('button', { class: 'prio-btn', text: l, attrs: { type: 'button', style: 'padding:0.05rem 0.45rem;font-size:0.72rem' + (on ? ';background:var(--accent);border-color:var(--accent);color:#10141a' : '') }, on: { click: () => { resolutions[m.uid] = v; render(); } } }));
+        });
+        tree.appendChild(cr);
+      }
+    };
+    const renderNode = (node, depth) => {
+      const row = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.4rem;padding:0.18rem 0;margin-left:' + (depth * 1.1) + 'rem' } });
+      row.appendChild(el('span', { text: '📁' }));
+      row.appendChild(el('span', { text: node.name, attrs: { style: 'font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+      row.appendChild(badge(node.status));
+      tree.appendChild(row);
+      (memosByProj[node.name] || []).forEach(m => renderMemo(m, depth + 1));
+      (node.children || []).forEach(ch => renderNode(ch, depth + 1));
+    };
+    (report.projects || []).forEach(n => renderNode(n, 0));
+    // mémos dont le projet n'est pas dans l'arbre (sécurité) → à plat
+    const leftover = (report.memos || []).filter(m => !renderedUids.has(m));
+    if (leftover.length) { tree.appendChild(el('div', { text: 'Autres mémos', attrs: { style: 'font-weight:600;font-size:0.8rem;color:var(--muted);margin-top:0.4rem' } })); leftover.forEach(m => renderMemo(m, 1)); }
+    // légende (D2)
+    legend.innerHTML = '';
+    [['new', 'ajouté'], ['merge', 'déjà présent → fusion'], ['skip', 'identique → ignoré'], ['conflict', 'conflit à trancher']].forEach(([k, lbl]) => {
+      const item = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.25rem' } });
+      item.appendChild(el('span', { attrs: { style: 'width:9px;height:9px;border-radius:50%;background:' + ST[k].color } }));
+      item.appendChild(el('span', { text: lbl }));
+      legend.appendChild(item);
+    });
+    // bilan + N
+    const nResolved = Object.values(resolutions).filter(v => v !== 'skip').length;
+    const N = (bilan.memos_new || 0) + (bilan.projects_new || 0) + nResolved;
+    const parts = [];
+    const add = [];
+    if (bilan.projects_new) add.push(bilan.projects_new + ' dossier' + (bilan.projects_new > 1 ? 's' : ''));
+    if (bilan.memos_new) add.push(bilan.memos_new + ' mémo' + (bilan.memos_new > 1 ? 's' : ''));
+    if (add.length) parts.push(add.join(' + ') + ' ajouté' + ((bilan.projects_new + bilan.memos_new) > 1 ? 's' : ''));
+    if (bilan.projects_merge) parts.push(bilan.projects_merge + ' retrouvé' + (bilan.projects_merge > 1 ? 's' : '') + ' (fusion)');
+    if (bilan.memos_skip) parts.push(bilan.memos_skip + ' ignoré' + (bilan.memos_skip > 1 ? 's' : ''));
+    const nConf = conflicts.length;
+    if (nConf) parts.push(nConf + ' conflit' + (nConf > 1 ? 's' : '') + (nResolved ? ' (' + nResolved + ' résolu' + (nResolved > 1 ? 's' : '') + ')' : ''));
+    bilanEl.textContent = parts.join(' · ') || 'Rien à importer.';
+    importBtn.disabled = N === 0;
+    importBtn.style.opacity = N === 0 ? '0.6' : '';
+    importBtn.textContent = N === 0 ? 'Rien à importer' : ('Importer ' + N + ' élément' + (N > 1 ? 's' : ''));
+    importBtn.onclick = async () => {
+      importBtn.disabled = true;
+      try {
+        const res = await api('/api/import?target_parent_id=' + targetId, { method: 'POST', body: JSON.stringify(Object.assign({}, fileData, { resolutions })) });
+        dlg.close();
+        const upd = (res.updated_memos || 0);
+        let msg = (res.imported_memos || 0) + ' mémo(s) ajouté(s)';
+        if (upd) msg += ', ' + upd + ' mis à jour/restauré(s)';
+        await notify(msg + '.', { title: '⬆ Import terminé' });
+        await loadAll();
+      } catch (err) { importBtn.disabled = false; await notify("Erreur d'import : " + err.message, { error: true }); }
+    };
+  }
+  render();
+  document.getElementById('ipv-cancel').onclick = () => dlg.close();  // D4 : Annuler = zéro effet
+  dlg.showModal();
+}
 const createMenu = document.getElementById('create-menu');
 const createMenuBtn = document.getElementById('create-menu-btn');
 createMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); createMenu.hidden = !createMenu.hidden; });

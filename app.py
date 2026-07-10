@@ -5552,6 +5552,80 @@ def create_backup_now():
     return jsonify({"created": _create_backup()}), 201
 
 
+def _memo_import_sig(content, title, done, due_date, due_time):
+    """[IMPORT-PREVIEW] Signature de comparaison d'un mémo (indépendante de l'instance et de
+    updated_at) : contenu visible. Deux mémos de même signature = « identiques » → skip."""
+    return "\x01".join([
+        (content or "").strip(),
+        (title or "").strip(),
+        "1" if done else "0",
+        (due_date or "").strip(),
+        (due_time or "").strip(),
+    ])
+
+
+def _import_dry_run(db, data):
+    """[IMPORT-PREVIEW] Analyse LECTURE PURE d'un fichier d'import (aucune écriture, aucun
+    bump _data_version) → rapport {projects (arbre), memos, bilan}. Statuts D2 :
+    project new/merge (par nom) ; mémo new/skip/conflict(active|trashed) (par uid + signature)."""
+    existing_proj = {(r["name"] or "").strip().lower() for r in db.execute("SELECT name FROM projects").fetchall()}
+    by_name = {}
+    for p in (data.get("projects") or []):
+        if not isinstance(p, dict):
+            continue
+        nm = (p.get("name") or "").strip()
+        if not nm:
+            continue
+        by_name[nm] = {"name": nm, "parent": (p.get("parent") or "").strip(),
+                       "status": "merge" if nm.lower() in existing_proj else "new", "children": []}
+    roots = []
+    for node in by_name.values():
+        par = node["parent"]
+        (by_name[par]["children"] if (par and par in by_name) else roots).append(node)
+    def _clean(n):
+        return {"name": n["name"], "status": n["status"], "children": [_clean(c) for c in n["children"]]}
+    proj_tree = [_clean(r) for r in roots]
+    proj_new = sum(1 for n in by_name.values() if n["status"] == "new")
+    proj_merge = len(by_name) - proj_new
+
+    memos_by_uid = {r["uid"]: r for r in db.execute("SELECT * FROM memos WHERE uid != ''").fetchall()}
+    out_memos = []
+    c_new = c_skip = c_active = c_trashed = 0
+    for m in (data.get("memos") or []):
+        if not isinstance(m, dict):
+            continue
+        content = (m.get("content") or "").strip()
+        title = _clean_title(m.get("title"))
+        if not content and not title:
+            continue
+        uid = (m.get("uid") or "").strip()
+        row = memos_by_uid.get(uid) if uid else None
+        entry = {"uid": uid, "title": title or _text_excerpt(content, 60),
+                 "project_name": (m.get("project") or "").strip()}
+        if not row:
+            entry["status"] = "new"; c_new += 1
+        elif (_row_get(row, "deleted_at") or "").strip():
+            entry.update(status="conflict", conflict_kind="trashed",
+                         updated_local=(row["updated_at"] or ""), updated_fichier=(m.get("updated_at") or ""))
+            c_trashed += 1
+        else:
+            sig_f = _memo_import_sig(content, title, m.get("done"), (m.get("due_date") or "").strip(), m.get("due_time"))
+            sig_d = _memo_import_sig(row["content"], _row_get(row, "title"), row["done"], row["due_date"], _row_get(row, "due_time"))
+            if sig_f == sig_d:
+                entry["status"] = "skip"; c_skip += 1
+            else:
+                entry.update(status="conflict", conflict_kind="active",
+                             updated_local=(row["updated_at"] or ""), updated_fichier=(m.get("updated_at") or ""))
+                c_active += 1
+        out_memos.append(entry)
+    return {
+        "projects": proj_tree,
+        "memos": out_memos,
+        "bilan": {"projects_new": proj_new, "projects_merge": proj_merge, "memos_new": c_new,
+                  "memos_skip": c_skip, "conflicts_active": c_active, "conflicts_trashed": c_trashed},
+    }
+
+
 @app.route("/api/import", methods=["POST"])
 def import_links():
     data = request.get_json(silent=True) or {}
@@ -5586,6 +5660,15 @@ def import_links():
         if (trow["name"] or "").strip().lower() in file_names_lc:
             return jsonify({"error": "le dossier cible fait partie du fichier importé (cycle)"}), 400
         target_parent_id = tp
+
+    # [IMPORT-PREVIEW] Dry-run : analyse LECTURE PURE (aucune écriture, pas de commit ni de bump
+    # _data_version) → rapport. Retour AVANT toute écriture (ensure_category/project écrivent).
+    if request.args.get("dry_run") in ("1", "true", "yes"):
+        return jsonify(_import_dry_run(db, data))
+
+    # [IMPORT-PREVIEW] Résolutions par uid : 'overwrite' | 'duplicate' | 'skip'. Absent = skip
+    # (= comportement V20.12 : newer-wins par uid). Seul le flux « Importer ici » les envoie.
+    res_map = data.get("resolutions") if isinstance(data.get("resolutions"), dict) else {}
 
     cat_ids = {}
 
@@ -5942,16 +6025,27 @@ def import_links():
         if not content and not title:
             continue
 
-        if uid and uid in memos_by_uid:
+        res = str(res_map.get(uid) or "").strip().lower() if uid else ""
+        # [IMPORT-PREVIEW] 'duplicate' → ne touche pas l'existant, tombe vers l'INSERT (uid neuf).
+        if uid and uid in memos_by_uid and res != "duplicate":
             existing = memos_by_uid[uid]
-            if updated and updated > (existing["updated_at"] or ""):
-                merged_images = images if images != "[]" else (existing["images"] or "[]")
-                merged_marker = memo_marker or _row_get(existing, "marker_color")
-                merged_time = memo_time or _row_get(existing, "due_time")
-                if not due_date:
-                    merged_time = ""
-                # created_by : enrichir si vide, ne jamais écraser une valeur par un vide plus ancien
-                merged_created_by = memo_created_by or _row_get(existing, "created_by")
+            merged_images = images if images != "[]" else (existing["images"] or "[]")
+            merged_marker = memo_marker or _row_get(existing, "marker_color")
+            merged_time = memo_time or _row_get(existing, "due_time")
+            if not due_date:
+                merged_time = ""
+            merged_created_by = memo_created_by or _row_get(existing, "created_by")
+            if res == "overwrite":
+                # [IMPORT-PREVIEW] Écraser/Restaurer : force la mise à jour, restaure si en corbeille
+                # (deleted_at=''), rattache au projet visé par l'import (project_id résolu du fichier).
+                db.execute(
+                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, "
+                    "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
+                    "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, deleted_at='', updated_at=? WHERE id=?",
+                    (content, done, due_date, merged_time, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, (updated or now), existing["id"]),
+                )
+                updated_memos += 1
+            elif updated and updated > (existing["updated_at"] or ""):
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
@@ -5963,13 +6057,16 @@ def import_links():
                 skipped_memos += 1
             continue
 
-        dedup_key = content if content else "\x00title:" + title
-        if dedup_key in existing_memos:
-            skipped_memos += 1
-            continue
-        existing_memos.add(dedup_key)
+        # INSERT (mémo nouveau OU 'duplicate' explicite). Le dédup par contenu est court-circuité
+        # pour une duplication demandée (on VEUT une copie), et l'uid est régénéré.
+        if res != "duplicate":
+            dedup_key = content if content else "\x00title:" + title
+            if dedup_key in existing_memos:
+                skipped_memos += 1
+                continue
+            existing_memos.add(dedup_key)
         max_mpos += 1
-        new_uid = uid or str(uuid.uuid4())
+        new_uid = str(uuid.uuid4()) if res == "duplicate" else (uid or str(uuid.uuid4()))
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
             "done, due_date, due_time, priority, subtasks, project_id, images, recurrence, emoji, location, "
