@@ -4784,7 +4784,7 @@ function voteManageEntry(v) {
 }
 
 function startVoteCreate(proj) {
-  voteCreate = { name: '', mode: 'single', deadline: '', sel: new Set(), projectId: proj.id };
+  voteCreate = { name: '', mode: 'single', deadline: '', eventDate: '', sel: new Set(), projectId: proj.id };
   selectedVoteId = null;
   renderBoard();
 }
@@ -4802,9 +4802,15 @@ function voteCreateBarEl() {
     attrs: { type: 'button', style: voteCreate.mode === m ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
     on: { click: () => { voteCreate.mode = m; renderBoard(); } },
   })));
-  const dl = el('input', { attrs: { type: 'datetime-local', value: voteCreate.deadline, title: 'Deadline (optionnelle)', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
+  bar.appendChild(el('span', { text: '⏳', attrs: { title: 'Deadline du vote (fin des votes)', style: 'font-size:0.85rem' } }));
+  const dl = el('input', { attrs: { type: 'datetime-local', value: voteCreate.deadline, title: 'Deadline du vote (optionnelle)', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
   dl.addEventListener('input', () => { voteCreate.deadline = dl.value; });
   bar.appendChild(dl);
+  // [VOTE-V1.1] date de l'événement (créneau) — distincte de la deadline ; planifie le gagnant.
+  bar.appendChild(el('span', { text: '📅', attrs: { title: "Date de l'événement (créneau voté) — le gagnant sera planifié à cette date", style: 'font-size:0.85rem' } }));
+  const ev = el('input', { attrs: { type: 'datetime-local', value: voteCreate.eventDate, title: "📅 Date de l'événement (optionnelle) — le gagnant sera planifié à cette date", style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
+  ev.addEventListener('input', () => { voteCreate.eventDate = ev.value; });
+  bar.appendChild(ev);
   const count = el('span', { attrs: { id: 'vote-create-count', style: 'font-size:0.8rem;color:var(--muted)' }, text: voteCreate.sel.size + ' option(s)' });
   bar.appendChild(count);
   bar.appendChild(el('button', {
@@ -4825,7 +4831,7 @@ async function submitVoteCreate() {
   if (!voteCreate.sel.size) { await notify('Coche au moins une option.', { error: true }); return; }
   try {
     await api(`/api/projects/${voteCreate.projectId}/votes`, { method: 'POST', body: JSON.stringify({
-      name, vote_mode: voteCreate.mode, vote_deadline: voteCreate.deadline || '', memo_ids: [...voteCreate.sel],
+      name, vote_mode: voteCreate.mode, vote_deadline: voteCreate.deadline || '', event_date: voteCreate.eventDate || '', memo_ids: [...voteCreate.sel],
     }) });
     voteCreate = null;
     await loadAll();
@@ -4862,9 +4868,13 @@ function openVoteManage(v) {
   renderMode();
   body.appendChild(modeRow);
   // Deadline
-  body.appendChild(lbl('Deadline (optionnelle)'));
+  body.appendChild(lbl('⏳ Deadline du vote (optionnelle)'));
   const dl = el('input', { attrs: { type: 'datetime-local', value: v.vote_deadline || '', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem' } });
   body.appendChild(dl);
+  // [VOTE-V1.1] Date de l'événement (créneau) — distincte de la deadline.
+  body.appendChild(lbl("📅 Date de l'événement (optionnelle)"));
+  const evd = el('input', { attrs: { type: 'datetime-local', value: v.event_date || '', title: 'Le gagnant sera planifié à cette date à la clôture', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem' } });
+  body.appendChild(evd);
   // Options (mémos du périmètre porteur + descendants)
   body.appendChild(lbl('Options'));
   const scope = new Set([proj.id, ...projectDescendants(proj.id)]);
@@ -4886,7 +4896,10 @@ function openVoteManage(v) {
   const reloadClose = async () => { dlg.close(); await loadAll(); };
   if (!closed) {
     actions.appendChild(el('button', { class: 'prio-btn', text: '🗳 Clore', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' }, on: { click: async () => {
-      if (!(await confirmPopin('Le gagnant sera figé.', { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
+      // [VOTE-V1.1] info si une date d'événement est posée : le gagnant unique sera planifié.
+      const evLabel = fmtVoteDeadline(evd.value || '');
+      const msg = 'Le gagnant sera figé.' + (evLabel ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evLabel + '.' : '');
+      if (!(await confirmPopin(msg, { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
       await doAction('close'); await reloadClose();
     } } }));
   } else {
@@ -4917,7 +4930,7 @@ function openVoteManage(v) {
     if ((removed || downgrade) && !(await confirmPopin(
       downgrade ? 'Passer en « un seul » : chaque votant ne gardera que sa voix la plus récente.' : 'Retirer une option supprimera ses voix.',
       { title: 'Confirmer', okLabel: 'Confirmer', danger: true }))) return;
-    try { await put({ name, vote_mode: mode, vote_deadline: dl.value || '', memo_ids: [...sel] }); await reloadClose(); }
+    try { await put({ name, vote_mode: mode, vote_deadline: dl.value || '', event_date: evd.value || '', memo_ids: [...sel] }); await reloadClose(); }
     catch (e) { await notify('Enregistrement impossible : ' + e.message, { error: true }); }
   } } }));
   body.appendChild(actions);

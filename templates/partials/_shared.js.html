@@ -419,9 +419,27 @@ function runMapDialog(cfg) {
         text: label,
         on: { click: fn, mouseenter: (e) => { e.target.style.background = 'var(--panel-2)'; }, mouseleave: (e) => { e.target.style.background = 'none'; } },
       });
+      // [MAP-GROUPS-MENU-DISMISS] Fermeture au clic extérieur / Échap (comme un menu natif).
+      // Contexte <dialog> top-layer : listeners en CAPTURE sur le dialog carte → reçoivent
+      // les clics AVANT que Leaflet ne les arrête (sinon un clic sur la carte ne fermerait pas).
+      const mapDlg = document.getElementById('map-dialog');
+      const onDocClick = (e) => { if (!wrap.contains(e.target)) closeMenu(); };
+      const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); } };
+      function closeMenu() {
+        menu.style.display = 'none';
+        (mapDlg || document).removeEventListener('click', onDocClick, true);
+        (mapDlg || document).removeEventListener('keydown', onKey, true);
+      }
+      function openMenu() {
+        buildRoot();
+        menu.style.display = 'block';
+        // Le clic d'ouverture a déjà passé la phase capture → pas d'auto-fermeture immédiate.
+        (mapDlg || document).addEventListener('click', onDocClick, true);
+        (mapDlg || document).addEventListener('keydown', onKey, true);
+      }
       const buildRoot = () => {
         menu.innerHTML = '';
-        menu.appendChild(mItem('＋ Créer un groupe', () => { menu.style.display = 'none'; startGroupMode('create'); }));
+        menu.appendChild(mItem('＋ Créer un groupe', () => { closeMenu(); startGroupMode('create'); }));
         if (names.length) {
           [['✎ Modifier un groupe ▸', 'edit'], ['⧉ Copier un groupe ▸', 'copy'], ['🗑 Supprimer un groupe ▸', 'del']].forEach(([lbl, kind]) => {
             menu.appendChild(mItem(lbl, () => buildPick(kind), kind === 'del'));
@@ -432,15 +450,14 @@ function runMapDialog(cfg) {
         menu.innerHTML = '';
         menu.appendChild(mItem('◂ Retour', buildRoot));
         names.forEach(g => menu.appendChild(mItem(g, () => {
-          menu.style.display = 'none';
+          closeMenu();
           if (kind === 'del') deleteGroup(g);
           else startGroupMode(kind, g);
         }, kind === 'del')));
       };
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (menu.style.display === 'none') { buildRoot(); menu.style.display = 'block'; }
-        else menu.style.display = 'none';
+        if (menu.style.display === 'none') openMenu(); else closeMenu();
       });
       wrap.appendChild(btn);
       wrap.appendChild(menu);

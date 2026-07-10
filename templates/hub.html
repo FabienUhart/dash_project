@@ -717,7 +717,7 @@ function hubVotesBar() {
     wrap.appendChild(chip('🗳 ' + v.name + st, hubSelectedVoteId === v.id, () => { hubSelectedVoteId = v.id; render(); }));
     if (v.mine) { const g = el('button', { class: 'prio-btn', text: '⚙', attrs: { type: 'button', title: 'Gérer ce vote' } }); g.addEventListener('click', () => openHubVoteManage(v)); wrap.appendChild(g); }
   });
-  if (proj.can_create_vote) wrap.appendChild(chip('➕ Créer un vote', false, () => { hubVoteCreate = { name: '', mode: 'single', deadline: '', sel: new Set(), projectId: proj.id, token: proj.share_token }; hubSelectedVoteId = null; render(); }));
+  if (proj.can_create_vote) wrap.appendChild(chip('➕ Créer un vote', false, () => { hubVoteCreate = { name: '', mode: 'single', deadline: '', eventDate: '', sel: new Set(), projectId: proj.id, token: proj.share_token }; hubSelectedVoteId = null; render(); }));
   return wrap;
 }
 function hubVoteCreateBar(proj) {
@@ -726,8 +726,13 @@ function hubVoteCreateBar(proj) {
   const nameIn = el('input', { attrs: { type: 'text', placeholder: 'Nom du vote', maxlength: '80', value: hubVoteCreate.name, style: 'flex:1;min-width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.35rem 0.5rem' } });
   nameIn.addEventListener('input', () => { hubVoteCreate.name = nameIn.value; }); bar.appendChild(nameIn);
   ['single', 'multi'].forEach(mm => { const b = el('button', { class: 'prio-btn', text: mm === 'single' ? '☝️ Un seul' : '☑️ Plusieurs', attrs: { type: 'button', style: hubVoteCreate.mode === mm ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' } }); b.addEventListener('click', () => { hubVoteCreate.mode = mm; render(); }); bar.appendChild(b); });
-  const dl = el('input', { attrs: { type: 'datetime-local', value: hubVoteCreate.deadline, style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
+  bar.appendChild(el('span', { text: '⏳', attrs: { title: 'Deadline du vote' } }));
+  const dl = el('input', { attrs: { type: 'datetime-local', value: hubVoteCreate.deadline, title: 'Deadline du vote (optionnelle)', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
   dl.addEventListener('input', () => { hubVoteCreate.deadline = dl.value; }); bar.appendChild(dl);
+  // [VOTE-V1.1] date de l'événement (créneau) — le gagnant sera planifié à cette date.
+  bar.appendChild(el('span', { text: '📅', attrs: { title: "Date de l'événement (créneau voté)" } }));
+  const ev = el('input', { attrs: { type: 'datetime-local', value: hubVoteCreate.eventDate, title: "Date de l'événement (optionnelle) — le gagnant sera planifié à cette date", style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
+  ev.addEventListener('input', () => { hubVoteCreate.eventDate = ev.value; }); bar.appendChild(ev);
   const cnt = el('span', { text: hubVoteCreate.sel.size + ' option(s)', attrs: { id: 'hvc-count', style: 'font-size:0.8rem;color:var(--muted)' } }); bar.appendChild(cnt);
   const ok = el('button', { class: 'prio-btn', text: '✓ Créer', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' } }); ok.addEventListener('click', submitHubVoteCreate); bar.appendChild(ok);
   const ca = el('button', { class: 'prio-btn', text: 'Annuler' }); ca.addEventListener('click', () => { hubVoteCreate = null; render(); }); bar.appendChild(ca);
@@ -737,7 +742,7 @@ async function submitHubVoteCreate() {
   const name = (hubVoteCreate.name || '').trim();
   if (!name) { notify('Donne un nom au vote.', { error: true }); return; }
   if (!hubVoteCreate.sel.size) { notify('Coche au moins une option.', { error: true }); return; }
-  const r = await api(hubVoteCreate.token, '/votes', { method: 'POST', body: JSON.stringify({ name, vote_mode: hubVoteCreate.mode, vote_deadline: hubVoteCreate.deadline || '', memo_ids: [...hubVoteCreate.sel], project_id: hubVoteCreate.projectId }) });
+  const r = await api(hubVoteCreate.token, '/votes', { method: 'POST', body: JSON.stringify({ name, vote_mode: hubVoteCreate.mode, vote_deadline: hubVoteCreate.deadline || '', event_date: hubVoteCreate.eventDate || '', memo_ids: [...hubVoteCreate.sel], project_id: hubVoteCreate.projectId }) });
   if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible.', { error: true }); return; }
   hubVoteCreate = null; await reload();
 }
@@ -756,8 +761,10 @@ function openHubVoteManage(v) {
   const modeRow = el('div', { attrs: { style: 'display:flex;gap:0.35rem' } });
   const rm = () => { modeRow.innerHTML = ''; ['single', 'multi'].forEach(mm => { const b = el('button', { class: 'prio-btn', text: mm === 'single' ? '☝️ Un seul' : '☑️ Plusieurs', attrs: { type: 'button', style: mode === mm ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' } }); b.addEventListener('click', () => { mode = mm; rm(); }); modeRow.appendChild(b); }); };
   rm(); body.appendChild(modeRow);
-  body.appendChild(lbl('Deadline (optionnelle)'));
+  body.appendChild(lbl('⏳ Deadline du vote (optionnelle)'));
   const dl = el('input', { attrs: { type: 'datetime-local', value: v.vote_deadline || '', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem' } }); body.appendChild(dl);
+  body.appendChild(lbl("📅 Date de l'événement (optionnelle)"));  // [VOTE-V1.1]
+  const evd = el('input', { attrs: { type: 'datetime-local', value: v.event_date || '', title: 'Le gagnant sera planifié à cette date à la clôture', style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem' } }); body.appendChild(evd);
   body.appendChild(lbl('Options'));
   const ow = el('div', { attrs: { style: 'max-height:11rem;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.5rem;display:flex;flex-direction:column;gap:0.25rem' } });
   hubScopeMemos(proj.id).forEach(m => {
@@ -771,7 +778,7 @@ function openHubVoteManage(v) {
   const done = async () => { dlg.close(); await reload(); };
   const actions = el('div', { attrs: { style: 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem' } });
   const abtn = (label, on, style) => { const b = el('button', { class: 'prio-btn', text: label, attrs: style ? { style } : {} }); b.addEventListener('click', on); return b; };
-  if (!closed) actions.appendChild(abtn('🗳 Clore', async () => { if (!(await confirmPopin('Le gagnant sera figé.', { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
+  if (!closed) actions.appendChild(abtn('🗳 Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
   else actions.appendChild(abtn('↻ Rouvrir', async () => { const r = await post('reopen', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Réouverture impossible.', { error: true }); }));
   actions.appendChild(abtn('↺ Reset', async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await post('reset', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
   actions.appendChild(abtn('🗑 Supprimer', async () => { if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer' }))) return; const r = await api(token, '/votes/' + v.id, { method: 'DELETE' }); if (r.ok) { if (hubSelectedVoteId === v.id) hubSelectedVoteId = null; done(); } else notify('Impossible.', { error: true }); }, 'color:var(--danger)'));
@@ -785,7 +792,7 @@ function openHubVoteManage(v) {
     const removed = (v.options || []).some(o => !sel.has(o.memo_id) && (o.vote_count || 0) > 0);
     const downgrade = v.vote_mode === 'multi' && mode === 'single';
     if ((removed || downgrade) && !(await confirmPopin(downgrade ? 'Passer en « un seul » : chaque votant garde sa voix la plus récente.' : 'Retirer une option supprimera ses voix.', { title: 'Confirmer', okLabel: 'Confirmer' }))) return;
-    const r = await post('', { name, vote_mode: mode, vote_deadline: dl.value || '', memo_ids: [...sel] });
+    const r = await post('', { name, vote_mode: mode, vote_deadline: dl.value || '', event_date: evd.value || '', memo_ids: [...sel] });
     if (r.ok) done(); else { const e = await r.json().catch(() => ({})); notify(e.error || 'Impossible.', { error: true }); }
   });
   foot.appendChild(save); body.appendChild(foot);

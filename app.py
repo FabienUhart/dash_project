@@ -448,10 +448,16 @@ def init_db():
             vote_closed INTEGER DEFAULT 0,
             vote_winner_ids TEXT DEFAULT '',
             created_by TEXT DEFAULT '',
-            created_at TEXT
+            created_at TEXT,
+            event_date TEXT DEFAULT ''
         )
         """
     )
+    # [VOTE-V1.1] date de l'événement (créneau) d'un vote nommé — planifie le gagnant unique
+    # à la clôture (due_date/due_time). Distinct de vote_deadline. Additif, non exporté.
+    vtcols = {r[1] for r in conn.execute("PRAGMA table_info(votes)").fetchall()}
+    if "event_date" not in vtcols:
+        conn.execute("ALTER TABLE votes ADD COLUMN event_date TEXT DEFAULT ''")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS vote_options (
@@ -1322,9 +1328,10 @@ def _create_named_vote(db, project_id, data, created_by):
         return {"error": "au moins une option requise"}, 400
     now = datetime.now(timezone.utc).isoformat()
     cur = db.execute(
-        "INSERT INTO votes (project_id, name, vote_mode, vote_deadline, vote_closed, vote_winner_ids, created_by, created_at) "
-        "VALUES (?, ?, ?, ?, 0, '', ?, ?)",
-        (project_id, name, _clean_vote_mode(data.get("vote_mode")), _clean_vote_deadline(data.get("vote_deadline")), created_by, now),
+        "INSERT INTO votes (project_id, name, vote_mode, vote_deadline, vote_closed, vote_winner_ids, created_by, created_at, event_date) "
+        "VALUES (?, ?, ?, ?, 0, '', ?, ?, ?)",
+        (project_id, name, _clean_vote_mode(data.get("vote_mode")), _clean_vote_deadline(data.get("vote_deadline")), created_by, now,
+         _clean_vote_deadline(data.get("event_date"))),  # [VOTE-V1.1]
     )
     vid = cur.lastrowid
     _set_vote_options(db, vid, project_id, valid)
@@ -1350,6 +1357,8 @@ def _update_named_vote(db, vote, data):
             _collapse_named_to_single(db, vid)  # purge « plus récente gagne »
     if "vote_deadline" in data:
         db.execute("UPDATE votes SET vote_deadline = ? WHERE id = ?", (_clean_vote_deadline(data.get("vote_deadline")), vid))
+    if "event_date" in data:  # [VOTE-V1.1]
+        db.execute("UPDATE votes SET event_date = ? WHERE id = ?", (_clean_vote_deadline(data.get("event_date")), vid))
     if "memo_ids" in data:
         valid = _set_vote_options(db, vid, vote["project_id"], data.get("memo_ids"))
         if not valid:
@@ -1836,6 +1845,18 @@ def _compute_named_winners(db, vid):
 def _freeze_named_vote(db, vid):
     winners = _compute_named_winners(db, vid)
     db.execute("UPDATE votes SET vote_winner_ids = ? WHERE id = ?", (json.dumps(winners), vid))
+    # [VOTE-V1.1] planifie le gagnant à la clôture SI date d'événement posée ET gagnant UNIQUE.
+    # Ex æquo → aucun write (pas deux mémos sur le même créneau ; l'owner départage puis re-clôt).
+    # Le write ÉCRASE due_date/due_time du gagnant (objet même du vote-créneau). Même site que
+    # le snapshot → vaut pour la clôture manuelle ET par deadline (_ensure_named_snapshot).
+    if len(winners) == 1:
+        row = db.execute("SELECT event_date FROM votes WHERE id = ?", (vid,)).fetchone()
+        ev = _clean_vote_deadline(_row_get(row, "event_date", "")) if row else ""
+        if ev:
+            db.execute(
+                "UPDATE memos SET due_date = ?, due_time = ?, updated_at = ? WHERE id = ?",
+                (ev[:10], ev[11:16], datetime.now(timezone.utc).isoformat(), winners[0]),
+            )
     return winners
 
 
@@ -1943,6 +1964,7 @@ def _named_vote_payload(db, row, viewer, owner_name, is_owner):
         "name": row["name"],
         "vote_mode": _clean_vote_mode(row["vote_mode"]),
         "vote_deadline": row["vote_deadline"] or "",
+        "event_date": _row_get(row, "event_date", "") or "",  # [VOTE-V1.1]
         "vote_state": "closed" if closed else "open",
         "vote_winner_ids": winner_ids,
         "options": opts,
@@ -3684,7 +3706,7 @@ def _data_version(db):
         # le « SELECT * FROM projects » ci-dessus (vote_enabled/deadline/closed/winner…).
         "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_votes",
         # [VOTE-GROUPS] votes nommés + options + rattachement des voix (memo_votes.vote_id).
-        "SELECT id, name, vote_mode, vote_deadline, vote_closed, vote_winner_ids, created_by FROM votes ORDER BY id",
+        "SELECT id, name, vote_mode, vote_deadline, vote_closed, vote_winner_ids, created_by, event_date FROM votes ORDER BY id",
         "SELECT vote_id, memo_id FROM vote_options ORDER BY vote_id, memo_id",
         "SELECT COALESCE(vote_id, -1) AS vid, COUNT(*) FROM memo_votes GROUP BY vid ORDER BY vid",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM memo_history",

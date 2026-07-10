@@ -1378,7 +1378,7 @@ function renderShareVotesBar() {
     wrap.appendChild(shareChip('🗳 ' + v.name + st, shareSelectedVoteId === v.id, () => { shareSelectedVoteId = v.id; render(); }));
     if (v.mine) { const g = el('button', 'prio-btn', '⚙'); g.type = 'button'; g.title = 'Gérer ce vote'; g.addEventListener('click', () => openShareVoteManage(v)); wrap.appendChild(g); }
   });
-  if (proj.can_create_vote) wrap.appendChild(shareChip('➕ Créer un vote', false, () => { shareVoteCreate = { name: '', mode: 'single', deadline: '', sel: new Set(), projectId: proj.id }; shareSelectedVoteId = null; render(); }));
+  if (proj.can_create_vote) wrap.appendChild(shareChip('➕ Créer un vote', false, () => { shareVoteCreate = { name: '', mode: 'single', deadline: '', eventDate: '', sel: new Set(), projectId: proj.id }; shareSelectedVoteId = null; render(); }));
   host.appendChild(wrap);
 }
 function shareVoteCreateBar(proj) {
@@ -1389,8 +1389,11 @@ function shareVoteCreateBar(proj) {
   nameIn.addEventListener('input', () => { shareVoteCreate.name = nameIn.value; });
   bar.appendChild(nameIn);
   ['single', 'multi'].forEach(m => bar.appendChild(shareChip(m === 'single' ? '☝️ Un seul' : '☑️ Plusieurs', shareVoteCreate.mode === m, () => { shareVoteCreate.mode = m; render(); })));
-  const dl = document.createElement('input'); dl.type = 'datetime-local'; dl.value = shareVoteCreate.deadline; dl.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem';
+  bar.appendChild(el('span', '', '⏳')); const dl = document.createElement('input'); dl.type = 'datetime-local'; dl.value = shareVoteCreate.deadline; dl.title = 'Deadline du vote (optionnelle)'; dl.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem';
   dl.addEventListener('input', () => { shareVoteCreate.deadline = dl.value; }); bar.appendChild(dl);
+  // [VOTE-V1.1] date de l'événement (créneau) — le gagnant sera planifié à cette date.
+  bar.appendChild(el('span', '', '📅')); const ev = document.createElement('input'); ev.type = 'datetime-local'; ev.value = shareVoteCreate.eventDate; ev.title = "Date de l'événement (optionnelle) — le gagnant sera planifié à cette date"; ev.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem';
+  ev.addEventListener('input', () => { shareVoteCreate.eventDate = ev.value; }); bar.appendChild(ev);
   const cnt = el('span', '', shareVoteCreate.sel.size + ' option(s)'); cnt.id = 'svc-count'; cnt.style.cssText = 'font-size:0.8rem;color:var(--muted)'; bar.appendChild(cnt);
   const ok = shareChip('✓ Créer', true, submitShareVoteCreate); bar.appendChild(ok);
   bar.appendChild(shareChip('Annuler', false, () => { shareVoteCreate = null; render(); }));
@@ -1401,7 +1404,7 @@ async function submitShareVoteCreate() {
   if (!name) { notify('Donne un nom au vote.', { error: true }); return; }
   if (!shareVoteCreate.sel.size) { notify('Coche au moins une option.', { error: true }); return; }
   const r = await fetch(API + '/votes', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
-    body: JSON.stringify({ name, vote_mode: shareVoteCreate.mode, vote_deadline: shareVoteCreate.deadline || '', memo_ids: [...shareVoteCreate.sel], project_id: shareVoteCreate.projectId }) });
+    body: JSON.stringify({ name, vote_mode: shareVoteCreate.mode, vote_deadline: shareVoteCreate.deadline || '', event_date: shareVoteCreate.eventDate || '', memo_ids: [...shareVoteCreate.sel], project_id: shareVoteCreate.projectId }) });
   if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible.', { error: true }); return; }
   shareVoteCreate = null; await load();
 }
@@ -1420,8 +1423,10 @@ function openShareVoteManage(v) {
   const modeRow = el('div', ''); modeRow.style.cssText = 'display:flex;gap:0.35rem';
   const rm = () => { modeRow.innerHTML = ''; ['single', 'multi'].forEach(m => modeRow.appendChild(shareChip(m === 'single' ? '☝️ Un seul' : '☑️ Plusieurs', mode === m, () => { mode = m; rm(); }))); };
   rm(); body.appendChild(modeRow);
-  body.appendChild(lbl('Deadline (optionnelle)'));
+  body.appendChild(lbl('⏳ Deadline du vote (optionnelle)'));
   const dl = document.createElement('input'); dl.type = 'datetime-local'; dl.value = v.vote_deadline || ''; dl.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem'; body.appendChild(dl);
+  body.appendChild(lbl("📅 Date de l'événement (optionnelle)"));  // [VOTE-V1.1]
+  const evd = document.createElement('input'); evd.type = 'datetime-local'; evd.value = v.event_date || ''; evd.title = 'Le gagnant sera planifié à cette date à la clôture'; evd.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.5rem'; body.appendChild(evd);
   body.appendChild(lbl('Options'));
   const ow = el('div', ''); ow.style.cssText = 'max-height:11rem;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.5rem;display:flex;flex-direction:column;gap:0.25rem';
   shareScopeMemos(proj.id).forEach(m => {
@@ -1434,7 +1439,7 @@ function openShareVoteManage(v) {
   const svPost = async (path, bodyObj) => fetch(API + '/votes/' + v.id + (path ? '/' + path : ''), { method: path ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify(bodyObj || {}) });
   const reloadClose = async () => { dlg.close(); await load(); };
   const actions = el('div', ''); actions.style.cssText = 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem';
-  if (!closed) actions.appendChild(shareChip('🗳 Clore', false, async () => { if (!(await confirmPopin('Le gagnant sera figé.', { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await svPost('close'); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
+  if (!closed) actions.appendChild(shareChip('🗳 Clore', false, async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await svPost('close'); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
   else actions.appendChild(shareChip('↻ Rouvrir', false, async () => { const r = await svPost('reopen', { vote_deadline: dl.value || '' }); if (r.ok) reloadClose(); else notify('Réouverture impossible.', { error: true }); }));
   actions.appendChild(shareChip('↺ Reset', false, async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await svPost('reset', { vote_deadline: dl.value || '' }); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
   const del = el('button', 'prio-btn', '🗑 Supprimer'); del.style.cssText = 'color:var(--danger)';
@@ -1449,7 +1454,7 @@ function openShareVoteManage(v) {
     const removed = (v.options || []).some(o => !sel.has(o.memo_id) && (o.vote_count || 0) > 0);
     const downgrade = v.vote_mode === 'multi' && mode === 'single';
     if ((removed || downgrade) && !(await confirmPopin(downgrade ? 'Passer en « un seul » : chaque votant garde sa voix la plus récente.' : 'Retirer une option supprimera ses voix.', { title: 'Confirmer', okLabel: 'Confirmer' }))) return;
-    const r = await svPost('', { name, vote_mode: mode, vote_deadline: dl.value || '', memo_ids: [...sel] });
+    const r = await svPost('', { name, vote_mode: mode, vote_deadline: dl.value || '', event_date: evd.value || '', memo_ids: [...sel] });
     if (r.ok) reloadClose(); else { const e = await r.json().catch(() => ({})); notify(e.error || 'Impossible.', { error: true }); }
   });
   foot.appendChild(save); body.appendChild(foot);
