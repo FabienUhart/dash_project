@@ -1,6 +1,6 @@
 # MEMORY BANK — dash_project
 
-**Dernière mise à jour :** 10 juillet 2026 (V21.1.63→66 — confort UX [SAVE-INDICATOR]/[UNDO-DELETE]/[EMPTY-STATES] + fix [VOTE-MAP-SUBPROJECT], commit groupé tag V21.1.66 ; avant : V21.1.62 [LINK-ADD-RELOCATE], V21.1.58→61 [FAVORITES]+[HOME-RESET], V21.0.56+57 [COMMENT-REACTIONS]+[REACTION-PALETTE] bump v21 — tout export v21, en prod)
+**Dernière mise à jour :** 10 juillet 2026 (V21.1.67→68 — [POMODORO] widget minuteur/pomodoro/chrono flottant, partial 3 pages, commit groupé tag V21.1.68 ; V21.1.63→66 confort UX [SAVE-INDICATOR]/[UNDO-DELETE]/[EMPTY-STATES] + fix [VOTE-MAP-SUBPROJECT] tag V21.1.66 ; avant : V21.1.62 [LINK-ADD-RELOCATE], V21.1.58→61 [FAVORITES]+[HOME-RESET], V21.0.56+57 [COMMENT-REACTIONS]+[REACTION-PALETTE] bump v21 — tout export v21, en prod)
 **Nature :** index de mémoire. La **source canonique** reste `CLAUDE.md` (racine). Ce fichier pointe vers elle, il ne la recopie pas (anti-duplication — cf. ADR-001).
 
 ## Résumé global

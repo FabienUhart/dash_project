@@ -1891,6 +1891,15 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
         Le fuseau choisi ici s'ajoute en plus (réglage propre à cet appareil).
       </p>
     </div>
+    <div class="settings-section">
+      <h4>MINUTEUR</h4>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer">
+        <input type="checkbox" id="pomo-visible-cb"> Afficher le minuteur ⏱ (bouton flottant)
+      </label>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        Pomodoro / minuteur / chronomètre. Réglage propre à cet appareil ; on peut aussi le masquer via le ✕ du widget.
+      </p>
+    </div>
   </div>
 
   <div class="settings-panel" data-panel="map">
@@ -6877,8 +6886,14 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   renderPrioManage();
   renderReactionManage();
   renderBackups();
+  // [POMODORO V1.1] reflète l'état d'affichage du widget minuteur (piloté dans le partial).
+  const pvcb = document.getElementById('pomo-visible-cb');
+  if (pvcb) pvcb.checked = !(window.pomoIsHidden && window.pomoIsHidden());
   setSettingsTab(localStorage.getItem('settingsTab') || 'identity');
   settingsDialog.showModal();
+});
+document.getElementById('pomo-visible-cb').addEventListener('change', (e) => {
+  if (window.pomoSetHidden) window.pomoSetHidden(!e.target.checked);
 });
 
 // [SETTINGS-TABS] sauvegarde AUTO du nom (blur / Entrée) — plus de bouton Enregistrer.

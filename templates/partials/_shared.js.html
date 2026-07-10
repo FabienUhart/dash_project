@@ -1780,4 +1780,350 @@ function agendaStartMonth(memos, todayIso) {
   const pfx = pick.slice(0, 7);
   return { ...ymOf(pick), day: dates.find(d => d.slice(0, 7) === pfx) || todayIso };
 }
+
+// ── [POMODORO] Widget minuteur/chrono flottant (3 pages via le partial) ──────────────
+// 3 modes : 🍅 Pomodoro (travail/pause en cycles) · ⏳ Minuteur (décompte) · ⏱ Chrono (croissant).
+// Source de vérité = timestamps absolus (endAt / chronoStart) recalculés à chaque tick depuis
+// Date.now() → exact même onglet en arrière-plan (recalage sur visibilitychange). Alerte double
+// (dés)activable : SON via Web Audio (bip synthétisé à la volée, ZÉRO asset — invariant 6) +
+// VIBRATION via navigator.vibrate (guardée, no-op sur iOS). État 100 % local (localStorage),
+// zéro route/schéma/export, aucune donnée partagée → parité owner/invité/hub gratuite.
+function initPomodoro() {
+  if (typeof document === 'undefined' || !document.body || document.getElementById('pomo-launch')) return;
+  const LS = 'pomo:v1';
+  const LR_R = 44, LR_C = 2 * Math.PI * 44;   // [B] anneau du LANCEUR (rayon/circonférence)
+  const P = { mode: 'pomodoro', alarmSound: true, alarmVibrate: true, alarmNotify: false, workMin: 25, breakMin: 5, timerMin: 10 };
+  try { Object.assign(P, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (e) {}
+  const save = () => { try { localStorage.setItem(LS, JSON.stringify({ mode: P.mode, alarmSound: P.alarmSound, alarmVibrate: P.alarmVibrate, alarmNotify: P.alarmNotify, workMin: P.workMin, breakMin: P.breakMin, timerMin: P.timerMin })); } catch (e) {} };
+  // Runtime (non persisté — un reload = minuteur arrêté, config conservée).
+  let running = false, endAt = 0, remainMs = 0, phase = 'work', chronoStart = 0, chronoAcc = 0, launchRingFg = null;
+  // [C] Couleurs d'anneau en tokens : travail/minuteur = accent (action), pause = vert (repos).
+  const ringColor = () => (P.mode === 'pomodoro' && phase === 'break') ? 'var(--green)' : 'var(--accent)';
+
+  // Audio synthétisé (débloqué au 1er Démarrer = geste utilisateur).
+  let actx = null;
+  function ensureAudio() { try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); if (actx && actx.state === 'suspended') actx.resume().catch(() => {}); } catch (e) { actx = null; } }
+  function beep() {
+    if (!P.alarmSound || !actx) return;
+    try {
+      const t = actx.currentTime;
+      for (let i = 0; i < 3; i++) {
+        const o = actx.createOscillator(), g = actx.createGain(), s = t + i * 0.22;
+        o.type = 'sine'; o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(0.3, s + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.18);
+        o.connect(g); g.connect(actx.destination); o.start(s); o.stop(s + 0.2);
+      }
+    } catch (e) {}
+  }
+  function buzz() { if (P.alarmVibrate && navigator.vibrate) { try { navigator.vibrate([120, 60, 120, 60, 120]); } catch (e) {} } }
+
+  const baseMs = () => (P.mode === 'timer' ? P.timerMin : (phase === 'work' ? P.workMin : P.breakMin)) * 60000;
+  const fmt = (ms) => { ms = Math.max(0, Math.round(ms / 1000)); return String(Math.floor(ms / 60)).padStart(2, '0') + ':' + String(ms % 60).padStart(2, '0'); };
+
+  // Injection CSS unique (tokens, pas de GSAP).
+  if (!document.getElementById('pomo-style')) {
+    const st = document.createElement('style'); st.id = 'pomo-style';
+    st.textContent = '#pomo-launch{position:fixed;left:1rem;bottom:1rem;z-index:3500;width:2.6rem;height:2.6rem;border-radius:50%;'
+      + 'border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:1.1rem;cursor:pointer;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center}'
+      + '#pomo-launch.run{border-color:var(--accent)}'
+      + '.pomo-launch-ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);pointer-events:none}'
+      + '.plr-bg{fill:none;stroke:var(--border);stroke-width:7}'
+      + '.plr-fg{fill:none;stroke:var(--accent);stroke-width:7;stroke-linecap:round;transition:stroke-dashoffset 0.25s linear,stroke 0.2s}'
+      + '.plr-ic{position:relative;font-size:1.1rem;line-height:1}'
+      + '#pomo-panel{position:fixed;left:1rem;bottom:3.9rem;z-index:3500;width:16rem;max-width:calc(100vw - 2rem);'
+      + 'background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:0.8rem;color:var(--text);'
+      + 'box-shadow:0 8px 30px rgba(0,0,0,0.4);font-size:0.85rem}'
+      + '#pomo-panel[hidden]{display:none}'
+      + '#pomo-launch[hidden],#pomo-reshow[hidden]{display:none}'
+      + '#pomo-reshow{position:fixed;left:0;bottom:1.2rem;z-index:3500;width:1.5rem;height:1.9rem;'
+      + 'border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;background:var(--panel);'
+      + 'color:var(--muted);font-size:0.85rem;cursor:pointer;opacity:0.6;display:flex;align-items:center;justify-content:center}'
+      + '#pomo-reshow:hover{opacity:1;color:var(--text)}'
+      + '.pomo-head{display:flex;align-items:center;gap:0.4rem;margin:-0.2rem -0.2rem 0.5rem;padding:0.15rem 0.2rem;'
+      + 'cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}'
+      + '.pomo-grip{flex:1;font-weight:600;font-size:0.8rem;color:var(--muted)}'
+      + '.pomo-x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;line-height:1;padding:0.1rem 0.3rem;border-radius:5px}'
+      + '.pomo-x:hover{color:var(--text);background:var(--panel-2)}'
+      + '.pomo-modes{display:flex;gap:0.3rem;margin-bottom:0.6rem}'
+      + '.pomo-ring-wrap{position:relative;width:8.5rem;height:8.5rem;margin:0.2rem auto}'
+      + '.pomo-ring{width:100%;height:100%;transform:rotate(-90deg)}'
+      + '.pomo-ring-bg{fill:none;stroke:var(--border);stroke-width:6}'
+      + '.pomo-ring-fg{fill:none;stroke:var(--accent);stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset 0.25s linear}'
+      + '.pomo-ring-fg.pause{stroke:var(--yellow)}'
+      + '.pomo-time{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;'
+      + 'font-size:1.9rem;font-weight:700;letter-spacing:0.02em;font-variant-numeric:tabular-nums}'
+      + '.pomo-phase{text-align:center;font-size:0.78rem;color:var(--muted);min-height:1em;margin-bottom:0.5rem}'
+      + '.pomo-phase.flash{color:var(--accent);font-weight:700}'
+      + '.pomo-cfg{display:flex;gap:0.4rem;align-items:center;justify-content:center;flex-wrap:wrap;margin-bottom:0.5rem;font-size:0.78rem;color:var(--muted)}'
+      + '.pomo-cfg input{width:3rem;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font:inherit;padding:0.2rem 0.3rem;text-align:center}'
+      + '.pomo-ctrl{display:flex;gap:0.4rem;margin-bottom:0.5rem}.pomo-ctrl button{flex:1}'
+      + '.pomo-alarms{display:flex;gap:0.8rem;justify-content:center;font-size:0.78rem;color:var(--muted)}'
+      + '.pomo-alarms label{display:flex;align-items:center;gap:0.25rem;cursor:pointer}';
+    document.head.appendChild(st);
+  }
+
+  const launch = document.createElement('button');
+  launch.id = 'pomo-launch'; launch.type = 'button';
+  // [B] anneau de progression autour du lanceur (visible panneau fermé) + ⏱ centré.
+  launch.innerHTML = '<svg class="pomo-launch-ring" viewBox="0 0 100 100">'
+    + '<circle class="plr-bg" cx="50" cy="50" r="' + LR_R + '"></circle>'
+    + '<circle class="plr-fg" cx="50" cy="50" r="' + LR_R + '" stroke-dasharray="' + LR_C + '" stroke-dashoffset="0"></circle></svg>'
+    + '<span class="plr-ic">⏱</span>';
+  launchRingFg = launch.querySelector('.plr-fg');
+  launch.title = 'Minuteur / Pomodoro / Chronomètre'; launch.setAttribute('aria-label', launch.title);
+  const panel = document.createElement('div');
+  panel.id = 'pomo-panel'; panel.hidden = true; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Minuteur');
+  // [POMODORO V1.1] pastille de réaffichage (universelle owner+invité : pas de Paramètres sur share/hub).
+  const reshow = document.createElement('button');
+  reshow.id = 'pomo-reshow'; reshow.type = 'button'; reshow.textContent = '⏱';
+  reshow.title = 'Afficher le minuteur'; reshow.setAttribute('aria-label', reshow.title);
+  document.body.appendChild(launch); document.body.appendChild(panel); document.body.appendChild(reshow);
+
+  // [POMODORO V1.1] préférence d'affichage du lanceur, persistée (état local, chacun pour soi).
+  let hidden = false; try { hidden = localStorage.getItem('pomoHidden') === '1'; } catch (e) {}
+  function applyVisibility() { launch.hidden = hidden; reshow.hidden = !hidden; if (hidden) { panel.hidden = true; restoreTitle(); } }
+  function setHidden(v) { hidden = !!v; try { localStorage.setItem('pomoHidden', hidden ? '1' : '0'); } catch (e) {} applyVisibility(); }
+  reshow.addEventListener('click', () => setHidden(false));
+  window.pomoSetHidden = setHidden;               // pilotable depuis les Paramètres owner
+  window.pomoIsHidden = () => hidden;
+
+  const MODES = [['pomodoro', '🍅', 'Pomodoro'], ['timer', '⏳', 'Minuteur'], ['chrono', '⏱', 'Chrono']];
+  let timeEl, phaseEl, cfgEl, startBtn, ringFg;
+  const RING_R = 42, RING_C = 2 * Math.PI * 42;   // [E] rayon / circonférence de l'anneau
+  let origTitle = null;                            // [C] snapshot du titre d'onglet
+
+  // [POMODORO V1.1] Position persistée du panneau + contrainte au viewport (jamais hors écran).
+  let pomoPos = null; try { pomoPos = JSON.parse(localStorage.getItem('pomoPos') || 'null'); } catch (e) {}
+  function clampPos(x, y, w, h) {
+    const maxX = Math.max(0, window.innerWidth - w), maxY = Math.max(0, window.innerHeight - h);
+    return [Math.min(Math.max(0, x), maxX), Math.min(Math.max(0, y), maxY)];
+  }
+  // [POMODORO V1.2] position persistée du LANCEUR + suppression du clic d'ouverture après un drag.
+  let pomoLaunchPos = null; try { pomoLaunchPos = JSON.parse(localStorage.getItem('pomoLaunchPos') || 'null'); } catch (e) {}
+  let launchSuppressClick = 0;
+  function applyLaunchPos() {
+    if (!pomoLaunchPos) return;  // sinon défaut CSS (bas-gauche)
+    const r = launch.getBoundingClientRect();
+    const [x, y] = clampPos(pomoLaunchPos.x, pomoLaunchPos.y, r.width || 42, r.height || 42);
+    launch.style.left = x + 'px'; launch.style.top = y + 'px'; launch.style.bottom = 'auto';
+  }
+  // [POMODORO V1.2] Ouvre le panneau PRÈS du lanceur, en basculant côté/haut-bas près d'un bord
+  // pour rester dans le viewport. Utilisé quand le panneau n'a pas de position propre (pomoPos).
+  function positionPanelNearLaunch() {
+    const lr = launch.getBoundingClientRect(), pr = panel.getBoundingClientRect(), gap = 8;
+    const pw = pr.width || 256, ph = pr.height || 320;
+    let x = lr.left; if (x + pw > window.innerWidth) x = lr.right - pw;   // déborde à droite → aligne à droite
+    let y = lr.top - ph - gap; if (y < 0) y = lr.bottom + gap;            // pas de place au-dessus → en dessous
+    const [cx, cy] = clampPos(x, y, pw, ph);
+    panel.style.left = cx + 'px'; panel.style.top = cy + 'px'; panel.style.bottom = 'auto';
+  }
+  function applyPanelPos() {
+    // Position propre du panneau (déplacé par l'utilisateur) prioritaire ; sinon près du lanceur.
+    if (pomoPos) {
+      const r = panel.getBoundingClientRect();
+      const [x, y] = clampPos(pomoPos.x, pomoPos.y, r.width || 256, r.height || 200);
+      panel.style.left = x + 'px'; panel.style.top = y + 'px'; panel.style.bottom = 'auto';
+    } else { positionPanelNearLaunch(); }
+  }
+  // Panneau déplaçable par sa barre d'en-tête (poignée), Pointer Events souris + tactile,
+  // même pattern que le DnD des favoris (invariant 6/9). Position clampée + persistée au drop.
+  function makeDraggable(handle) {
+    let pid = null, sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;  // pas de drag depuis le ✕
+      pid = e.pointerId; const r = panel.getBoundingClientRect(); ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY; dragging = true;
+      panel.style.bottom = 'auto';
+      try { handle.setPointerCapture(pid); } catch (_) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging || e.pointerId !== pid) return;
+      e.preventDefault();
+      const r = panel.getBoundingClientRect();
+      const [x, y] = clampPos(ox + (e.clientX - sx), oy + (e.clientY - sy), r.width, r.height);
+      panel.style.left = x + 'px'; panel.style.top = y + 'px';
+    });
+    const end = (e) => {
+      if (e.pointerId !== pid || !dragging) return;
+      dragging = false; const r = panel.getBoundingClientRect(); pomoPos = { x: r.left, y: r.top };
+      try { localStorage.setItem('pomoPos', JSON.stringify(pomoPos)); } catch (_) {}
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  function buildPanel() {
+    panel.innerHTML = '';
+    // [POMODORO V1.1] barre d'en-tête = poignée de déplacement + ✕ masquer.
+    const head = el('div', { class: 'pomo-head' });
+    head.appendChild(el('span', { class: 'pomo-grip', text: '⏱ Minuteur' }));
+    head.appendChild(el('button', { class: 'pomo-x', text: '✕', attrs: { type: 'button', title: 'Masquer le minuteur' }, on: { click: () => setHidden(true) } }));
+    panel.appendChild(head);
+    makeDraggable(head);
+    const modes = el('div', { class: 'pomo-modes' });
+    MODES.forEach(([m, ic, lbl]) => {
+      modes.appendChild(el('button', {
+        class: 'prio-btn', text: ic + ' ' + lbl,
+        attrs: { type: 'button', style: 'padding:0.15rem 0.4rem;font-size:0.75rem;' + (P.mode === m ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+        on: { click: () => { if (P.mode === m) return; stop(); P.mode = m; phase = 'work'; save(); buildPanel(); render(); } },
+      }));
+    });
+    panel.appendChild(modes);
+    // [POMODORO V1.1-E] anneau de progression SVG + temps centré (recalculé depuis les timestamps).
+    const ringWrap = el('div', { class: 'pomo-ring-wrap' });
+    ringWrap.innerHTML = '<svg class="pomo-ring" viewBox="0 0 100 100">'
+      + '<circle class="pomo-ring-bg" cx="50" cy="50" r="' + RING_R + '"></circle>'
+      + '<circle class="pomo-ring-fg" cx="50" cy="50" r="' + RING_R + '" stroke-dasharray="' + RING_C + '" stroke-dashoffset="0"></circle></svg>';
+    ringFg = ringWrap.querySelector('.pomo-ring-fg');
+    timeEl = el('div', { class: 'pomo-time', text: '00:00' });
+    ringWrap.appendChild(timeEl);
+    phaseEl = el('div', { class: 'pomo-phase' });
+    panel.appendChild(ringWrap); panel.appendChild(phaseEl);
+
+    cfgEl = el('div', { class: 'pomo-cfg' });
+    const numIn = (val, min, max, on) => { const i = el('input', { attrs: { type: 'number', min: String(min), max: String(max), value: String(val) } }); i.addEventListener('change', () => { let v = parseInt(i.value, 10); if (isNaN(v)) v = min; v = Math.max(min, Math.min(max, v)); i.value = String(v); on(v); }); return i; };
+    if (P.mode === 'pomodoro') {
+      cfgEl.append('Travail ', numIn(P.workMin, 1, 180, v => { P.workMin = v; save(); if (!running) render(); }), 'min · Pause ', numIn(P.breakMin, 1, 60, v => { P.breakMin = v; save(); if (!running) render(); }), 'min');
+    } else if (P.mode === 'timer') {
+      cfgEl.append('Durée ', numIn(P.timerMin, 1, 600, v => { P.timerMin = v; save(); if (!running) render(); }), 'min');
+    } else {
+      cfgEl.append('Chronomètre — compte croissant');
+    }
+    panel.appendChild(cfgEl);
+
+    const ctrl = el('div', { class: 'pomo-ctrl' });
+    startBtn = el('button', { class: 'primary', text: 'Démarrer', attrs: { type: 'button' }, on: { click: toggle } });
+    ctrl.appendChild(startBtn);
+    ctrl.appendChild(el('button', { text: 'Réinitialiser', attrs: { type: 'button' }, on: { click: () => { stop(); render(); } } }));
+    panel.appendChild(ctrl);
+
+    if (P.mode !== 'chrono') {
+      const al = el('div', { class: 'pomo-alarms' });
+      const mk = (key, label) => { const w = el('label'); const cb = el('input', { attrs: { type: 'checkbox' } }); cb.checked = !!P[key]; cb.addEventListener('change', () => { P[key] = cb.checked; save(); }); w.appendChild(cb); w.append(' ' + label); return w; };
+      al.appendChild(mk('alarmSound', '🔔 Son')); al.appendChild(mk('alarmVibrate', '📳 Vibration'));
+      // [POMODORO V1.1-D] Notification desktop : permission demandée au clic (geste), dégradation propre.
+      if ('Notification' in window) {
+        const w = el('label'); const cb = el('input', { attrs: { type: 'checkbox' } });
+        cb.checked = !!P.alarmNotify && Notification.permission === 'granted';
+        cb.addEventListener('change', () => {
+          if (cb.checked) {
+            if (Notification.permission === 'granted') { P.alarmNotify = true; }
+            else if (Notification.permission === 'denied') { cb.checked = false; P.alarmNotify = false; notify('Notifications bloquées par le navigateur.', { error: true }); }
+            else { Notification.requestPermission().then((perm) => { P.alarmNotify = (perm === 'granted'); cb.checked = P.alarmNotify; save(); }); }
+          } else { P.alarmNotify = false; }
+          save();
+        });
+        w.appendChild(cb); w.append(' 🖥 Notification'); al.appendChild(w);
+      }
+      panel.appendChild(al);
+    }
+    render();
+  }
+
+  function currentMs() {
+    if (P.mode === 'chrono') return chronoAcc + (running ? (Date.now() - chronoStart) : 0);
+    return running ? Math.max(0, endAt - Date.now()) : (remainMs || baseMs());
+  }
+  function render() {
+    if (!timeEl) return;
+    const ms = currentMs();
+    timeEl.textContent = fmt(ms);
+    phaseEl.textContent = P.mode === 'pomodoro' ? (phase === 'work' ? '🍅 Travail' : '☕ Pause') : (P.mode === 'chrono' ? 'Chronomètre' : 'Minuteur');
+    if (startBtn) startBtn.textContent = running ? 'Pause' : (P.mode === 'chrono' ? 'Démarrer' : ((remainMs && remainMs < baseMs()) ? 'Reprendre' : 'Démarrer'));
+    launch.classList.toggle('run', running);
+    // [E]/[B]/[C] anneaux (panneau + lanceur) : décompte = se vide (frac restant) ; chrono = plein.
+    // Couleur bicolore en Pomodoro : travail = accent (action), pause = vert (repos).
+    let frac = 1;
+    if (P.mode !== 'chrono') { const base = baseMs(); frac = base > 0 ? Math.max(0, Math.min(1, ms / base)) : 0; }
+    const col = ringColor();
+    if (ringFg) { ringFg.setAttribute('stroke-dashoffset', String(RING_C * (1 - frac))); ringFg.style.stroke = col; }
+    if (launchRingFg) { launchRingFg.setAttribute('stroke-dashoffset', String(LR_C * (1 - frac))); launchRingFg.style.stroke = col; }
+    // [C] titre d'onglet = temps restant pendant un décompte/chrono actif ; restauré sinon/masqué.
+    if (running && !hidden) updateTitle(ms); else restoreTitle();
+  }
+  function updateTitle(ms) {
+    if (origTitle == null) origTitle = document.title;
+    document.title = '⏱ ' + fmt(ms) + ' · ' + origTitle;
+  }
+  function restoreTitle() { if (origTitle != null) { document.title = origTitle; origTitle = null; } }
+  function toggle() { running ? pause() : start(); }
+  function start() {
+    ensureAudio();
+    if (P.mode === 'chrono') { chronoStart = Date.now(); }
+    else { if (!remainMs || remainMs <= 0) remainMs = baseMs(); endAt = Date.now() + remainMs; }
+    running = true; render();
+  }
+  function pause() {
+    if (P.mode === 'chrono') { chronoAcc += Date.now() - chronoStart; }
+    else { remainMs = Math.max(0, endAt - Date.now()); }
+    running = false; render();
+  }
+  function stop() { running = false; remainMs = 0; chronoAcc = 0; chronoStart = 0; phase = 'work'; }
+  function fireAlarm() {
+    beep(); buzz();
+    // [POMODORO V1.1-D] notification desktop (complète son + vibration, ne les remplace pas).
+    if (P.alarmNotify && ('Notification' in window) && Notification.permission === 'granted') {
+      try { new Notification(P.mode === 'pomodoro' ? '🍅 Pomodoro terminé !' : '⏳ Minuteur terminé !'); } catch (e) {}
+    }
+    if (phaseEl) { phaseEl.classList.add('flash'); setTimeout(() => phaseEl && phaseEl.classList.remove('flash'), 1500); }
+  }
+  function onCountdownEnd() {
+    fireAlarm();
+    if (P.mode === 'pomodoro') { phase = (phase === 'work') ? 'break' : 'work'; remainMs = baseMs(); endAt = Date.now() + remainMs; /* enchaîne le cycle */ }
+    else { running = false; remainMs = 0; }
+    render();
+  }
+  function tick() {
+    if (!running) return;
+    if (P.mode !== 'chrono' && (endAt - Date.now()) <= 0) { onCountdownEnd(); return; }
+    render();
+  }
+  setInterval(tick, 250);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+  window.addEventListener('focus', render);
+
+  // [POMODORO V1.2] Lanceur déplaçable (Pointer Events souris + tactile, même clampPos que le
+  // panneau). Distinction clic/glisser : mouvement > 4 px = drag (déplace, n'ouvre pas) ; sinon
+  // clic = ouvre/ferme le panneau. touch-action:none → glisser tactile sans scroller la page.
+  launch.style.touchAction = 'none';
+  (function () {
+    let pid = null, sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    launch.addEventListener('pointerdown', (e) => {
+      pid = e.pointerId; const r = launch.getBoundingClientRect(); ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY; dragging = false;
+      try { launch.setPointerCapture(pid); } catch (_) {}
+    });
+    launch.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pid) return;
+      if (!dragging) { if (Math.abs(e.clientX - sx) > 4 || Math.abs(e.clientY - sy) > 4) { dragging = true; launch.style.bottom = 'auto'; } else return; }
+      e.preventDefault();
+      const r = launch.getBoundingClientRect();
+      const [x, y] = clampPos(ox + (e.clientX - sx), oy + (e.clientY - sy), r.width, r.height);
+      launch.style.left = x + 'px'; launch.style.top = y + 'px';
+    });
+    const end = (e) => {
+      if (e.pointerId !== pid) return;
+      if (dragging) {
+        const r = launch.getBoundingClientRect(); pomoLaunchPos = { x: r.left, y: r.top };
+        try { localStorage.setItem('pomoLaunchPos', JSON.stringify(pomoLaunchPos)); } catch (_) {}
+        launchSuppressClick = Date.now() + 300;   // évite d'ouvrir le panneau à la fin d'un drag
+        if (!panel.hidden) applyPanelPos();        // le panneau ouvert suit le lanceur
+      }
+      pid = null; dragging = false;
+    };
+    launch.addEventListener('pointerup', end);
+    launch.addEventListener('pointercancel', end);
+  })();
+  launch.addEventListener('click', () => {
+    if (Date.now() < launchSuppressClick) return;  // fin d'un drag → ne pas ouvrir
+    const open = panel.hidden; panel.hidden = !open; if (open) { render(); applyPanelPos(); }
+  });
+  window.addEventListener('resize', () => { applyLaunchPos(); if (!panel.hidden) applyPanelPos(); });
+  buildPanel();
+  applyLaunchPos();
+  applyVisibility();
+}
+initPomodoro();
 </script>
