@@ -1698,6 +1698,8 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div id="create-menu" class="card-menu" hidden>
       <button type="button" id="create-move">↗ Déplacer vers…</button>
       <button type="button" id="create-export">⬇ Exporter ce dossier (JSON)</button>
+      <button type="button" id="create-import">⬆ Importer un dossier ici (JSON)</button>
+      <input type="file" id="create-import-file" accept="application/json,.json" style="display:none">
       <button type="button" id="create-delete" class="danger-item">🗑 Supprimer</button>
     </div>
   </div>
@@ -2579,6 +2581,7 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-menu').hidden = true;
   document.getElementById('create-move').style.display = (item && kind === 'project') ? '' : 'none';
   document.getElementById('create-export').style.display = (item && kind === 'project') ? '' : 'none';  // [EXPORT-SUBTREE]
+  document.getElementById('create-import').style.display = (item && kind === 'project') ? '' : 'none';  // [EXPORT-SUBTREE]
   createLoc = item ? parseLoc(item.location) : null;
   refreshCreateLoc();
   const suggest = document.getElementById('emoji-suggest');
@@ -2770,6 +2773,40 @@ document.getElementById('create-export').addEventListener('click', () => {
   document.body.appendChild(a);
   a.click();
   a.remove();
+});
+// [EXPORT-SUBTREE] Import CIBLÉ « ici » : import standard + target_parent_id = dossier courant.
+// Le serveur ne rattache à la cible que les RACINES NOUVELLES du fichier (invariant 2 :
+// jamais un projet existant). Sous-dossiers/mémos intacts sous leur racine.
+const createImportFile = document.getElementById('create-import-file');
+let importTargetId = null;
+document.getElementById('create-import').addEventListener('click', () => {
+  if (!editingItem || createKind !== 'project') return;
+  importTargetId = editingItem.id;
+  document.getElementById('create-menu').hidden = true;
+  createImportFile.click();
+});
+createImportFile.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file || importTargetId == null) { e.target.value = ''; return; }
+  const targetId = importTargetId;
+  const targetName = (state.projects.find(p => p.id === targetId) || {}).name || 'ce dossier';
+  try {
+    const data = JSON.parse(await file.text());
+    const nProj = Array.isArray(data.projects) ? data.projects.length : 0;
+    const nMemos = Array.isArray(data.memos) ? data.memos.length : 0;
+    if (!nProj && !nMemos) { await notify('Aucun dossier ni mémo dans le fichier.', { error: true }); return; }
+    if (!(await confirmPopin(
+      `Importer ${nProj} dossier(s) et ${nMemos} mémo(s) DANS « ${targetName} » ?\nSeuls les dossiers nouveaux y sont rattachés ; l'existant n'est jamais déplacé. Doublons ignorés.`,
+      { title: '⬆ Importer ici', okLabel: 'Importer', danger: false }
+    ))) return;
+    const result = await api('/api/import?target_parent_id=' + targetId, { method: 'POST', body: JSON.stringify(data) });
+    const skipped = (result.skipped || 0) + (result.skipped_memos || 0);
+    let msg = `${result.imported_memos} mémo(s) ajouté(s)`;
+    if (skipped) msg += `, ${skipped} doublon(s) ignoré(s)`;
+    await notify(msg + '.', { title: '⬆ Import terminé' });
+    await loadAll();
+  } catch (err) { await notify("Erreur d'import : " + err.message, { error: true }); }
+  finally { e.target.value = ''; importTargetId = null; }
 });
 const createMenu = document.getElementById('create-menu');
 const createMenuBtn = document.getElementById('create-menu-btn');

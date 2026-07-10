@@ -5565,6 +5565,28 @@ def import_links():
 
     db = get_db()
 
+    # [EXPORT-SUBTREE] Import CIBLÉ « Importer ici » : query param optionnel target_parent_id.
+    # Ne s'applique qu'aux projets RACINE du fichier qui sont NOUVEAUX (nom inconnu) — invariant 2 :
+    # l'import ajoute, il ne réorganise pas. Absent = comportement actuel exact.
+    # Cible validée STRICTEMENT : projet existant ET pas lui-même un élément du fichier (anti-cycle).
+    target_parent_id = None
+    tp_raw = request.args.get("target_parent_id")
+    if tp_raw not in (None, "", "0"):
+        try:
+            tp = int(tp_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "target_parent_id invalide"}), 400
+        trow = db.execute("SELECT name FROM projects WHERE id = ?", (tp,)).fetchone()
+        if not trow:
+            return jsonify({"error": "dossier cible introuvable"}), 400
+        file_names_lc = {
+            (p.get("name") or "").strip().lower()
+            for p in (data.get("projects") or []) if isinstance(p, dict)
+        }
+        if (trow["name"] or "").strip().lower() in file_names_lc:
+            return jsonify({"error": "le dossier cible fait partie du fichier importé (cycle)"}), 400
+        target_parent_id = tp
+
     cat_ids = {}
 
     def ensure_category(name, color="", emoji=""):
@@ -5609,6 +5631,7 @@ def import_links():
             ensure_category(cat)
 
     proj_ids = {}
+    new_projects = set()  # [EXPORT-SUBTREE] noms des projets CRÉÉS par cet import (racines ciblables)
 
     def ensure_project(name, color="", tags="", emoji="", location=None, description="", marker_color="", is_trip=None):
         name = (name or "").strip()
@@ -5667,6 +5690,7 @@ def import_links():
                 (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji), _clean_location(location), _clean_description(description), _clean_hex_color(marker_color, ""), _clean_is_trip(is_trip)),
             )
             proj_ids[name] = cur.lastrowid
+            new_projects.add(name)  # [EXPORT-SUBTREE]
         return proj_ids[name]
 
     for proj in data.get("projects") or []:
@@ -5706,6 +5730,30 @@ def import_links():
                     "UPDATE projects SET parent_id = ? WHERE id = ?",
                     (resolved, child_id),
                 )
+
+    # [EXPORT-SUBTREE] Ciblage « Importer ici » : rattache les RACINES NOUVELLES du fichier
+    # (parent hors fichier) au dossier cible. N'affecte QUE les projets créés par cet import
+    # (jamais un existant → invariant 2). Prime sur la résolution par nom pour ces racines.
+    if target_parent_id is not None:
+        file_names = {
+            (p.get("name") or "").strip()
+            for p in (data.get("projects") or []) if isinstance(p, dict) and (p.get("name") or "").strip()
+        }
+        for proj in data.get("projects") or []:
+            if not isinstance(proj, dict):
+                continue
+            name = (proj.get("name") or "").strip()
+            if name not in new_projects:
+                continue  # projet existant → jamais déplacé
+            par = (proj.get("parent") or "").strip()
+            if par and par in file_names:
+                continue  # a un parent DANS le fichier → sous-dossier, pas une racine
+            child_id = proj_ids.get(name)
+            if not child_id:
+                continue
+            resolved, err = _resolve_parent(db, child_id, target_parent_id)
+            if not err:
+                db.execute("UPDATE projects SET parent_id = ? WHERE id = ?", (resolved, child_id))
 
     prio_map = {}
     for pr in data.get("priorities") or []:
