@@ -391,6 +391,43 @@ def init_db():
         )
         """
     )
+    # [FAVORITES] Projets/vues épinglés en tête de la sidebar. OWNER-ONLY, additif, JAMAIS
+    # exporté/importé (pas de bump de format — reste v21) : donnée de confort locale, comme
+    # les accusés de lecture. Ordre = date d'ajout (position). Purge en cascade à la
+    # suppression du projet (delete_project). UNIQUE(kind, ref) → POST idempotent.
+    # [FAVORITES V1.1] modèle TYPÉ {kind, ref} (kind='project'|'view'). Migration douce depuis
+    # le schéma V1 (favorites(project_id PK)) : rebuild en portant chaque favori projet en
+    # {kind:'project', ref:project_id}, sans perte. V1 jamais déployé → sur un serveur neuf on
+    # crée directement le schéma typé. Donnée de confort NON exportée → ré-écriture in-place sûre.
+    fav_cols = [r[1] for r in conn.execute("PRAGMA table_info(favorites)").fetchall()]
+    if fav_cols and "kind" not in fav_cols:  # ancien schéma V1 présent → migrer vers typé
+        conn.execute("ALTER TABLE favorites RENAME TO favorites_v1")
+        conn.execute(
+            """CREATE TABLE favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(kind, ref)
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO favorites (kind, ref, position, created_at) "
+            "SELECT 'project', CAST(project_id AS TEXT), position, created_at FROM favorites_v1"
+        )
+        conn.execute("DROP TABLE favorites_v1")
+    else:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                ref TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(kind, ref)
+            )"""
+        )
     # [PHOTO-MAP] Métadonnées EXIF des images, donnée DÉRIVÉE des fichiers (jamais
     # exportée, pas de bump de version) : remplie à l'upload + backfill, pour que la
     # carte du projet lise les lieux/dates sans re-parser/re-géocoder à chaque ouverture.
@@ -1465,6 +1502,7 @@ def delete_project(project_id):
     # [VOTE-GROUPS] votes nommés du dossier + leurs options (leurs voix parties ci-dessus)
     db.execute("DELETE FROM vote_options WHERE vote_id IN (SELECT id FROM votes WHERE project_id = ?)", (project_id,))
     db.execute("DELETE FROM votes WHERE project_id = ?", (project_id,))
+    db.execute("DELETE FROM favorites WHERE kind = 'project' AND ref = ?", (str(project_id),))  # [FAVORITES] purge en cascade
     db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     db.execute(
         "DELETE FROM shares WHERE kind = 'project' AND target_id = ?", (project_id,)
@@ -3459,6 +3497,108 @@ def put_settings():
     )
 
 
+# [FAVORITES] Projets/vues épinglés (owner-only, derrière Authelia — RIEN côté /share). Modèle
+# TYPÉ {kind, ref} : kind='project' (ref=id projet) | 'view' (ref ∈ FAV_VIEWS). Liste ordonnée par
+# position (date d'ajout) ; les favoris projet dont le projet a disparu sont filtrés (défense en
+# profondeur avec la purge en cascade de delete_project). Jamais exporté. Toggle par (kind, ref).
+FAV_VIEWS = ("plan", "agenda", "memos")
+
+
+def _clean_favorite(data):
+    """Valide un favori {kind, ref} → (kind, ref_text) ou (None, None). ref stocké en TEXT."""
+    kind = str((data or {}).get("kind") or "").strip()
+    ref = (data or {}).get("ref")
+    if kind == "view":
+        r = str(ref if ref is not None else "").strip()
+        return ("view", r) if r in FAV_VIEWS else (None, None)
+    if kind == "project":
+        try:
+            return ("project", str(int(ref)))
+        except (TypeError, ValueError):
+            return (None, None)
+    return (None, None)
+
+
+def _favorites_payload(db):
+    """Liste TYPÉE ordonnée des favoris, projets disparus filtrés (défense en profondeur)."""
+    proj_ids = {r["id"] for r in db.execute("SELECT id FROM projects").fetchall()}
+    out = []
+    for r in db.execute(
+        "SELECT kind, ref FROM favorites ORDER BY position, created_at, id"
+    ).fetchall():
+        if r["kind"] == "project":
+            try:
+                pid = int(r["ref"])
+            except (TypeError, ValueError):
+                continue
+            if pid in proj_ids:  # projet supprimé → jamais renvoyé
+                out.append({"kind": "project", "ref": pid})
+        elif r["kind"] == "view" and r["ref"] in FAV_VIEWS:
+            out.append({"kind": "view", "ref": r["ref"]})
+    return out
+
+
+@app.route("/api/favorites", methods=["GET"])
+def list_favorites():
+    db = get_db()
+    return jsonify({"favorites": _favorites_payload(db)})
+
+
+@app.route("/api/favorites/reorder", methods=["PUT"])
+def reorder_favorites():
+    # [FAVORITES V1.2] Réordonne la liste TYPÉE (owner-only). Reçoit l'ordre complet [{kind,ref}] ;
+    # revalide chaque item, met à jour `position` pour ceux qui existent, ignore les disparus
+    # (aucun 500). Ordre MIXTE projet/vue assumé. Renvoie la liste à jour comme GET.
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    order = data.get("order")
+    if not isinstance(order, list):
+        return jsonify({"error": "order doit être une liste"}), 400
+    pos = 0
+    for it in order:
+        kind, ref = _clean_favorite(it if isinstance(it, dict) else {})
+        if not kind:
+            continue
+        cur = db.execute(
+            "UPDATE favorites SET position = ? WHERE kind = ? AND ref = ?", (pos, kind, ref)
+        )
+        if cur.rowcount:  # item réellement présent → position consommée
+            pos += 1
+    db.commit()
+    return jsonify({"favorites": _favorites_payload(db)})
+
+
+@app.route("/api/favorites", methods=["POST"])
+def add_favorite():
+    db = get_db()
+    kind, ref = _clean_favorite(request.get_json(silent=True) or {})
+    if not kind:
+        return jsonify({"error": "favori invalide"}), 400
+    if kind == "project" and not db.execute(
+        "SELECT 1 FROM projects WHERE id = ?", (int(ref),)
+    ).fetchone():
+        return jsonify({"error": "not found"}), 404
+    # Idempotent : ne recrée ni ne réordonne un favori déjà présent (INSERT OR IGNORE).
+    max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM favorites").fetchone()[0]
+    db.execute(
+        "INSERT OR IGNORE INTO favorites (kind, ref, position, created_at) VALUES (?, ?, ?, ?)",
+        (kind, ref, max_pos + 1, datetime.now(timezone.utc).isoformat()),
+    )
+    db.commit()
+    return jsonify({"favorite": True, "kind": kind, "ref": ref})
+
+
+@app.route("/api/favorites", methods=["DELETE"])
+def remove_favorite():
+    db = get_db()
+    kind, ref = _clean_favorite(request.get_json(silent=True) or {})
+    if not kind:
+        return jsonify({"error": "favori invalide"}), 400
+    db.execute("DELETE FROM favorites WHERE kind = ? AND ref = ?", (kind, ref))
+    db.commit()
+    return jsonify({"favorite": False, "kind": kind, "ref": ref})
+
+
 @app.route("/api/guests", methods=["GET"])
 def list_guests():
     db = get_db()
@@ -3750,6 +3890,7 @@ def _data_version(db):
         "SELECT vote_id, memo_id FROM vote_options ORDER BY vote_id, memo_id",
         "SELECT COALESCE(vote_id, -1) AS vid, COUNT(*) FROM memo_votes GROUP BY vid ORDER BY vid",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM memo_history",
+        "SELECT kind, ref, position FROM favorites ORDER BY position, kind, ref",  # [FAVORITES]
         "SELECT key, value FROM app_state WHERE key != 'activity_seen_at' ORDER BY key",
     )
     for q in queries:

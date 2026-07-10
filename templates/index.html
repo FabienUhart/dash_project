@@ -108,6 +108,10 @@ header {
 }
 header h1 { margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em;
   background: linear-gradient(90deg, var(--text), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+/* [HOME-RESET] titre cliquable → accueil : affordance discrète au survol/focus */
+header h1#home-btn { transition: opacity 0.15s; border-radius: 6px; }
+header h1#home-btn:hover { opacity: 0.72; }
+header h1#home-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 #search-wrap {
   flex: 1;
   max-width: 340px;
@@ -425,6 +429,21 @@ nav#sidebar {
 .cat-item:hover .count, .cat-item:focus-within .count { opacity: 0; }
 .cat-item .cat-edit:hover { opacity: 1; color: var(--text); background: var(--panel-2); }
 nav#sidebar.sb-rail .cat-edit { display: none; }
+/* [FAVORITES] étoile d'épinglage des vues (Plan/Agenda/Mémos) — inline, toujours visible,
+   tokens existants (invariant 9). ★ accent si épinglé, ☆ discret sinon. */
+.cat-item .fav-star {
+  flex-shrink: 0; min-height: 0; width: 1.4rem; height: 1.4rem; padding: 0;
+  border: none; background: none; color: var(--muted); cursor: pointer;
+  border-radius: 5px; font-size: 0.95rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cat-item .fav-star[aria-pressed="true"] { color: var(--accent); }
+.cat-item .fav-star:hover { color: var(--text); background: var(--panel-2); }
+nav#sidebar.sb-rail .fav-star { display: none; }
+/* [FAVORITES V1.2] réordonnancement DnD : pas de sélection de texte pendant le glisser,
+   item en cours de déplacement estompé (tokens existants, invariant 9). */
+.fav-sortable [data-favkey] { -webkit-user-select: none; user-select: none; }
+.fav-sortable [data-favkey].fav-dragging { opacity: 0.55; background: var(--panel-2); }
 /* en-têtes de sections repliables (façon Evernote) */
 .sb-section-head {
   display: flex; align-items: center; gap: 0.4rem;
@@ -1514,7 +1533,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 <header>
   <button id="sidebar-rail-btn" class="icon" title="Replier la barre latérale" aria-label="Replier la barre latérale" aria-expanded="true"><svg class="ic"><use href="#ic-menu"/></svg></button>
   <button id="sidebar-eye-btn" class="icon" title="Afficher / masquer la barre latérale" aria-label="Afficher / masquer la barre latérale"><svg class="ic"><use href="#ic-eye"/></svg></button>
-  <h1>Dashboard</h1>
+  <h1 id="home-btn" title="Revenir à l'accueil" role="button" tabindex="0" style="cursor:pointer">Dashboard</h1>
   <div id="search-wrap">
     <span style="color:var(--muted)"><svg class="ic"><use href="#ic-search"/></svg></span>
     <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off" aria-label="Rechercher">
@@ -1536,18 +1555,21 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <button id="activity-btn" class="icon" title="Activité des invités" aria-label="Activité des invités"><svg class="ic"><use href="#ic-bell"/></svg><span id="activity-badge"></span></button>
   <button id="theme-btn" class="icon" title="Thème clair / sombre" aria-label="Basculer le thème"><svg class="ic"><use href="#ic-moon"/></svg></button>
   <button id="settings-btn" class="icon" title="Paramètres" aria-label="Paramètres"><svg class="ic"><use href="#ic-settings"/></svg></button>
-  <button id="add-link" class="primary">+ Ajouter</button>
 </header>
 
 <div class="layout">
   <nav id="sidebar"></nav>
   <main>
+    <!-- [LINK-ADD-RELOCATE] Ajout de lien dans la vue Liens (retiré du header). Même dialog/flow
+         (#add-link → openDialog()). Barre visible seulement en vue Liens (togglée dans renderAll). -->
+    <div id="links-actions" style="margin-bottom:0.75rem"><button id="add-link" class="primary">+ Ajouter un lien</button></div>
     <ul id="links" class="cards"></ul>
     <div id="memo-board" hidden></div>
     <div id="shares-board" hidden></div>
     <div id="trash-board" hidden></div>
     <div id="tree-board" hidden></div>
     <div id="agenda-board" hidden></div>
+    <div id="favorites-board" hidden></div>
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
@@ -1696,6 +1718,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <h3 id="create-title">Nouveau projet</h3>
     <button type="button" id="create-menu-btn" class="icon-btn" title="Actions" aria-label="Actions" style="display:none">⋯</button>
     <div id="create-menu" class="card-menu" hidden>
+      <button type="button" id="create-fav">☆ Ajouter aux favoris</button>
       <button type="button" id="create-move">↗ Déplacer vers…</button>
       <button type="button" id="create-export">⬇ Exporter ce dossier (JSON)</button>
       <button type="button" id="create-import">⬆ Importer un dossier ici (JSON)</button>
@@ -1988,6 +2011,7 @@ const state = {
   ownerName: 'Fabien',
   smtpEnabled: false,
   mapMarkerColor: '#e53935',
+  favorites: [],  // [FAVORITES] ids de projets épinglés (ordre serveur)
 };
 
 function parseSearch() {
@@ -2100,6 +2124,7 @@ async function loadAll() {
     state.memoProject = 'all';
   }
   try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; state.smtpEnabled = !!(s && s.smtp_enabled); if (s && Array.isArray(s.reaction_emojis)) REACTION_EMOJIS = s.reaction_emojis; } catch (e) {}
+  try { const f = await api('/api/favorites'); state.favorites = (f && Array.isArray(f.favorites)) ? f.favorites : []; } catch (e) { state.favorites = []; }  // [FAVORITES]
   renderAll();
   if (state.view === 'links') loadStatus();
 }
@@ -2113,20 +2138,20 @@ function renderAll() {
   document.getElementById('trash-board').hidden = v !== 'trash';
   document.getElementById('tree-board').hidden = v !== 'tree';
   document.getElementById('agenda-board').hidden = v !== 'agenda';
+  document.getElementById('favorites-board').hidden = v !== 'favorites';  // [FAVORITES] vue mobile
   document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
-  // Le bouton « + Ajouter » du header ne crée que des liens → masqué hors de la vue Liens
-  // (les vues Mémos/Projet ont leur propre barre « + Nouveau mémo »).
-  document.getElementById('add-link').style.display = v === 'links' ? '' : 'none';
+  // [LINK-ADD-RELOCATE] La barre « + Ajouter un lien » vit dans la vue Liens → visible seulement là.
+  document.getElementById('links-actions').style.display = v === 'links' ? '' : 'none';
   if (v === 'memos') renderBoard();
   else if (v === 'shares') renderShares();
   else if (v === 'trash') renderTrash();
   else if (v === 'tree') renderTreeView();
   else if (v === 'agenda') renderAgendaView();
+  else if (v === 'favorites') renderFavoritesView();
   else renderLinks();
   renderMemos();
   applyA11y();
-  // La hauteur du header change selon la vue (le bouton « + Ajouter » n'est visible
-  // qu'en vue Liens) → re-mesurer pour que la barre collante se cale au bon endroit.
+  // Re-mesurer la hauteur du header (peut varier en mobile) pour caler la barre collante.
   syncHeaderHeight();
 }
 
@@ -2148,6 +2173,149 @@ document.addEventListener('keydown', (e) => {
 
 /* ------------------------------------------------ sidebar */
 
+// [FAVORITES] Favoris TYPÉS {kind:'project'|'view', ref}. Vues épinglables globales.
+const FAV_VIEWS = {
+  plan: { emoji: '🌳', label: 'Plan', open: () => { state.view = 'tree'; } },
+  agenda: { emoji: '📆', label: 'Agenda', open: () => { agendaFilterProj = null; agendaYM = null; agendaSelDay = null; state.view = 'agenda'; } },
+  memos: { emoji: '📝', label: 'Mémos', open: () => { state.view = 'memos'; state.memoProject = 'all'; } },
+};
+function isFav(kind, ref) {
+  return (state.favorites || []).some(f => f.kind === kind && String(f.ref) === String(ref));
+}
+async function toggleFav(kind, ref) {
+  const on = isFav(kind, ref);
+  try {
+    await api('/api/favorites', { method: on ? 'DELETE' : 'POST', body: JSON.stringify({ kind, ref }) });
+  } catch (e) { await notify('Action impossible', { error: true }); return on; }
+  if (on) state.favorites = state.favorites.filter(f => !(f.kind === kind && String(f.ref) === String(ref)));
+  else state.favorites = state.favorites.concat([{ kind, ref: kind === 'project' ? Number(ref) : ref }]);
+  return !on;
+}
+// Métadonnées d'affichage d'un favori (ou null si sa cible n'existe plus).
+function favMeta(f) {
+  if (f.kind === 'view') {
+    const v = FAV_VIEWS[f.ref];
+    return v ? { icon: el('span', { class: 'emoji', text: v.emoji }), name: v.label } : null;
+  }
+  const p = state.projects.find(x => x.id === Number(f.ref));
+  return p ? { icon: comboIcon(p.emoji, p.color, '📁'), name: p.name, proj: p } : null;
+}
+function openFav(f) {
+  if (f.kind === 'view') { const v = FAV_VIEWS[f.ref]; if (v) { v.open(); renderAll(); } return; }
+  const p = state.projects.find(x => x.id === Number(f.ref));
+  if (p) { state.view = 'memos'; state.memoProject = p.id; renderAll(); }
+}
+// Bouton ★/☆ d'épinglage (vues ET projets). Toggle → re-render sidebar (+ vue Favoris si ouverte).
+function favStarBtn(kind, ref) {
+  const on = isFav(kind, ref);
+  return el('button', {
+    class: 'fav-star', text: on ? '★' : '☆',
+    attrs: { type: 'button', title: on ? 'Retirer des favoris' : 'Ajouter aux favoris', 'aria-pressed': on ? 'true' : 'false' },
+    on: { click: async (e) => { e.stopPropagation(); await toggleFav(kind, ref); renderAll(); } },
+  });
+}
+// [FAVORITES V1.2] Réordonnancement drag-and-drop de la liste des favoris (desktop + mobile).
+// Pointer Events (mouse + touch, ZÉRO lib externe — invariant 6) : souris = drag au 1er mouvement ;
+// tactile = appui long ~0,5 s puis glisser (un tap court = ouvrir, un mouvement avant le délai =
+// scroll, drag annulé). Réordonne le DOM en direct, persiste l'ordre au drop via /api/favorites/reorder.
+let favSuppressClickUntil = 0;  // fenêtre courte après un drag → avale le click d'ouverture
+async function reorderFavs(order) {
+  try {
+    const r = await api('/api/favorites/reorder', { method: 'PUT', body: JSON.stringify({ order }) });
+    if (r && Array.isArray(r.favorites)) state.favorites = r.favorites;
+  } catch (e) { await notify('Réordonnancement impossible', { error: true }); }
+  renderAll();
+}
+function favKeyToItem(key) { const i = key.indexOf(':'); return { kind: key.slice(0, i), ref: key.slice(i + 1) }; }
+function makeFavSortable(container) {
+  let dragEl = null, pid = null, timer = null, dragging = false, sx = 0, sy = 0, touch = false;
+  const rows = () => Array.from(container.children).filter(c => c.dataset.favkey);
+  function cleanup() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (dragEl) dragEl.classList.remove('fav-dragging');
+    container.style.touchAction = '';  // rendre la liste re-scrollable en tactile
+    dragEl = null; pid = null; dragging = false;
+  }
+  function begin() {
+    if (!dragEl) return;
+    dragging = true;
+    dragEl.classList.add('fav-dragging');
+    // [FAVORITES fix mobile] le geste devient propriété du JS : sans ceci, au 1er mouvement du
+    // doigt le navigateur démarre son scroll natif et émet pointercancel → le drag est tué.
+    // touch-action:none neutralise l'arbitrage de gestes ; le touchmove non-passif ci-dessous
+    // preventDefault en secours si le navigateur ne réévalue pas touch-action en cours de geste.
+    container.style.touchAction = 'none';
+    try { dragEl.setPointerCapture(pid); } catch (e) {}
+  }
+  container.addEventListener('pointerdown', (e) => {
+    const row = e.target.closest('[data-favkey]');
+    if (!row || !container.contains(row) || (e.button !== undefined && e.button !== 0)) return;
+    dragEl = row; pid = e.pointerId; sx = e.clientX; sy = e.clientY;
+    touch = e.pointerType === 'touch' || e.pointerType === 'pen';
+    if (touch) timer = setTimeout(() => { timer = null; begin(); }, 500);  // appui long
+  });
+  container.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid || !dragEl) return;
+    const dx = Math.abs(e.clientX - sx), dy = Math.abs(e.clientY - sy);
+    if (!dragging) {
+      if (touch) { if (dx > 8 || dy > 8) cleanup(); return; }  // mouvement avant le délai = scroll → annule
+      if (dx > 4 || dy > 4) begin(); else return;              // souris = drag au 1er mouvement
+    }
+    e.preventDefault();
+    let placed = false;
+    for (const r of rows()) {
+      if (r === dragEl) continue;
+      const rect = r.getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) { container.insertBefore(dragEl, r); placed = true; break; }
+    }
+    if (!placed) container.appendChild(dragEl);
+  });
+  // Secours tactile : bloque le scroll natif UNIQUEMENT pendant le drag (non-passif obligatoire
+  // pour que preventDefault soit honoré). Hors drag, la liste scrolle normalement.
+  container.addEventListener('touchmove', (e) => { if (dragging) e.preventDefault(); }, { passive: false });
+  function finalize() {
+    if (dragging) {
+      favSuppressClickUntil = Date.now() + 350;
+      const order = rows().map(r => favKeyToItem(r.dataset.favkey));
+      cleanup();
+      reorderFavs(order);
+    } else cleanup();
+  }
+  container.addEventListener('pointerup', (e) => { if (e.pointerId !== pid) return; if (dragging) e.preventDefault(); finalize(); });
+  // pointercancel NE DOIT PAS tuer un drag déjà démarré : on finalise l'ordre en cours (le pointer
+  // est parti, pointerup ne viendra pas) au lieu de tout annuler.
+  container.addEventListener('pointercancel', (e) => { if (e.pointerId !== pid) return; finalize(); });
+  container.addEventListener('click', (e) => {
+    if (Date.now() < favSuppressClickUntil) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+}
+
+// [FAVORITES V1.1] Vue « Favoris » dans le main (surtout mobile : entrée unique → liste ici).
+function renderFavoritesView() {
+  const board = document.getElementById('favorites-board');
+  board.innerHTML = '';
+  const bar = el('div', { class: 'tree-toolbar' });
+  bar.appendChild(el('h2', { text: '⭐ Favoris' }));
+  board.appendChild(bar);
+  const items = (state.favorites || []).map(f => ({ f, meta: favMeta(f) })).filter(x => x.meta);
+  if (!items.length) {
+    board.appendChild(el('div', { class: 'empty', text: 'Aucun favori. Épingle un projet (pop-in projet → ☆) ou une vue (★ à côté de Plan, Agenda, Mémos).' }));
+    return;
+  }
+  board.appendChild(el('p', { attrs: { style: 'color:var(--muted);font-size:0.8rem;margin:0 0 0.5rem' }, text: 'Appui long puis glisser pour réordonner.' }));
+  const favBox = el('div', { class: 'fav-sortable' });  // [FAVORITES V1.2] conteneur DnD
+  items.forEach(({ f, meta }) => {
+    const row = el('div', { class: 'cat-item', attrs: { title: meta.name, 'data-favkey': f.kind + ':' + f.ref }, on: { click: () => openFav(f) } });
+    row.appendChild(meta.icon);
+    row.appendChild(el('span', { class: 'cat-label', text: meta.name, attrs: { title: meta.name } }));
+    row.appendChild(el('span', { class: 'badge', text: f.kind === 'view' ? 'Vue' : 'Projet' }));
+    row.appendChild(favStarBtn(f.kind, f.ref));
+    favBox.appendChild(row);
+  });
+  board.appendChild(favBox);
+  makeFavSortable(favBox);
+}
+
 function catEmoji(idx) { return CAT_EMOJIS[(idx + 1) % CAT_EMOJIS.length]; }
 
 function sbSectionOpen(name) { return localStorage.getItem('sbSection:' + name) !== '0'; }
@@ -2166,6 +2334,55 @@ function renderSidebar() {
   const projOpen = (id) => flat || sbProjOpen(id);
   const uncat = state.links.filter(l => !l.category_id).length;
   const pendingMemoCount = state.memos.filter(m => !m.done).length;
+
+  // [FAVORITES] « ⭐ Favoris » en TÊTE (au-dessus de Partages). Owner-only. N'apparaît que s'il
+  // reste au moins un favori dont la cible existe. Deux rendus selon le layout :
+  //  • DESKTOP : section repliable inline (comme V1, persistée `sbSection:Favoris`), items typés.
+  //  • MOBILE/rail (flat) : UNE seule entrée « ★ Favoris » qui ouvre la vue dans le main
+  //    (footprint constant, comme Plan/Agenda/Partages) — [FAVORITES V1.1] point A.
+  const favItems = (state.favorites || []).map(f => ({ f, meta: favMeta(f) })).filter(x => x.meta);
+  if (favItems.length) {
+    if (flat) {
+      const favEntry = el('div', {
+        class: 'cat-item' + (state.view === 'favorites' ? ' active' : ''),
+        attrs: { title: 'Vos favoris (projets et vues épinglés)' },
+        on: { click: () => { state.view = 'favorites'; renderAll(); } },
+      });
+      favEntry.appendChild(el('span', { class: 'emoji', text: '⭐' }));
+      favEntry.appendChild(el('span', { class: 'cat-label', text: 'Favoris' }));
+      favEntry.appendChild(el('span', { class: 'count', text: String(favItems.length) }));
+      nav.appendChild(favEntry);
+    } else {
+      const open = secOpen('Favoris');
+      const head = el('div', { class: 'sb-section-head', attrs: { title: open ? 'Replier la section' : 'Déplier la section' } });
+      head.appendChild(el('span', { class: 'sb-chevron', text: open ? '▾' : '▸' }));
+      head.appendChild(el('span', { class: 'sb-section-label', text: '⭐ Favoris' }));
+      head.addEventListener('click', () => { toggleSbSection('Favoris'); renderSidebar(); });
+      nav.appendChild(head);
+      if (open) {
+        const favBox = el('div', { class: 'fav-sortable' });  // [FAVORITES V1.2] conteneur DnD
+        favItems.forEach(({ f, meta }) => {
+          const active = (f.kind === 'view'
+            ? (f.ref === 'plan' && state.view === 'tree') || (f.ref === 'agenda' && state.view === 'agenda') || (f.ref === 'memos' && state.view === 'memos' && state.memoProject === 'all')
+            : state.view === 'memos' && state.memoProject === Number(f.ref));
+          const item = el('div', {
+            class: 'cat-item sub' + (active ? ' active' : ''),
+            attrs: { title: meta.name + ' — glisser pour réordonner', 'data-favkey': f.kind + ':' + f.ref },
+            on: { click: () => openFav(f) },
+          });
+          item.appendChild(meta.icon);
+          item.appendChild(el('span', { class: 'cat-label', text: meta.name, attrs: { title: meta.name } }));
+          if (f.kind === 'project') {
+            item.appendChild(el('span', { class: 'count', text: String(state.memos.filter(m => !m.done && m.project_id === Number(f.ref)).length) }));
+          }
+          favBox.appendChild(item);
+        });
+        nav.appendChild(favBox);
+        makeFavSortable(favBox);
+      }
+    }
+    nav.appendChild(el('div', { class: 'sidebar-sep' }));
+  }
 
   // [SHARES-BADGE] badge « N · M » (invités · dossiers partagés) — mêmes valeurs que
   // la vue Partages. L'alerte d'activité (invités en attente) reste sur la cloche
@@ -2342,6 +2559,7 @@ function renderSidebar() {
     memoItem.appendChild(emojiIcon('📝'));
     memoItem.appendChild(el('span', { class: 'cat-label', text: 'Mémos' }));
     memoItem.appendChild(el('span', { class: 'count', text: String(pendingMemoCount) }));
+    memoItem.appendChild(favStarBtn('view', 'memos'));  // [FAVORITES] épingler la vue
     memoItem.addEventListener('dragover', (e) => {
       if (!dragProjId) return;
       e.preventDefault();
@@ -2365,6 +2583,7 @@ function renderSidebar() {
     });
     planItem.appendChild(emojiIcon('🌳'));
     planItem.appendChild(el('span', { class: 'cat-label', text: 'Plan' }));
+    planItem.appendChild(favStarBtn('view', 'plan'));  // [FAVORITES] épingler la vue
     nav.appendChild(planItem);
 
     // [AGENDA] Vue calendrier mensuelle des échéances. [AGENDA-PROJECT] l'item
@@ -2377,6 +2596,7 @@ function renderSidebar() {
     });
     agendaItem.appendChild(emojiIcon('📆'));
     agendaItem.appendChild(el('span', { class: 'cat-label', text: 'Agenda' }));
+    agendaItem.appendChild(favStarBtn('view', 'agenda'));  // [FAVORITES] épingler la vue
     nav.appendChild(agendaItem);
 
     const inboxItem = mkProjItem('inbox', emojiIcon('📥'), 'Inbox', inboxCount, null);
@@ -2611,6 +2831,12 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
   document.getElementById('create-menu').hidden = true;
   document.getElementById('create-move').style.display = (item && kind === 'project') ? '' : 'none';
+  // [FAVORITES] ★ toggle (projets existants seulement) : ★ pleine si favori, ☆ contour sinon.
+  const favBtn = document.getElementById('create-fav');
+  favBtn.style.display = (item && kind === 'project') ? '' : 'none';
+  if (item && kind === 'project') {
+    favBtn.textContent = isFav('project', item.id) ? '★ Retirer des favoris' : '☆ Ajouter aux favoris';
+  }
   document.getElementById('create-export').style.display = (item && kind === 'project') ? '' : 'none';  // [EXPORT-SUBTREE]
   document.getElementById('create-import').style.display = (item && kind === 'project') ? '' : 'none';  // [EXPORT-SUBTREE]
   createLoc = item ? parseLoc(item.location) : null;
@@ -2791,6 +3017,15 @@ document.getElementById('create-move').addEventListener('click', () => {
   createDialog.close();
   editingItem = null;
   openMoveProject(proj);
+});
+// [FAVORITES] Toggle ★ favori du projet courant. Reste dans la pop-in (menu fermé, label MAJ) ;
+// re-render sidebar pour refléter la section ⭐ immédiatement.
+document.getElementById('create-fav').addEventListener('click', async () => {
+  if (!editingItem || createKind !== 'project') return;
+  const nowOn = await toggleFav('project', editingItem.id);
+  document.getElementById('create-fav').textContent = nowOn ? '★ Retirer des favoris' : '☆ Ajouter aux favoris';
+  document.getElementById('create-menu').hidden = true;
+  renderAll();
 });
 // [EXPORT-SUBTREE] Télécharge le JSON v20 du dossier + descendants (owner-only). Le serveur
 // pose le Content-Disposition (nom dossier-<slug>-v20.json) ; ancre <a download> = pas de
@@ -3348,7 +3583,7 @@ function renderLinks() {
   if (links.length === 0) {
     const msg = state.search
       ? 'Aucun résultat.'
-      : 'Aucun lien ici. Clique sur « + Ajouter » pour commencer.';
+      : 'Aucun lien ici. Clique sur « + Ajouter un lien » pour commencer.';
     ul.appendChild(el('li', { class: 'empty', text: msg }));
     return;
   }
@@ -6449,6 +6684,25 @@ form.addEventListener('submit', async (e) => {
 
 document.getElementById('cancel').addEventListener('click', () => dialog.close());
 document.getElementById('add-link').addEventListener('click', () => openDialog());
+
+// [HOME-RESET] Clic sur le titre « Dashboard » → accueil : vue Liens par défaut, projet/vue
+// désélectionné, recherche + filtre réinitialisés, scroll en haut. Idempotent. Desk + mobile.
+function goHome() {
+  state.view = 'links';
+  state.filterCat = 'all';
+  state.memoProject = 'all';
+  state.search = '';
+  state.searchScope = 'all';
+  const s = document.getElementById('search'); if (s) s.value = '';
+  const sc = document.getElementById('search-scope'); if (sc) sc.value = 'all';
+  renderAll();
+  window.scrollTo(0, 0);
+  const main = document.querySelector('main'); if (main) main.scrollTop = 0;
+  document.getElementById('sidebar').scrollTop = 0;
+}
+const homeBtn = document.getElementById('home-btn');
+homeBtn.addEventListener('click', goHome);
+homeBtn.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goHome(); } });
 
 // Thème clair / sombre (tokens surchargés sous [data-theme=light], persistant)
 const themeBtn = document.getElementById('theme-btn');
