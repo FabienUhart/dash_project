@@ -5284,24 +5284,65 @@ def export_links():
     return jsonify(_build_export(get_db()))
 
 
-def _build_export(db):
+def _export_slug(name):
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "").strip().lower()).strip("-")
+    return (s or "dossier")[:60]
+
+
+@app.route("/api/projects/<int:project_id>/export", methods=["GET"])
+def export_project_subtree(project_id):
+    # [EXPORT-SUBTREE] Export d'un dossier SEUL (owner-only, derrière Authelia — pas de
+    # variante /share). JSON v20 standard filtré au sous-arbre → avalé par l'import existant.
+    db = get_db()
+    row = db.execute("SELECT name FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    resp = jsonify(_build_export(db, root_id=project_id))
+    resp.headers["Content-Disposition"] = (
+        'attachment; filename="dossier-' + _export_slug(row["name"]) + '-v20.json"'
+    )
+    return resp
+
+
+def _build_export(db, root_id=None):
+    # [EXPORT-SUBTREE] root_id non nul → export FILTRÉ au sous-arbre (dossier + descendants +
+    # leurs mémos/commentaires/historique). MÊME format v20, MÊMES exclusions que l'export
+    # global (pas de binaires d'image — juste les noms de fichiers, comme le global ; pas de
+    # votes/voix/config vote). L'import existant l'avale tel quel (upsert par uid/nom, invariant 2).
+    subtree = None if root_id is None else set(_project_descendants(db, root_id))
     cats = {
         r["id"]: r["name"]
         for r in db.execute("SELECT id, name FROM categories").fetchall()
     }
-    links = db.execute(
+    # Un sous-arbre n'embarque ni liens (rattachés aux catégories, pas aux projets) ni
+    # catégories (aucun mémo/projet ne les référence). Les PRIORITÉS restent (référentiel :
+    # `memos.priority` est remappé par NOM à l'import — invariant 1 v10).
+    links = [] if subtree is not None else db.execute(
         f"SELECT {LINK_FIELDS} FROM links ORDER BY position, id"
     ).fetchall()
-    memos = db.execute(
-        "SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' ORDER BY position, id"
-    ).fetchall()
-    categories = db.execute(
+    if subtree is not None:
+        ph = ",".join("?" * len(subtree))
+        memos = db.execute(
+            f"SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' AND project_id IN ({ph}) "
+            "ORDER BY position, id", list(subtree)
+        ).fetchall()
+    else:
+        memos = db.execute(
+            "SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' ORDER BY position, id"
+        ).fetchall()
+    categories = [] if subtree is not None else db.execute(
         "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
-    projects = db.execute(
+    all_projects = db.execute(
         "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color, is_trip FROM projects ORDER BY position, id"
     ).fetchall()
-    proj_names = {r["id"]: r["name"] for r in projects}
+    # proj_names = TOUS les projets (pour résoudre le nom du parent, y compris le parent du
+    # dossier racine qui est HORS du sous-arbre → à l'import il raccroche si ce nom existe,
+    # sinon le dossier atterrit à la racine). Export = seulement les projets du sous-arbre.
+    proj_names = {r["id"]: r["name"] for r in all_projects}
+    projects = all_projects if subtree is None else [r for r in all_projects if r["id"] in subtree]
+    # uids des mémos du périmètre → filtre commentaires + historique (par memo_uid).
+    memo_uids = {m["uid"] for m in memos if m["uid"]} if subtree is not None else None
     out_links = []
     for r in links:
         d = dict(r)
@@ -5335,6 +5376,8 @@ def _build_export(db):
         "SELECT memo_uid, content, project, done_at FROM memo_history "
         "ORDER BY done_at, id"
     ).fetchall()
+    if subtree is not None:
+        history = [r for r in history if r["memo_uid"] in memo_uids]
     priorities = db.execute(
         "SELECT id, name, color, position FROM priorities ORDER BY position, id"
     ).fetchall()
@@ -5344,6 +5387,8 @@ def _build_export(db):
         "FROM memo_comments c LEFT JOIN memo_comments p ON p.id = c.parent_id "
         "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
+    if subtree is not None:
+        comments = [r for r in comments if r["memo_uid"] in memo_uids]
     return {
         "version": 20,
         "exported_at": datetime.now(timezone.utc).isoformat(),

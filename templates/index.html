@@ -1697,6 +1697,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <button type="button" id="create-menu-btn" class="icon-btn" title="Actions" aria-label="Actions" style="display:none">⋯</button>
     <div id="create-menu" class="card-menu" hidden>
       <button type="button" id="create-move">↗ Déplacer vers…</button>
+      <button type="button" id="create-export">⬇ Exporter ce dossier (JSON)</button>
       <button type="button" id="create-delete" class="danger-item">🗑 Supprimer</button>
     </div>
   </div>
@@ -2577,6 +2578,7 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
   document.getElementById('create-menu').hidden = true;
   document.getElementById('create-move').style.display = (item && kind === 'project') ? '' : 'none';
+  document.getElementById('create-export').style.display = (item && kind === 'project') ? '' : 'none';  // [EXPORT-SUBTREE]
   createLoc = item ? parseLoc(item.location) : null;
   refreshCreateLoc();
   const suggest = document.getElementById('emoji-suggest');
@@ -2755,6 +2757,19 @@ document.getElementById('create-move').addEventListener('click', () => {
   createDialog.close();
   editingItem = null;
   openMoveProject(proj);
+});
+// [EXPORT-SUBTREE] Télécharge le JSON v20 du dossier + descendants (owner-only). Le serveur
+// pose le Content-Disposition (nom dossier-<slug>-v20.json) ; ancre <a download> = pas de
+// navigation hors SPA. Réimportable via Paramètres → Importer (upsert non destructif).
+document.getElementById('create-export').addEventListener('click', () => {
+  if (!editingItem || createKind !== 'project') return;
+  document.getElementById('create-menu').hidden = true;
+  const a = document.createElement('a');
+  a.href = `/api/projects/${editingItem.id}/export`;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 });
 const createMenu = document.getElementById('create-menu');
 const createMenuBtn = document.getElementById('create-menu-btn');
