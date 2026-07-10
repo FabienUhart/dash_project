@@ -1562,7 +1562,10 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <main>
     <!-- [LINK-ADD-RELOCATE] Ajout de lien dans la vue Liens (retiré du header). Même dialog/flow
          (#add-link → openDialog()). Barre visible seulement en vue Liens (togglée dans renderAll). -->
-    <div id="links-actions" style="margin-bottom:0.75rem"><button id="add-link" class="primary">+ Ajouter un lien</button></div>
+    <div id="links-actions" style="margin-bottom:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap">
+      <button id="add-link" class="primary">+ Ajouter un lien</button>
+      <button id="add-cat-page">+ Ajouter une catégorie</button>
+    </div>
     <ul id="links" class="cards"></ul>
     <div id="memo-board" hidden></div>
     <div id="shares-board" hidden></div>
@@ -6684,6 +6687,9 @@ form.addEventListener('submit', async (e) => {
 
 document.getElementById('cancel').addEventListener('click', () => dialog.close());
 document.getElementById('add-link').addEventListener('click', () => openDialog());
+// [LINK-ADD-RELOCATE] « + Ajouter une catégorie » dans la page Liens (même handler que le « + »
+// de la section LIENS de la sidebar — pas de logique nouvelle, invariant 9).
+document.getElementById('add-cat-page').addEventListener('click', () => addCategory());
 
 // [HOME-RESET] Clic sur le titre « Dashboard » → accueil : vue Liens par défaut, projet/vue
 // désélectionné, recherche + filtre réinitialisés, scroll en haut. Idempotent. Desk + mobile.

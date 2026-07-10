@@ -9,7 +9,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 ### En cours / prochains lots (à jour 10 juil. 2026)
 
 - ✅ **[FAVORITES]** — favoris owner-only en base, **non exporté** — **LIVRÉ [V21.1.58→60]** : V1 (favoris projets, section ★ desktop) + V1.1 (modèle typé `{kind:'project'|'view'}`, épinglage des vues Plan/Agenda/Mémos, entrée « ⭐ Favoris » mobile ouvrant la liste dans le main) + V1.2 (réordonnancement drag-and-drop, Pointer Events, desk souris + mobile appui long). Détail : `REALISATION.md`.
-- ✅ **[HOME-RESET]** + **[LINK-ADD-RELOCATE]** — **LIVRÉ [V21.1.61]** : clic « Dashboard » = accueil (reset vue/recherche/scroll) ; « + Ajouter » (lien) déplacé du header vers la vue Liens. `REALISATION.md`.
+- ✅ **[HOME-RESET]** + **[LINK-ADD-RELOCATE]** — **LIVRÉ [V21.1.61→62]** : clic « Dashboard » = accueil (reset vue/recherche/scroll) ; « + Ajouter » (lien) déplacé du header vers la vue Liens, puis **regroupé avec « + Ajouter une catégorie »** dans la page Liens [V21.1.62]. `REALISATION.md`.
 - 🎨 **Cluster [NAV & MOBILE]** restant (à maquetter avant brief) : `[HEADER-ADD-CONTEXT]` (« + Ajouter » contextuel mobile — partiellement adressé par [LINK-ADD-RELOCATE]). Fiche § Moyens.
 - 🧊 Lots tampons dispo : `[POMODORO]` (§ Moyens).
 - ⏸️ **[VOTE-MATCH]** V3 « vote live » — **non planifié**, brouillon `docs/specs/VOTE-MATCH-v3-draft.md` (RGPD/identité tranchés, bloquants restants). À re-cadrer plus tard.
