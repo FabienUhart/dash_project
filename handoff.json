@@ -1,26 +1,31 @@
 {
-  "lot": "LINK-ADD-RELOCATE (regroupement lien + catégorie)",
-  "version": "V21.1.62",
+  "lot": "SAVE-INDICATOR + UNDO-DELETE + EMPTY-STATES + VOTE-MAP-SUBPROJECT",
+  "version": "V21.1.66",
   "date": "2026-07-10",
-  "status": "Refinement de [LINK-ADD-RELOCATE] (déjà livré en V21.1.61) : on ajoute « + Ajouter une catégorie » à côté de « + Ajouter un lien » dans la page Liens. Frontend PUR (index.html seul), NON commité, NON journalisé (⚠️ REALISATION.md/BUILD_VERSION restent à V21.1.61 — tête mise à jour AU commit). Export v21 inchangé. Code COMPLET, node --check + py_compile OK, rebuild + smoke markup OK. SÉQUENCE : (1) validation Chrome OWNER desktop + mobile par l'AGENT COWORK — PAS Claude Code ; RIEN côté invité, (2) journaliser [V21.1.62] en tête de REALISATION.md + IDEAS/CLAUDE(§historique)/MEMORY, (3) commit [V21.1.62] + git tag V21.1.62 && git push origin V21.1.62 -> déploiement auto. ⚠️ TAG = V21.1.62 == tête REALISATION.md. Aucun commit/tag/push sans feu vert explicite.",
+  "status": "Quatre incréments empilés dans le working tree, NON commités, NON journalisés (⚠️ REALISATION.md/BUILD_VERSION restent à V21.1.62 — tête mise à jour AU commit) : [SAVE-INDICATOR] [V21.1.63] + [UNDO-DELETE] [V21.1.64] + [EMPTY-STATES] [V21.1.65] + [VOTE-MAP-SUBPROJECT] [V21.1.66] (correctif bug). Frontend PUR, export v21 inchangé, ZÉRO route. Code COMPLET, node --check + py_compile OK, rebuild OK, backend scope invité vérifié (6/6). SÉQUENCE : (1) validation Chrome par l'AGENT COWORK — PAS Claude Code, (2) journaliser [V21.1.63→66] + IDEAS/CLAUDE(§historique)/MEMORY, (3) UN commit GROUPÉ + git tag V21.1.66 && git push origin V21.1.66 -> déploiement auto. ⚠️ TAG = V21.1.66 == tête REALISATION.md. Aucun commit/tag/push sans feu vert explicite.",
   "app_url": "http://localhost:8099/",
-  "export_decision": "Frontend pur, modèle liens/catégories inchangé, export v21 inchangé.",
-  "resume": "Partie A [HOME-RESET] (clic titre = accueil) DÉJÀ livrée en V21.1.61 — rien à refaire. Ce lot = Partie B affinée : dans la vue Liens, deux actions d'ajout côte à côte — « + Ajouter un lien » (relocalisé du header en V21.1.61, mis en avant .primary) + « + Ajouter une catégorie » (nouveau ici, même handler addCategory que le « + » de la section LIENS sidebar). Le « + » catégorie de la sidebar RESTE en place (raccourci, aucun double handler — bouton distinct appelant la même fonction).",
+  "export_decision": "Frontend pur, aucun changement modèle/API/route, export v21 inchangé.",
+  "resume": "[VOTE-MAP-SUBPROJECT] BUG (confirmé Cowork 10 juil.) : le vote d'un SOUS-PROJET n'apparaissait pas sur la carte ouverte depuis un PARENT (ni chip de scrutin, ni toggle « 🗳 Voix », surtout côté invité d'un partage du parent). Cause : les builders de vote de la carte ne lisaient que le projet du board courant (racine), pas les descendants. Correctif : agréger les scrutins du projet courant ET de ses descendants présents, en miroir owner/invité/hub.",
   "fichiers_modifies": [
-    "templates/index.html : barre #links-actions passée en flex (2 boutons côte à côte) — ajout de #add-cat-page « + Ajouter une catégorie » à côté de #add-link « + Ajouter un lien » ; handler #add-cat-page → addCategory() (= openCreateDialog('category'), MÊME fonction que le « + » sidebar, aucune logique nouvelle). #add-link/openDialog inchangés. share.html/hub.html INCHANGÉS ; app.py NON touché."
+    "templates/partials/_shared.js.html : helper PARTAGÉ voteScrutinsForProject(proj, memos, prefix) — scrutins normalisés d'un projet (vote-dossier id:null + votes nommés), `prefix` = nom du sous-projet préfixé au libellé pour distinguer plusieurs porteurs ; `projId` sur chaque scrutin. runMapDialog : le chip de scrutin lit `s.label` si présent (sinon '(dossier)'/nom) → deux vote-dossier (parent + sous-projet) ne sont plus tous deux « (dossier) ».",
+    "templates/index.html : buildMapVoteData (owner) agrège [courant, ...projectDescendants(courant)] via voteScrutinsForProject ; onVote met à jour le PORTEUR du vote nommé (recherche dans state.projects, plus la seule racine).",
+    "templates/share.html : buildShareMapVoteData (invité) agrège [courant, ...projDescendants(pid)] — projDescendants ne parcourt que DATA.projects (déjà scopé au partage, invariant 5) ; onVote via TOKEN du partage (scope récursif) met à jour le porteur dans DATA.projects.",
+    "templates/hub.html : buildHubMapVoteData agrège [FOCUS, ...projDescendants(FOCUS)] ; onVote via le share_token du dossier focalisé (scope récursif) ; porteur cherché dans DATA.projects."
   ],
   "tests_valides_localement": [
-    "node --check du bloc JS index.html OK ; py_compile app.py OK (intouché).",
-    "Rebuild docker + smoke markup : page Liens contient « + Ajouter un lien » ET #add-cat-page « + Ajouter une catégorie » ; <header> SANS #add-link. /api/version reste 21.1.61 (journalisation au commit)."
+    "node --check des 3 blocs JS (index/share/hub) + _shared.js.html OK ; py_compile app.py OK (intouché).",
+    "Backend scope invité (Flask test client, copie de base) — 6/6 ALL PASS : share_data du PARENT expose le SOUS-PROJET en mode vote + les mémos-options avec vote_count ; invité approuvé vote un mémo du sous-projet VIA LE TOKEN DU PARENT → 200 + count=1 ; anonyme → 403 ; mémo hors scope → 404 (invariant 5). → confirme que les données existent déjà et que le fix front se contente de les agréger.",
+    "Rebuild docker OK : /api/version reste 21.1.62 (journalisation au commit)."
   ],
   "a_verifier_par_fabien_en_live": [
-    "OWNER DESKTOP (localhost:8099) : vue Liens → deux boutons côte à côte ; « + Ajouter un lien » ouvre le dialog lien (mise en avant), « + Ajouter une catégorie » ouvre le dialog catégorie (même que le « + » de la section LIENS sidebar) ; création OK des deux, aucune régression. Clic titre « Dashboard » = accueil (déjà validé V21.1.61).",
-    "OWNER MOBILE : les deux boutons visibles et fonctionnels dans la page Liens (flex-wrap) ; header sans « + Ajouter ».",
-    "INVITÉ : RIEN (share.html/hub.html inchangés)."
+    "OWNER (localhost:8099) — [VOTE-MAP-SUBPROJECT] : ouvrir la carte depuis un PARENT dont un SOUS-PROJET porte un vote (ex. « Voyage Japon » → « restaurants » en vote multi) → la barre de scrutins affiche le(s) vote(s) du sous-projet (libellé préfixé du nom du sous-projet), toggle « 🗳 Voix » actif, badges « ✓ n » corrects ; voter en place fonctionne ; sélection entre plusieurs scrutins OK. Carte ouverte depuis le SOUS-PROJET direct = INCHANGÉE.",
+    "INVITÉ (partage du PARENT, approuvé) : même chose sur la carte invité (le scrutin du sous-projet apparaît enfin) ; anonyme = résultats en lecture, pas de bouton Voter. Hub : idem sur la carte d'un dossier focalisé.",
+    "Régression : un projet plat (sans sous-projet votant) → carte inchangée ; thème clair + sombre."
   ],
   "notes": [
-    "Réutilisation stricte des handlers existants (openDialog pour le lien, addCategory pour la catégorie) — invariant 9, pas de nouvelle logique.",
-    "Le « + » catégorie de la sidebar reste (raccourci). Deux boutons distincts appellent addCategory() → pas de double handler sur un même élément, pas de régression.",
-    "À FAIRE AU COMMIT (protège BUILD_VERSION) : REALISATION.md [V21.1.62], IDEAS.md, CLAUDE.md § historique (compléter l'entrée FAVORITES/HOME/LINK), MEMORY.md."
+    "Zéro nouvelle route : les compteurs/état viennent des données déjà exposées (mémos + proj.votes) ; les onVote existants passent déjà par un token/route qui scope les descendants (token parent = scope récursif, validé 6/6).",
+    "Collision id:null (deux vote-dossier) résolue par `label` d'affichage uniquement — l'id reste null (POST {} → le serveur cible le projet du mémo, donc pas d'ambiguïté fonctionnelle).",
+    "Invariant 5 : côté invité, projDescendants ne voit que DATA.projects (périmètre du partage) → n'agrège jamais hors scope.",
+    "À FAIRE AU COMMIT : REALISATION.md [V21.1.63→66], IDEAS.md (4 fiches : 3 confort faites + bug VOTE-MAP-SUBPROJECT corrigé), CLAUDE.md § historique, MEMORY.md."
   ]
 }

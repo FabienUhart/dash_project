@@ -13,8 +13,22 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - 🎨 **Cluster [NAV & MOBILE]** restant (à maquetter avant brief) : `[HEADER-ADD-CONTEXT]` (« + Ajouter » contextuel mobile — partiellement adressé par [LINK-ADD-RELOCATE]). Fiche § Moyens.
 - 🧊 Lots tampons dispo : `[POMODORO]` (§ Moyens).
 - ⏸️ **[VOTE-MATCH]** V3 « vote live » — **non planifié**, brouillon `docs/specs/VOTE-MATCH-v3-draft.md` (RGPD/identité tranchés, bloquants restants). À re-cadrer plus tard.
+- ✅ **[VOTE-MAP-SUBPROJECT]** — **CORRIGÉ [V21.1.66]** : les builders de vote carte agrègent désormais courant + descendants (owner/invité/hub en miroir via `voteScrutinsForProject`) → le vote d'un sous-projet apparaît sur la carte du parent. `REALISATION.md`.
+- ✅ **[SAVE-INDICATOR]** + **[UNDO-DELETE]** + **[EMPTY-STATES]** — **LIVRÉS [V21.1.63→65]** (confort/UX) : ✓ « enregistré » à chaque patch mémo ; toast « Annuler » après suppression ; états vides soignés (icône + action). `REALISATION.md`.
 
 _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import de dossier, prévisualisation d'import, réactions : **tout livré et en prod** — voir `REALISATION.md`._
+
+### 🐛 [VOTE-MAP-SUBPROJECT] — vote d'un sous-projet invisible sur la carte d'un parent (correctif) → cible V21.1.z
+
+**Statut** : bug **confirmé en session Cowork (10 juil. 2026)** sur les données restaurants (vote-dossier **multi** du sous-projet « restaurants » sous « Voyage Japon »).
+
+**Symptôme** : carte ouverte depuis le board du **sous-projet** qui porte le vote → OK (chip « 🗳 (dossier) », toggle « 🗳 Voix », badges de voix « ✓ n » sur les marqueurs). Carte ouverte depuis le board **parent** (ex. « Voyage Japon », qui inclut pourtant les points du sous-projet) → **aucun chip de scrutin, aucun toggle « 🗳 Voix »** ; et le filtre « Sous-projets » **dans** la carte ne ramène pas le vote. Se manifeste surtout **côté invité** : un partage du parent a pour racine le parent, donc la carte invité ne surface jamais le vote du sous-projet.
+
+**Cause** : le calque de vote de la carte est construit pour le **seul projet du board courant** — owner `buildMapVoteData()` (index.html) lit `state.memoProject` ; invité `buildShareMapVoteData()` (share.html) lit `DATA.root_id` (ou le filtre `PFILTER`). Aucun ne parcourt les **votes des sous-projets** affichés sur la carte, et le filtre sous-projet in-carte ne reconstruit pas les scrutins.
+
+**Correctif attendu** : agréger sur la carte les scrutins de **tous les projets présents** (le projet courant **ET** ses sous-projets/descendants dont des points sont affichés), pas seulement la racine. `buildMapVoteData` (owner) et `buildShareMapVoteData` (invité) **en miroir** (factoriser dans `_shared.js.html` si possible, invariant 9). Chaque scrutin conserve son `id`/nom — **préfixer par le nom du sous-projet** quand plusieurs projets portent un vote, pour les distinguer dans la barre de scrutins. Les compteurs (`opt` par mémo) et l'état viennent des **données déjà exposées** (mémos + `proj.votes`) → **zéro nouvelle route**. Cohérent avec le filtre sous-projet de la carte. **Portée invité** : n'agréger que les sous-projets **dans le périmètre du partage** (invariant 5) ; anonyme = lecture, pas de `onVote`. Frontend pur, **export inchangé (v21)**.
+
+**Acceptation (validation Cowork)** : carte du parent (owner + invité approuvé) → le(s) scrutin(s) du/des sous-projet(s) apparaissent, badges de voix corrects, vote ouvrable ; sélection/bascule entre plusieurs scrutins OK ; carte du sous-projet direct **inchangée** ; anonyme = lecture seule. `node --check` + `py_compile`. Invariants 5/6/8/9.
 
 ## Quick wins
 

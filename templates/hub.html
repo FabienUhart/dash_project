@@ -449,7 +449,7 @@ async function api(token, path, opts, _retried) {
   if (r.status === 403) notify('Session expirée — re-saisis ton code.', { error: true });
   return r;
 }
-async function putMemo(m, body) { const r = await api(m.share_token, '/memo/' + m.id, { method: 'PUT', body: JSON.stringify(body) }); if (r.ok) await reload(); return r; }
+async function putMemo(m, body) { const r = await api(m.share_token, '/memo/' + m.id, { method: 'PUT', body: JSON.stringify(body) }); if (r.ok) { await reload(); flashSaved(true); } else flashSaved(false); return r; }  // [SAVE-INDICATOR]
 
 // ── proof header pour /share/hub/<token>/data ──
 function hubProof() { try { return localStorage.getItem('dashhubproof:' + HUB_TOKEN) || ''; } catch (e) { return ''; } }
@@ -1235,16 +1235,12 @@ function buildHubMapVoteData() {
   if (FOCUS == null) return null;
   const proj = projById(FOCUS);
   if (!proj) return null;
-  const scrutins = [];
-  if (proj.vote_enabled) {
-    const opt = {};
-    (DATA.memos || []).forEach(m => { if (m.project_id === proj.id && !m.vote_excluded && m.vote_count !== undefined) opt[m.id] = { count: m.vote_count, mine: !!m.vote_mine, is_winner: !!m.is_winner }; });
-    scrutins.push({ id: null, name: '(dossier)', mode: proj.vote_mode, state: proj.vote_state, winner_ids: (proj.vote_winner_ids || []).slice(), opt });
-  }
-  (proj.votes || []).forEach(v => {
-    const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
-    scrutins.push({ id: v.id, name: v.name, mode: v.vote_mode, state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt });
-  });
+  // [VOTE-MAP-SUBPROJECT] agrège le dossier focalisé + ses descendants (scope du token du parent) →
+  // le vote d'un sous-projet apparaît sur la carte du parent focalisé côté hub.
+  const descIds = projDescendants(FOCUS) || [];
+  const order = [proj, ...descIds.map(id => projById(id)).filter(Boolean)];
+  let scrutins = [];
+  order.forEach((p, i) => { scrutins = scrutins.concat(voteScrutinsForProject(p, DATA.memos, i === 0 ? '' : (p.emoji ? p.emoji + ' ' : '') + p.name)); });
   if (!scrutins.length) return null;
   const token = proj.share_token;
   return {
@@ -1259,7 +1255,8 @@ function buildHubMapVoteData() {
         return { state: d.vote.vote_state, winner_ids: (d.vote.vote_winner_ids || []).slice(), opt };
       }
       const v = d.vote; const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
-      if (proj.votes) proj.votes = proj.votes.map(x => x.id === v.id ? v : x);
+      const owner = (DATA.projects || []).find(p => (p.votes || []).some(x => x.id === v.id));  // porteur (focalisé OU descendant)
+      if (owner) owner.votes = owner.votes.map(x => x.id === v.id ? v : x);
       return { state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt };
     }) : null,
   };

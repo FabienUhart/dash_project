@@ -680,6 +680,14 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .status-unknown { background: var(--gray); }
 @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
 .empty { color: var(--muted); font-style: italic; padding: 0.5rem 0; list-style: none; }
+/* [EMPTY-STATES] états vides soignés : icône + titre + hint + bouton d'action (tokens). */
+.empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--muted); display: flex;
+  flex-direction: column; align-items: center; gap: 0.5rem; list-style: none; }
+.empty-state .es-icon { font-size: 2.4rem; opacity: 0.7; line-height: 1; }
+.empty-state .es-title { font-size: 1rem; font-weight: 600; color: var(--text); }
+.empty-state .es-hint { font-size: 0.85rem; max-width: 34ch; line-height: 1.4; }
+.empty-state .es-action { margin-top: 0.5rem; }
+.cards .empty-li { grid-column: 1 / -1; list-style: none; }
 
 /* ---------- vue Mémos (board) ---------- */
 #memo-board { max-width: 760px; margin: 0 auto; }
@@ -3379,23 +3387,18 @@ async function savePointGroups(p, groups) {
 // [VOTE-MAP] Normalise les scrutins du projet du board pour runMapDialog (données déjà
 // exposées : dossier + votes nommés). Retourne null si le projet n'a aucun scrutin.
 function buildMapVoteData() {
-  const proj = state.projects.find(p => p.id === state.memoProject);
-  if (!proj) return null;
-  const scrutins = [];
-  if (proj.vote_enabled) {
-    const opt = {};
-    state.memos.forEach(m => { if (m.project_id === proj.id && !m.vote_excluded && m.vote_count !== undefined) opt[m.id] = { count: m.vote_count, mine: !!m.vote_mine, is_winner: !!m.is_winner }; });
-    const wids = (proj.vote_winner_ids || []).slice(); if (proj.vote_winner_id) wids.push(proj.vote_winner_id);
-    scrutins.push({ id: null, name: '(dossier)', mode: proj.vote_mode, state: proj.vote_state, winner_ids: wids, opt });
-  }
-  (proj.votes || []).forEach(v => {
-    const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
-    scrutins.push({ id: v.id, name: v.name, mode: v.vote_mode, state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt });
-  });
+  const cur = state.projects.find(p => p.id === state.memoProject);
+  if (!cur) return null;
+  // [VOTE-MAP-SUBPROJECT] agrège les scrutins du projet courant ET de ses descendants présents
+  // sur la carte (pas seulement la racine) → le vote d'un sous-projet apparaît sur la carte du parent.
+  const descIds = projectDescendants(cur.id) || [];
+  const order = [cur, ...descIds.map(id => state.projects.find(p => p.id === id)).filter(Boolean)];
+  let scrutins = [];
+  order.forEach((p, i) => { scrutins = scrutins.concat(voteScrutinsForProject(p, state.memos, i === 0 ? '' : (p.emoji ? p.emoji + ' ' : '') + p.name)); });
   if (!scrutins.length) return null;
   return {
     scrutins,
-    voteKey: 'mapVotesOn:' + proj.id,
+    voteKey: 'mapVotesOn:' + cur.id,
     onVote: async (memoId, sid) => {
       const r = await api(`/api/memos/${memoId}/vote`, { method: 'POST', body: JSON.stringify(sid == null ? {} : { vote_id: sid }) });
       if (sid == null) {
@@ -3404,7 +3407,8 @@ function buildMapVoteData() {
         return { state: r.vote.vote_state, winner_ids: wids, opt };
       }
       const v = r.vote; const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
-      if (proj.votes) proj.votes = proj.votes.map(x => x.id === v.id ? v : x);
+      const owner = state.projects.find(p => (p.votes || []).some(x => x.id === v.id));  // porteur du vote nommé (courant OU descendant)
+      if (owner) owner.votes = owner.votes.map(x => x.id === v.id ? v : x);
       return { state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt };
     },
   };
@@ -3579,15 +3583,34 @@ function projectDescendants(pid) {
   return out;
 }
 
+// [EMPTY-STATES] Bloc d'état vide soigné : icône + titre + hint + bouton d'action optionnel.
+function emptyState(opts) {
+  const box = el('div', { class: 'empty-state' });
+  if (opts.icon) box.appendChild(el('div', { class: 'es-icon', text: opts.icon }));
+  box.appendChild(el('div', { class: 'es-title', text: opts.title }));
+  if (opts.hint) box.appendChild(el('div', { class: 'es-hint', text: opts.hint }));
+  if (opts.actionLabel && opts.onAction) {
+    box.appendChild(el('button', { class: 'primary es-action', text: opts.actionLabel, on: { click: opts.onAction } }));
+  }
+  return box;
+}
+// Efface la recherche courante et re-rend (action des états vides « aucun résultat »).
+function clearSearch() {
+  state.search = '';
+  const s = document.getElementById('search'); if (s) s.value = '';
+  renderAll();
+}
+
 function renderLinks() {
   const ul = document.getElementById('links');
   ul.innerHTML = '';
   const links = visibleLinks();
   if (links.length === 0) {
-    const msg = state.search
-      ? 'Aucun résultat.'
-      : 'Aucun lien ici. Clique sur « + Ajouter un lien » pour commencer.';
-    ul.appendChild(el('li', { class: 'empty', text: msg }));
+    const li = el('li', { class: 'empty-li' });
+    li.appendChild(state.search
+      ? emptyState({ icon: '🔍', title: 'Aucun résultat', hint: 'Aucun lien ne correspond à « ' + state.search + ' ».', actionLabel: 'Effacer la recherche', onAction: clearSearch })
+      : emptyState({ icon: '🔗', title: 'Aucun lien ici', hint: 'Ajoute ton premier lien pour démarrer ton tableau de bord.', actionLabel: '+ Ajouter un lien', onAction: () => openDialog() }));
+    ul.appendChild(li);
     return;
   }
   const catById = Object.fromEntries(state.categories.map(c => [c.id, c]));
@@ -3756,8 +3779,14 @@ function linkify(text) {
 }
 
 async function patchMemo(id, body) {
-  await api(`/api/memos/${id}`, { method: 'PUT', body: JSON.stringify(body) });
-  await loadAll();
+  try {
+    await api(`/api/memos/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    await loadAll();
+    flashSaved(true);  // [SAVE-INDICATOR]
+  } catch (e) {
+    flashSaved(false);
+    throw e;  // préserve la propagation existante (aucun appelant ne l'avalait)
+  }
 }
 
 function toggleCheckItem(memo, idx) {
@@ -5013,13 +5042,21 @@ function thumbsEl(memo, editable, collapsed = false) {
 }
 
 async function deleteMemo(id, skipConfirm = false) {
+  const memo = state.memos.find(m => m.id === id);
+  const full = memo ? (memo.title || stripHTML(memo.content)) : '';
   if (!skipConfirm) {
-    const memo = state.memos.find(m => m.id === id);
-    const excerpt = memo ? (memo.title || stripHTML(memo.content).slice(0, 60)) : '';
-    if (!(await confirmPopin(`Déplacer le mémo « ${excerpt}${excerpt.length >= 60 ? '…' : ''} » dans la corbeille ?\nTu pourras le restaurer pendant 7 jours.`, { okLabel: 'Mettre à la corbeille' }))) return;
+    const ex60 = full.slice(0, 60);
+    if (!(await confirmPopin(`Déplacer le mémo « ${ex60}${full.length > 60 ? '…' : ''} » dans la corbeille ?\nTu pourras le restaurer pendant 7 jours.`, { okLabel: 'Mettre à la corbeille' }))) return;
   }
   await api(`/api/memos/${id}`, { method: 'DELETE' });
   await loadAll();
+  // [UNDO-DELETE] toast « Annuler » → restauration immédiate (route corbeille existante).
+  const ex40 = full.slice(0, 40);
+  const label = ex40 ? `Mémo « ${ex40}${full.length > 40 ? '…' : ''} » supprimé.` : 'Mémo supprimé.';
+  undoToast(label, async () => {
+    try { await api(`/api/trash/${id}/restore`, { method: 'POST' }); await loadAll(); }
+    catch (e) { await notify('Restauration impossible', { error: true }); }
+  });
 }
 
 async function duplicateMemo(id) {
@@ -6318,14 +6355,17 @@ function renderBoard() {
     return;
   }
 
+  const focusAddMemo = () => { const i = document.querySelector('#memo-add-bar input[type=text]'); if (i) i.focus(); };
   if (state.memoFilter !== 'all') {
     sections = sections.filter(s => s.filter === state.memoFilter);
     if (!sections[0] || !sections[0].items.length) {
-      board.appendChild(el('div', { class: 'empty', text: 'Rien ici. 🎉' }));
+      board.appendChild(emptyState({ icon: '🎉', title: 'Rien à afficher ici', hint: 'Aucun mémo ne correspond à ce filtre.', actionLabel: 'Voir tous les mémos', onAction: () => { state.memoFilter = 'all'; renderAll(); } }));
       return;
     }
   } else if (pending.length === 0 && done.length === 0) {
-    board.appendChild(el('div', { class: 'empty', text: state.search ? 'Aucun résultat.' : 'Aucun mémo. Ajoute ta première note ci-dessus.' }));
+    board.appendChild(state.search
+      ? emptyState({ icon: '🔍', title: 'Aucun résultat', hint: 'Aucun mémo ne correspond à « ' + state.search + ' ».', actionLabel: 'Effacer la recherche', onAction: clearSearch })
+      : emptyState({ icon: '📝', title: 'Aucun mémo ici', hint: 'Ajoute ta première note pour commencer à t’organiser.', actionLabel: '+ Nouveau mémo', onAction: focusAddMemo }));
     return;
   }
 

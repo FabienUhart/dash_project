@@ -178,6 +178,29 @@ function voteWinnerIdSet(proj) {
   return s.size ? s : null;
 }
 
+// [VOTE-MAP-SUBPROJECT] Scrutins normalisés d'UN projet (vote-dossier + votes nommés) pour la
+// carte, à partir d'une liste de mémos (owner `state.memos` / invité `DATA.memos`). `prefix` non
+// vide = nom du sous-projet, préfixé au libellé du chip pour distinguer plusieurs projets
+// porteurs de vote sur la carte d'un parent. Chaque scrutin garde son `id` (null = vote-dossier
+// → POST `{}`, le serveur cible le projet du mémo) ; `projId` sert à retrouver le porteur pour la
+// mise à jour locale. Owner/invité/hub agrègent en miroir (courant + descendants). Pur.
+function voteScrutinsForProject(proj, memos, prefix) {
+  if (!proj) return [];
+  const out = [];
+  const pre = prefix ? (prefix + ' · ') : '';
+  if (proj.vote_enabled) {
+    const opt = {};
+    (memos || []).forEach(m => { if (m.project_id === proj.id && !m.vote_excluded && m.vote_count !== undefined) opt[m.id] = { count: m.vote_count, mine: !!m.vote_mine, is_winner: !!m.is_winner }; });
+    const wids = (proj.vote_winner_ids || []).slice(); if (proj.vote_winner_id) wids.push(proj.vote_winner_id);
+    out.push({ id: null, name: '(dossier)', label: pre ? (pre + '(dossier)') : null, mode: proj.vote_mode, state: proj.vote_state, winner_ids: wids, opt, projId: proj.id });
+  }
+  (proj.votes || []).forEach(v => {
+    const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
+    out.push({ id: v.id, name: v.name, label: pre ? (pre + v.name) : null, mode: v.vote_mode, state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt, projId: proj.id });
+  });
+  return out;
+}
+
 function usableProjColor(c) {
   if (!/^#[0-9a-fA-F]{6}$/.test(c || '')) return '';
   const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16);
@@ -612,8 +635,8 @@ function runMapDialog(cfg) {
     scrutins.forEach(s => {
       const on = selVote === s;
       voteBar.appendChild(el('button', {
-        class: 'prio-btn', text: (s.id == null ? '(dossier)' : s.name) + (s.state === 'closed' ? ' · clos' : ''),
-        attrs: { type: 'button', title: s.id == null ? 'Vote du dossier' : s.name, style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+        class: 'prio-btn', text: (s.label || (s.id == null ? '(dossier)' : s.name)) + (s.state === 'closed' ? ' · clos' : ''),
+        attrs: { type: 'button', title: s.label || (s.id == null ? 'Vote du dossier' : s.name), style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
         on: { click: () => { selVote = on ? null : s; renderVoteBar(); refresh(false); if (selVote && selVote.state === 'closed') fitWinners(); } },
       }));
     });
@@ -1293,6 +1316,59 @@ function announce(msg) {
 function syncHeaderHeight() {
   const h = document.querySelector('header');
   if (h) document.documentElement.style.setProperty('--header-h', h.offsetHeight + 'px');
+}
+
+// [UNDO-DELETE] Toast « … supprimé — Annuler » (~5 s) après une suppression douce. Générique :
+// `onUndo` est le callback de restauration (route propre à la page). Élément flottant créé à la
+// volée, tokens CSS, pas de GSAP (invariant 8). Un seul toast à la fois (remplace le précédent).
+function undoToast(msg, onUndo, ms) {
+  const prev = document.getElementById('undo-toast');
+  if (prev) { clearTimeout(prev._t); prev.remove(); }
+  const t = document.createElement('div');
+  t.id = 'undo-toast';
+  t.setAttribute('role', 'status');
+  t.style.cssText = 'position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);z-index:4000;'
+    + 'display:flex;align-items:center;gap:0.75rem;padding:0.55rem 0.9rem;border-radius:10px;'
+    + 'background:var(--panel);border:1px solid var(--border);color:var(--text);font-size:0.85rem;'
+    + 'box-shadow:0 6px 24px rgba(0,0,0,0.35);max-width:calc(100vw - 2rem)';
+  const label = document.createElement('span');
+  label.textContent = msg;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Annuler';
+  btn.className = 'prio-btn';
+  btn.style.cssText = 'background:var(--accent);border-color:var(--accent);color:#10141a;padding:0.15rem 0.6rem';
+  const close = () => { clearTimeout(t._t); t.remove(); };
+  btn.addEventListener('click', async () => { close(); try { await onUndo(); } catch (e) {} });
+  t.appendChild(label); t.appendChild(btn);
+  document.body.appendChild(t);
+  t._t = setTimeout(close, ms || 5000);
+  return t;
+}
+
+// [SAVE-INDICATOR] Petit ✓ discret (~1,2 s) à chaque sauvegarde OK d'un mémo ; état d'erreur
+// discret (~2,2 s) si l'enregistrement échoue. Élément flottant créé à la volée (aucun markup à
+// ajouter aux pages), tokens CSS (--green/--red), aria-live. Pas de GSAP (invariant 8). PUR :
+// appelé depuis chaque entonnoir de patch (owner patchMemo, invité put/putMemo) → parité 3 pages.
+function flashSaved(ok) {
+  let ind = document.getElementById('save-indicator');
+  if (!ind) {
+    ind = document.createElement('div');
+    ind.id = 'save-indicator';
+    ind.setAttribute('role', 'status');
+    ind.setAttribute('aria-live', 'polite');
+    ind.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:4000;padding:0.4rem 0.8rem;'
+      + 'border-radius:8px;font-size:0.85rem;font-weight:600;pointer-events:none;opacity:0;'
+      + 'transition:opacity 0.2s;box-shadow:0 4px 16px rgba(0,0,0,0.3)';
+    document.body.appendChild(ind);
+  }
+  const good = ok !== false;
+  ind.textContent = good ? '✓ Enregistré' : '⚠ Non enregistré';
+  ind.style.background = good ? 'var(--green)' : 'var(--red)';
+  ind.style.color = good ? '#10141a' : '#fff';
+  ind.style.opacity = '1';
+  clearTimeout(ind._t);
+  ind._t = setTimeout(() => { ind.style.opacity = '0'; }, good ? 1200 : 2200);
 }
 
 function registerMentionBlot() {

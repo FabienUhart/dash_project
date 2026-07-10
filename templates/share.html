@@ -1277,8 +1277,8 @@ async function put(memoId, body) {
     headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
     body: JSON.stringify(body),
   });
-  if (r.ok) { await load(); announce('Modification enregistrée.'); }
-  else if (r.status === 403) await load();
+  if (r.ok) { await load(); announce('Modification enregistrée.'); flashSaved(true); }  // [SAVE-INDICATOR]
+  else { flashSaved(false); if (r.status === 403) await load(); }
 }
 
 // [VOTE-DECISION] Voter côté invité : approbation suffit (can_edit NON requis, §2.3).
@@ -1783,18 +1783,15 @@ async function saveSharePointColor(p, color) {
 // approuvé (le serveur revalide) ; anonyme = lecture (onVote absent). null si aucun scrutin.
 function buildShareMapVoteData() {
   const pid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
-  const proj = (DATA.projects || []).find(p => p.id === pid);
-  if (!proj) return null;
-  const scrutins = [];
-  if (proj.vote_enabled) {
-    const opt = {};
-    (DATA.memos || []).forEach(m => { if (m.project_id === proj.id && !m.vote_excluded && m.vote_count !== undefined) opt[m.id] = { count: m.vote_count, mine: !!m.vote_mine, is_winner: !!m.is_winner }; });
-    scrutins.push({ id: null, name: '(dossier)', mode: proj.vote_mode, state: proj.vote_state, winner_ids: (proj.vote_winner_ids || []).slice(), opt });
-  }
-  (proj.votes || []).forEach(v => {
-    const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
-    scrutins.push({ id: v.id, name: v.name, mode: v.vote_mode, state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt });
-  });
+  const cur = (DATA.projects || []).find(p => p.id === pid);
+  if (!cur) return null;
+  // [VOTE-MAP-SUBPROJECT] agrège courant + descendants DANS LE PÉRIMÈTRE DU PARTAGE (invariant 5 :
+  // projDescendants ne parcourt que DATA.projects, déjà scopé) → le vote d'un sous-projet partagé
+  // via un parent apparaît sur la carte invité.
+  const descIds = projDescendants(pid) || [];
+  const order = [cur, ...descIds.map(id => (DATA.projects || []).find(p => p.id === id)).filter(Boolean)];
+  let scrutins = [];
+  order.forEach((p, i) => { scrutins = scrutins.concat(voteScrutinsForProject(p, DATA.memos, i === 0 ? '' : (p.emoji ? p.emoji + ' ' : '') + p.name)); });
   if (!scrutins.length) return null;
   const approved = GUEST.status === 'approved';
   return {
@@ -1809,7 +1806,8 @@ function buildShareMapVoteData() {
         return { state: d.vote.vote_state, winner_ids: (d.vote.vote_winner_ids || []).slice(), opt };
       }
       const v = d.vote; const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
-      if (proj.votes) proj.votes = proj.votes.map(x => x.id === v.id ? v : x);
+      const owner = (DATA.projects || []).find(p => (p.votes || []).some(x => x.id === v.id));  // porteur (courant OU descendant)
+      if (owner) owner.votes = owner.votes.map(x => x.id === v.id ? v : x);
       return { state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt };
     }) : null,
   };
