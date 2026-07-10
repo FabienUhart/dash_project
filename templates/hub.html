@@ -334,6 +334,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <div id="ed-people" style="display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center"></div>
   <label class="me-label">Images</label>
   <div id="ed-images" style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center"></div>
+  <div id="ed-attachments"></div>
   <label class="me-label">Commentaires</label>
   <div id="ed-comments"></div>
   <div class="dlg-actions">
@@ -518,6 +519,13 @@ function fallbackLauncher(folders) {
 // ── données scopées (focus + recherche) ──
 function projChildren(pid) { return (DATA.projects || []).filter(p => p.parent_id === pid); }
 function projDescendants(pid) { const out = []; const w = (id) => projChildren(id).forEach(c => { out.push(c.id); w(c.id); }); w(pid); return out; }
+// [PHOTO-BATCH-DOWNLOAD] Fichiers d'un dossier (+ sous-dossiers) — scope borné à DATA.memos.
+function hubProjectZipCount(pid, scope, includeSubs) {
+  const set = new Set(includeSubs ? [pid, ...projDescendants(pid)] : [pid]);
+  let n = 0;
+  (DATA.memos || []).forEach(m => { if (set.has(m.project_id)) n += memoZipCount(m, scope); });
+  return n;
+}
 function focusedMemos() {
   let ms = DATA.memos || [];
   if (FOCUS != null) { const set = new Set([FOCUS, ...projDescendants(FOCUS)]); ms = ms.filter(m => set.has(m.project_id)); }
@@ -631,6 +639,11 @@ function memoCard(m) {
   if (prio && prio.color && !m.done) badges.appendChild(el('span', { class: 'prio-chip', text: prio.name, attrs: { style: 'background:' + prio.color + ';color:' + textOn(prio.color) } }));
   const due = dueInfo(m); if (due) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: due.label }));
   if (m.project) badges.appendChild(el('span', { class: 'badge', text: '📁 ' + m.project }));
+  if ((m.attachments || []).length) {  // [ATTACHMENTS-QUICKVIEW] badge 📎 n cliquable
+    const ab = el('span', { class: 'badge', text: '📎 ' + m.attachments.length, attrs: { style: 'cursor:pointer', title: 'Voir les fichiers joints' } });
+    ab.addEventListener('click', (e) => { e.stopPropagation(); openHubMemoAttachments(m); });
+    badges.appendChild(ab);
+  }
   (m.assignees || []).forEach(a => badges.appendChild(el('span', { class: 'asg-av', text: initials(a), attrs: { title: a } })));
   if (!m.can_edit) badges.appendChild(el('span', { class: 'lock', text: '🔒 lecture' }));
   if (badges.children.length) row.appendChild(badges);
@@ -845,6 +858,19 @@ function renderBoard() {
           render();
         } },
       }));
+      // [PHOTO-BATCH-DOWNLOAD] zip des fichiers du dossier (+ sous-dossiers), scopé au token.
+      if (fp.share_token && hubProjectZipCount(FOCUS, 'all', true) > 0) {
+        hd.appendChild(el('button', {
+          class: 'btn', text: '⤓ Télécharger',
+          attrs: { title: 'Télécharger les fichiers du dossier en .zip' },
+          on: { click: () => downloadZipDialog({
+            title: 'Télécharger les fichiers',
+            hasSubprojects: true,
+            count: (scope, subs) => hubProjectZipCount(FOCUS, scope, subs),
+            buildUrl: (scope, subs) => '/share/' + fp.share_token + '/project/' + FOCUS + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0),
+          }) },
+        }));
+      }
       board.appendChild(hd);
     }
   }
@@ -1146,6 +1172,7 @@ function openEditor(m) {
   mk(0, 'Aucune', ''); (DATA.priorities || []).forEach(p => mk(p.id, p.name, p.color));
   renderEdPeople(ro);
   renderEdImages(m, ro);
+  renderEdAttachments(m, ro);  // [ATTACHMENTS]
   renderEdComments(m, ro);
   document.getElementById('ed-save').style.display = ro ? 'none' : '';
   document.getElementById('ed-del').style.display = ro ? 'none' : '';
@@ -1161,6 +1188,38 @@ function renderEdPeople(ro) {
     pw.appendChild(inp);
     let dl = document.getElementById('hub-asg'); if (!dl) { dl = document.createElement('datalist'); dl.id = 'hub-asg'; document.body.appendChild(dl); }
     dl.innerHTML = ''; (DATA.members || []).forEach(n => dl.appendChild(el('option', { attrs: { value: n } }))); }
+}
+// [ATTACHMENTS-QUICKVIEW] Pop-in de consultation des fichiers depuis la card (hub).
+function openHubMemoAttachments(m) {
+  const label = m.title || stripTags(m.content || '').slice(0, 40) || 'Fichiers';
+  attachQuickView('📎 ' + label, (rerender) => {
+    const fresh = (DATA.memos || []).find((x) => x.id === m.id) || m;
+    return {
+      attachments: fresh.attachments || [],
+      canEdit: !!fresh.can_edit,
+      uploadUrl: '/share/' + m.share_token + '/memo/' + m.id + '/attachments',
+      zip: { url: '/share/' + m.share_token + '/memo/' + m.id + '/download.zip', images: (fresh.images || []).length },
+      headers: { 'X-Guest-Token': gtFor(m.share_token) },
+      onChange: async () => { await reload(); rerender(); },
+      openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+    };
+  });
+}
+
+// [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur hub (scopée au share du dossier).
+function renderEdAttachments(m, ro) {
+  const box = document.getElementById('ed-attachments');
+  if (!box) return;
+  box.innerHTML = '';
+  box.appendChild(renderAttachments({
+    attachments: m.attachments || [],
+    canEdit: !ro,
+    uploadUrl: '/share/' + m.share_token + '/memo/' + m.id + '/attachments',
+    zip: { url: '/share/' + m.share_token + '/memo/' + m.id + '/download.zip', images: (m.images || []).length },
+    headers: { 'X-Guest-Token': gtFor(m.share_token) },
+    onChange: async () => { await reload(); const fresh = (DATA.memos || []).find((x) => x.id === m.id); if (fresh) renderEdAttachments(fresh, !fresh.can_edit); },
+    openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+  }));
 }
 function renderEdImages(m, ro) {
   const iw = document.getElementById('ed-images'); iw.innerHTML = '';

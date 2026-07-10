@@ -2,14 +2,17 @@ import calendar
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
 import secrets
 import smtplib
 import sqlite3
 import ssl
+import tempfile
 import threading
 import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -40,16 +43,18 @@ import urllib3
 from flask import (
     Flask,
     Response,
+    after_this_request,
     g,
     jsonify,
     render_template,
     request,
+    send_file,
     send_from_directory,
 )
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "21"  # X = version du format d'export (invariant 1) — v21 = [COMMENT-REACTIONS]
+APP_VERSION = "22"  # X = version du format d'export (invariant 1) — v22 = [ATTACHMENTS] pièces jointes ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -105,7 +110,150 @@ def _save_uploaded_image(f, allowed_ext):
     return name, None
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+# [ATTACHMENTS] pièces jointes jusqu'à 300 Mo/fichier → plafond de corps de requête à ~320 Mo
+# (marge pour l'entête multipart + petits champs). Le worker gunicorn a besoin d'un --timeout
+# allongé (Dockerfile) pour ne pas couper un upload lent de 300 Mo.
+app.config["MAX_CONTENT_LENGTH"] = 320 * 1024 * 1024
+
+
+# ─────────────────────────── [ATTACHMENTS] pièces jointes ───────────────────────────
+# Généralise l'upload d'images : tout type de fichier accepté, stocké sur disque (nom seul en
+# base). Types « aperçu sûr » (image/pdf/audio validés par SIGNATURE) → inline possible ; tout
+# le reste → téléchargement forcé (Content-Disposition: attachment), jamais inline (anti-XSS :
+# aucun HTML/SVG/script rendu). Table `attachments` additive, distincte de `memos.images`
+# (qui reste dédiée aux photos EXIF/carte).
+ATTACH_MAX = 300 * 1024 * 1024
+SAFE_ATTACH_NAME = re.compile(r"^[0-9a-f]{32}(?:\.[A-Za-z0-9]{1,12})?$")
+
+
+def _clean_orig_name(name):
+    """Nom d'origine assaini (pour le download), extension conservée. Jamais de chemin/HTML."""
+    base = os.path.basename(str(name or "")).strip()
+    base = re.sub(r"[^\w.\- ]", "_", base)[:200]
+    return base or "fichier"
+
+
+def _attach_preview(head, ext):
+    """(mime, preview) — preview True SEULEMENT pour image/pdf/audio validés par signature.
+    Tout le reste → (mime deviné, False) = servi en téléchargement forcé (anti-XSS)."""
+    if ext in ALLOWED_IMG_EXT and _looks_like_image(head, ext):
+        return ("image/" + ("jpeg" if ext in ("jpg", "jpeg") else ext), True)
+    if ext == "pdf" and head[:5] == b"%PDF-":
+        return ("application/pdf", True)
+    if ext == "mp3" and (head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")):
+        return ("audio/mpeg", True)
+    if ext == "wav" and head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return ("audio/wav", True)
+    if ext == "ogg" and head[:4] == b"OggS":
+        return ("audio/ogg", True)
+    if ext in ("m4a", "aac") and head[4:8] == b"ftyp":
+        return ("audio/mp4", True)
+    if ext == "flac" and head[:4] == b"fLaC":
+        return ("audio/flac", True)
+    return (mimetypes.guess_type("x." + ext)[0] or "application/octet-stream", False)
+
+
+def _save_attachment(f):
+    """Sauvegarde STREAMÉE sur disque (jamais 300 Mo en RAM ; f.save = copyfileobj). Garde de
+    taille APRÈS écriture (le plafond MAX_CONTENT_LENGTH borne déjà le corps). Retourne
+    ({filename, orig, mime, size, preview}, None) ou (None, err)."""
+    orig = _clean_orig_name(f.filename)
+    raw_ext = orig.rsplit(".", 1)[-1].lower() if "." in orig else ""
+    ext = re.sub(r"[^a-z0-9]", "", raw_ext)[:12]
+    head = f.stream.read(16)
+    f.stream.seek(0)
+    mime, preview = _attach_preview(head, ext)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    name = uuid.uuid4().hex + (("." + ext) if ext else "")
+    path = os.path.join(UPLOAD_DIR, name)
+    f.save(path)  # streamé sur disque
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    if size > ATTACH_MAX:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None, "fichier trop volumineux (max 300 Mo)"
+    return {"filename": name, "orig": orig, "mime": mime, "size": size, "preview": preview}, None
+
+
+def _attach_row_dict(r, url):
+    return {
+        "id": r["id"], "name": r["filename"],
+        "orig_name": r["orig_name"] or r["filename"],
+        "mime": r["mime"] or "", "size": r["size"] or 0,
+        "preview": bool(r["preview"]), "created_at": r["created_at"], "url": url,
+    }
+
+
+def _attachments_map(db, memo_ids, url_fn):
+    """{memo_id: [attach_dict]} pour un lot de mémos ; `url_fn(row)` construit l'URL (owner/invité)."""
+    ids = [i for i in memo_ids if i is not None]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    out = {}
+    for r in db.execute(
+        f"SELECT * FROM attachments WHERE memo_id IN ({ph}) ORDER BY id", ids
+    ).fetchall():
+        out.setdefault(r["memo_id"], []).append(_attach_row_dict(r, url_fn(r)))
+    return out
+
+
+def _serve_attachment_row(r, force_download):
+    """Sert un fichier joint : inline si type « aperçu sûr » ET pas de download forcé, sinon
+    téléchargement forcé (attachment) avec le nom d'origine. Jamais inline pour un non-média."""
+    name = os.path.basename(r["filename"])
+    if not SAFE_ATTACH_NAME.match(name):
+        return "", 404
+    inline = bool(r["preview"]) and not force_download
+    return send_from_directory(
+        UPLOAD_DIR, name, max_age=3600,
+        as_attachment=(not inline),
+        download_name=(r["orig_name"] or name),
+        mimetype=(r["mime"] or None),
+    )
+
+
+def _delete_attachment_file(filename):
+    name = os.path.basename(str(filename or ""))
+    if SAFE_ATTACH_NAME.match(name):
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, name))
+        except OSError:
+            pass
+
+
+def _import_memo_attachments(db, memo_id, memo_uid, att_list, now):
+    """[ATTACHMENTS] v22 : import ADDITIF non destructif. N'ajoute que les fichiers dont le binaire
+    EXISTE sur le volume (comme les images) et pas déjà rattachés (dédup par (memo_id, filename))."""
+    if not isinstance(att_list, list):
+        return
+    have = {r["filename"] for r in db.execute(
+        "SELECT filename FROM attachments WHERE memo_id = ?", (memo_id,)
+    ).fetchall()}
+    for a in att_list:
+        if not isinstance(a, dict):
+            continue
+        fn = os.path.basename(str(a.get("filename") or ""))
+        if not SAFE_ATTACH_NAME.match(fn) or fn in have:
+            continue
+        if not os.path.isfile(os.path.join(UPLOAD_DIR, fn)):
+            continue  # binaire absent → ignoré (tolérant, comme les références d'image orphelines)
+        try:
+            size = int(a.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        db.execute(
+            "INSERT INTO attachments (memo_id, memo_uid, filename, orig_name, mime, size, preview, created_at, created_by, share_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            (memo_id, memo_uid, fn, _clean_orig_name(a.get("orig_name") or fn), str(a.get("mime") or "")[:100],
+             size, 1 if a.get("preview") else 0, (a.get("created_at") or "").strip() or now, str(a.get("created_by") or "").strip()[:200]),
+        )
+        have.add(fn)
 
 
 def get_db():
@@ -428,6 +576,27 @@ def init_db():
                 UNIQUE(kind, ref)
             )"""
         )
+    # [ATTACHMENTS] Pièces jointes génériques (tout type) rattachées à un mémo. Additive,
+    # distincte de memos.images (photos EXIF/carte). Noms de fichiers seuls en base, binaire
+    # sur le volume data/uploads/. `preview` = type « aperçu sûr » (image/pdf/audio validé par
+    # signature) ; sinon téléchargement forcé. `share_id` = provenance invité (comme les révisions).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memo_id INTEGER NOT NULL,
+            memo_uid TEXT DEFAULT '',
+            filename TEXT NOT NULL,
+            orig_name TEXT DEFAULT '',
+            mime TEXT DEFAULT '',
+            size INTEGER DEFAULT 0,
+            preview INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            created_by TEXT DEFAULT '',
+            share_id INTEGER
+        )
+        """
+    )
     # [PHOTO-MAP] Métadonnées EXIF des images, donnée DÉRIVÉE des fichiers (jamais
     # exportée, pas de bump de version) : remplie à l'upload + backfill, pour que la
     # carte du projet lise les lieux/dates sans re-parser/re-géocoder à chaque ouverture.
@@ -2449,9 +2618,11 @@ def list_memos():
         enabled = db.execute("SELECT * FROM projects WHERE vote_enabled = 1").fetchall()
     vpay = {pr["id"]: _vote_project_payload(db, pr, owner=True) for pr in enabled}
     vmap = {pr["id"]: _vote_voters_map(db, pr["id"]) for pr in enabled}
+    amap = _attachments_map(db, [r["id"] for r in rows], lambda r: "/api/attachments/" + str(r["id"]))  # [ATTACHMENTS]
     out = []
     for row in rows:
         d = _memo_dict(row, owner_name)
+        d["attachments"] = amap.get(d["id"], [])  # [ATTACHMENTS]
         g = guest_last.get(d["id"])
         if g:
             d["guest_editor"] = g["editor"]
@@ -2714,6 +2885,10 @@ def _purge_memo_row(db, memo_id):
     if row:
         _delete_image_files(row["images"])
         _forget_image_meta(db, row["images"])  # [PHOTO-MAP]
+    # [ATTACHMENTS] purge des fichiers joints + lignes (le binaire suit le mémo purgé).
+    for a in db.execute("SELECT filename FROM attachments WHERE memo_id = ?", (memo_id,)).fetchall():
+        _delete_attachment_file(a["filename"])
+    db.execute("DELETE FROM attachments WHERE memo_id = ?", (memo_id,))
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
     # [COMMENT-REACTIONS] purge des réactions AVANT les commentaires (comment_id → orphelin sinon).
@@ -2871,6 +3046,240 @@ def delete_memo_image(memo_id, name):
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
     return jsonify(_memo_dict(row))
+
+
+# ─────────────────────────── [ATTACHMENTS] routes owner ───────────────────────────
+def _owner_attach_url(r):
+    return "/api/attachments/" + str(r["id"])
+
+
+@app.route("/api/memos/<int:memo_id>/attachments", methods=["GET"])
+def list_attachments(memo_id):
+    db = get_db()
+    if not db.execute("SELECT 1 FROM memos WHERE id = ?", (memo_id,)).fetchone():
+        return jsonify({"error": "not found"}), 404
+    return jsonify(_attachments_map(db, [memo_id], _owner_attach_url).get(memo_id, []))
+
+
+@app.route("/api/memos/<int:memo_id>/attachments", methods=["POST"])
+def add_attachment(memo_id):
+    db = get_db()
+    memo = db.execute("SELECT id, uid FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not memo:
+        return jsonify({"error": "not found"}), 404
+    files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
+    files = [f for f in files if f and f.filename]
+    if not files:
+        return jsonify({"error": "file required"}), 400
+    now = datetime.now(timezone.utc).isoformat()
+    added_names = []
+    for f in files:
+        info, err = _save_attachment(f)
+        if err:
+            return jsonify({"error": err}), 400
+        db.execute(
+            "INSERT INTO attachments (memo_id, memo_uid, filename, orig_name, mime, size, preview, created_at, created_by, share_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', NULL)",
+            (memo_id, memo["uid"], info["filename"], info["orig"], info["mime"], info["size"], 1 if info["preview"] else 0, now),
+        )
+        added_names.append(info["orig"])
+    _attach_log_comment(db, memo, True, added_names, "moi", None)  # [ATTACHMENTS-COMMENT]
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (now, memo_id))
+    db.commit()
+    return jsonify(_attachments_map(db, [memo_id], _owner_attach_url).get(memo_id, [])), 201
+
+
+@app.route("/api/attachments/<int:att_id>", methods=["GET"])
+def download_attachment(att_id):
+    db = get_db()
+    r = db.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
+    if not r:
+        return "", 404
+    return _serve_attachment_row(r, request.args.get("download") in ("1", "true", "yes"))
+
+
+@app.route("/api/attachments/<int:att_id>", methods=["DELETE"])
+def delete_attachment(att_id):
+    db = get_db()
+    r = db.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
+    if not r:
+        return jsonify({"error": "not found"}), 404
+    _delete_attachment_file(r["filename"])
+    db.execute("DELETE FROM attachments WHERE id = ?", (att_id,))
+    memo = db.execute("SELECT id, uid FROM memos WHERE id = ?", (r["memo_id"],)).fetchone()
+    if memo:
+        _attach_log_comment(db, memo, False, [r["orig_name"] or r["filename"]], "moi", None)  # [ATTACHMENTS-COMMENT]
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), r["memo_id"]))
+    db.commit()
+    return "", 204
+
+
+# ─────────────────── [PHOTO-BATCH-DOWNLOAD] téléchargement en .zip d'un lot ───────────────────
+# Récupère d'un coup, en .zip, les fichiers d'un mémo OU d'un dossier (récursif optionnel). DEUX
+# stocks de fichiers coexistent et sont affichés dans l'app : la table `attachments` (tout type,
+# V22) et la colonne legacy `memos.images` (photos EXIF/carte). Le filtre « photos » = UNION
+# (attachments mime image/* + toutes les images legacy). Le zip est construit sur un fichier
+# TEMPORAIRE (jamais 300 Mo en RAM), streamé par send_file puis supprimé (after_this_request).
+# ZIP_STORED : les médias sont déjà compressés → pas de re-compression coûteuse sur le Zimaboard.
+def _zip_seg(s, fallback="fichier"):
+    """Segment de chemin de zip assaini : jamais de séparateur, ni HTML, ni chemin absolu."""
+    base = os.path.basename(str(s or "")).strip().replace("/", "_").replace("\\", "_")
+    base = re.sub(r"[^\w.\- ]", "_", base).strip(". ")[:120]
+    return base or fallback
+
+
+def _memo_zip_files(db, memo_row, scope):
+    """[{disk, name}] des fichiers d'un mémo pour `scope` ('all'|'photos'). Union attachments +
+    images legacy ; ne renvoie QUE les binaires réellement présents sur le volume (tolérant)."""
+    photos_only = scope != "all"
+    out, seen = [], set()
+    for r in db.execute(
+        "SELECT * FROM attachments WHERE memo_id = ? ORDER BY id", (memo_row["id"],)
+    ).fetchall():
+        mime = r["mime"] or ""
+        if photos_only and not mime.startswith("image/"):
+            continue
+        disk = os.path.basename(r["filename"] or "")
+        if not SAFE_ATTACH_NAME.match(disk) or disk in seen:
+            continue
+        path = os.path.join(UPLOAD_DIR, disk)
+        if not os.path.isfile(path):
+            continue
+        seen.add(disk)
+        out.append({"disk": path, "name": r["orig_name"] or disk})
+    try:
+        imgs = json.loads(memo_row["images"] or "[]")  # legacy : toujours des photos
+    except Exception:
+        imgs = []
+    for name in imgs:
+        disk = os.path.basename(str(name or ""))
+        if not SAFE_IMG_NAME.match(disk) or disk in seen:
+            continue
+        path = os.path.join(UPLOAD_DIR, disk)
+        if not os.path.isfile(path):
+            continue
+        seen.add(disk)
+        out.append({"disk": path, "name": disk})
+    return out
+
+
+def _project_path_names(db, root_id, project_id):
+    """Noms de dossiers assainis de l'enfant de `root_id` jusqu'à `project_id` inclus (vide si
+    project_id == root_id). Anti-boucle par garde de profondeur."""
+    chain, cur, guard = [], project_id, 0
+    while cur is not None and cur != root_id and guard < 60:
+        r = db.execute("SELECT name, parent_id FROM projects WHERE id = ?", (cur,)).fetchone()
+        if not r:
+            break
+        chain.append(_zip_seg(r["name"], "dossier"))
+        cur = r["parent_id"]
+        guard += 1
+    chain.reverse()
+    return chain
+
+
+def _project_zip_entries(db, root_id, scope, include_subs):
+    """[{disk, arc}] pour un dossier : arborescence lisible SousDossier/TitreMémo/fichier.
+    include_subs=False → uniquement les mémos DIRECTEMENT dans le dossier."""
+    pids = _project_descendants(db, root_id) if include_subs else [root_id]
+    ph = ",".join("?" * len(pids))
+    rows = db.execute(
+        f"SELECT * FROM memos WHERE project_id IN ({ph}) AND COALESCE(deleted_at, '') = '' "
+        "ORDER BY position, id",
+        pids,
+    ).fetchall()
+    entries = []
+    for m in rows:
+        files = _memo_zip_files(db, m, scope)
+        if not files:
+            continue
+        title = _zip_seg(m["title"] or _text_excerpt(m["content"]) or ("memo-" + str(m["id"])), "memo-" + str(m["id"]))
+        folder = "/".join(_project_path_names(db, root_id, m["project_id"]) + [title])
+        for f in files:
+            entries.append({"disk": f["disk"], "arc": folder + "/" + _zip_seg(f["name"])})
+    return entries
+
+
+def _memo_zip_entries(db, memo_row, scope):
+    """[{disk, arc}] à plat pour un mémo (arc = nom d'origine assaini)."""
+    return [{"disk": f["disk"], "arc": _zip_seg(f["name"])} for f in _memo_zip_files(db, memo_row, scope)]
+
+
+def _send_zip(entries, base_name):
+    """Construit un zip temporaire (dédup des collisions d'arc), le streame en pièce jointe puis
+    le supprime. base_name → nom du fichier ; send_file/Werkzeug encode RFC 5987 (accents OK)."""
+    if not entries:
+        return "", 404
+    tmp = tempfile.NamedTemporaryFile(prefix="dashzip_", suffix=".zip", delete=False)
+    tmp.close()
+    try:
+        with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
+            used = set()
+            for e in entries:
+                arc = e["arc"]
+                if arc in used:
+                    root, ext = os.path.splitext(arc)
+                    i = 2
+                    while f"{root} ({i}){ext}" in used:
+                        i += 1
+                    arc = f"{root} ({i}){ext}"
+                used.add(arc)
+                zf.write(e["disk"], arc)
+    except Exception:
+        try:
+            os.remove(tmp.name)
+        except OSError:
+            pass
+        return "", 500
+
+    @after_this_request
+    def _cleanup(resp):
+        try:
+            os.remove(tmp.name)
+        except OSError:
+            pass
+        return resp
+
+    return send_file(
+        tmp.name, mimetype="application/zip", as_attachment=True,
+        download_name=_zip_seg(base_name, "fichiers") + ".zip", max_age=0,
+    )
+
+
+def _zip_scope(args):
+    return "all" if args.get("scope") == "all" else "photos"
+
+
+def _zip_subs(args):
+    return args.get("subprojects", "1") not in ("0", "false", "no")
+
+
+def _zip_base(label, scope, fallback):
+    return (label or fallback) + ("-fichiers" if scope == "all" else "-photos")
+
+
+@app.route("/api/memos/<int:memo_id>/download.zip")
+def download_memo_zip(memo_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM memos WHERE id = ? AND COALESCE(deleted_at, '') = ''", (memo_id,)
+    ).fetchone()
+    if not row:
+        return "", 404
+    scope = _zip_scope(request.args)
+    base = _zip_base(row["title"] or _text_excerpt(row["content"]), scope, "memo-" + str(memo_id))
+    return _send_zip(_memo_zip_entries(db, row, scope), base)
+
+
+@app.route("/api/projects/<int:project_id>/download.zip")
+def download_project_zip(project_id):
+    db = get_db()
+    proj = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not proj:
+        return "", 404
+    scope = _zip_scope(request.args)
+    entries = _project_zip_entries(db, project_id, scope, _zip_subs(request.args))
+    return _send_zip(entries, _zip_base(proj["name"], scope, "dossier-" + str(project_id)))
 
 
 @app.route("/api/history", methods=["GET"])
@@ -3890,6 +4299,7 @@ def _data_version(db):
         "SELECT vote_id, memo_id FROM vote_options ORDER BY vote_id, memo_id",
         "SELECT COALESCE(vote_id, -1) AS vid, COUNT(*) FROM memo_votes GROUP BY vid ORDER BY vid",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM memo_history",
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM attachments",  # [ATTACHMENTS]
         "SELECT kind, ref, position FROM favorites ORDER BY position, kind, ref",  # [FAVORITES]
         "SELECT key, value FROM app_state WHERE key != 'activity_seen_at' ORDER BY key",
     )
@@ -4264,6 +4674,21 @@ def _insert_comment(db, memo_row, body, author, share_id=None, parent_id=None, p
     ).fetchone()
 
 
+def _attach_log_comment(db, memo_row, added, names, author, share_id):
+    """[ATTACHMENTS-COMMENT] Commentaire automatique d'ajout/suppression de fichier. Commentaire
+    NORMAL (compte dans 💬, déclenche 🔔 si invité via share_id) attribué à l'auteur de l'action.
+    Le « par qui » vient de l'attribution du commentaire (author) — pas répété dans le corps."""
+    names = [n for n in (names or []) if n]
+    if not names:
+        return
+    if added:
+        body = ("📎 a ajouté le fichier « %s »" % names[0]) if len(names) == 1 else (
+            "📎 a ajouté %d fichiers : %s" % (len(names), ", ".join(names)))
+    else:
+        body = "🗑 a supprimé le fichier « %s »" % names[0]
+    _insert_comment(db, memo_row, body, author, share_id)
+
+
 @app.route("/api/memos/<int:memo_id>/comments", methods=["GET"])
 def list_comments(memo_id):
     db = get_db()
@@ -4610,6 +5035,8 @@ def hub_data(hub_token):
         d["comments"] = comments_by_memo.get(mid, [])
         d["share_token"] = win["token"]
         d["can_edit"] = win["can_edit"]
+        # [ATTACHMENTS] URL scopée au share couvrant ce mémo (token propre à chaque dossier du hub).
+        d["attachments"] = _attachments_map(db, [mid], lambda r, t=win["token"]: "/share/" + t + "/attachment/" + str(r["id"])).get(mid, [])
         pv = vpay.get(r["project_id"])
         if pv and not _row_get(r, "vote_excluded", 0):  # [VOTE-EXCLUDE]
             voters = vmap[r["project_id"]].get(mid, [])
@@ -4838,11 +5265,13 @@ def share_data(token):
         # [VOTE-GROUPS] votes nommés + permission résolue (booléen lecture seule, façon `trip`).
         p["votes"] = _project_named_votes(db, p["id"], me, vote_owner_name, is_owner=False)
         p["can_create_vote"] = bool(share["can_edit"]) and me is not None and _resolve_vote_create(db, p["id"]) == "guests"
+    att_map = _attachments_map(db, [r["id"] for r in rows], lambda a: "/share/" + token + "/attachment/" + str(a["id"]))  # [ATTACHMENTS]
     for r in rows:
         d = _share_memo_dict(r)
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
             d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(r["id"], [])
+        d["attachments"] = att_map.get(r["id"], [])  # [ATTACHMENTS]
         pv = vpay.get(r["project_id"])
         if pv and not _row_get(r, "vote_excluded", 0):  # [VOTE-EXCLUDE]
             voters = vmap[r["project_id"]].get(r["id"], [])
@@ -5125,6 +5554,115 @@ def share_delete_image(token, memo_id, name):
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
     return jsonify(_share_memo_dict(row))
+
+
+# ─────────────────────────── [ATTACHMENTS] routes invité (sous /share/*) ───────────────────────────
+# Invariant 5 : upload = invité APPROUVÉ + can_edit + mémo DANS le scope ; download = tout invité
+# ayant accès (le fichier doit appartenir à un mémo du scope). Non-média TOUJOURS en attachment.
+@app.route("/share/<token>/memo/<int:memo_id>/attachments", methods=["POST"])
+def share_add_attachment(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"]:
+        return jsonify({"error": "lecture seule"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
+    files = [f for f in files if f and f.filename]
+    if not files:
+        return jsonify({"error": "file required"}), 400
+    memo = db.execute("SELECT id, uid FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    by = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    now = datetime.now(timezone.utc).isoformat()
+    added_names = []
+    for f in files:
+        info, err = _save_attachment(f)
+        if err:
+            return jsonify({"error": err}), 400
+        db.execute(
+            "INSERT INTO attachments (memo_id, memo_uid, filename, orig_name, mime, size, preview, created_at, created_by, share_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (memo_id, memo["uid"], info["filename"], info["orig"], info["mime"], info["size"], 1 if info["preview"] else 0, now, by, share["id"]),
+        )
+        added_names.append(info["orig"])
+    _attach_log_comment(db, memo, True, added_names, by, share["id"])  # [ATTACHMENTS-COMMENT] déclenche 🔔
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (now, memo_id))
+    db.commit()
+    url_fn = lambda r: "/share/" + token + "/attachment/" + str(r["id"])
+    return jsonify(_attachments_map(db, [memo_id], url_fn).get(memo_id, [])), 201
+
+
+@app.route("/share/<token>/attachment/<int:att_id>")
+def share_download_attachment(token, att_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return "", 404
+    r = db.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
+    if not r or r["memo_id"] not in {m["id"] for m in _share_scope_memos(db, share)}:
+        return "", 404
+    return _serve_attachment_row(r, request.args.get("download") in ("1", "true", "yes"))
+
+
+@app.route("/share/<token>/attachment/<int:att_id>", methods=["DELETE"])
+def share_delete_attachment(token, att_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share or not share["can_edit"]:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    r = db.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
+    if not r or r["memo_id"] not in {m["id"] for m in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    _delete_attachment_file(r["filename"])
+    db.execute("DELETE FROM attachments WHERE id = ?", (att_id,))
+    memo = db.execute("SELECT id, uid FROM memos WHERE id = ?", (r["memo_id"],)).fetchone()
+    if memo:  # [ATTACHMENTS-COMMENT] déclenche 🔔 (invité approuvé, dans le scope — invariant 5)
+        by = f"{guest['name'] or guest['email']} <{guest['email']}>"
+        _attach_log_comment(db, memo, False, [r["orig_name"] or r["filename"]], by, share["id"])
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), r["memo_id"]))
+    db.commit()
+    return "", 204
+
+
+# [PHOTO-BATCH-DOWNLOAD] Zip côté invité : lecture seule scopée au token (comme share_image /
+# share_download_attachment — pas d'approbation requise pour LIRE). L'invité ne peut zipper que ce
+# que son token couvre ; subprojects borné au sous-arbre autorisé (invariant 5).
+@app.route("/share/<token>/memo/<int:memo_id>/download.zip")
+def share_download_memo_zip(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return "", 404
+    if memo_id not in {m["id"] for m in _share_scope_memos(db, share)}:
+        return "", 404
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    scope = _zip_scope(request.args)
+    base = _zip_base(row["title"] or _text_excerpt(row["content"]), scope, "memo-" + str(memo_id))
+    return _send_zip(_memo_zip_entries(db, row, scope), base)
+
+
+@app.route("/share/<token>/project/<int:project_id>/download.zip")
+def share_download_project_zip(token, project_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share or share["kind"] != "project":
+        return "", 404
+    # le dossier demandé doit être la cible du partage OU un de ses descendants → tout son
+    # sous-arbre est alors, lui aussi, dans le périmètre autorisé.
+    if project_id not in set(_project_descendants(db, share["target_id"])):
+        return "", 404
+    proj = db.execute("SELECT name FROM projects WHERE id = ?", (project_id,)).fetchone()
+    scope = _zip_scope(request.args)
+    entries = _project_zip_entries(db, project_id, scope, _zip_subs(request.args))
+    return _send_zip(entries, _zip_base(proj["name"] if proj else "", scope, "dossier-" + str(project_id)))
 
 
 def _share_memo_dict_from_payload(d):
@@ -5745,12 +6283,26 @@ def _build_export(db, root_id=None):
         d.pop("id", None)
         d["category"] = cats.get(d.pop("category_id", None), "")
         out_links.append(d)
+    # [ATTACHMENTS] v22 : pièces jointes nichées par mémo (noms de fichiers seuls, jamais le binaire).
+    att_by_id = {}
+    if memos:
+        ph_m = ",".join("?" * len(memos))
+        for a in db.execute(
+            "SELECT memo_id, filename, orig_name, mime, size, preview, created_at, created_by "
+            f"FROM attachments WHERE memo_id IN ({ph_m}) ORDER BY id", [m["id"] for m in memos]
+        ).fetchall():
+            att_by_id.setdefault(a["memo_id"], []).append({
+                "filename": a["filename"], "orig_name": a["orig_name"] or a["filename"],
+                "mime": a["mime"] or "", "size": a["size"] or 0,
+                "preview": 1 if a["preview"] else 0, "created_at": a["created_at"], "created_by": a["created_by"] or "",
+            })
     out_memos = []
     for r in memos:
         d = _memo_dict(r)
-        d.pop("id", None)
+        mid = d.pop("id", None)
         d.pop("created_by_display", None)  # runtime-only, jamais exporté ; created_by (brut) reste
         d["project"] = proj_names.get(d.pop("project_id", None), "")
+        d["attachments"] = att_by_id.get(mid, [])  # [ATTACHMENTS] v22
         out_memos.append(d)
     out_projects = [
         {
@@ -5797,7 +6349,7 @@ def _build_export(db, root_id=None):
         d["reactions"] = reacts_by_cid.get(cid, [])
         out_comments.append(d)
     result = {
-        "version": 21,
+        "version": 22,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -6483,6 +7035,7 @@ def import_links():
                 updated_memos += 1
             else:
                 skipped_memos += 1
+            _import_memo_attachments(db, existing["id"], uid, memo.get("attachments"), now)  # [ATTACHMENTS] v22
             continue
 
         # INSERT (mémo nouveau OU 'duplicate' explicite). Le dédup par contenu est court-circuité
@@ -6505,6 +7058,7 @@ def import_links():
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
         ).fetchone()
+        _import_memo_attachments(db, memos_by_uid[new_uid]["id"], new_uid, memo.get("attachments"), now)  # [ATTACHMENTS] v22
         imported_memos += 1
 
     existing_hist = {

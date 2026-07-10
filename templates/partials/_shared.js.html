@@ -1781,6 +1781,207 @@ function agendaStartMonth(memos, todayIso) {
   return { ...ymOf(pick), day: dates.find(d => d.slice(0, 7) === pfx) || todayIso };
 }
 
+// ── [ATTACHMENTS] Section « 📎 Fichiers » d'un mémo (parité owner/invité/hub) ────────────
+// PUR : la page fournit cfg = { attachments, canEdit, uploadUrl, headers?, onChange, openImage? }.
+// Types « aperçu sûr » (preview=true : image/pdf/audio validés serveur) → aperçu ; le reste →
+// téléchargement forcé (?download=1). Upload streamé côté serveur ; barre de progression via XHR.
+function fmtBytes(n) { n = n || 0; if (n < 1024) return n + ' o'; if (n < 1048576) return (n / 1024).toFixed(0) + ' Ko'; return (n / 1048576).toFixed(1) + ' Mo'; }
+function attachIcon(mime) {
+  mime = mime || '';
+  if (mime.indexOf('image/') === 0) return '🖼';
+  if (mime === 'application/pdf') return '📄';
+  if (mime.indexOf('audio/') === 0) return '🎵';
+  if (mime.indexOf('video/') === 0) return '🎬';
+  if (/zip|compress|tar|rar|7z/.test(mime)) return '🗜';
+  if (/word|document|opendocument|sheet|excel|presentation|text/.test(mime)) return '📃';
+  return '📎';
+}
+function _attachStyle() {
+  if (document.getElementById('attach-style')) return;
+  const st = document.createElement('style'); st.id = 'attach-style';
+  st.textContent = '.attach-sec{margin-top:0.6rem}.attach-head{font-weight:600;font-size:0.85rem;color:var(--muted);margin-bottom:0.35rem}'
+    + '.attach-item{display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.4rem;border:1px solid var(--border);border-radius:8px;margin-bottom:0.35rem;background:var(--panel-2)}'
+    + '.attach-ic{font-size:1.2rem;flex:0 0 auto}.attach-meta{flex:1;min-width:0}'
+    + '.attach-name{font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    + '.attach-size{font-size:0.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    + '.attach-acts{display:flex;gap:0.25rem;flex:0 0 auto}'
+    + '.attach-up{margin-top:0.4rem;border:1px dashed var(--border);border-radius:8px;padding:0.5rem;text-align:center}'
+    + '.attach-up.drag{border-color:var(--accent);background:var(--panel-2)}'
+    + '.attach-hint{font-size:0.75rem;color:var(--muted)}'
+    + '.attach-prog{height:6px;background:var(--border);border-radius:4px;margin-top:0.4rem;overflow:hidden}'
+    + '.attach-bar{height:100%;width:0;background:var(--accent);transition:width 0.1s}';
+  document.head.appendChild(st);
+}
+function attachPreview(a, cfg) {
+  if (a.mime && a.mime.indexOf('image/') === 0 && cfg.openImage) { cfg.openImage(a); return; }
+  window.open(a.url, '_blank', 'noopener');  // pdf/audio previewables → nouvel onglet (servi safe serveur)
+}
+function attachRow(a, cfg) {
+  const row = el('div', { class: 'attach-item' });
+  row.appendChild(el('span', { class: 'attach-ic', text: attachIcon(a.mime) }));
+  const meta = el('div', { class: 'attach-meta' });
+  meta.appendChild(el('div', { class: 'attach-name', text: a.orig_name, attrs: { title: a.orig_name } }));
+  meta.appendChild(el('div', { class: 'attach-size', text: fmtBytes(a.size) + (a.mime ? ' · ' + a.mime : '') }));
+  row.appendChild(meta);
+  const acts = el('div', { class: 'attach-acts' });
+  if (a.preview) acts.appendChild(el('button', { class: 'iv-btn', text: '⤢', attrs: { type: 'button', title: 'Aperçu' }, on: { click: () => attachPreview(a, cfg) } }));
+  acts.appendChild(el('a', { class: 'iv-btn', text: '⤓', attrs: { href: a.url + '?download=1', title: 'Télécharger', download: a.orig_name, rel: 'noopener' } }));
+  if (cfg.canEdit) acts.appendChild(el('button', {
+    class: 'iv-btn iv-del', text: '✕', attrs: { type: 'button', title: 'Supprimer' },
+    on: { click: async () => {
+      if (typeof confirmPopin === 'function' && !(await confirmPopin('Supprimer « ' + a.orig_name + ' » ?', { okLabel: 'Supprimer' }))) return;
+      try { const r = await fetch(a.url, { method: 'DELETE', headers: cfg.headers || {} }); if (!r.ok) throw 0; } catch (e) { notify('Suppression impossible', { error: true }); return; }
+      if (cfg.onChange) cfg.onChange();
+    } },
+  }));
+  row.appendChild(acts);
+  return row;
+}
+function attachUpload(files, cfg, prog, bar) {
+  const fd = new FormData();
+  for (let i = 0; i < files.length; i++) fd.append('files', files[i]);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', cfg.uploadUrl);
+  if (cfg.headers) Object.keys(cfg.headers).forEach(k => xhr.setRequestHeader(k, cfg.headers[k]));
+  prog.style.display = 'block'; bar.style.width = '0%';
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) bar.style.width = Math.round(e.loaded / e.total * 100) + '%'; };
+  xhr.onload = () => { prog.style.display = 'none'; if (xhr.status >= 200 && xhr.status < 300) { if (cfg.onChange) cfg.onChange(); } else { let m = 'Upload impossible'; try { m = JSON.parse(xhr.responseText).error || m; } catch (e) {} notify(m, { error: true }); } };
+  xhr.onerror = () => { prog.style.display = 'none'; notify('Upload impossible', { error: true }); };
+  xhr.send(fd);
+}
+function attachUploader(cfg) {
+  const box = el('div', { class: 'attach-up' });
+  const input = el('input', { attrs: { type: 'file', multiple: 'true', style: 'display:none' } });
+  const btn = el('button', { class: 'prio-btn', text: '+ Ajouter un fichier', attrs: { type: 'button' } });
+  const prog = el('div', { class: 'attach-prog', attrs: { style: 'display:none' } });
+  const bar = el('div', { class: 'attach-bar' }); prog.appendChild(bar);
+  btn.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { if (input.files.length) attachUpload(input.files, cfg, prog, bar); input.value = ''; });
+  box.addEventListener('dragover', (e) => { e.preventDefault(); box.classList.add('drag'); });
+  box.addEventListener('dragleave', () => box.classList.remove('drag'));
+  box.addEventListener('drop', (e) => { e.preventDefault(); box.classList.remove('drag'); if (e.dataTransfer.files.length) attachUpload(e.dataTransfer.files, cfg, prog, bar); });
+  box.appendChild(btn); box.appendChild(el('span', { class: 'attach-hint', text: ' ou glisser-déposer (max 300 Mo)' }));
+  box.appendChild(input); box.appendChild(prog);
+  return box;
+}
+// [PHOTO-BATCH-DOWNLOAD] Compte des fichiers téléchargeables d'un mémo pour un scope. Union des
+// deux stocks : `memo.images` (legacy = photos, comptent aux deux scopes) + `memo.attachments`
+// (mime image/* seulement en scope 'photos'). Partagé owner/invité/hub (invariant 9).
+function memoZipCount(memo, scope) {
+  let n = (memo.images || []).length;
+  (memo.attachments || []).forEach(a => { if (scope === 'all' || (a.mime || '').indexOf('image/') === 0) n++; });
+  return n;
+}
+// Idem à partir d'une cfg renderAttachments (attachments + cfg.zip.images = nb d'images legacy).
+function attachZipCount(cfg, scope) {
+  let n = (cfg.zip && cfg.zip.images) || 0;
+  (cfg.attachments || []).forEach(a => { if (scope === 'all' || (a.mime || '').indexOf('image/') === 0) n++; });
+  return n;
+}
+// Pop-in « Télécharger les fichiers » (mémo OU dossier). cfg = { title, hasSubprojects,
+// count(scope, subs) -> nombre, buildUrl(scope, subs) -> URL }. Réutilise le gabarit <dialog> +
+// classes existantes (invariant 9), pas de GSAP sur le <dialog> (invariant 8). Créée à la volée.
+function downloadZipDialog(cfg) {
+  let dlg = document.getElementById('zip-dl-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'zip-dl-dialog';
+    dlg.style.cssText = 'width:min(420px,94vw);border:1px solid var(--border);border-radius:14px;'
+      + 'background:var(--panel);color:var(--text);padding:1rem';
+    document.body.appendChild(dlg);
+  }
+  let scope = cfg.count('photos', true) > 0 ? 'photos' : 'all';
+  let subs = true;
+  function render() {
+    dlg.innerHTML = '';
+    const head = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.5rem;margin-bottom:0.8rem' } });
+    head.appendChild(el('h3', { text: cfg.title || 'Télécharger les fichiers', attrs: { style: 'margin:0;font-size:1rem;flex:1' } }));
+    const x = el('button', { class: 'iv-btn', text: '✕', attrs: { type: 'button', title: 'Fermer' } });
+    x.addEventListener('click', () => dlg.close());
+    head.appendChild(x); dlg.appendChild(head);
+    const seg = el('div', { attrs: { style: 'display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.7rem' } });
+    [['photos', 'Photos seulement'], ['all', 'Toutes les pièces jointes']].forEach(([val, label]) => {
+      const b = el('button', { class: 'prio-btn', text: label + ' (' + cfg.count(val, subs) + ')', attrs: { type: 'button' } });
+      if (scope === val) { b.style.background = 'var(--accent)'; b.style.color = '#10141a'; }
+      b.addEventListener('click', () => { scope = val; render(); });
+      seg.appendChild(b);
+    });
+    dlg.appendChild(seg);
+    if (cfg.hasSubprojects) {
+      const lbl = el('label', { attrs: { style: 'display:flex;align-items:center;gap:0.5rem;margin-bottom:0.8rem;font-size:0.9rem;cursor:pointer' } });
+      const cb = el('input', { attrs: { type: 'checkbox' } }); cb.checked = subs;
+      cb.addEventListener('change', () => { subs = cb.checked; render(); });
+      lbl.appendChild(cb); lbl.appendChild(el('span', { text: 'Inclure les sous-dossiers' }));
+      dlg.appendChild(lbl);
+    }
+    const foot = el('div', { attrs: { style: 'display:flex;justify-content:flex-end;gap:0.5rem' } });
+    const cancel = el('button', { class: 'iv-btn', text: 'Annuler', attrs: { type: 'button' } });
+    cancel.addEventListener('click', () => dlg.close());
+    const go = el('button', { class: 'primary', text: 'Télécharger', attrs: { type: 'button' } });
+    if (!cfg.count(scope, subs)) { go.disabled = true; go.style.opacity = '0.5'; }
+    go.addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = cfg.buildUrl(scope, subs); a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      dlg.close();
+    });
+    foot.appendChild(cancel); foot.appendChild(go); dlg.appendChild(foot);
+  }
+  render();
+  dlg.showModal();
+}
+function renderAttachments(cfg) {
+  _attachStyle();
+  const wrap = el('div', { class: 'attach-sec' });
+  const list = cfg.attachments || [];
+  const head = el('div', { class: 'attach-head', attrs: { style: 'display:flex;align-items:center;gap:0.4rem' } });
+  head.appendChild(el('span', { text: '📎 Fichiers' + (list.length ? ' (' + list.length + ')' : ''), attrs: { style: 'flex:1' } }));
+  if (cfg.zip && cfg.zip.url && attachZipCount(cfg, 'all') > 0) {  // [PHOTO-BATCH-DOWNLOAD] zip du mémo
+    const z = el('button', { class: 'iv-btn', text: '⤓', attrs: { type: 'button', title: 'Télécharger en .zip' } });
+    z.addEventListener('click', () => downloadZipDialog({
+      title: 'Télécharger les fichiers',
+      hasSubprojects: false,
+      count: (scope) => attachZipCount(cfg, scope),
+      buildUrl: (scope) => cfg.zip.url + '?scope=' + scope,
+    }));
+    head.appendChild(z);
+  }
+  wrap.appendChild(head);
+  list.forEach(a => wrap.appendChild(attachRow(a, cfg)));
+  if (cfg.canEdit) wrap.appendChild(attachUploader(cfg));
+  return wrap;
+}
+
+// [ATTACHMENTS-QUICKVIEW] Pop-in de consultation des fichiers d'un mémo depuis la card (badge 📎n),
+// sans ouvrir l'éditeur. Réutilise renderAttachments (invariant 9 : même rendu aperçu/download).
+// `makeCfg(rerender)` renvoie la cfg renderAttachments (onChange re-rend la pop-in). Pas de GSAP
+// sur le <dialog> (invariant 8). Dialog créé à la volée, réutilisé.
+function attachQuickView(title, makeCfg) {
+  let dlg = document.getElementById('attach-view-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'attach-view-dialog';
+    dlg.style.cssText = 'width:min(520px,94vw);border:1px solid var(--border);border-radius:14px;'
+      + 'background:var(--panel);color:var(--text);padding:1rem';
+    document.body.appendChild(dlg);
+  }
+  function render() {
+    dlg.innerHTML = '';
+    const head = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem' } });
+    head.appendChild(el('h3', { text: title, attrs: { style: 'margin:0;font-size:1rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+    const x = el('button', { class: 'prio-btn', text: '✕', attrs: { type: 'button', title: 'Fermer', style: 'padding:0.1rem 0.5rem' } });
+    x.addEventListener('click', () => dlg.close());
+    head.appendChild(x);
+    dlg.appendChild(head);
+    const cfg = makeCfg(render);
+    const list = cfg.attachments || [];
+    if (!list.length && !cfg.canEdit) dlg.appendChild(el('div', { attrs: { style: 'color:var(--muted);font-size:0.85rem' }, text: 'Aucun fichier joint.' }));
+    dlg.appendChild(renderAttachments(cfg));
+  }
+  render();
+  dlg.showModal();
+}
+
 // ── [POMODORO] Widget minuteur/chrono flottant (3 pages via le partial) ──────────────
 // 3 modes : 🍅 Pomodoro (travail/pause en cycles) · ⏳ Minuteur (décompte) · ⏱ Chrono (croissant).
 // Source de vérité = timestamps absolus (endAt / chronoStart) recalculés à chaque tick depuis

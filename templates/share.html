@@ -802,6 +802,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="q-wrap"><div id="q-editor"></div></div>
   <label class="me-label">Assigné·es</label>
   <div id="q-people" class="q-people"></div>
+  <div id="q-attachments"></div>
   <div class="dlg-actions">
     <button type="button" id="edit-cancel">Annuler</button>
     <button type="button" id="edit-save" class="primary">Enregistrer</button>
@@ -1222,6 +1223,39 @@ function renderQContext(memo) {
   }
 }
 
+// [ATTACHMENTS-QUICKVIEW] Pop-in de consultation des fichiers depuis la card (invité).
+function openShareMemoAttachments(memo) {
+  const label = memo.title || stripTags(memo.content || '').slice(0, 40) || 'Fichiers';
+  attachQuickView('📎 ' + label, (rerender) => {
+    const m = (DATA.memos || []).find((x) => x.id === memo.id) || memo;
+    return {
+      attachments: m.attachments || [],
+      canEdit: canEditNow(),
+      uploadUrl: API + '/memo/' + memo.id + '/attachments',
+      zip: { url: API + '/memo/' + memo.id + '/download.zip', images: (m.images || []).length },
+      headers: { 'X-Guest-Token': guestToken() },
+      onChange: async () => { await load(); rerender(); },
+      openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+    };
+  });
+}
+
+// [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur invité (scopée au partage).
+function renderQAttachments(memo) {
+  const box = document.getElementById('q-attachments');
+  if (!box) return;
+  box.innerHTML = '';
+  box.appendChild(renderAttachments({
+    attachments: memo.attachments || [],
+    canEdit: canEditNow(),
+    uploadUrl: API + '/memo/' + memo.id + '/attachments',
+    zip: { url: API + '/memo/' + memo.id + '/download.zip', images: (memo.images || []).length },
+    headers: { 'X-Guest-Token': guestToken() },
+    onChange: async () => { await load(); const m = (DATA.memos || []).find((x) => x.id === memo.id); if (m) renderQAttachments(m); },
+    openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+  }));
+}
+
 function openEditor(memo, contentEl, taskEl) {
   const q = getShareQuill();
   if (!q) {
@@ -1246,6 +1280,7 @@ function openEditor(memo, contentEl, taskEl) {
   }
   editingId = memo.id;
   renderQContext(memo);
+  renderQAttachments(memo);  // [ATTACHMENTS]
   const titleEl = document.getElementById('q-title');
   if (titleEl) titleEl.value = memo.title || '';
   editAssignees = [...(memo.assignees || [])];
@@ -1494,6 +1529,15 @@ function scopedMemos() {
   if (PFILTER === 'all') return DATA.memos;
   const set = new Set([PFILTER, ...projDescendants(PFILTER)]);
   return DATA.memos.filter(m => set.has(m.project_id));
+}
+
+// [PHOTO-BATCH-DOWNLOAD] Fichiers d'un dossier partagé (+ sous-dossiers) — scope borné à
+// DATA.memos (périmètre du partage, invariant 5). Le token borne côté serveur.
+function shareProjectZipCount(pid, scope, includeSubs) {
+  const set = new Set(includeSubs ? [pid, ...projDescendants(pid)] : [pid]);
+  let n = 0;
+  (DATA.memos || []).forEach(m => { if (set.has(m.project_id)) n += memoZipCount(m, scope); });
+  return n;
 }
 
 async function guestPut(url, body) {
@@ -1899,6 +1943,23 @@ function renderTiles() {
     tile.appendChild(l);
     tile.addEventListener('click', openSharePhotos);
     tiles.appendChild(tile);
+  }
+  // [PHOTO-BATCH-DOWNLOAD] Tuile « ⤓ Télécharger » : zip des fichiers du dossier partagé.
+  if (DATA.kind === 'project') {
+    const zpid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
+    if (zpid && shareProjectZipCount(zpid, 'all', true) > 0) {
+      const tile = el('div', 'tile');
+      const l = el('span', 'tl', '⤓ Télécharger'); l.style.color = '#b08968';
+      tile.appendChild(l);
+      tile.title = 'Télécharger les fichiers du dossier en .zip';
+      tile.addEventListener('click', () => downloadZipDialog({
+        title: 'Télécharger les fichiers',
+        hasSubprojects: true,
+        count: (scope, subs) => shareProjectZipCount(zpid, scope, subs),
+        buildUrl: (scope, subs) => API + '/project/' + zpid + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0),
+      }));
+      tiles.appendChild(tile);
+    }
   }
   // [AGENDA-PROJECT] Tuile « 📆 Agenda » : agenda pré-filtré sur le dossier courant
   // (PFILTER) + descendants ; sur « Tous » = agenda global du partage (comme la sidebar).
@@ -2413,6 +2474,12 @@ function render() {
     if (memo.due_date) {
       const dt = fmtMemoTime(memo.due_time);
       row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (dt ? ' · ' + dt : '')));
+    }
+    if ((memo.attachments || []).length) {  // [ATTACHMENTS-QUICKVIEW] badge 📎 n cliquable
+      const ab = el('span', 'badge', '📎 ' + memo.attachments.length);
+      ab.style.cursor = 'pointer'; ab.title = 'Voir les fichiers joints';
+      ab.addEventListener('click', (e) => { e.stopPropagation(); openShareMemoAttachments(memo); });
+      row.appendChild(ab);
     }
     if (canEditNow()) {
       const eBtn = el('button', 'task-edit');

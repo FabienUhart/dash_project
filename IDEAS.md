@@ -30,6 +30,30 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 
 **Acceptation (validation Cowork)** : carte du parent (owner + invité approuvé) → le(s) scrutin(s) du/des sous-projet(s) apparaissent, badges de voix corrects, vote ouvrable ; sélection/bascule entre plusieurs scrutins OK ; carte du sous-projet direct **inchangée** ; anonyme = lecture seule. `node --check` + `py_compile`. Invariants 5/6/8/9.
 
+## [FX-CONVERTER] — Widget convertisseur de devises (JPY↔EUR + sélecteur)
+
+**Statut :** À faire
+**Contexte :** Voyage Japon. Widget convertisseur calqué sur le Pomodoro (afficher/masquer, lanceur + panneau déplaçables, préférence par utilisateur), activable aussi par les invités depuis leur vue. Pas de changement de format d'export → APP_VERSION reste "22".
+
+**Taux — 1 fetch/jour, conservé toute la journée (serveur) :**
+- Source : Frankfurter `https://api.frankfurter.app/latest?from=EUR` (données BCE, gratuit, sans clé). Réponse = taux base EUR multi-devises (JPY, USD, GBP…).
+- Cache serveur partagé : `{date, base:"EUR", rates_json, fetched_at}`. Refresh paresseux : à la 1ʳᵉ requête `/api/fx` où date stockée ≠ jour (Europe/Paris) → refetch + écrase ; sinon cache. Une seule sortie réseau/jour, pas de cron.
+- Stockage : table `fx_rates` (additif, invariant 1) ou fichier JSON dans `data/`. Exclu de l'export (cache, pas de donnée utilisateur).
+- Robustesse : fetch KO → garde le dernier taux, affiche « taux du {date} ». Pas de crash.
+
+**Endpoints :**
+- Owner : `GET /api/fx` → `{date, base, rates}`.
+- Invités (invariant 5, bypass `/share/*`) : `GET /share/<token>/fx`, token revalidé.
+
+**Widget (réutilise les patterns Pomodoro — invariant 9) :**
+- Lanceur `#fx-launch` (glyphe monochrome `¥€`) + panneau `#fx-panel` déplaçables, clamp fenêtre, positions persistées (`fxPos`, `fxHidden`), re-show `#fx-reshow`.
+- Case afficher/masquer `#fx-visible-cb` dans les réglages — owner (index.html) ET invités (share.html, hub.html) ; préférence locale par utilisateur.
+- Conversion bidirectionnelle : 2 champs + 2 sélecteurs, défaut JPY↔EUR, bouton swap `↔`. Taper à gauche MAJ droite et inverse. Taux croisé côté client depuis la table base EUR. Arrondi (2 déc. EUR, 0 JPY).
+- Sélecteur : JPY/EUR en tête + USD/GBP/CHF… ; couple mémorisé (localStorage).
+- Style monochrome, pas de GSAP sur `<dialog>` (invariant 8), helpers mutualisés dans `_shared.js.html`.
+
+**Contraintes :** additif (inv. 1), pas de CDN runtime navigateur (inv. 6, seul appel externe = fetch serveur), aucun commit/tag/push sans feu vert. Journaliser IDEAS→REALISATION une fois codé + build OK. Validation Chrome owner + invité par Cowork.
+
 ## Quick wins
 
 - **Raccourcis clavier 1-9** : ouvrir directement les 9 premiers liens de la catégorie active.
@@ -117,11 +141,16 @@ Petites touches de plaisir :
 
 - **[TAG-NAV] Section « Étiquettes » dans la sidebar (navigation par tag)** : les tags existent déjà (sur liens, mémos et projets, normalisés minuscules sans `#`, recherche scopée `l#`/`m#`/`p#`) mais ne sont pas navigables depuis la sidebar. Ajouter une section **Étiquettes** listant tous les tags présents (dédupliqués, triés, avec compteur), chacun cliquable pour **filtrer/parcourir** tout ce qui le porte (réutilise la recherche scopée existante). Optionnel : repli/dépli, et petites pastilles de couleur. **Frontend uniquement** (agrège `state.links`/`state.memos`/`state.projects`), aucun changement d'export. Brique d'Evernote ([SIDEBAR-EVERNOTE]) — l'utilisateur aime ce modèle « par étiquette ».
 
-- **[ATTACHMENTS] Pièces jointes (pdf, texte, image, audio) téléchargeables, invités inclus** : généraliser l'upload d'images existant (`_save_uploaded_image`, `UPLOAD_DIR`, validation par **signature binaire** — invariant 5) à d'autres types. Réutiliser au maximum l'infra en place (table images / `data/uploads/`, routes `/uploads/<name>` et `/share/<token>/image/<name>`, upload invité `/share/<token>/memo/<id>/images`).
+- [x] **[ATTACHMENTS] Pièces jointes (pdf, texte, image, audio) téléchargeables, invités inclus** → **✅ FAIT [V22.0.69] (BUMP EXPORT v22)** : table additive `attachments`, upload owner + invités approuvés `can_edit` (300 Mo, `MAX_CONTENT_LENGTH` 320 Mo, gunicorn `--timeout 300`), validation par **signature binaire** (`_attach_preview`), service inline/download anti-XSS (`_serve_attachment_row`), routes owner `/api/memos/<id>/attachments` + `/api/attachments/<id>` et invité `/share/<token>/memo/<id>/attachments` + `/share/<token>/attachment/<id>` (scope revalidé, invariant 5), export v22 additif = **noms de fichiers seuls** (binaires dans `data/uploads/`, jamais dans le JSON), import non destructif `_import_memo_attachments`. Détail : `REALISATION.md` [V22.0.69]. Idée d'origine ci-dessous.
+  - généraliser l'upload d'images existant (`_save_uploaded_image`, `UPLOAD_DIR`, validation par **signature binaire** — invariant 5) à d'autres types. Réutiliser au maximum l'infra en place (table images / `data/uploads/`, routes `/uploads/<name>` et `/share/<token>/image/<name>`, upload invité `/share/<token>/memo/<id>/images`).
   - **Types & validation** : PDF (signature `%PDF-`, facile), images (déjà fait). Audio (signatures mp3/`ID3`, m4a/`ftyp`, ogg/`OggS`, wav/`RIFF`…`WAVE`) — plus de cas + fichiers lourds, attention à la taille. **Texte** (`.txt`) : pas de signature fiable → valider par extension + plafond de taille + servir en **téléchargement** (`Content-Disposition: attachment`), jamais en inline (anti-XSS). Garder une **liste blanche d'extensions** et une **taille max** par type.
   - **Téléchargement** : route owner + route publique `/share/...` renvoyant le fichier en pièce jointe ; les invités **approuvés** peuvent télécharger (pas seulement voir), dans le strict périmètre du partage (invariant 5). Ne jamais servir un type exécutable/HTML inline.
   - **Modèle & export** : soit étendre la table images en table `attachments` générique (colonne `kind`/`mime`), soit une table dédiée. Export/import **vN additif** : **noms de fichiers seulement** (comme les images v6), compat ascendante, upsert non destructif. Les fichiers eux-mêmes restent dans le volume `data/uploads/` (jamais committés, jamais dans le JSON).
   - **Note** : recoupe l'item « Audios sur les mémos » plus bas — à fusionner si on fait l'audio ici. Découpage conseillé : livrer d'abord **PDF + image** (collent à l'infra actuelle), puis **audio**, puis **texte**.
+  - [x] **[ATTACHMENTS-QUICKVIEW] Aperçu rapide depuis la card** → **✅ FAIT [V22.0.70]** : badge 📎 n cliquable → pop-in `attachQuickView` (partial, `<dialog>` à la volée, réutilise `renderAttachments`), 3 pages. `REALISATION.md`.
+  - [x] **[ATTACHMENTS-COMMENT] Auto-commentaire ajout/suppression** → **✅ FAIT [V22.0.71]** : `_attach_log_comment` insère un commentaire normal (compte 💬, déclenche 🔔 si invité) sur les 4 sites owner/invité. `REALISATION.md`.
+  - [x] **[ATTACHMENTS-BTN-STYLE] Boutons au style de l'app (monochrome)** → **✅ FAIT [V22.0.72]** : `attachRow` passe de `.prio-btn`+emojis à `.iv-btn`/`.iv-del` (⤢ / ⤓ / ✕), overrides ad-hoc retirés. `REALISATION.md`.
+  - [x] **[PHOTO-BATCH-DOWNLOAD] Téléchargement d'un lot en `.zip` (mémo + dossier)** → **✅ FAIT [V22.0.73]** : pop-in de choix (photos seules / toutes pièces jointes ; « inclure les sous-dossiers » pour un dossier), zip streamé sur fichier temporaire (`ZIP_STORED`, jamais en RAM), routes owner + invités (`/share/*`, scope revalidé — invariant 5), arbre `SousDossier/TitreMémo/fichier` assaini + RFC 5987, filtre « Photos » = union `attachments` image/* + `memos.images`. Boutons monochromes `.iv-btn ⤓` (mémo, 3 pages via `renderAttachments`) + « ⤓ Télécharger » (dossier : board owner / tuile share / en-tête hub). Détail : `REALISATION.md` [V22.0.73]. Aucun changement d'export (rejoint v22). Groupé au commit [ATTACHMENTS].
 
 - **Bookmarklet "ajouter à mon dash"** : un lien à glisser dans la barre de favoris qui ouvre `dash/?add=<url>&title=<titre>` pré-rempli — capture d'un lien depuis n'importe quelle page.
 - **Historique de disponibilité** : stocker les résultats du status check (table `status_history`) et afficher un mini sparkline uptime sur chaque card. Le Zimaboard devient aussi un mini-monitoring.

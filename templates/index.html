@@ -1841,6 +1841,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <button type="button" id="me-loc-clear" class="prio-btn" style="display:none">×</button>
     <span id="me-loc-label" style="font-size:0.8rem;color:var(--muted)">aucune</span>
   </div>
+  <div id="me-attachments"></div>
   <details id="me-comments-acc" class="me-acc">
     <summary id="me-comments-sum">💬 Commentaires</summary>
     <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
@@ -3463,6 +3464,22 @@ function openPhotoView() {
   });
 }
 
+// [PHOTO-BATCH-DOWNLOAD] Nombre de fichiers d'un dossier (+ sous-dossiers optionnels) pour un
+// scope, et ouverture de la pop-in de téléchargement en .zip. Périmètre = memos.project_id.
+function projectZipCount(projId, scope, includeSubs) {
+  const set = new Set(includeSubs ? [projId, ...projectDescendants(projId)] : [projId]);
+  let n = 0;
+  (state.memos || []).forEach(m => { if (set.has(m.project_id)) n += memoZipCount(m, scope); });
+  return n;
+}
+function openProjectZip(proj) {
+  downloadZipDialog({
+    title: 'Télécharger — ' + proj.name,
+    hasSubprojects: true,
+    count: (scope, subs) => projectZipCount(proj.id, scope, subs),
+    buildUrl: (scope, subs) => `/api/projects/${proj.id}/download.zip?scope=${scope}&subprojects=${subs ? 1 : 0}`,
+  });
+}
 function boardMapPoints() {
   // Mêmes mémos que la liste affichée (recherche + filtre + projet) → la carte
   // reste cohérente avec ce qu'on voit, jamais de point « fantôme ».
@@ -4902,6 +4919,42 @@ function renderMeContext(memo) {
   }
 }
 
+// [ATTACHMENTS-QUICKVIEW] Pop-in de consultation des fichiers depuis la card (owner).
+function openMemoAttachments(memo) {
+  const label = memo.title || stripHTML(memo.content || '').slice(0, 40) || 'Fichiers';
+  attachQuickView('📎 ' + label, (rerender) => {
+    const m = state.memos.find((x) => x.id === memo.id) || memo;
+    return {
+      attachments: m.attachments || [],
+      canEdit: true,
+      uploadUrl: `/api/memos/${memo.id}/attachments`,
+      zip: { url: `/api/memos/${memo.id}/download.zip`, images: (m.images || []).length },
+      onChange: async () => { try { const l = await api(`/api/memos/${memo.id}/attachments`); const mm = state.memos.find((x) => x.id === memo.id); if (mm) mm.attachments = l; } catch (e) {} rerender(); renderBoard(); },
+      openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
+    };
+  });
+}
+
+// [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur mémo (owner).
+function renderMeAttachments(memo) {
+  const box = document.getElementById('me-attachments');
+  if (!box) return;
+  box.innerHTML = '';
+  box.appendChild(renderAttachments({
+    attachments: memo.attachments || [],
+    canEdit: true,
+    uploadUrl: `/api/memos/${memo.id}/attachments`,
+    zip: { url: `/api/memos/${memo.id}/download.zip`, images: (memo.images || []).length },
+    onChange: () => refreshMeAttachments(memo),
+    openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
+  }));
+}
+async function refreshMeAttachments(memo) {
+  try { memo.attachments = await api(`/api/memos/${memo.id}/attachments`); } catch (e) {}
+  const m = state.memos.find((x) => x.id === memo.id); if (m) m.attachments = memo.attachments;
+  renderMeAttachments(memo);
+}
+
 function openMemoEditor(memo) {
   const q = getQuill();
   if (!q) return false;
@@ -4914,6 +4967,7 @@ function openMemoEditor(memo) {
   editingLoc = (memo.location && typeof memo.location.lat === 'number') ? { ...memo.location } : null;
   document.getElementById('me-loc-addr').value = '';
   renderMeLoc();
+  renderMeAttachments(memo);  // [ATTACHMENTS]
   const mc = document.getElementById('me-comments');
   mc.innerHTML = '';
   mc.appendChild(commentsBlockEl(memo));
@@ -5485,6 +5539,11 @@ function taskEl(memo) {
       }));
     });
     badges.appendChild(stack);
+  }
+  if ((memo.attachments || []).length) {  // [ATTACHMENTS] badge 📎 n cliquable → pop-in fichiers
+    const ab = el('span', { class: 'badge', text: '📎 ' + memo.attachments.length, attrs: { title: 'Voir les fichiers joints', style: 'cursor:pointer' } });
+    ab.addEventListener('click', (e) => { e.stopPropagation(); openMemoAttachments(memo); });
+    badges.appendChild(ab);
   }
   if (memo.comment_count) {
     const cb = el('span', {
@@ -6061,6 +6120,14 @@ function renderBoard() {
         attrs: { title: 'Parcourir les photos du projet (lieux, dates EXIF)' },
         on: { click: openPhotoView },
       }));
+      // [PHOTO-BATCH-DOWNLOAD] Télécharger en .zip les fichiers du dossier (+ sous-dossiers).
+      if (projectZipCount(proj.id, 'all', true) > 0) {
+        title.appendChild(el('button', {
+          class: 'prio-btn', text: '⤓ Télécharger',
+          attrs: { title: 'Télécharger les fichiers du dossier en .zip' },
+          on: { click: () => openProjectZip(proj) },
+        }));
+      }
       // [AGENDA-PROJECT] Agenda pré-filtré sur ce projet + ses sous-projets (même
       // périmètre que la carte). L'item sidebar « 📆 Agenda » reste l'agenda global.
       // [AGENDA-SMART-MONTH] chaque clic ré-évalue le mois d'atterrissage (un projet
