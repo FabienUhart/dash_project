@@ -2300,12 +2300,22 @@ function render() {
     (a.due_date || '').localeCompare(b.due_date || '') ||
     ((a.due_time ? 1 : 0) - (b.due_time ? 1 : 0)) ||
     (a.due_time || '').localeCompare(b.due_time || ''));
-  if (!visible.length) {
-    list.appendChild(el('div', 'empty', 'Rien dans cette vue. 🎉'));
+  // [BOARD-SUBHIDE] chips masquer/afficher par sous-projet (affichage seul — tuiles/carte inchangées).
+  const _sh = subHideBar({
+    storageKey: 'shareBoardSubHide:' + TOKEN + ':' + PFILTER,
+    memos: visible,
+    currentProjectId: (PFILTER !== 'all') ? PFILTER : DATA.root_id,
+    projById: (id) => (DATA.projects || []).find(p => p.id === id) || null,
+    onChange: render,
+  });
+  if (_sh.bar) list.appendChild(_sh.bar);
+  const shown = visible.filter(m => !_sh.isHidden(m));
+  if (!shown.length) {
+    list.appendChild(el('div', 'empty', _sh.bar ? 'Tous les mémos sont masqués.' : 'Rien dans cette vue. 🎉'));
     return;
   }
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
-  visible.forEach(memo => {
+  shown.forEach(memo => {
     const t = el('div', 'task' + (memo.done ? ' done' : ''));
     if (canEditNow() && DATA.kind === 'project') {
       t.draggable = true;

@@ -5885,7 +5885,18 @@ function renderBoard() {
   addBar.appendChild(addBtn);
   board.appendChild(addBar);
 
-  const memos = allMemos;
+  // [BOARD-SUBHIDE] chips masquer/afficher par sous-projet (sous les tuiles + barre d'ajout,
+  // au-dessus des sections). Affichage seul : tuiles/compteurs/carte gardent le périmètre complet.
+  const subHide = subHideBar({
+    storageKey: 'boardSubHide:' + state.memoProject,
+    memos: allMemos,
+    currentProjectId: state.memoProject,
+    projById: (id) => state.projects.find(p => p.id === id) || null,
+    onChange: renderBoard,
+  });
+  if (subHide.bar) board.appendChild(subHide.bar);
+
+  const memos = allMemos.filter(m => !subHide.isHidden(m));
   const pending = memos.filter(m => !m.done);
   const done = memos.filter(m => m.done);
   const today = todayD;

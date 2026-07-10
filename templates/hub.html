@@ -851,8 +851,18 @@ function renderBoard() {
   const spb = subProjBar(); if (spb) board.appendChild(spb); // [GUEST-SUBPROJECT]
   const vb = hubVotesBar(); if (vb) board.appendChild(vb); // [VOTE-GROUPS] chips/création/gestion
   const ms = focusedMemos().slice().sort((a, b) => (a.done - b.done) || (a.due_date || '').localeCompare(b.due_date || ''));
-  if (!ms.length) { board.appendChild(el('div', { class: 'empty', text: 'Aucun mémo ici.' })); return; }
-  ms.forEach(m => board.appendChild(memoCard(m)));
+  // [BOARD-SUBHIDE] chips masquer/afficher par sous-projet (affichage seul — carte inchangée).
+  const _sh = subHideBar({
+    storageKey: 'hubBoardSubHide:' + FOCUS,
+    memos: ms,
+    currentProjectId: FOCUS,
+    projById: (id) => projById(id) || null,
+    onChange: render,
+  });
+  if (_sh.bar) board.appendChild(_sh.bar);
+  const shown = ms.filter(m => !_sh.isHidden(m));
+  if (!shown.length) { board.appendChild(el('div', { class: 'empty', text: _sh.bar ? 'Tous les mémos sont masqués.' : 'Aucun mémo ici.' })); return; }
+  shown.forEach(m => board.appendChild(memoCard(m)));
 }
 
 function editableProjects() { return (DATA.projects || []).filter(p => p.can_edit); }

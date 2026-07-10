@@ -83,6 +83,52 @@ function voteBtnLabel(mode, mine) {
 function voteWinnerText(vote) {
   return (vote && vote.vote_winner_ids && vote.vote_winner_ids.length > 1) ? '🏆 Ex æquo' : '🏆 Gagnant';
 }
+// [BOARD-SUBHIDE] Barre de chips « masquer/afficher » les mémos par sous-projet (provenance
+// = memo.project_id). PUR (localStorage + DOM) : le masquage s'applique au rendu des cards
+// UNIQUEMENT (jamais tuiles/compteurs/carte — pipeline distinct). Pattern [MAP-SUBFILTER],
+// sémantique inversée (chip actif = masqué). cfg = { storageKey, memos (board-scoped, AVANT
+// masquage), currentProjectId, projById(id)->{id,name,emoji,color}|null, onChange() }.
+// Renvoie { bar:Element|null, isHidden(memo)->bool }. bar null = pas de barre (projet plat /
+// global / inbox). Corps identique owner/share/hub → mutualisé (ADR-001).
+function subHideBar(cfg) {
+  const cur = cfg.currentProjectId;
+  const counts = new Map();
+  (cfg.memos || []).forEach(m => { const t = m.project_id || cur; counts.set(t, (counts.get(t) || 0) + 1); });
+  const tokens = [...counts.keys()];
+  const noop = { bar: null, isHidden: () => false };
+  // Barre seulement sur un VRAI projet ET si au moins un mémo vient d'un descendant.
+  if (cur == null || cur === 'all' || cur === 'inbox' || !tokens.some(t => t !== cur)) return noop;
+  let hidden;
+  try { hidden = new Set(JSON.parse(localStorage.getItem(cfg.storageKey) || '[]')); } catch (e) { hidden = new Set(); }
+  const persist = () => localStorage.setItem(cfg.storageKey, JSON.stringify([...hidden].filter(t => counts.has(t))));  // orphelins ignorés
+  const isHidden = (m) => hidden.has(m.project_id || cur);
+  const ordered = [cur, ...tokens.filter(t => t !== cur)].filter(t => counts.has(t));  // projet courant d'abord
+  const bar = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0 0 0.7rem;overflow-x:auto' } });
+  ordered.forEach(t => {
+    const proj = cfg.projById(t);
+    const name = (t === cur) ? '(ce projet)' : (proj ? proj.name : '(sans projet)');
+    const hid = hidden.has(t);
+    const chip = el('button', { class: 'prio-btn', attrs: { type: 'button',
+      title: (hid ? 'Réafficher' : 'Masquer') + ' les mémos de « ' + name + ' »',
+      style: 'padding:0.1rem 0.5rem;display:inline-flex;align-items:center;gap:0.3rem' + (hid ? ';opacity:0.5' : '') } });
+    chip.appendChild(el('span', { attrs: { style: 'width:9px;height:9px;border-radius:50%;flex-shrink:0;background:' + provenanceColor(proj) } }));
+    if (proj && proj.emoji) chip.appendChild(el('span', { text: proj.emoji }));
+    chip.appendChild(el('span', { text: (hid ? '✕ ' : '') + name, attrs: hid ? { style: 'text-decoration:line-through' } : {} }));
+    chip.appendChild(el('span', { text: '· ' + counts.get(t), attrs: { style: 'color:var(--muted);font-size:0.72rem' } }));
+    chip.addEventListener('click', () => { if (hidden.has(t)) hidden.delete(t); else hidden.add(t); persist(); cfg.onChange(); });
+    bar.appendChild(chip);
+  });
+  const nHidden = (cfg.memos || []).filter(isHidden).length;
+  if (nHidden > 0) {
+    const badge = el('button', { class: 'prio-btn',
+      text: nHidden + ' mémo' + (nHidden > 1 ? 's' : '') + ' masqué' + (nHidden > 1 ? 's' : '') + ' · tout afficher',
+      attrs: { type: 'button', title: 'Réafficher tous les mémos', style: 'padding:0.1rem 0.5rem;margin-left:auto' } });
+    badge.addEventListener('click', () => { hidden.clear(); persist(); cfg.onChange(); });
+    bar.appendChild(badge);
+  }
+  return { bar, isHidden };
+}
+
 // Set des mémos gagnants d'un dossier au vote CLOS (pour la mise en avant carte), ou null.
 function voteWinnerIdSet(proj) {
   if (!proj || !proj.vote_enabled || proj.vote_state !== 'closed') return null;
