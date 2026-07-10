@@ -1204,12 +1204,49 @@ function hubDatedPoints() {
     imgUrl: (m.images && m.images.length) ? '/share/' + m.share_token + '/image/' + m.images[0] : '', // [MAP-TRIP-POLISH]
   }));
 }
+// [VOTE-MAP] Scrutins du dossier focus (hub). Voter routé vers le /share/<share_token> du
+// porteur (invité approuvé côté serveur). null si pas de FOCUS ou aucun scrutin.
+function buildHubMapVoteData() {
+  if (FOCUS == null) return null;
+  const proj = projById(FOCUS);
+  if (!proj) return null;
+  const scrutins = [];
+  if (proj.vote_enabled) {
+    const opt = {};
+    (DATA.memos || []).forEach(m => { if (m.project_id === proj.id && !m.vote_excluded && m.vote_count !== undefined) opt[m.id] = { count: m.vote_count, mine: !!m.vote_mine, is_winner: !!m.is_winner }; });
+    scrutins.push({ id: null, name: '(dossier)', mode: proj.vote_mode, state: proj.vote_state, winner_ids: (proj.vote_winner_ids || []).slice(), opt });
+  }
+  (proj.votes || []).forEach(v => {
+    const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
+    scrutins.push({ id: v.id, name: v.name, mode: v.vote_mode, state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt });
+  });
+  if (!scrutins.length) return null;
+  const token = proj.share_token;
+  return {
+    scrutins,
+    voteKey: 'hubMapVotesOn:' + HUB_TOKEN + ':' + proj.id,
+    onVote: token ? (async (memoId, sid) => {
+      const r = await api(token, '/memo/' + memoId + '/vote', { method: 'POST', body: JSON.stringify(sid == null ? {} : { vote_id: sid }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + r.status)); }
+      const d = await r.json();
+      if (sid == null) {
+        const opt = {}; (d.options || []).forEach(o => { opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner }; const m = (DATA.memos || []).find(x => x.id === o.memo_id); if (m) { m.vote_count = o.vote_count; m.vote_mine = o.vote_mine; m.is_winner = o.is_winner; } });
+        return { state: d.vote.vote_state, winner_ids: (d.vote.vote_winner_ids || []).slice(), opt };
+      }
+      const v = d.vote; const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
+      if (proj.votes) proj.votes = proj.votes.map(x => x.id === v.id ? v : x);
+      return { state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt };
+    }) : null,
+  };
+}
+
 document.getElementById('btn-map').addEventListener('click', () => {
   if (typeof L === 'undefined') { notify('Carte indisponible.', { error: true }); return; }
   runMapDialog({ title: DATA.name || 'Mes dossiers', points: hubMapPoints(), recompute: hubMapPoints, editable: false,
     projects: DATA.projects || [], currentProjectId: FOCUS == null ? 'all' : FOCUS, subFilterScope: FOCUS != null,
     defaultMarkerColor: DATA.marker_color, focusKey: 'hubMapFocus:' + HUB_TOKEN, subKey: 'hubMapSub:' + HUB_TOKEN,
     winnerIds: voteWinnerIdSet(FOCUS == null ? null : projById(FOCUS)),  // [VOTE-DECISION]
+    voteData: buildHubMapVoteData(),  // [VOTE-MAP]
     datedPoints: hubDatedPoints, timelineKey: 'hubMapTimeline:' + HUB_TOKEN }); // [MAP-TIMELINE]
 });
 // [HUB-MAP-CLOSE] Le partial runMapDialog ne câble pas #map-close (chaque page le fait, cf.

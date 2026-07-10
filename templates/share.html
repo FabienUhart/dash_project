@@ -1774,6 +1774,42 @@ async function saveSharePointColor(p, color) {
   if (obj) obj.point_color = color;
 }
 
+// [VOTE-MAP] Scrutins du projet actif (invité) pour runMapDialog. Voter réservé à l'invité
+// approuvé (le serveur revalide) ; anonyme = lecture (onVote absent). null si aucun scrutin.
+function buildShareMapVoteData() {
+  const pid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
+  const proj = (DATA.projects || []).find(p => p.id === pid);
+  if (!proj) return null;
+  const scrutins = [];
+  if (proj.vote_enabled) {
+    const opt = {};
+    (DATA.memos || []).forEach(m => { if (m.project_id === proj.id && !m.vote_excluded && m.vote_count !== undefined) opt[m.id] = { count: m.vote_count, mine: !!m.vote_mine, is_winner: !!m.is_winner }; });
+    scrutins.push({ id: null, name: '(dossier)', mode: proj.vote_mode, state: proj.vote_state, winner_ids: (proj.vote_winner_ids || []).slice(), opt });
+  }
+  (proj.votes || []).forEach(v => {
+    const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
+    scrutins.push({ id: v.id, name: v.name, mode: v.vote_mode, state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt });
+  });
+  if (!scrutins.length) return null;
+  const approved = GUEST.status === 'approved';
+  return {
+    scrutins,
+    voteKey: 'shareMapVotesOn:' + TOKEN + ':' + pid,
+    onVote: approved ? (async (memoId, sid) => {
+      const r = await fetch(API + '/memo/' + memoId + '/vote', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify(sid == null ? {} : { vote_id: sid }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + r.status)); }
+      const d = await r.json();
+      if (sid == null) {
+        const opt = {}; (d.options || []).forEach(o => { opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner }; const m = (DATA.memos || []).find(x => x.id === o.memo_id); if (m) { m.vote_count = o.vote_count; m.vote_mine = o.vote_mine; m.is_winner = o.is_winner; } });
+        return { state: d.vote.vote_state, winner_ids: (d.vote.vote_winner_ids || []).slice(), opt };
+      }
+      const v = d.vote; const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
+      if (proj.votes) proj.votes = proj.votes.map(x => x.id === v.id ? v : x);
+      return { state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt };
+    }) : null,
+  };
+}
+
 function openShareMap(extra) {
   // Thin wrapper : délègue à runMapDialog (partial) avec le config invité (scopé au partage).
   // [PHOTO-TEMPLATE-MEMO] `extra` = {autoPhoto, focusFilename} pour « 📍 localiser ».
@@ -1787,6 +1823,7 @@ function openShareMap(extra) {
     subFilterScope: PFILTER !== 'all',
     defaultMarkerColor: DATA.marker_color,
     winnerIds: voteWinnerIdSet((DATA.projects || []).find(p => p.id === (PFILTER !== 'all' ? PFILTER : DATA.root_id))),
+    voteData: buildShareMapVoteData(),  // [VOTE-MAP]
     focusKey: 'shareMapFocus:' + TOKEN + ':' + PFILTER,
     subKey: 'shareMapSubFilter:' + TOKEN + ':' + PFILTER,
     saveColor: saveSharePointColor, saveGroups: saveShareGroups,

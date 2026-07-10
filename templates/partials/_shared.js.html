@@ -471,6 +471,50 @@ function runMapDialog(cfg) {
     selbar.appendChild(el('button', { class: 'prio-btn', text: 'Annuler', attrs: { type: 'button' }, on: { click: exitGroupMode } }));
   }
 
+  // ── [VOTE-MAP] V20.10 : vote sur la carte « par scrutin » ──────────────────────────
+  // Données passées par la page (cfg.voteData) : liste de scrutins normalisés
+  // { id (null = vote du dossier), name, mode, state, winner_ids:[], opt:{memoId:{count,mine,is_winner}} }
+  // + voteKey (localStorage, distinct owner/share/hub) + onVote(memoId, scrutinId)->{state,winner_ids,opt}.
+  // Absent ou aucun scrutin → carte STRICTEMENT inchangée. Zéro route (tout déjà exposé).
+  const voteData = cfg.voteData || null;
+  const scrutins = voteData ? (voteData.scrutins || []) : [];
+  const VOTEKEY = voteData ? (voteData.voteKey || '') : '';
+  let votesOn = VOTEKEY ? localStorage.getItem(VOTEKEY) !== '0' : true;
+  let selVote = null;  // null = aucun scrutin sélectionné (carte classique)
+  const voteOpt = (p) => (selVote && p.kind === 'memo' && selVote.opt) ? selVote.opt[p.id] : null;
+  const isWinnerOpt = (p) => selVote && selVote.state === 'closed' && (selVote.winner_ids || []).indexOf(p.id) !== -1;
+  async function castVote(memoId) {
+    if (!voteData || !voteData.onVote || !selVote || selVote.state === 'closed') return;
+    try {
+      const upd = await voteData.onVote(memoId, selVote.id);
+      if (upd) { selVote.state = upd.state; selVote.winner_ids = upd.winner_ids || []; if (upd.opt) selVote.opt = upd.opt; }
+      refresh(false);
+    } catch (e) { notify('Vote impossible : ' + ((e && e.message) || e), { error: true }); }
+  }
+  let voteBar = document.getElementById('map-votebar');
+  if (!voteBar) {
+    voteBar = el('div', { attrs: { id: 'map-votebar', style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0 0 0.4rem;overflow-x:auto' } });
+    subbar.parentNode.insertBefore(voteBar, subbar);
+  }
+  function fitWinners() {
+    const wl = (selVote.winner_ids || []).map(id => markersByKey['memo:' + id]).filter(Boolean).map(m => m.ll);
+    if (wl.length) fitTo(wl);
+  }
+  function renderVoteBar() {
+    voteBar.innerHTML = '';
+    if (!scrutins.length) { voteBar.style.display = 'none'; return; }
+    voteBar.style.display = 'flex';
+    voteBar.appendChild(el('span', { text: '🗳', attrs: { style: 'font-size:0.85rem;color:var(--muted)' } }));
+    scrutins.forEach(s => {
+      const on = selVote === s;
+      voteBar.appendChild(el('button', {
+        class: 'prio-btn', text: (s.id == null ? '(dossier)' : s.name) + (s.state === 'closed' ? ' · clos' : ''),
+        attrs: { type: 'button', title: s.id == null ? 'Vote du dossier' : s.name, style: 'padding:0.1rem 0.45rem;' + (on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+        on: { click: () => { selVote = on ? null : s; renderVoteBar(); refresh(false); if (selVote && selVote.state === 'closed') fitWinners(); } },
+      }));
+    });
+  }
+
   function draw(pts, fit) {
     markerLayer.clearLayers();
     Object.keys(markersByKey).forEach(k => delete markersByKey[k]); // [MAP-TIMELINE]
@@ -504,8 +548,15 @@ function runMapDialog(cfg) {
       // (photo du mémo si dispo, sinon cercle numéroté) — liseré = couleur v16 du
       // point (dotColor), reflet passé par opacité comme les marqueurs classiques.
       const stepNo = tripOrder[pkey(p)];
+      const _vopt = voteOpt(p);
+      const _vref = selVote && p.kind === 'memo' && !_vopt;  // [VOTE-MAP] mémo hors du scrutin sélectionné
       let marker;
-      if (stepNo) {
+      if (_vref) {
+        // [VOTE-MAP] point de référence : carré gris discret, toujours visible, jamais de pastille.
+        const icon = L.divIcon({ className: 'vote-ref', html: '<span style="display:block;width:10px;height:10px;background:#8a93a0;border:1px solid #5b6470;border-radius:2px;opacity:' + (focused ? 0.7 : 0.35) + '"></span>', iconSize: [12, 12], iconAnchor: [6, 6] });
+        marker = L.marker(ll, { icon, zIndexOffset: -300 }).addTo(markerLayer);
+        marker.bindTooltip('repère', { direction: 'top' });
+      } else if (stepNo) {
         const dim = strokeOp < 1 ? 'opacity:0.5;' : '';
         const inner = p.imgUrl
           ? '<img src="' + p.imgUrl + '" loading="lazy" alt="" style="width:100%;height:100%;object-fit:cover;display:block">'
@@ -526,9 +577,18 @@ function runMapDialog(cfg) {
           radius: focused ? 9 : 6, color: mColor, weight: focused ? 2 : 1, opacity: strokeOp, fillColor: mColor, fillOpacity: fillOp,
         }).addTo(markerLayer);
       }
-      // [VOTE-DECISION] point gagnant du vote clos → anneau accent (réutilise ACCENT/focus).
-      if (cfg.winnerIds && p.kind === 'memo' && focused && cfg.winnerIds.has(p.id)) {
+      // [VOTE-MAP] gagnant du scrutin sélectionné clos (prime) : anneau accent agrandi + 🏆 +
+      // étiquette « nom · n voix ». Sinon legacy [VOTE-DECISION] (dossier winner) si pas de voteData.
+      if (_vopt && isWinnerOpt(p)) {
+        L.circleMarker(ll, { radius: 17, color: ACCENT, weight: 3, opacity: 0.95, fillColor: ACCENT, fillOpacity: 0.06 }).addTo(markerLayer);
+        L.marker(ll, { icon: L.divIcon({ className: 'vote-win', html: '<span style="font-size:15px">🏆</span>', iconSize: [16, 16], iconAnchor: [-8, 22] }), interactive: false, zIndexOffset: 950 }).addTo(markerLayer);
+        marker.bindTooltip((selVote.id == null ? '' : selVote.name + ' · ') + ((_vopt.count || 0) + ' voix'), { permanent: true, direction: 'right', offset: [8, 0], className: 'vote-winlabel' });
+      } else if (!voteData && cfg.winnerIds && p.kind === 'memo' && focused && cfg.winnerIds.has(p.id)) {
         L.circleMarker(ll, { radius: 16, color: ACCENT, weight: 3, opacity: 0.9, fillColor: ACCENT, fillOpacity: 0.06 }).addTo(markerLayer);
+      }
+      // [VOTE-MAP] perdant d'un scrutin clos, coche « Voix » décochée → estompé (reflet passé).
+      if (_vopt && selVote.state === 'closed' && !isWinnerOpt(p) && !votesOn && marker.setStyle) {
+        marker.setStyle({ opacity: 0.35, fillOpacity: 0.12 });
       }
       marker.bindPopup(
         '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
@@ -538,6 +598,13 @@ function runMapDialog(cfg) {
       // point sans date → « 🌍 Tous » (applyDay(null)). La popup Leaflet s'ouvre toujours.
       marker.on('click', () => applyDay(p.due_date || null));
       markersByKey[pkey(p)] = { marker, ll };
+      // [VOTE-MAP] pastille compteur « n voix » + ✓ mes choix (coche Voix on) ; clic = voter/retirer.
+      if (_vopt && votesOn) {
+        const mine = _vopt.mine ? '<span style="color:var(--accent);font-weight:700">✓</span>' : '';
+        const html = '<span style="display:inline-flex;align-items:center;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:0 5px;font:700 10px/16px system-ui;color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,0.35);white-space:nowrap' + (selVote.state !== 'closed' && voteData.onVote ? ';cursor:pointer' : '') + '">' + mine + (_vopt.count || 0) + '</span>';
+        const pm = L.marker(ll, { icon: L.divIcon({ className: 'vote-pastille', html, iconSize: [1, 1], iconAnchor: [-9, 20] }), zIndexOffset: 800 }).addTo(markerLayer);
+        if (voteData.onVote && selVote.state !== 'closed') pm.on('click', () => castVote(p.id));
+      }
       const row = el('div', { attrs: { style: 'display:flex;align-items:flex-start;gap:0.4rem;font-size:0.8rem;padding:0.35rem 0.5rem;width:100%' + (focused ? '' : ';opacity:0.4') } });
       if (showChip) {
         const accent = proj ? provenanceColor(proj) : 'var(--border)';
@@ -859,8 +926,17 @@ function runMapDialog(cfg) {
   // (fix au passage : la barre s'insérait à CHAQUE ouverture sans retrait → doublons)
   const oldBar = document.getElementById('map-toolbar');
   if (oldBar) oldBar.remove();
-  if (cfg.loadPhotos || hasDated) {
+  if (cfg.loadPhotos || hasDated || scrutins.length) {
     const bar = el('div', { attrs: { id: 'map-toolbar', style: 'display:flex;gap:0.35rem;align-items:center;margin:0 0 0.45rem;flex-wrap:wrap' } });
+    // [VOTE-MAP] coche « 🗳 Voix » (gabarit « 🕒 Frise ») : pastilles visibles + perdants lisibles ;
+    // décochée → pastilles masquées et (scrutin clos) perdants estompés. Persistée par projet/page.
+    if (scrutins.length) {
+      const vBtn = el('button', { class: 'prio-btn', attrs: { type: 'button', title: 'Afficher les compteurs de voix et mes choix sur la carte', style: 'padding:0.1rem 0.5rem' } });
+      const syncV = () => { vBtn.textContent = votesOn ? '🗳 Voix ✓' : '🗳 Voix'; vBtn.style.background = votesOn ? 'var(--accent)' : ''; vBtn.style.color = votesOn ? '#10141a' : ''; vBtn.style.borderColor = votesOn ? 'var(--accent)' : ''; };
+      vBtn.addEventListener('click', () => { votesOn = !votesOn; if (VOTEKEY) localStorage.setItem(VOTEKEY, votesOn ? '1' : '0'); syncV(); refresh(false); });
+      syncV();
+      bar.appendChild(vBtn);
+    }
     if (cfg.loadPhotos) {
       photoBtn = el('button', {
         class: 'prio-btn', text: '📷 Photos',
@@ -890,6 +966,7 @@ function runMapDialog(cfg) {
   }
 
   function refresh(fit) {
+    renderVoteBar();  // [VOTE-MAP] chips de scrutin (masqué si aucun scrutin)
     renderSubbar();
     renderGroupbar();
     renderSelbar();

@@ -2949,6 +2949,40 @@ async function savePointGroups(p, groups) {
   if (obj) obj.map_groups = groups;
 }
 
+// [VOTE-MAP] Normalise les scrutins du projet du board pour runMapDialog (données déjà
+// exposées : dossier + votes nommés). Retourne null si le projet n'a aucun scrutin.
+function buildMapVoteData() {
+  const proj = state.projects.find(p => p.id === state.memoProject);
+  if (!proj) return null;
+  const scrutins = [];
+  if (proj.vote_enabled) {
+    const opt = {};
+    state.memos.forEach(m => { if (m.project_id === proj.id && !m.vote_excluded && m.vote_count !== undefined) opt[m.id] = { count: m.vote_count, mine: !!m.vote_mine, is_winner: !!m.is_winner }; });
+    const wids = (proj.vote_winner_ids || []).slice(); if (proj.vote_winner_id) wids.push(proj.vote_winner_id);
+    scrutins.push({ id: null, name: '(dossier)', mode: proj.vote_mode, state: proj.vote_state, winner_ids: wids, opt });
+  }
+  (proj.votes || []).forEach(v => {
+    const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
+    scrutins.push({ id: v.id, name: v.name, mode: v.vote_mode, state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt });
+  });
+  if (!scrutins.length) return null;
+  return {
+    scrutins,
+    voteKey: 'mapVotesOn:' + proj.id,
+    onVote: async (memoId, sid) => {
+      const r = await api(`/api/memos/${memoId}/vote`, { method: 'POST', body: JSON.stringify(sid == null ? {} : { vote_id: sid }) });
+      if (sid == null) {
+        const opt = {}; (r.options || []).forEach(o => { opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner }; const m = state.memos.find(x => x.id === o.memo_id); if (m) { m.vote_count = o.vote_count; m.vote_mine = o.vote_mine; m.is_winner = o.is_winner; } });
+        const wids = (r.vote.vote_winner_ids || []).slice(); if (r.vote.vote_winner_id) wids.push(r.vote.vote_winner_id);
+        return { state: r.vote.vote_state, winner_ids: wids, opt };
+      }
+      const v = r.vote; const opt = {}; (v.options || []).forEach(o => opt[o.memo_id] = { count: o.vote_count, mine: !!o.vote_mine, is_winner: !!o.is_winner });
+      if (proj.votes) proj.votes = proj.votes.map(x => x.id === v.id ? v : x);
+      return { state: v.vote_state, winner_ids: (v.vote_winner_ids || []).slice(), opt };
+    },
+  };
+}
+
 function openMapDialog(title, points, recompute, extra) {
   // Thin wrapper : délègue à runMapDialog (partial) avec le config owner.
   // [PHOTO-MAP] Calque photo seulement sur un vrai projet (endpoint scopé récursif) ;
@@ -2961,6 +2995,7 @@ function openMapDialog(title, points, recompute, extra) {
     subFilterScope: realProject,
     defaultMarkerColor: state.mapMarkerColor,
     winnerIds: voteWinnerIdSet(realProject ? state.projects.find(p => p.id === state.memoProject) : null),
+    voteData: realProject ? buildMapVoteData() : null,  // [VOTE-MAP]
     focusKey: 'mapFocus:' + state.memoProject,
     subKey: 'mapSubFilter:' + state.memoProject,
     saveColor: savePointColor, saveGroups: savePointGroups,
