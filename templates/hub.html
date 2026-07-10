@@ -487,6 +487,7 @@ async function loadDash(knownFolders) {
   }
   persistFolderTokens(data.folders);  // [HUB-TOKEN-REFRESH] dossiers ajoutés après coup deviennent éditables
   DATA = data;
+  if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis;  // [REACTION-PALETTE]
   document.getElementById('code-screen').hidden = true;
   document.getElementById('dash').hidden = false;
   if (data.name) document.getElementById('dash-name').textContent = '📂 ' + data.name;
@@ -494,7 +495,7 @@ async function loadDash(knownFolders) {
 }
 async function reload() {
   const r = await fetch(HUB_BASE + '/data', { headers: { 'X-Guest-Token': hubProof() } });
-  if (r.ok) { DATA = await r.json(); persistFolderTokens(DATA.folders); render(); }
+  if (r.ok) { DATA = await r.json(); if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis; persistFolderTokens(DATA.folders); render(); }
 }
 function showCode() { document.getElementById('dash').hidden = true; document.getElementById('code-screen').hidden = false;
   document.getElementById('pin').focus(); }
@@ -1174,7 +1175,14 @@ function renderEdComments(m, ro) {
   const cw = document.getElementById('ed-comments'); cw.innerHTML = '';
   (m.comments || []).forEach(c => { const r = el('div', { class: 'comment' });
     r.appendChild(el('span', { class: 'ca', text: (c.author || '').replace(/\s*<[^>]*>/, ''), attrs: c.guest ? { style: 'color:var(--guest,#b39ddb)' } : {} }));
-    r.appendChild(el('span', { class: 'cb', text: c.body })); cw.appendChild(r); });
+    r.appendChild(el('span', { class: 'cb', text: c.body })); cw.appendChild(r);
+    // [COMMENT-REACTIONS] l'invité du hub est approuvé → peut réagir (can_edit non requis).
+    cw.appendChild(reactionRow(c.reactions, true, async (emoji) => {
+      const resp = await api(m.share_token, '/comment/' + c.id + '/react', { method: 'POST', body: JSON.stringify({ emoji }) });
+      if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
+      else notify('Réaction impossible.', { error: true });
+    }));
+  });
   if (!ro) { const inp = el('input', { attrs: { type: 'text', placeholder: '+ Commentaire…', style: 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.35rem 0.5rem;margin-top:0.4rem' } });
     inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b }) }); inp.value = ''; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); });
     cw.appendChild(inp); }

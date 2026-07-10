@@ -49,7 +49,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "20"  # X = version du format d'export (invariant 1)
+APP_VERSION = "21"  # X = version du format d'export (invariant 1) — v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -373,6 +373,21 @@ def init_db():
             viewer TEXT NOT NULL,
             seen_at TEXT NOT NULL,
             UNIQUE(comment_id, viewer)
+        )
+        """
+    )
+    # [COMMENT-REACTIONS] v21 : réactions emoji (palette fixe) sur les commentaires. Additif,
+    # jamais destructif. Une réaction max par (commentaire, emoji, votant). voter = '' owner /
+    # « Nom <email> » invité (pattern created_by). Exportées (v21) ; purgées en cascade.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS comment_reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            comment_id INTEGER NOT NULL,
+            emoji TEXT NOT NULL,
+            voter TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(comment_id, emoji, voter)
         )
         """
     )
@@ -2663,6 +2678,8 @@ def _purge_memo_row(db, memo_id):
         _forget_image_meta(db, row["images"])  # [PHOTO-MAP]
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
+    # [COMMENT-REACTIONS] purge des réactions AVANT les commentaires (comment_id → orphelin sinon).
+    db.execute("DELETE FROM comment_reactions WHERE comment_id IN (SELECT id FROM memo_comments WHERE memo_id = ?)", (memo_id,))
     db.execute("DELETE FROM memo_comments WHERE memo_id = ?", (memo_id,))
     db.execute("DELETE FROM memo_votes WHERE memo_id = ?", (memo_id,))  # [VOTE-DECISION] voix dossier + nommées
     db.execute("DELETE FROM vote_options WHERE memo_id = ?", (memo_id,))  # [VOTE-GROUPS] retire des options nommées
@@ -3395,6 +3412,7 @@ def get_settings():
         {
             "owner_name": _owner_name(db),
             "map_marker_color": _map_marker_color(db),
+            "reaction_emojis": _reaction_palette(db),  # [REACTION-PALETTE] palette configurable
             # [HUB-EMAIL-INVITE] booléen seulement — JAMAIS le secret SMTP.
             "smtp_enabled": _smtp_config() is not None,
         }
@@ -3415,8 +3433,29 @@ def put_settings():
         color = _clean_hex_color(data.get("map_marker_color"), DEFAULT_MARKER_COLOR)
         _set_state(db, "map_marker_color", color)
         db.commit()
+    if "reaction_emojis" in data:
+        # [REACTION-PALETTE] Config owner-only de la palette. Validation STRICTE de chaque emoji
+        # (un seul grapheme, aucune injection). Liste vide autorisée (owner retire tout).
+        raw = data.get("reaction_emojis")
+        if not isinstance(raw, list):
+            return jsonify({"error": "reaction_emojis doit être une liste"}), 400
+        if len(raw) > 40:
+            return jsonify({"error": "trop de réactions"}), 400
+        cleaned = []
+        for e in raw:
+            c = _clean_reaction_emoji(e)
+            if not c:
+                return jsonify({"error": "emoji invalide"}), 400
+            if c not in cleaned:
+                cleaned.append(c)
+        _set_state(db, "reaction_emojis", json.dumps(cleaned, ensure_ascii=False))
+        db.commit()
     return jsonify(
-        {"owner_name": _owner_name(db), "map_marker_color": _map_marker_color(db)}
+        {
+            "owner_name": _owner_name(db),
+            "map_marker_color": _map_marker_color(db),
+            "reaction_emojis": _reaction_palette(db),
+        }
     )
 
 
@@ -3702,6 +3741,7 @@ def _data_version(db):
         "SELECT id, share_id, email, name, status, approved_at FROM share_guests ORDER BY id",
         "SELECT id, email, name, pin FROM guest_hubs ORDER BY id",
         "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_comments",
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM comment_reactions",  # [COMMENT-REACTIONS]
         # [VOTE-DECISION] voix ; les flags/état de vote des projets sont déjà couverts par
         # le « SELECT * FROM projects » ci-dessus (vote_enabled/deadline/closed/winner…).
         "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_votes",
@@ -3844,7 +3884,162 @@ def memo_restore(memo_id):
     return jsonify(_memo_dict(row))
 
 
-def _comment_dict(r, seen_map=None):
+# [COMMENT-REACTIONS] / [REACTION-PALETTE] V21.0.57 : palette CONFIGURABLE (owner).
+# REACTION_EMOJIS = SEED par défaut (6 base) tant qu'aucune config n'est enregistrée dans
+# `app_state`. L'owner ajoute/retire dans les Paramètres (modèle priorités/catégories) ;
+# la validation des réactions se fait contre la palette configurée, plus contre cette constante.
+REACTION_EMOJIS = ("👍", "👎", "❤️", "😂", "😮", "🎉")
+
+# Codepoints "accessoires" d'un grapheme emoji — autorisés, mais ne comptent JAMAIS comme base.
+_EMOJI_ZWJ = 0x200D
+_EMOJI_VS = (0xFE0E, 0xFE0F)               # sélecteurs de variation (texte/emoji)
+_EMOJI_SKIN = range(0x1F3FB, 0x1F400)      # modificateurs de teinte de peau
+_EMOJI_ENCLOSE = (0x20E3, 0x20E0)          # keycap / cercle englobant
+_EMOJI_REGIONAL = range(0x1F1E6, 0x1F200)  # indicateurs régionaux (drapeaux)
+
+
+def _is_emoji_core(cp):
+    """cp appartient-il à une plage pictographique emoji (base autonome) ?"""
+    return (
+        0x1F000 <= cp <= 0x1FAFF          # pictographes, symboles & suppléments
+        or 0x2600 <= cp <= 0x27BF         # symboles divers + dingbats
+        or 0x2B00 <= cp <= 0x2BFF         # ⭐ ⬆ …
+        or 0x2300 <= cp <= 0x23FF         # ⌚ ⏰ ⏳ …
+        or 0x2190 <= cp <= 0x21FF         # flèches (↔️ …)
+        or cp in (0x203C, 0x2049)         # ‼ ⁉
+        or cp in (0x00A9, 0x00AE, 0x2122, 0x2139)  # © ® ™ ℹ
+    )
+
+
+def _clean_reaction_emoji(raw):
+    """[REACTION-PALETTE] Valide un AJOUT de réaction : UN SEUL grapheme emoji, rien d'autre.
+    Python pur (plages Unicode + garde de longueur), jamais de librairie/CDN (invariant 6).
+    Rejette texte, HTML, espaces, multi-caractères et deux emojis collés → renvoie '' (→ 400)."""
+    if not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    if not s:
+        return ""
+    cps = [ord(c) for c in s]
+    if len(cps) > 10:                      # garde de longueur (séquence ZWJ ≈ 7-8 cp max)
+        return ""
+    bases = 0                              # bases pictographiques NON jointes par ZWJ
+    regional = 0
+    has_core = False
+    for i, cp in enumerate(cps):
+        if cp == _EMOJI_ZWJ or cp in _EMOJI_VS or cp in _EMOJI_SKIN or cp in _EMOJI_ENCLOSE:
+            continue                       # accessoires (teinte, VS, ZWJ, keycap) : jamais une base
+        if cp in _EMOJI_REGIONAL:
+            regional += 1
+            has_core = True
+            continue
+        if _is_emoji_core(cp):
+            has_core = True
+            if i == 0 or cps[i - 1] != _EMOJI_ZWJ:
+                bases += 1                 # nouvelle base (sauf maillon d'une séquence ZWJ)
+            continue
+        return ""                          # tout le reste (ASCII, lettres, <, >, &, espace…) → rejet
+    if not has_core:
+        return ""                          # que des accessoires (VS/ZWJ seuls) → rejet
+    if regional:                           # drapeau = exactement 2 indicateurs = 1 grapheme
+        return s if (regional == 2 and not bases) else ""
+    return s if bases == 1 else ""         # 0 base ou ≥2 (deux emojis) → rejet
+
+
+def _reaction_palette(db):
+    """[REACTION-PALETTE] Palette configurée. Défaut = REACTION_EMOJIS (6 base) tant qu'aucune
+    config `reaction_emojis` n'est enregistrée. Liste ordonnée, dédupliquée, re-validée.
+    Peut être vide si l'owner a tout retiré (aucune réaction possible)."""
+    row = db.execute("SELECT value FROM app_state WHERE key = 'reaction_emojis'").fetchone()
+    if row is None:
+        return list(REACTION_EMOJIS)
+    try:
+        lst = json.loads(row["value"])
+    except (ValueError, TypeError):
+        return list(REACTION_EMOJIS)
+    if not isinstance(lst, list):
+        return list(REACTION_EMOJIS)
+    out = []
+    for e in lst:
+        c = _clean_reaction_emoji(e)
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
+def _valid_reaction_emoji(value, palette):
+    """Réaction acceptée = présente dans la palette CONFIGURÉE (base + ajouts). '' sinon → 400."""
+    v = str(value or "").strip()
+    return v if v in palette else ""
+
+
+def _comment_reactions_map(db, comment_ids):
+    """{comment_id: [{emoji, voter}]} pour un lot de commentaires (brut, non agrégé)."""
+    ids = [c for c in comment_ids if c is not None]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    out = {}
+    for rr in db.execute(
+        f"SELECT comment_id, emoji, voter FROM comment_reactions WHERE comment_id IN ({ph}) "
+        "ORDER BY created_at, id", ids
+    ).fetchall():
+        out.setdefault(rr["comment_id"], []).append({"emoji": rr["emoji"], "voter": rr["voter"]})
+    return out
+
+
+def _aggregate_reactions(reacts, me, owner_name, palette=None):
+    """Agrège [{emoji, voter}] → [{emoji, count, mine, voters(noms affichables)}] dans l'ordre
+    de la palette CONFIGURÉE (`palette`, défaut = 6 base). `me` = identité appelant ('' owner,
+    None anonyme) ; e-mail jamais exposé. Les emojis présents mais HORS palette (ex. retirés
+    après coup) sont affichés APRÈS, jamais masqués (non destructif à l'affichage)."""
+    by_emoji = {}
+    for rr in (reacts or []):
+        by_emoji.setdefault(rr["emoji"], []).append(rr["voter"])
+    order = list(palette) if palette else list(REACTION_EMOJIS)
+    for e in by_emoji:
+        if e not in order:
+            order.append(e)
+    mine_key = _voter_key(me) if me is not None else "\x00none"
+    out = []
+    for emoji in order:
+        voters = by_emoji.get(emoji)
+        if not voters:
+            continue
+        out.append({
+            "emoji": emoji,
+            "count": len(voters),
+            "mine": any(_voter_key(v) == mine_key for v in voters),
+            "voters": [_vote_display_name(v, owner_name) for v in voters],
+        })
+    return out
+
+
+def _find_reaction(db, comment_id, emoji, voter):
+    """Réaction de `voter` sur (commentaire, emoji) — match par e-mail (robuste au renommage)."""
+    key = _voter_key(voter)
+    for r in db.execute(
+        "SELECT id, voter FROM comment_reactions WHERE comment_id = ? AND emoji = ?",
+        (comment_id, emoji),
+    ).fetchall():
+        if _voter_key(r["voter"]) == key:
+            return r
+    return None
+
+
+def _toggle_reaction(db, comment_id, emoji, voter):
+    """Toggle : re-cliquer sa réaction la retire. Une réaction max par (commentaire, emoji, votant)."""
+    existing = _find_reaction(db, comment_id, emoji, voter)
+    if existing:
+        db.execute("DELETE FROM comment_reactions WHERE id = ?", (existing["id"],))
+    else:
+        db.execute(
+            "INSERT INTO comment_reactions (comment_id, emoji, voter, created_at) VALUES (?, ?, ?, ?)",
+            (comment_id, emoji, voter, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def _comment_dict(r, seen_map=None, reactions_map=None, me=None, owner_name="", palette=None):
     return {
         "id": r["id"],
         "memo_id": r["memo_id"],
@@ -3855,6 +4050,8 @@ def _comment_dict(r, seen_map=None):
         "parent_id": _row_get(r, "parent_id"),
         "priority": _row_get(r, "priority", 0) or 0,
         "seen": (seen_map or {}).get(r["id"], []),
+        # [COMMENT-REACTIONS] agrégées pour l'appelant (me) ; voters = noms affichables seuls.
+        "reactions": _aggregate_reactions((reactions_map or {}).get(r["id"]), me, owner_name, palette),
     }
 
 
@@ -3933,8 +4130,12 @@ def list_comments(memo_id):
         "SELECT * FROM memo_comments WHERE memo_id = ? ORDER BY created_at, id",
         (memo_id,),
     ).fetchall()
-    seen = _comment_seen_map(db, [r["id"] for r in rows])
-    return jsonify([_comment_dict(r, seen) for r in rows])
+    ids = [r["id"] for r in rows]
+    seen = _comment_seen_map(db, ids)
+    reacts = _comment_reactions_map(db, ids)  # [COMMENT-REACTIONS]
+    owner_name = _owner_name(db)
+    palette = _reaction_palette(db)  # [REACTION-PALETTE]
+    return jsonify([_comment_dict(r, seen, reacts, me="", owner_name=owner_name, palette=palette) for r in rows])
 
 
 @app.route("/api/memos/<int:memo_id>/comments", methods=["POST"])
@@ -3965,9 +4166,30 @@ def mark_comments_seen_owner(memo_id):
 @app.route("/api/comments/<int:comment_id>", methods=["DELETE"])
 def delete_comment(comment_id):
     db = get_db()
+    db.execute("DELETE FROM comment_reactions WHERE comment_id = ?", (comment_id,))  # [COMMENT-REACTIONS]
     db.execute("DELETE FROM memo_comments WHERE id = ?", (comment_id,))
     db.commit()
     return "", 204
+
+
+def _react_result(db, comment_id, me):
+    """Réactions agrégées d'un commentaire pour l'appelant (renvoyé après un toggle)."""
+    reacts = _comment_reactions_map(db, [comment_id]).get(comment_id)
+    return {"reactions": _aggregate_reactions(reacts, me, _owner_name(db), _reaction_palette(db))}
+
+
+@app.route("/api/comments/<int:comment_id>/react", methods=["POST"])
+def react_comment(comment_id):
+    # [COMMENT-REACTIONS] Réagir (owner, voter = ''). Toggle. 400 hors palette, 404 inconnu.
+    db = get_db()
+    if not db.execute("SELECT 1 FROM memo_comments WHERE id = ?", (comment_id,)).fetchone():
+        return jsonify({"error": "not found"}), 404
+    emoji = _valid_reaction_emoji((request.get_json(silent=True) or {}).get("emoji"), _reaction_palette(db))
+    if not emoji:
+        return jsonify({"error": "emoji hors palette"}), 400
+    _toggle_reaction(db, comment_id, emoji, "")
+    db.commit()
+    return jsonify(_react_result(db, comment_id, ""))
 
 
 SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js", "favicon.svg", "Inter.woff2",
@@ -4206,8 +4428,12 @@ def hub_data(hub_token):
             memo_ids,
         ).fetchall()
         cseen = _comment_seen_map(db, [c["id"] for c in crows])
+        creacts = _comment_reactions_map(db, [c["id"] for c in crows])  # [COMMENT-REACTIONS]
+        _cname = _owner_name(db)
+        _cpalette = _reaction_palette(db)  # [REACTION-PALETTE]
+        _cme = f"{hub['name'] or hub['email']} <{hub['email']}>"
         for c in crows:
-            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen))
+            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen, creacts, me=_cme, owner_name=_cname, palette=_cpalette))
     # [VOTE-DECISION] contexte vote de l'union hub (gel paresseux inclus). Identité du
     # votant = e-mail du hub (le match des voix est par e-mail → robuste au renommage).
     vote_owner_name = _owner_name(db)
@@ -4317,6 +4543,7 @@ def hub_data(hub_token):
             ).fetchall()
         ],
         "marker_color": _map_marker_color(db),
+        "reaction_emojis": _reaction_palette(db),  # [REACTION-PALETTE] palette consommée par les invités
         # [HUB-TOKEN-REFRESH] jetons par dossier rafraîchis à CHAQUE chargement (pas qu'à approve)
         # → un dossier ajouté après coup devient éditable sans re-saisir le code. L'invité est
         # déjà prouvé (hubProof) ; on ne fait que reposer des guest_token qu'il a droit d'avoir.
@@ -4442,8 +4669,11 @@ def share_data(token):
             memo_ids,
         ).fetchall()
         cseen = _comment_seen_map(db, [c["id"] for c in crows])
+        creacts = _comment_reactions_map(db, [c["id"] for c in crows])  # [COMMENT-REACTIONS]
+        _cname = _owner_name(db)
+        _cpalette = _reaction_palette(db)  # [REACTION-PALETTE]
         for c in crows:
-            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen))
+            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen, creacts, me=me, owner_name=_cname, palette=_cpalette))
     # [VOTE-DECISION] contexte vote des dossiers du périmètre (gel paresseux inclus).
     vote_owner_name = _owner_name(db)
     vote_pids = {r["project_id"] for r in rows if r["project_id"]}
@@ -4490,6 +4720,7 @@ def share_data(token):
             ).fetchall()
         ],
         "marker_color": _map_marker_color(db),
+        "reaction_emojis": _reaction_palette(db),  # [REACTION-PALETTE] palette consommée par les invités
     }
     if share["kind"] == "project":
         proj = db.execute(
@@ -5000,6 +5231,30 @@ def share_add_comment(token, memo_id):
     return jsonify(_comment_dict(row)), 201
 
 
+@app.route("/share/<token>/comment/<int:comment_id>/react", methods=["POST"])
+def share_react_comment(token, comment_id):
+    # [COMMENT-REACTIONS] Réagir côté invité. Route publique sous /share/* (bypass Authelia,
+    # invariant 5). can_edit NON requis (décision 2 : réagir n'est pas éditer) mais invité
+    # APPROUVÉ requis + mémo du commentaire dans le scope. 400 hors palette.
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    crow = db.execute("SELECT id, memo_id FROM memo_comments WHERE id = ?", (comment_id,)).fetchone()
+    if not crow or crow["memo_id"] not in {r["id"] for r in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    emoji = _valid_reaction_emoji((request.get_json(silent=True) or {}).get("emoji"), _reaction_palette(db))
+    if not emoji:
+        return jsonify({"error": "emoji hors palette"}), 400
+    voter = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    _toggle_reaction(db, comment_id, emoji, voter)
+    db.commit()
+    return jsonify(_react_result(db, comment_id, voter))
+
+
 @app.route("/share/<token>/memo/<int:memo_id>/vote", methods=["POST"])
 def share_vote_memo(token, memo_id):
     # [VOTE-DECISION] Voter côté invité. Route publique sous /share/* (bypass Authelia,
@@ -5382,15 +5637,26 @@ def _build_export(db, root_id=None):
         "SELECT id, name, color, position FROM priorities ORDER BY position, id"
     ).fetchall()
     comments = db.execute(
-        "SELECT c.memo_uid, c.author, c.body, c.created_at, "
+        "SELECT c.id, c.memo_uid, c.author, c.body, c.created_at, "
         "COALESCE(c.priority, 0) AS priority, p.created_at AS parent_created_at "
         "FROM memo_comments c LEFT JOIN memo_comments p ON p.id = c.parent_id "
         "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
     ).fetchall()
     if subtree is not None:
         comments = [r for r in comments if r["memo_uid"] in memo_uids]
-    return {
-        "version": 20,
+    # [COMMENT-REACTIONS] v21 : réactions brutes (voter comme created_by v19) nichées par commentaire.
+    reacts_by_cid = {}
+    for rr in db.execute("SELECT comment_id, emoji, voter, created_at FROM comment_reactions ORDER BY created_at, id").fetchall():
+        reacts_by_cid.setdefault(rr["comment_id"], []).append(
+            {"emoji": rr["emoji"], "voter": rr["voter"], "created_at": rr["created_at"]})
+    out_comments = []
+    for r in comments:
+        d = dict(r)
+        cid = d.pop("id", None)
+        d["reactions"] = reacts_by_cid.get(cid, [])
+        out_comments.append(d)
+    result = {
+        "version": 21,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -5398,8 +5664,14 @@ def _build_export(db, root_id=None):
         "links": out_links,
         "memos": out_memos,
         "history": [dict(r) for r in history],
-        "comments": [dict(r) for r in comments],
+        "comments": out_comments,
     }
+    # [REACTION-PALETTE] v21 : palette custom exportée avec les réglages (comme les priorités).
+    # Émise SEULEMENT si l'owner a configuré une palette (clé présente) → un export par défaut
+    # reste sans le champ, donc l'import v20/v21 sans palette = base par défaut, aucun crash.
+    if db.execute("SELECT 1 FROM app_state WHERE key = 'reaction_emojis'").fetchone():
+        result["reaction_emojis"] = _reaction_palette(db)
+    return result
 
 
 def _rotate_backups():
@@ -5864,6 +6136,21 @@ def import_links():
         except (TypeError, ValueError):
             pass
 
+    # [REACTION-PALETTE] Restaure la palette custom SI le fichier en fournit une ET qu'aucune
+    # config locale n'existe (non destructif : ne clobbe jamais la palette courante de l'owner).
+    # Fichier v20/v21 sans le champ = base par défaut, aucun crash. Chaque emoji re-validé.
+    rp = data.get("reaction_emojis")
+    if isinstance(rp, list) and db.execute(
+        "SELECT 1 FROM app_state WHERE key = 'reaction_emojis'"
+    ).fetchone() is None:
+        cleaned = []
+        for e in rp:
+            c = _clean_reaction_emoji(e)
+            if c and c not in cleaned:
+                cleaned.append(c)
+        if cleaned:
+            _set_state(db, "reaction_emojis", json.dumps(cleaned, ensure_ascii=False))
+
     def map_priority(value):
         try:
             p = int(value or 0)
@@ -6124,18 +6411,39 @@ def import_links():
             continue
         key = (c_uid, c_at, c_author)
         if key in existing_comments:
-            continue
-        c_prio = _valid_comment_priority(c.get("priority"))
-        parent_at = (c.get("parent_created_at") or "").strip()
-        parent_id = comment_id_by_key.get((c_uid, parent_at)) if parent_at else None
-        cur = db.execute(
-            "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at, parent_id, priority) "
-            "VALUES (?, ?, ?, NULL, ?, ?, ?, ?)",
-            (memo_row["id"], c_uid, c_author, c_body, c_at, parent_id, c_prio),
-        )
-        existing_comments.add(key)
-        comment_id_by_key[(c_uid, c_at)] = cur.lastrowid
-        imported_comments += 1
+            cid = comment_id_by_key.get((c_uid, c_at))
+        else:
+            c_prio = _valid_comment_priority(c.get("priority"))
+            parent_at = (c.get("parent_created_at") or "").strip()
+            parent_id = comment_id_by_key.get((c_uid, parent_at)) if parent_at else None
+            cur = db.execute(
+                "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at, parent_id, priority) "
+                "VALUES (?, ?, ?, NULL, ?, ?, ?, ?)",
+                (memo_row["id"], c_uid, c_author, c_body, c_at, parent_id, c_prio),
+            )
+            existing_comments.add(key)
+            cid = cur.lastrowid
+            comment_id_by_key[(c_uid, c_at)] = cid
+            imported_comments += 1
+        # [COMMENT-REACTIONS] v21 : additif non destructif — AJOUTE les réactions manquantes
+        # (dédup par UNIQUE(comment_id, emoji, voter)), emoji hors palette ignoré. Compat v1→v20 :
+        # champ absent = aucune réaction. Voter brut (comme created_by v19).
+        if cid is not None:
+            for rr in (c.get("reactions") or []):
+                if not isinstance(rr, dict):
+                    continue
+                # Validation de FORMAT (pas de palette) : un import est non destructif et
+                # additif — on préserve les réactions historiques, même sur un emoji retiré
+                # de la palette courante (invariant 2). Seule la garbage (texte/HTML) est rejetée.
+                r_emoji = _clean_reaction_emoji(rr.get("emoji"))
+                if not r_emoji:
+                    continue
+                r_voter = str(rr.get("voter") or "").strip()[:200]
+                r_at = (rr.get("created_at") or "").strip() or now
+                db.execute(
+                    "INSERT OR IGNORE INTO comment_reactions (comment_id, emoji, voter, created_at) VALUES (?, ?, ?, ?)",
+                    (cid, r_emoji, r_voter, r_at),
+                )
 
     db.commit()
     return jsonify(

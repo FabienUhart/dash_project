@@ -2519,6 +2519,13 @@ function render() {
           r.appendChild(rep);
         }
         cwrap.appendChild(r);
+        // [COMMENT-REACTIONS] chips + palette : invité APPROUVÉ peut réagir (can_edit non requis).
+        const rr = reactionRow(c.reactions, GUEST.status === 'approved', async (emoji) => {
+          const resp = await fetch(API + '/comment/' + c.id + '/react', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify({ emoji }) });
+          if (resp.ok) await load(); else notify('Réaction impossible.', { error: true });
+        });
+        if (isReply) rr.style.marginLeft = '1.5rem';
+        cwrap.appendChild(rr);
       };
       comments.filter(c => !c.parent_id).forEach(c => {
         renderC(c, false);
@@ -2802,6 +2809,7 @@ async function load() {
     return;
   }
   DATA = await r.json();
+  if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis;  // [REACTION-PALETTE]
   await refreshGuest();
   render();
 }

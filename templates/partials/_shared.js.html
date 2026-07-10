@@ -129,6 +129,47 @@ function subHideBar(cfg) {
   return { bar, isHidden };
 }
 
+// [COMMENT-REACTIONS] / [REACTION-PALETTE] Palette CONFIGURABLE (owner). `REACTION_EMOJIS` = défaut
+// (6 base) ; chaque page l'écrase avec la palette du serveur (settings owner / DATA.reaction_emojis)
+// après chargement. Rangée de chips par emoji présent (« 👍 3 », ma réaction = chip accent) + bouton
+// « 😊+ » → mini-palette (façon card-menu, fermeture au clic extérieur, CSS/markup — invariant 8).
+// PUR : cfg via callback. Identique 3 pages. La mini-palette lit la liste configurée courante.
+let REACTION_EMOJIS = ['👍', '👎', '❤️', '😂', '😮', '🎉'];
+function reactionRow(reactions, canReact, onToggle) {
+  const row = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;margin-top:0.25rem' } });
+  (reactions || []).forEach(r => {
+    const chip = el('button', {
+      class: 'prio-btn', text: r.emoji + ' ' + r.count,
+      attrs: { type: 'button', title: (r.voters || []).join(', '),
+        style: 'padding:0.05rem 0.45rem;font-size:0.78rem' + (r.mine ? ';background:var(--accent);border-color:var(--accent);color:#10141a' : '') },
+    });
+    if (canReact) chip.addEventListener('click', () => onToggle(r.emoji));
+    else chip.disabled = true;
+    row.appendChild(chip);
+  });
+  if (canReact && REACTION_EMOJIS.length) {
+    const wrap = el('span', { attrs: { style: 'position:relative;display:inline-flex' } });
+    const btn = el('button', { class: 'prio-btn', text: '😊+', attrs: { type: 'button', title: 'Réagir', style: 'padding:0.05rem 0.4rem' } });
+    const menu = el('div', { attrs: { style: 'position:absolute;bottom:calc(100% + 4px);left:0;z-index:1300;display:none;gap:0.15rem;'
+      + 'background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.25rem;box-shadow:0 8px 24px rgba(0,0,0,0.35)' } });
+    const onDoc = (e) => { if (!wrap.contains(e.target)) closeMenu(); };
+    function closeMenu() { menu.style.display = 'none'; document.removeEventListener('click', onDoc, true); }
+    REACTION_EMOJIS.forEach(em => {
+      const b = el('button', { text: em, attrs: { type: 'button', style: 'background:none;border:none;font-size:1.15rem;cursor:pointer;padding:0.1rem 0.25rem;line-height:1' } });
+      b.addEventListener('click', () => { closeMenu(); onToggle(em); });
+      menu.appendChild(b);
+    });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (menu.style.display === 'none') { menu.style.display = 'flex'; document.addEventListener('click', onDoc, true); }
+      else closeMenu();
+    });
+    wrap.appendChild(btn); wrap.appendChild(menu);
+    row.appendChild(wrap);
+  }
+  return row;
+}
+
 // Set des mémos gagnants d'un dossier au vote CLOS (pour la mise en avant carte), ou null.
 function voteWinnerIdSet(proj) {
   if (!proj || !proj.vote_enabled || proj.vote_state !== 'closed') return null;

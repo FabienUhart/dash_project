@@ -1833,6 +1833,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <button type="button" class="prio-btn" data-tab="backups" role="tab">💾 Sauvegardes</button>
     <button type="button" class="prio-btn" data-tab="cats" role="tab">🗂️ Catégories</button>
     <button type="button" class="prio-btn" data-tab="prios" role="tab">🚩 Priorités</button>
+    <button type="button" class="prio-btn" data-tab="reactions" role="tab">😊 Réactions</button>
   </div>
 
   <div class="settings-panel" data-panel="identity">
@@ -1929,6 +1930,22 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div class="settings-section">
       <h4>PRIORITÉS</h4>
       <div id="prio-manage"></div>
+    </div>
+  </div>
+
+  <div class="settings-panel" data-panel="reactions">
+    <div class="settings-section">
+      <h4>RÉACTIONS</h4>
+      <div id="reaction-manage" style="display:flex;flex-wrap:wrap;gap:0.4rem;align-items:center"></div>
+      <div class="cat-add-line" style="margin-top:0.6rem">
+        <input type="text" id="reaction-add-input" maxlength="16" placeholder="Colle un emoji…" autocomplete="off"
+               style="width:6.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.45rem 0.6rem;text-align:center;font-size:1.15rem">
+        <button id="reaction-add-btn" class="prio-btn">＋ Ajouter</button>
+      </div>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.6rem 0 0">
+        Les emojis proposés sous les commentaires (owner et invités). Les 6 de base sont là par défaut ;
+        ajoute les tiens (colle ou tape un seul emoji) ou retire ceux dont tu ne veux pas. Enregistré automatiquement.
+      </p>
     </div>
   </div>
 
@@ -2082,7 +2099,7 @@ async function loadAll() {
       && !state.projects.some(p => p.id === state.memoProject)) {
     state.memoProject = 'all';
   }
-  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; state.smtpEnabled = !!(s && s.smtp_enabled); } catch (e) {}
+  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; state.smtpEnabled = !!(s && s.smtp_enabled); if (s && Array.isArray(s.reaction_emojis)) REACTION_EMOJIS = s.reaction_emojis; } catch (e) {}
   renderAll();
   if (state.view === 'links') loadStatus();
 }
@@ -5418,6 +5435,13 @@ function commentsBlockEl(memo) {
         } },
       }));
       list.appendChild(r);
+      // [COMMENT-REACTIONS] rangée de chips + palette (owner peut toujours réagir).
+      const rr = reactionRow(c.reactions, true, async (emoji) => {
+        try { await api(`/api/comments/${c.id}/react`, { method: 'POST', body: JSON.stringify({ emoji }) }); loadComments(); }
+        catch (e) { await notify('Réaction impossible : ' + e.message, { error: true }); }
+      });
+      if (isReply) rr.style.marginLeft = '1.5rem';
+      list.appendChild(rr);
     };
     comments.filter(c => !c.parent_id).forEach(c => {
       renderOne(c, false);
@@ -6519,7 +6543,7 @@ window.addEventListener('load', syncHeaderHeight);
 const settingsDialog = document.getElementById('settings-dialog');
 
 // [SETTINGS-TABS] un seul panneau visible ; onglet actif persisté (localStorage `settingsTab`).
-const SETTINGS_TABS = ['identity', 'map', 'backups', 'cats', 'prios'];
+const SETTINGS_TABS = ['identity', 'map', 'backups', 'cats', 'prios', 'reactions'];
 function setSettingsTab(tab) {
   if (!SETTINGS_TABS.includes(tab)) tab = 'identity';
   localStorage.setItem('settingsTab', tab);
@@ -6551,6 +6575,7 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   renderCatManage();
   renderProjManage();
   renderPrioManage();
+  renderReactionManage();
   renderBackups();
   setSettingsTab(localStorage.getItem('settingsTab') || 'identity');
   settingsDialog.showModal();
@@ -6588,6 +6613,48 @@ document.getElementById('marker-color-input').addEventListener('change', (e) => 
 document.getElementById('marker-color-reset').addEventListener('click', () => {
   document.getElementById('marker-color-input').value = '#e53935';
   saveMarkerColor('#e53935');
+});
+
+// [REACTION-PALETTE] Gestion de la palette de réactions (owner-only). Gabarit des priorités :
+// chips emoji (chacun ✕-retirable) + champ « ＋ Ajouter ». Sauvegarde AUTO (PUT /api/settings).
+async function saveReactionPalette(list) {
+  const r = await api('/api/settings', { method: 'PUT', body: JSON.stringify({ reaction_emojis: list }) });
+  if (r && Array.isArray(r.reaction_emojis)) REACTION_EMOJIS = r.reaction_emojis;
+  renderReactionManage();
+  settingsSavedFlash();
+}
+function renderReactionManage() {
+  const wrap = document.getElementById('reaction-manage');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!REACTION_EMOJIS.length) {
+    wrap.appendChild(el('span', { attrs: { style: 'color:var(--muted);font-size:0.82rem' }, text: 'Aucune réaction — les commentaires n’en proposeront pas.' }));
+  }
+  REACTION_EMOJIS.forEach(em => {
+    const chip = el('span', { class: 'prio-btn', attrs: { style: 'display:inline-flex;align-items:center;gap:0.3rem;padding:0.15rem 0.5rem;cursor:default;font-size:1rem' } });
+    chip.appendChild(el('span', { text: em, attrs: { style: 'font-size:1.15rem;line-height:1' } }));
+    const del = el('button', { text: '✕', attrs: { type: 'button', title: 'Retirer', style: 'background:none;border:none;color:var(--red);cursor:pointer;font-size:0.85rem;line-height:1;padding:0' } });
+    del.addEventListener('click', () => saveReactionPalette(REACTION_EMOJIS.filter(e => e !== em)));
+    chip.appendChild(del);
+    wrap.appendChild(chip);
+  });
+}
+const reactionAddInput = document.getElementById('reaction-add-input');
+async function addReactionEmoji() {
+  const v = (reactionAddInput.value || '').trim();
+  if (!v) return;
+  if (REACTION_EMOJIS.includes(v)) { reactionAddInput.value = ''; return; }  // déjà présent → no-op
+  const next = REACTION_EMOJIS.concat([v]);
+  reactionAddInput.value = '';
+  try {
+    await saveReactionPalette(next);  // le serveur valide (un seul emoji) → 400 rejeté ci-dessous
+  } catch (e) {
+    notify('Emoji invalide : colle un seul emoji.', { error: true });
+  }
+}
+document.getElementById('reaction-add-btn').addEventListener('click', addReactionEmoji);
+reactionAddInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); addReactionEmoji(); }
 });
 
 async function renderBackups() {
