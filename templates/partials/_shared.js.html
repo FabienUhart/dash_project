@@ -1952,6 +1952,157 @@ function renderAttachments(cfg) {
   return wrap;
 }
 
+// ── [FILES-VIEW] Vue « retrouver les fichiers » (agrégée, source cliquable) ──────────────────
+// Partagée owner/invité/hub (invariant 9). cfg = { files:[{kind,filename,orig_name,mime,size,
+// created_at,preview,url,source:{type,id,title,crumb:[{id,name,emoji}]}}], onOpenSource(source),
+// openImage?(entry) }. Rend une barre (type + recherche + regroupement) + une liste. Monochrome.
+function _filesStyle() {
+  if (document.getElementById('files-style')) return;
+  const st = document.createElement('style'); st.id = 'files-style';
+  st.textContent = '.fv-bar{display:flex;flex-wrap:wrap;gap:0.4rem;align-items:center;margin-bottom:0.7rem}'
+    + '.fv-search{flex:1;min-width:140px;padding:0.35rem 0.5rem;border:1px solid var(--border);border-radius:8px;background:var(--panel-2);color:var(--text)}'
+    + '.fv-grp{font-size:0.75rem;color:var(--muted);margin:0.6rem 0 0.3rem;text-transform:uppercase;letter-spacing:0.03em}'
+    + '.fv-row{display:flex;align-items:center;gap:0.5rem;padding:0.4rem;border:1px solid var(--border);border-radius:8px;margin-bottom:0.35rem;background:var(--panel-2)}'
+    + '.fv-ic{font-size:1.2rem;flex:0 0 auto}.fv-meta{flex:1;min-width:0}'
+    + '.fv-name{font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    + '.fv-src{font-size:0.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+    + '.fv-crumb{cursor:pointer;text-decoration:none;color:var(--muted)}.fv-crumb:hover{color:var(--accent);text-decoration:underline}'
+    + '.fv-size{font-size:0.72rem;color:var(--muted);flex:0 0 auto;white-space:nowrap}'
+    + '.fv-acts{display:flex;gap:0.25rem;flex:0 0 auto}'
+    + '.fv-empty{color:var(--muted);font-size:0.9rem;padding:1rem;text-align:center}';
+  document.head.appendChild(st);
+}
+function _fileType(mime) {
+  mime = mime || '';
+  if (mime.indexOf('image/') === 0) return 'photos';
+  if (mime.indexOf('audio/') === 0) return 'audio';
+  return 'docs';
+}
+function fileSourceEl(source, onOpen) {
+  // Fil d'Ariane cliquable : dossiers (crumb) puis, si mémo, le titre du mémo.
+  const wrap = el('span', { class: 'fv-src' });
+  const crumb = (source && source.crumb) || [];
+  crumb.forEach((p, i) => {
+    if (i) wrap.appendChild(document.createTextNode(' › '));
+    const seg = el('a', { class: 'fv-crumb', text: (p.emoji ? p.emoji + ' ' : '') + p.name, attrs: { title: p.name } });
+    seg.addEventListener('click', (e) => { e.preventDefault(); onOpen && onOpen({ type: 'project', id: p.id }); });
+    wrap.appendChild(seg);
+  });
+  if (source && source.type === 'memo') {
+    if (crumb.length) wrap.appendChild(document.createTextNode(' › '));
+    else wrap.appendChild(document.createTextNode('📥 '));
+    const seg = el('a', { class: 'fv-crumb', text: '📝 ' + source.title, attrs: { title: source.title } });
+    seg.addEventListener('click', (e) => { e.preventDefault(); onOpen && onOpen({ type: 'memo', id: source.id }); });
+    wrap.appendChild(seg);
+  }
+  return wrap;
+}
+function fileRow(entry, cfg) {
+  const row = el('div', { class: 'fv-row' });
+  row.appendChild(el('span', { class: 'fv-ic', text: attachIcon(entry.mime) }));
+  const meta = el('div', { class: 'fv-meta' });
+  meta.appendChild(el('div', { class: 'fv-name', text: entry.orig_name, attrs: { title: entry.orig_name } }));
+  meta.appendChild(fileSourceEl(entry.source, cfg.onOpenSource));
+  row.appendChild(meta);
+  if (entry.size) row.appendChild(el('span', { class: 'fv-size', text: fmtBytes(entry.size) }));
+  const acts = el('div', { class: 'fv-acts' });
+  if (entry.preview) {
+    const v = el('button', { class: 'iv-btn', text: '⤢', attrs: { type: 'button', title: 'Aperçu' } });
+    v.addEventListener('click', () => {
+      if ((entry.mime || '').indexOf('image/') === 0 && cfg.openImage) cfg.openImage(entry);
+      else window.open(entry.url, '_blank', 'noopener');
+    });
+    acts.appendChild(v);
+  }
+  acts.appendChild(el('a', { class: 'iv-btn', text: '⤓', attrs: {
+    href: entry.url + (entry.kind === 'attachment' ? '?download=1' : ''),
+    title: 'Télécharger', download: entry.orig_name, rel: 'noopener' } }));
+  row.appendChild(acts);
+  return row;
+}
+function renderFilesView(cfg) {
+  _filesStyle();
+  const wrap = el('div', { class: 'fv-wrap' });
+  const state = { type: 'all', q: '', group: 'none' };
+  const body = el('div');
+  const bar = el('div', { class: 'fv-bar' });
+  [['all', 'Tout'], ['photos', 'Photos'], ['docs', 'Docs'], ['audio', 'Audio']].forEach(([val, label]) => {
+    const b = el('button', { class: 'prio-btn', text: label, attrs: { type: 'button' } });
+    const paint = () => { if (state.type === val) { b.style.background = 'var(--accent)'; b.style.color = '#10141a'; } else { b.style.background = ''; b.style.color = ''; } };
+    paint();
+    b.addEventListener('click', () => { state.type = val; bar.querySelectorAll('button').forEach(x => { x.style.background = ''; x.style.color = ''; }); b.style.background = 'var(--accent)'; b.style.color = '#10141a'; draw(); });
+    bar.appendChild(b);
+  });
+  const search = el('input', { class: 'fv-search', attrs: { type: 'search', placeholder: '🔎 Nom de fichier…' } });
+  search.addEventListener('input', () => { state.q = search.value.trim().toLowerCase(); draw(); });
+  bar.appendChild(search);
+  const grp = el('select', { class: 'fv-search', attrs: { title: 'Regroupement', style: 'flex:0 0 auto;min-width:0' } });
+  [['none', 'Sans regroupement'], ['sub', 'Par dossier'], ['memo', 'Par source']].forEach(([v, l]) => grp.appendChild(el('option', { text: l, attrs: { value: v } })));
+  grp.addEventListener('change', () => { state.group = grp.value; draw(); });
+  bar.appendChild(grp);
+  wrap.appendChild(bar);
+  wrap.appendChild(body);
+  function draw() {
+    body.innerHTML = '';
+    let list = (cfg.files || []).filter(f => (state.type === 'all' || _fileType(f.mime) === state.type)
+      && (!state.q || (f.orig_name || '').toLowerCase().includes(state.q)));
+    if (!list.length) { body.appendChild(el('div', { class: 'fv-empty', text: 'Aucun fichier.' })); return; }
+    if (state.group === 'none') { list.forEach(f => body.appendChild(fileRow(f, cfg))); return; }
+    const groups = new Map();
+    list.forEach(f => {
+      const s = f.source || {};
+      let key, label;
+      if (state.group === 'memo') {
+        key = s.type + ':' + s.id;
+        label = (s.type === 'memo' ? '📝 ' : '📁 ') + (s.title || '—');
+      } else {
+        const last = (s.crumb && s.crumb.length) ? s.crumb[s.crumb.length - 1] : null;
+        key = last ? 'p:' + last.id : 'inbox';
+        label = last ? ((last.emoji ? last.emoji + ' ' : '📁 ') + last.name) : '📥 Sans dossier';
+      }
+      if (!groups.has(key)) groups.set(key, { label, items: [] });
+      groups.get(key).items.push(f);
+    });
+    groups.forEach(g => {
+      body.appendChild(el('div', { class: 'fv-grp', text: g.label + ' (' + g.items.length + ')' }));
+      g.items.forEach(f => body.appendChild(fileRow(f, cfg)));
+    });
+  }
+  draw();
+  return wrap;
+}
+// [FILES-VIEW] Pop-in plein écran listant des fichiers agrégés. cfg = { title, load:()=>Promise<files>,
+// onOpenSource(source), openImage?, zip?:{count,buildUrl,hasSubprojects} }. Pas de GSAP (invariant 8).
+function openFilesDialog(cfg) {
+  let dlg = document.getElementById('files-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'files-dialog';
+    dlg.style.cssText = 'width:min(680px,96vw);max-height:88vh;border:1px solid var(--border);'
+      + 'border-radius:14px;background:var(--panel);color:var(--text);padding:1rem;overflow:auto';
+    document.body.appendChild(dlg);
+  }
+  const openSource = (s) => { dlg.close(); cfg.onOpenSource && cfg.onOpenSource(s); };
+  dlg.innerHTML = '';
+  const head = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.5rem;margin-bottom:0.7rem' } });
+  head.appendChild(el('h3', { text: '📁 ' + (cfg.title || 'Fichiers'), attrs: { style: 'margin:0;font-size:1rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+  if (cfg.zip) {
+    const z = el('button', { class: 'iv-btn', text: '⤓', attrs: { type: 'button', title: 'Télécharger en .zip' } });
+    z.addEventListener('click', () => downloadZipDialog({ title: 'Télécharger les fichiers', hasSubprojects: !!cfg.zip.hasSubprojects, count: cfg.zip.count, buildUrl: cfg.zip.buildUrl }));
+    head.appendChild(z);
+  }
+  const x = el('button', { class: 'iv-btn', text: '✕', attrs: { type: 'button', title: 'Fermer' } });
+  x.addEventListener('click', () => dlg.close());
+  head.appendChild(x); dlg.appendChild(head);
+  const slot = el('div', { text: 'Chargement…', attrs: { style: 'color:var(--muted);font-size:0.9rem' } });
+  dlg.appendChild(slot);
+  dlg.showModal();
+  Promise.resolve(cfg.load()).then(files => {
+    slot.innerHTML = '';
+    slot.appendChild(renderFilesView({ files: files || [], onOpenSource: openSource, openImage: cfg.openImage }));
+  }).catch(() => { slot.textContent = 'Impossible de charger les fichiers.'; });
+}
+
 // [ATTACHMENTS-QUICKVIEW] Pop-in de consultation des fichiers d'un mémo depuis la card (badge 📎n),
 // sans ouvrir l'éditeur. Réutilise renderAttachments (invariant 9 : même rendu aperçu/download).
 // `makeCfg(rerender)` renvoie la cfg renderAttachments (onChange re-rend la pop-in). Pas de GSAP

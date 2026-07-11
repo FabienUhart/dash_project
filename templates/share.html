@@ -724,6 +724,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 <main>
   <div id="guest-banner" hidden></div>
   <div id="pdesc" hidden style="color:var(--muted);font-size:0.85rem;margin:0 0 0.7rem;white-space:pre-wrap"></div>
+  <div id="pfiles"></div>
   <div id="tiles" hidden></div>
   <div id="add-bar" hidden>
     <input id="add-input" type="text" placeholder="+ Ajouter un élément… (Entrée)">
@@ -1537,7 +1538,28 @@ function shareProjectZipCount(pid, scope, includeSubs) {
   const set = new Set(includeSubs ? [pid, ...projDescendants(pid)] : [pid]);
   let n = 0;
   (DATA.memos || []).forEach(m => { if (set.has(m.project_id)) n += memoZipCount(m, scope); });
+  // [FOLDER-ATTACHMENTS] fichiers rattachés aux dossiers du périmètre
+  (DATA.projects || []).forEach(p => { if (set.has(p.id)) (p.attachments || []).forEach(a => { if (scope === 'all' || (a.mime || '').indexOf('image/') === 0) n++; }); });
   return n;
+}
+// [FILES-VIEW] Vue « Fichiers » d'un dossier partagé (borné au token, invariant 5).
+function openShareFileSource(s) {
+  if (!s) return;
+  if (s.type === 'memo') {
+    const m = (DATA.memos || []).find(x => x.id === s.id);
+    if (m) { if (canEditNow()) { openEditor(m, el('span', ''), el('span', '')); return; } PFILTER = m.project_id || 'all'; GVIEW = 'board'; render(); return; }
+  }
+  if (s.type === 'project') { PFILTER = s.id; GVIEW = 'board'; render(); }
+}
+function openShareFiles(pid) {
+  openFilesDialog({
+    title: 'Fichiers',
+    load: () => fetch(API + '/project/' + pid + '/files').then(r => r.json()),
+    onOpenSource: openShareFileSource,
+    openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+    zip: { hasSubprojects: true, count: (scope, subs) => shareProjectZipCount(pid, scope, subs),
+           buildUrl: (scope, subs) => API + '/project/' + pid + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0) },
+  });
 }
 
 async function guestPut(url, body) {
@@ -1944,6 +1966,18 @@ function renderTiles() {
     tile.addEventListener('click', openSharePhotos);
     tiles.appendChild(tile);
   }
+  // [FILES-VIEW] Tuile « 📁 Fichiers » : retrouver tous les fichiers du dossier partagé.
+  if (DATA.kind === 'project') {
+    const fpid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
+    if (fpid) {
+      const tile = el('div', 'tile');
+      const l = el('span', 'tl', '📁 Fichiers'); l.style.color = '#7986cb';
+      tile.appendChild(l);
+      tile.title = 'Retrouver tous les fichiers du dossier et de ses sous-dossiers';
+      tile.addEventListener('click', () => openShareFiles(fpid));
+      tiles.appendChild(tile);
+    }
+  }
   // [PHOTO-BATCH-DOWNLOAD] Tuile « ⤓ Télécharger » : zip des fichiers du dossier partagé.
   if (DATA.kind === 'project') {
     const zpid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
@@ -2296,6 +2330,23 @@ function render() {
   }
   pdesc.hidden = !curDesc;
   pdesc.textContent = curDesc;
+  // [FOLDER-ATTACHMENTS] fichiers rattachés au dossier courant (vue board d'un projet).
+  const pfiles = document.getElementById('pfiles');
+  pfiles.innerHTML = '';
+  if (DATA.kind === 'project' && GVIEW === 'board') {
+    const zpid = PFILTER !== 'all' ? PFILTER : DATA.root_id;
+    const fp = (DATA.projects || []).find(p => p.id === zpid);
+    if (fp && ((fp.attachments || []).length || canEditNow())) {
+      pfiles.appendChild(renderAttachments({
+        attachments: fp.attachments || [],
+        canEdit: canEditNow(),
+        uploadUrl: API + '/project/' + fp.id + '/attachments',
+        headers: { 'X-Guest-Token': guestToken() },
+        onChange: async () => { await load(); },
+        openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+      }));
+    }
+  }
   document.getElementById('add-bar').hidden = !(canEditNow() && DATA.kind === 'project');
   document.getElementById('proj-bar').hidden = !(canEditNow() && DATA.kind === 'project');
   const projSel = document.getElementById('add-project');

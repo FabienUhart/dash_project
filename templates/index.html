@@ -2620,6 +2620,16 @@ function renderSidebar() {
     agendaItem.appendChild(favStarBtn('view', 'agenda'));  // [FAVORITES] épingler la vue
     nav.appendChild(agendaItem);
 
+    // [FILES-VIEW] « Fichiers » : vue globale (pop-in) de TOUS les fichiers du dashboard.
+    const filesItem = el('div', {
+      class: 'cat-item',
+      attrs: { title: 'Retrouver tous les fichiers du dashboard (dossiers + mémos)' },
+      on: { click: openGlobalFiles },
+    });
+    filesItem.appendChild(emojiIcon('📁'));
+    filesItem.appendChild(el('span', { class: 'cat-label', text: 'Fichiers' }));
+    nav.appendChild(filesItem);
+
     const inboxItem = mkProjItem('inbox', emojiIcon('📥'), 'Inbox', inboxCount, null);
     // [SIDEBAR-TREE] colonne chevron réservée (vide) pour aligner l'icône sur les projets.
     inboxItem.insertBefore(el('span', { class: 'sb-proj-chev' }), inboxItem.firstChild);
@@ -3470,7 +3480,37 @@ function projectZipCount(projId, scope, includeSubs) {
   const set = new Set(includeSubs ? [projId, ...projectDescendants(projId)] : [projId]);
   let n = 0;
   (state.memos || []).forEach(m => { if (set.has(m.project_id)) n += memoZipCount(m, scope); });
+  // [FOLDER-ATTACHMENTS] fichiers rattachés aux dossiers eux-mêmes
+  (state.projects || []).forEach(p => { if (set.has(p.id)) (p.attachments || []).forEach(a => { if (scope === 'all' || (a.mime || '').indexOf('image/') === 0) n++; }); });
   return n;
+}
+// [FILES-VIEW] Ouvre la vue « Fichiers » d'un dossier (sous-arbre) ou globale.
+function openProjectFiles(proj) {
+  openFilesDialog({
+    title: proj.name,
+    load: () => api(`/api/projects/${proj.id}/files?subtree=1`),
+    onOpenSource: openFileSource,
+    openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
+    zip: { hasSubprojects: true, count: (scope, subs) => projectZipCount(proj.id, scope, subs),
+           buildUrl: (scope, subs) => `/api/projects/${proj.id}/download.zip?scope=${scope}&subprojects=${subs ? 1 : 0}` },
+  });
+}
+function openGlobalFiles() {
+  openFilesDialog({
+    title: 'Tous les fichiers',
+    load: () => api('/api/files'),
+    onOpenSource: openFileSource,
+    openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
+  });
+}
+// Navigue vers la source d'un fichier (mémo ou dossier) depuis le fil d'Ariane.
+function openFileSource(s) {
+  if (!s) return;
+  if (s.type === 'memo') {
+    const m = (state.memos || []).find(x => x.id === s.id);
+    if (m) { openMemoEditor(m); return; }
+  }
+  if (s.type === 'project') { state.view = 'memos'; state.memoProject = s.id; renderAll(); }
 }
 function openProjectZip(proj) {
   downloadZipDialog({
@@ -6120,6 +6160,12 @@ function renderBoard() {
         attrs: { title: 'Parcourir les photos du projet (lieux, dates EXIF)' },
         on: { click: openPhotoView },
       }));
+      // [FILES-VIEW] Vue « Fichiers » du dossier (agrégation sous-arbre, source cliquable).
+      title.appendChild(el('button', {
+        class: 'prio-btn', text: '📁 Fichiers',
+        attrs: { title: 'Retrouver tous les fichiers du dossier et de ses sous-dossiers' },
+        on: { click: () => openProjectFiles(proj) },
+      }));
       // [PHOTO-BATCH-DOWNLOAD] Télécharger en .zip les fichiers du dossier (+ sous-dossiers).
       if (projectZipCount(proj.id, 'all', true) > 0) {
         title.appendChild(el('button', {
@@ -6228,6 +6274,14 @@ function renderBoard() {
         });
       });
       board.appendChild(desc);
+      // [FOLDER-ATTACHMENTS] Fichiers rattachés au dossier lui-même (près de la description).
+      board.appendChild(renderAttachments({
+        attachments: proj.attachments || [],
+        canEdit: true,
+        uploadUrl: `/api/projects/${proj.id}/attachments`,
+        onChange: async () => { await loadAll(); },
+        openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
+      }));
     }
     const recap = guestRecapEl('project', state.memoProject);
     if (recap) board.appendChild(recap);

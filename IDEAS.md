@@ -15,6 +15,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - ⏸️ **[VOTE-MATCH]** V3 « vote live » — **non planifié**, brouillon `docs/specs/VOTE-MATCH-v3-draft.md` (RGPD/identité tranchés, bloquants restants). À re-cadrer plus tard.
 - ✅ **[VOTE-MAP-SUBPROJECT]** — **CORRIGÉ [V21.1.66]** : les builders de vote carte agrègent désormais courant + descendants (owner/invité/hub en miroir via `voteScrutinsForProject`) → le vote d'un sous-projet apparaît sur la carte du parent. `REALISATION.md`.
 - ✅ **[SAVE-INDICATOR]** + **[UNDO-DELETE]** + **[EMPTY-STATES]** — **LIVRÉS [V21.1.63→65]** (confort/UX) : ✓ « enregistré » à chaque patch mémo ; toast « Annuler » après suppression ; états vides soignés (icône + action). `REALISATION.md`.
+- ✅ **[FOLDER-ATTACHMENTS]** + **[FILES-VIEW]** — **CODÉ [V23.0.74] (BUMP EXPORT v23, à valider Cowork)** : (A) pièce jointe rattachable à un **dossier** (colonne additive `attachments.project_id`, routes owner+invité, export niché par projet, purge cascade) ; (B) vues « Fichiers » (agrégation `_collect_files` avec **fil d'Ariane cliquable**) — bouton 📁 Fichiers par dossier (3 pages) + entrée « Fichiers » globale sidebar owner + endpoints lecture owner/global/invité scopé. `REALISATION.md` [V23.0.74].
 
 _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import de dossier, prévisualisation d'import, réactions : **tout livré et en prod** — voir `REALISATION.md`._
 

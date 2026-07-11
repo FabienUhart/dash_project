@@ -54,7 +54,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "22"  # X = version du format d'export (invariant 1) — v22 = [ATTACHMENTS] pièces jointes ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "23"  # X = version du format d'export (invariant 1) — v23 = [FOLDER-ATTACHMENTS] pièces jointes de dossier ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -251,6 +251,45 @@ def _import_memo_attachments(db, memo_id, memo_uid, att_list, now):
             "INSERT INTO attachments (memo_id, memo_uid, filename, orig_name, mime, size, preview, created_at, created_by, share_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
             (memo_id, memo_uid, fn, _clean_orig_name(a.get("orig_name") or fn), str(a.get("mime") or "")[:100],
+             size, 1 if a.get("preview") else 0, (a.get("created_at") or "").strip() or now, str(a.get("created_by") or "").strip()[:200]),
+        )
+        have.add(fn)
+
+
+def _project_attachments_list(db, project_id, url_fn):
+    """[FOLDER-ATTACHMENTS] Pièces jointes rattachées à UN dossier (project_id rempli, memo_id=0)."""
+    return [
+        _attach_row_dict(r, url_fn(r))
+        for r in db.execute(
+            "SELECT * FROM attachments WHERE project_id = ? ORDER BY id", (project_id,)
+        ).fetchall()
+    ]
+
+
+def _import_project_attachments(db, project_id, att_list, now):
+    """[FOLDER-ATTACHMENTS] v23 : import ADDITIF non destructif des fichiers d'un DOSSIER. Même
+    règle que les mémos : binaire présent + pas déjà rattaché (dédup par (project_id, filename))."""
+    if not isinstance(att_list, list):
+        return
+    have = {r["filename"] for r in db.execute(
+        "SELECT filename FROM attachments WHERE project_id = ?", (project_id,)
+    ).fetchall()}
+    for a in att_list:
+        if not isinstance(a, dict):
+            continue
+        fn = os.path.basename(str(a.get("filename") or ""))
+        if not SAFE_ATTACH_NAME.match(fn) or fn in have:
+            continue
+        if not os.path.isfile(os.path.join(UPLOAD_DIR, fn)):
+            continue
+        try:
+            size = int(a.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        db.execute(
+            "INSERT INTO attachments (memo_id, memo_uid, project_id, filename, orig_name, mime, size, preview, created_at, created_by, share_id) "
+            "VALUES (0, '', ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            (project_id, fn, _clean_orig_name(a.get("orig_name") or fn), str(a.get("mime") or "")[:100],
              size, 1 if a.get("preview") else 0, (a.get("created_at") or "").strip() or now, str(a.get("created_by") or "").strip()[:200]),
         )
         have.add(fn)
@@ -597,6 +636,13 @@ def init_db():
         )
         """
     )
+    # [FOLDER-ATTACHMENTS] v23 : une pièce jointe peut viser un DOSSIER au lieu d'un mémo.
+    # Colonne additive `project_id` (nullable) : rempli = attache de dossier (memo_id = 0,
+    # aucun mémo n'a l'id 0 → invisible des requêtes mémo `WHERE memo_id = ?`) ; NULL = attache
+    # de mémo (comportement v22 inchangé). Additif, jamais destructif (invariant 1).
+    acols = {r[1] for r in conn.execute("PRAGMA table_info(attachments)").fetchall()}
+    if "project_id" not in acols:
+        conn.execute("ALTER TABLE attachments ADD COLUMN project_id INTEGER")
     # [PHOTO-MAP] Métadonnées EXIF des images, donnée DÉRIVÉE des fichiers (jamais
     # exportée, pas de bump de version) : remplie à l'upload + backfill, pour que la
     # carte du projet lise les lieux/dates sans re-parser/re-géocoder à chaque ouverture.
@@ -1261,6 +1307,10 @@ def list_projects():
     if [1 for r in rows if r["vote_enabled"] and _ensure_vote_snapshot(db, r)]:
         db.commit()
     owner_name = _owner_name(db)
+    # [FOLDER-ATTACHMENTS] map project_id -> [attach_dict] en un seul SELECT.
+    proj_att = {}
+    for a in db.execute("SELECT * FROM attachments WHERE project_id IS NOT NULL ORDER BY id").fetchall():
+        proj_att.setdefault(a["project_id"], []).append(_attach_row_dict(a, _owner_attach_url(a)))
     out = []
     for r in rows:
         d = dict(r)
@@ -1272,6 +1322,7 @@ def list_projects():
         d["vote_create"] = _row_get(r, "vote_create", "") or ""
         d["vote_create_resolved"] = _resolve_vote_create(db, r["id"])
         d["can_create_vote"] = True  # owner crée toujours
+        d["attachments"] = proj_att.get(r["id"], [])  # [FOLDER-ATTACHMENTS]
         out.append(d)
     return jsonify(out)
 
@@ -1672,6 +1723,10 @@ def delete_project(project_id):
     db.execute("DELETE FROM vote_options WHERE vote_id IN (SELECT id FROM votes WHERE project_id = ?)", (project_id,))
     db.execute("DELETE FROM votes WHERE project_id = ?", (project_id,))
     db.execute("DELETE FROM favorites WHERE kind = 'project' AND ref = ?", (str(project_id),))  # [FAVORITES] purge en cascade
+    # [FOLDER-ATTACHMENTS] purge en cascade des fichiers du dossier (binaires + lignes).
+    for a in db.execute("SELECT filename FROM attachments WHERE project_id = ?", (project_id,)).fetchall():
+        _delete_attachment_file(a["filename"])
+    db.execute("DELETE FROM attachments WHERE project_id = ?", (project_id,))
     db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     db.execute(
         "DELETE FROM shares WHERE kind = 'project' AND target_id = ?", (project_id,)
@@ -3114,6 +3169,69 @@ def delete_attachment(att_id):
     return "", 204
 
 
+# ─────────────────── [FOLDER-ATTACHMENTS] pièces jointes de dossier (owner) ───────────────────
+@app.route("/api/projects/<int:project_id>/attachments", methods=["GET"])
+def list_project_attachments(project_id):
+    db = get_db()
+    if not _valid_project_id(db, project_id):
+        return jsonify({"error": "not found"}), 404
+    return jsonify(_project_attachments_list(db, project_id, _owner_attach_url))
+
+
+@app.route("/api/projects/<int:project_id>/attachments", methods=["POST"])
+def add_project_attachment(project_id):
+    db = get_db()
+    if not _valid_project_id(db, project_id):
+        return jsonify({"error": "not found"}), 404
+    files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
+    files = [f for f in files if f and f.filename]
+    if not files:
+        return jsonify({"error": "file required"}), 400
+    now = datetime.now(timezone.utc).isoformat()
+    for f in files:
+        info, err = _save_attachment(f)
+        if err:
+            return jsonify({"error": err}), 400
+        db.execute(
+            "INSERT INTO attachments (memo_id, memo_uid, project_id, filename, orig_name, mime, size, preview, created_at, created_by, share_id) "
+            "VALUES (0, '', ?, ?, ?, ?, ?, ?, ?, '', NULL)",
+            (project_id, info["filename"], info["orig"], info["mime"], info["size"], 1 if info["preview"] else 0, now),
+        )
+    db.commit()
+    return jsonify(_project_attachments_list(db, project_id, _owner_attach_url)), 201
+
+
+# ─────────────────── [FILES-VIEW] vues « retrouver les fichiers » (owner) ───────────────────
+def _owner_img_url(name):
+    return "/uploads/" + name
+
+
+@app.route("/api/projects/<int:project_id>/files", methods=["GET"])
+def project_files(project_id):
+    db = get_db()
+    if not _valid_project_id(db, project_id):
+        return jsonify({"error": "not found"}), 404
+    subtree = request.args.get("subtree", "1") not in ("0", "false", "no")
+    pids = _project_descendants(db, project_id) if subtree else [project_id]
+    ph = ",".join("?" * len(pids))
+    memos = db.execute(
+        f"SELECT id, project_id, title, content, images FROM memos "
+        f"WHERE project_id IN ({ph}) AND COALESCE(deleted_at, '') = '' ORDER BY position, id", pids
+    ).fetchall()
+    return jsonify(_collect_files(db, memos, pids, lambda i: "/api/attachments/" + str(i), _owner_img_url))
+
+
+@app.route("/api/files", methods=["GET"])
+def all_files():
+    db = get_db()
+    pids = [r["id"] for r in db.execute("SELECT id FROM projects").fetchall()]
+    memos = db.execute(
+        "SELECT id, project_id, title, content, images FROM memos "
+        "WHERE COALESCE(deleted_at, '') = '' ORDER BY position, id"
+    ).fetchall()
+    return jsonify(_collect_files(db, memos, pids, lambda i: "/api/attachments/" + str(i), _owner_img_url))
+
+
 # ─────────────────── [PHOTO-BATCH-DOWNLOAD] téléchargement en .zip d'un lot ───────────────────
 # Récupère d'un coup, en .zip, les fichiers d'un mémo OU d'un dossier (récursif optionnel). DEUX
 # stocks de fichiers coexistent et sont affichés dans l'app : la table `attachments` (tout type,
@@ -3163,6 +3281,77 @@ def _memo_zip_files(db, memo_row, scope):
     return out
 
 
+# ─────────────────── [FILES-VIEW] agrégation « retrouver les fichiers » ───────────────────
+def _project_crumb(db, project_id, cache):
+    """Fil d'Ariane racine→dossier : [{id, name, emoji}]. Mémoïsé par appel (anti-boucle)."""
+    if project_id in cache:
+        return cache[project_id]
+    chain, cur, guard = [], project_id, 0
+    while cur is not None and guard < 60:
+        r = db.execute("SELECT id, name, emoji, parent_id FROM projects WHERE id = ?", (cur,)).fetchone()
+        if not r:
+            break
+        chain.append({"id": r["id"], "name": r["name"], "emoji": r["emoji"] or ""})
+        cur = r["parent_id"]
+        guard += 1
+    chain.reverse()
+    cache[project_id] = chain
+    return chain
+
+
+def _collect_files(db, memo_rows, project_ids, att_url, img_url):
+    """[FILES-VIEW] Agrège en une liste plate : pièces jointes de DOSSIER (project_ids), pièces
+    jointes de MÉMO + images legacy (memo_rows). Chaque entrée porte sa SOURCE (type + id cible +
+    fil d'Ariane cliquable) pour « retrouver facilement ». URLs construites par les callbacks
+    (owner / invité). Les images legacy sont toujours des photos (mime image/*)."""
+    cache = {}
+    out = []
+    pset = list(project_ids or [])
+    if pset:
+        ph = ",".join("?" * len(pset))
+        for a in db.execute(f"SELECT * FROM attachments WHERE project_id IN ({ph}) ORDER BY id", pset).fetchall():
+            crumb = _project_crumb(db, a["project_id"], cache)
+            out.append({
+                "kind": "attachment", "id": a["id"], "filename": a["filename"],
+                "orig_name": a["orig_name"] or a["filename"], "mime": a["mime"] or "",
+                "size": a["size"] or 0, "preview": bool(a["preview"]), "created_at": a["created_at"] or "",
+                "url": att_url(a["id"]),
+                "source": {"type": "project", "id": a["project_id"],
+                           "title": crumb[-1]["name"] if crumb else "", "crumb": crumb},
+            })
+    mids = [m["id"] for m in memo_rows]
+    att_by_mid = {}
+    if mids:
+        phm = ",".join("?" * len(mids))
+        for a in db.execute(f"SELECT * FROM attachments WHERE memo_id IN ({phm}) ORDER BY id", mids).fetchall():
+            att_by_mid.setdefault(a["memo_id"], []).append(a)
+    for m in memo_rows:
+        crumb = _project_crumb(db, m["project_id"], cache) if m["project_id"] else []
+        title = m["title"] or _text_excerpt(m["content"]) or ("Mémo #" + str(m["id"]))
+        src = {"type": "memo", "id": m["id"], "title": title, "crumb": crumb}
+        for a in att_by_mid.get(m["id"], []):
+            out.append({
+                "kind": "attachment", "id": a["id"], "filename": a["filename"],
+                "orig_name": a["orig_name"] or a["filename"], "mime": a["mime"] or "",
+                "size": a["size"] or 0, "preview": bool(a["preview"]), "created_at": a["created_at"] or "",
+                "url": att_url(a["id"]), "source": src,
+            })
+        try:
+            imgs = json.loads(m["images"] or "[]")
+        except Exception:
+            imgs = []
+        for name in imgs:
+            nm = os.path.basename(str(name or ""))
+            if not SAFE_IMG_NAME.match(nm):
+                continue
+            out.append({
+                "kind": "image", "id": None, "filename": nm, "orig_name": nm,
+                "mime": "image/*", "size": 0, "preview": True, "created_at": "",
+                "url": img_url(nm), "source": src,
+            })
+    return out
+
+
 def _project_path_names(db, root_id, project_id):
     """Noms de dossiers assainis de l'enfant de `root_id` jusqu'à `project_id` inclus (vide si
     project_id == root_id). Anti-boucle par garde de profondeur."""
@@ -3197,6 +3386,20 @@ def _project_zip_entries(db, root_id, scope, include_subs):
         folder = "/".join(_project_path_names(db, root_id, m["project_id"]) + [title])
         for f in files:
             entries.append({"disk": f["disk"], "arc": folder + "/" + _zip_seg(f["name"])})
+    # [FOLDER-ATTACHMENTS] fichiers rattachés aux dossiers eux-mêmes → à la racine du dossier.
+    photos_only = scope != "all"
+    for pid in pids:
+        prefix = _project_path_names(db, root_id, pid)
+        for r in db.execute("SELECT * FROM attachments WHERE project_id = ? ORDER BY id", (pid,)).fetchall():
+            if photos_only and not (r["mime"] or "").startswith("image/"):
+                continue
+            disk = os.path.basename(r["filename"] or "")
+            if not SAFE_ATTACH_NAME.match(disk):
+                continue
+            path = os.path.join(UPLOAD_DIR, disk)
+            if not os.path.isfile(path):
+                continue
+            entries.append({"disk": path, "arc": "/".join(prefix + [_zip_seg(r["orig_name"] or disk)])})
     return entries
 
 
@@ -5024,6 +5227,15 @@ def hub_data(hub_token):
         # [VOTE-GROUPS] votes nommés + permission résolue (can_edit du dossier ET 'guests').
         pr["votes"] = _project_named_votes(db, pr["id"], me, vote_owner_name, is_owner=False)
         pr["can_create_vote"] = bool(pr.get("can_edit")) and _resolve_vote_create(db, pr["id"]) == "guests"
+    # [FOLDER-ATTACHMENTS] pièces jointes de dossier, URL scopée au share couvrant CE dossier.
+    if union_pids:
+        ph = ",".join("?" * len(union_pids))
+        pamap = {}
+        for a in db.execute(f"SELECT * FROM attachments WHERE project_id IN ({ph}) ORDER BY id", list(union_pids)).fetchall():
+            pamap.setdefault(a["project_id"], []).append(a)
+        for pr in projects:
+            tok = pr["share_token"]
+            pr["attachments"] = [_attach_row_dict(a, "/share/" + tok + "/attachment/" + str(a["id"])) for a in pamap.get(pr["id"], [])]
     memos = []
     for mid, r in rows_by_id.items():
         covering = _cover_memo(r["project_id"], mid)
@@ -5260,6 +5472,16 @@ def share_data(token):
         for pr in venabled:
             vpay[pr["id"]] = _vote_project_payload(db, pr, owner=False)
             vmap[pr["id"]] = _vote_voters_map(db, pr["id"])
+    # [FOLDER-ATTACHMENTS] pièces jointes de dossier du périmètre (un seul SELECT).
+    if scope_projects:
+        spids = [p["id"] for p in scope_projects]
+        ph = ",".join("?" * len(spids))
+        pamap = {}
+        for a in db.execute(f"SELECT * FROM attachments WHERE project_id IN ({ph}) ORDER BY id", spids).fetchall():
+            pamap.setdefault(a["project_id"], []).append(
+                _attach_row_dict(a, "/share/" + token + "/attachment/" + str(a["id"])))
+        for p in scope_projects:
+            p["attachments"] = pamap.get(p["id"], [])
     for p in scope_projects:
         p.update(vpay.get(p["id"], {"vote_enabled": False}))
         # [VOTE-GROUPS] votes nommés + permission résolue (booléen lecture seule, façon `trip`).
@@ -5597,6 +5819,73 @@ def share_add_attachment(token, memo_id):
     return jsonify(_attachments_map(db, [memo_id], url_fn).get(memo_id, [])), 201
 
 
+# [FOLDER-ATTACHMENTS] Upload invité d'un fichier sur un DOSSIER : partage de projet only, dossier
+# dans le sous-arbre autorisé, invité approuvé + can_edit (invariant 5, mêmes gardes que les mémos).
+@app.route("/share/<token>/project/<int:project_id>/attachments", methods=["POST"])
+def share_add_project_attachment(token, project_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    if not share["can_edit"]:
+        return jsonify({"error": "lecture seule"}), 403
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    if share["kind"] != "project" or project_id not in set(_project_descendants(db, share["target_id"])):
+        return jsonify({"error": "not found"}), 404
+    files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
+    files = [f for f in files if f and f.filename]
+    if not files:
+        return jsonify({"error": "file required"}), 400
+    by = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    now = datetime.now(timezone.utc).isoformat()
+    for f in files:
+        info, err = _save_attachment(f)
+        if err:
+            return jsonify({"error": err}), 400
+        db.execute(
+            "INSERT INTO attachments (memo_id, memo_uid, project_id, filename, orig_name, mime, size, preview, created_at, created_by, share_id) "
+            "VALUES (0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, info["filename"], info["orig"], info["mime"], info["size"], 1 if info["preview"] else 0, now, by, share["id"]),
+        )
+    db.commit()
+    url_fn = lambda r: "/share/" + token + "/attachment/" + str(r["id"])
+    return jsonify(_project_attachments_list(db, project_id, url_fn)), 201
+
+
+# [FILES-VIEW] Vue « retrouver les fichiers » d'un dossier partagé, bornée au sous-arbre du token
+# (invariant 5). Lecture seule (comme share_data), pas de vue globale côté invité.
+@app.route("/share/<token>/project/<int:project_id>/files")
+def share_project_files(token, project_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share or share["kind"] != "project":
+        return jsonify({"error": "not found"}), 404
+    if project_id not in set(_project_descendants(db, share["target_id"])):
+        return jsonify({"error": "not found"}), 404
+    pids = _project_descendants(db, project_id)  # ⊆ sous-arbre autorisé (descendants d'un projet du scope)
+    ph = ",".join("?" * len(pids))
+    memos = db.execute(
+        f"SELECT id, project_id, title, content, images FROM memos "
+        f"WHERE project_id IN ({ph}) AND COALESCE(deleted_at, '') = '' ORDER BY position, id", pids
+    ).fetchall()
+    files = _collect_files(
+        db, memos, pids,
+        lambda i: "/share/" + token + "/attachment/" + str(i),
+        lambda n: "/share/" + token + "/image/" + n,
+    )
+    return jsonify(files)
+
+
+def _attach_in_share_scope(db, share, r):
+    """[FOLDER-ATTACHMENTS] Pièce jointe (mémo OU dossier) dans le périmètre du partage (invariant 5).
+    Fichier de dossier : uniquement un partage de projet dont le dossier est un descendant."""
+    if r["project_id"]:
+        return share["kind"] == "project" and r["project_id"] in set(_project_descendants(db, share["target_id"]))
+    return r["memo_id"] in {m["id"] for m in _share_scope_memos(db, share)}
+
+
 @app.route("/share/<token>/attachment/<int:att_id>")
 def share_download_attachment(token, att_id):
     db = get_db()
@@ -5604,7 +5893,7 @@ def share_download_attachment(token, att_id):
     if not share:
         return "", 404
     r = db.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
-    if not r or r["memo_id"] not in {m["id"] for m in _share_scope_memos(db, share)}:
+    if not r or not _attach_in_share_scope(db, share, r):
         return "", 404
     return _serve_attachment_row(r, request.args.get("download") in ("1", "true", "yes"))
 
@@ -5619,7 +5908,7 @@ def share_delete_attachment(token, att_id):
     if not guest or guest["status"] != "approved":
         return jsonify({"error": "guest_required"}), 403
     r = db.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
-    if not r or r["memo_id"] not in {m["id"] for m in _share_scope_memos(db, share)}:
+    if not r or not _attach_in_share_scope(db, share, r):
         return jsonify({"error": "not found"}), 404
     _delete_attachment_file(r["filename"])
     db.execute("DELETE FROM attachments WHERE id = ?", (att_id,))
@@ -6304,6 +6593,21 @@ def _build_export(db, root_id=None):
         d["project"] = proj_names.get(d.pop("project_id", None), "")
         d["attachments"] = att_by_id.get(mid, [])  # [ATTACHMENTS] v22
         out_memos.append(d)
+    # [FOLDER-ATTACHMENTS] v23 : pièces jointes de dossier nichées par projet (noms de fichiers
+    # seuls, jamais le binaire — comme les mémos). Rattachées par NOM à l'import (comme le reste
+    # d'un projet). Absent chez un importeur v1→v22 = aucune pièce jointe de dossier (compat).
+    proj_att_by_id = {}
+    if projects:
+        ph_p = ",".join("?" * len(projects))
+        for a in db.execute(
+            "SELECT project_id, filename, orig_name, mime, size, preview, created_at, created_by "
+            f"FROM attachments WHERE project_id IN ({ph_p}) ORDER BY id", [p["id"] for p in projects]
+        ).fetchall():
+            proj_att_by_id.setdefault(a["project_id"], []).append({
+                "filename": a["filename"], "orig_name": a["orig_name"] or a["filename"],
+                "mime": a["mime"] or "", "size": a["size"] or 0,
+                "preview": 1 if a["preview"] else 0, "created_at": a["created_at"], "created_by": a["created_by"] or "",
+            })
     out_projects = [
         {
             "name": r["name"],
@@ -6317,6 +6621,7 @@ def _build_export(db, root_id=None):
             "marker_color": _row_get(r, "marker_color"),
             # [MAP-TIMELINE] v20 : valeur BRUTE non résolue (null = hérite).
             "is_trip": _row_get(r, "is_trip", None),
+            "attachments": proj_att_by_id.get(r["id"], []),  # [FOLDER-ATTACHMENTS] v23
         }
         for r in projects
     ]
@@ -6349,7 +6654,7 @@ def _build_export(db, root_id=None):
         d["reactions"] = reacts_by_cid.get(cid, [])
         out_comments.append(d)
     result = {
-        "version": 22,
+        "version": 23,
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -6802,6 +7107,15 @@ def import_links():
             resolved, err = _resolve_parent(db, child_id, target_parent_id)
             if not err:
                 db.execute("UPDATE projects SET parent_id = ? WHERE id = ?", (resolved, child_id))
+
+    # [FOLDER-ATTACHMENTS] v23 : pièces jointes de dossier, rattachées par NOM (comme le projet).
+    _now_pa = datetime.now(timezone.utc).isoformat()
+    for proj in data.get("projects") or []:
+        if not isinstance(proj, dict):
+            continue
+        pid = proj_ids.get((proj.get("name") or "").strip())
+        if pid:
+            _import_project_attachments(db, pid, proj.get("attachments"), _now_pa)
 
     prio_map = {}
     for pr in data.get("priorities") or []:

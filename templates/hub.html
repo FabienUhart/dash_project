@@ -524,7 +524,25 @@ function hubProjectZipCount(pid, scope, includeSubs) {
   const set = new Set(includeSubs ? [pid, ...projDescendants(pid)] : [pid]);
   let n = 0;
   (DATA.memos || []).forEach(m => { if (set.has(m.project_id)) n += memoZipCount(m, scope); });
+  // [FOLDER-ATTACHMENTS] fichiers rattachés aux dossiers du périmètre
+  (DATA.projects || []).forEach(p => { if (set.has(p.id)) (p.attachments || []).forEach(a => { if (scope === 'all' || (a.mime || '').indexOf('image/') === 0) n++; }); });
   return n;
+}
+// [FILES-VIEW] Vue « Fichiers » d'un dossier du hub (scopée au token du dossier, invariant 5).
+function openHubFileSource(s) {
+  if (!s) return;
+  if (s.type === 'memo') { const m = (DATA.memos || []).find(x => x.id === s.id); if (m) { openEditor(m); return; } }
+  if (s.type === 'project') { FOCUS = s.id; VIEW = 'board'; syncViewBtns(); render(); }
+}
+function openHubFiles(proj) {
+  openFilesDialog({
+    title: proj.name,
+    load: () => fetch('/share/' + proj.share_token + '/project/' + proj.id + '/files').then(r => r.json()),
+    onOpenSource: openHubFileSource,
+    openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+    zip: { hasSubprojects: true, count: (scope, subs) => hubProjectZipCount(proj.id, scope, subs),
+           buildUrl: (scope, subs) => '/share/' + proj.share_token + '/project/' + proj.id + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0) },
+  });
 }
 function focusedMemos() {
   let ms = DATA.memos || [];
@@ -858,6 +876,14 @@ function renderBoard() {
           render();
         } },
       }));
+      // [FILES-VIEW] Vue « Fichiers » du dossier (agrégation sous-arbre, source cliquable).
+      if (fp.share_token) {
+        hd.appendChild(el('button', {
+          class: 'btn', text: '📁 Fichiers',
+          attrs: { title: 'Retrouver tous les fichiers du dossier et de ses sous-dossiers' },
+          on: { click: () => openHubFiles(fp) },
+        }));
+      }
       // [PHOTO-BATCH-DOWNLOAD] zip des fichiers du dossier (+ sous-dossiers), scopé au token.
       if (fp.share_token && hubProjectZipCount(FOCUS, 'all', true) > 0) {
         hd.appendChild(el('button', {
@@ -872,6 +898,17 @@ function renderBoard() {
         }));
       }
       board.appendChild(hd);
+      // [FOLDER-ATTACHMENTS] fichiers rattachés au dossier courant (sous l'en-tête).
+      if ((fp.attachments || []).length || fp.can_edit) {
+        board.appendChild(renderAttachments({
+          attachments: fp.attachments || [],
+          canEdit: !!fp.can_edit,
+          uploadUrl: '/share/' + fp.share_token + '/project/' + fp.id + '/attachments',
+          headers: { 'X-Guest-Token': gtFor(fp.share_token) },
+          onChange: async () => { await reload(); },
+          openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
+        }));
+      }
     }
   }
   board.appendChild(addBar());
