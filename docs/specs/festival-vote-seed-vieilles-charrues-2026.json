@@ -1,0 +1,730 @@
+{
+  "festival": "Vieilles Charrues 2026",
+  "source": "https://www.vieillescharrues.asso.fr/programmation/#/timetable (extrait le 2026-07-13 via Chrome, shadow DOM widget Fragolabs)",
+  "dates": {
+    "Jeudi": "2026-07-16",
+    "Vendredi": "2026-07-17",
+    "Samedi": "2026-07-18",
+    "Dimanche": "2026-07-19"
+  },
+  "convention_horaires": "start/end en HH:MM locale. CONVENTION (décision Fabien 13 juil.) : `date` = VRAIE date calendaire du début du passage (un set d'après-minuit porte la date du lendemain : RILÈS 00:30 = 2026-07-20). `day` = JOURNÉE DE FESTIVAL (celle du programme officiel : RILÈS reste « Dimanche »). Règle d'affichage/regroupement : journée de festival = date - 1 jour si start < 12:00. Fin après minuit relative au start : si end <= start, ajouter 24h à end (ex. NICK CAVE 22:00 → 00:30).",
+  "scenes": [
+    "Glenmor",
+    "Kerouac",
+    "Grall",
+    "Gwernig",
+    "Guinguette",
+    "Esplanade"
+  ],
+  "site": {
+    "label": "Site de Kerampuilh, Rue Jean-Sébastien Corvellec, 29270 Carhaix-Plouguer",
+    "lat": 48.2723062,
+    "lng": -3.5580944,
+    "source": "tourismebretagne.com (fiche officielle du festival)"
+  },
+  "scene_locations_note": "Coordonnées recalées le 13 juil. sur le polygone OSM réel « Espace du Festival des Vieilles Charrues » (Overpass : lat 48.27114→48.27324, lon -3.56073→-3.55630), disposition selon le plan officiel illustré (Glenmor NO, Kerouac centre-ouest, Grall SE, Gwernig NE, Guinguette est, Esplanade sud). Ajustables ensuite via l'édition de location des sous-dossiers.",
+  "scene_locations": [
+    {
+      "scene": "Glenmor",
+      "lat": 48.2729,
+      "lng": -3.5601,
+      "label": "Scène Glenmor, Kerampuilh"
+    },
+    {
+      "scene": "Kerouac",
+      "lat": 48.272,
+      "lng": -3.5596,
+      "label": "Scène Kerouac, Kerampuilh"
+    },
+    {
+      "scene": "Grall",
+      "lat": 48.2714,
+      "lng": -3.5576,
+      "label": "Scène Grall, Kerampuilh"
+    },
+    {
+      "scene": "Gwernig",
+      "lat": 48.273,
+      "lng": -3.5575,
+      "label": "Scène Gwernig, Kerampuilh"
+    },
+    {
+      "scene": "Guinguette",
+      "lat": 48.2722,
+      "lng": -3.5568,
+      "label": "Guinguette, Kerampuilh"
+    },
+    {
+      "scene": "Esplanade",
+      "lat": 48.27145,
+      "lng": -3.559,
+      "label": "Esplanade, Kerampuilh"
+    }
+  ],
+  "passages": [
+    {
+      "scene": "Glenmor",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "BIGA*RANX",
+      "start": "17:40",
+      "end": "18:40"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "GIMS",
+      "start": "19:55",
+      "end": "21:05"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "KATY PERRY",
+      "start": "22:30",
+      "end": "00:00"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "JOY CROOKES",
+      "start": "16:30",
+      "end": "17:30"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "JEAN-LOUIS AUBERT",
+      "start": "19:15",
+      "end": "20:30"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "NICK CAVE & THE BAD SEEDS",
+      "start": "22:00",
+      "end": "00:30"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Vendredi",
+      "date": "2026-07-18",
+      "artist": "MOSIMANN",
+      "start": "01:45",
+      "end": "03:00"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "DUB INC",
+      "start": "17:00",
+      "end": "18:15"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "AYA NAKAMURA",
+      "start": "19:45",
+      "end": "21:00"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "MIKA",
+      "start": "22:30",
+      "end": "00:00"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Samedi",
+      "date": "2026-07-19",
+      "artist": "NICO MORENO",
+      "start": "01:45",
+      "end": "03:00"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "SUZANE",
+      "start": "16:10",
+      "end": "17:10"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "FEU! CHATTERTON",
+      "start": "18:40",
+      "end": "19:55"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "ORELSAN",
+      "start": "21:30",
+      "end": "23:00"
+    },
+    {
+      "scene": "Glenmor",
+      "day": "Dimanche",
+      "date": "2026-07-20",
+      "artist": "RILÈS",
+      "start": "00:30",
+      "end": "02:00"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "PICHE",
+      "start": "16:30",
+      "end": "17:30"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "ILIONA",
+      "start": "18:50",
+      "end": "19:40"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "JOSMAN",
+      "start": "21:15",
+      "end": "22:15"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Jeudi",
+      "date": "2026-07-17",
+      "artist": "UPSILONE",
+      "start": "00:05",
+      "end": "01:20"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "LUIZA",
+      "start": "15:15",
+      "end": "16:15"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "PATRICK WATSON",
+      "start": "17:45",
+      "end": "19:00"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "DISIZ",
+      "start": "20:45",
+      "end": "21:45"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Vendredi",
+      "date": "2026-07-18",
+      "artist": "VALD × VLADIMIR CAUCHEMAR × TODIEFOR",
+      "start": "00:35",
+      "end": "01:35"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "OLLI & THE LONDON RADIO POP ORCHESTRA",
+      "start": "15:45",
+      "end": "16:45"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "HOUDI",
+      "start": "18:30",
+      "end": "19:30"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "YELLE",
+      "start": "21:15",
+      "end": "22:15"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Samedi",
+      "date": "2026-07-19",
+      "artist": "INTERPOL",
+      "start": "00:15",
+      "end": "01:30"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "MIOSSEC",
+      "start": "15:00",
+      "end": "16:00"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "XAVIER RUDD",
+      "start": "17:20",
+      "end": "18:30"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "VANESSA PARADIS",
+      "start": "20:05",
+      "end": "21:20"
+    },
+    {
+      "scene": "Kerouac",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "TOMORA",
+      "start": "23:10",
+      "end": "00:25"
+    },
+    {
+      "scene": "Grall",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "NE RANGEZ PAS LES JARDINS",
+      "start": "16:45",
+      "end": "17:30"
+    },
+    {
+      "scene": "Grall",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "BONNE NUIT",
+      "start": "18:15",
+      "end": "19:15"
+    },
+    {
+      "scene": "Grall",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "JEHNNY BETH",
+      "start": "20:00",
+      "end": "21:00"
+    },
+    {
+      "scene": "Grall",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "GEORGIO",
+      "start": "21:45",
+      "end": "22:45"
+    },
+    {
+      "scene": "Grall",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "JASMINE NOT JAFAR",
+      "start": "23:30",
+      "end": "00:30"
+    },
+    {
+      "scene": "Grall",
+      "day": "Vendredi",
+      "date": "2026-07-18",
+      "artist": "JETLAG GANG",
+      "start": "01:00",
+      "end": "03:00"
+    },
+    {
+      "scene": "Grall",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "NO PAIN NO PAIN",
+      "start": "16:30",
+      "end": "17:30"
+    },
+    {
+      "scene": "Grall",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "ASFAR SHAMSI",
+      "start": "18:15",
+      "end": "19:15"
+    },
+    {
+      "scene": "Grall",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "SPRINTS",
+      "start": "20:00",
+      "end": "21:00"
+    },
+    {
+      "scene": "Grall",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "JOLAGREEN23",
+      "start": "21:45",
+      "end": "22:45"
+    },
+    {
+      "scene": "Grall",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "FOLIE'S",
+      "start": "23:30",
+      "end": "00:30"
+    },
+    {
+      "scene": "Grall",
+      "day": "Samedi",
+      "date": "2026-07-19",
+      "artist": "CASSIUS",
+      "start": "01:15",
+      "end": "02:15"
+    },
+    {
+      "scene": "Grall",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "GOODBYE KARELLE",
+      "start": "15:25",
+      "end": "16:25"
+    },
+    {
+      "scene": "Grall",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "DANYL",
+      "start": "17:10",
+      "end": "18:00"
+    },
+    {
+      "scene": "Grall",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "MAUREEN",
+      "start": "18:45",
+      "end": "19:45"
+    },
+    {
+      "scene": "Grall",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "47 TER",
+      "start": "20:30",
+      "end": "21:30"
+    },
+    {
+      "scene": "Grall",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "TVOD",
+      "start": "22:15",
+      "end": "23:15"
+    },
+    {
+      "scene": "Grall",
+      "day": "Dimanche",
+      "date": "2026-07-20",
+      "artist": "PACT",
+      "start": "00:15",
+      "end": "01:45"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "CAP KOZMIK",
+      "start": "17:30",
+      "end": "18:30"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "COCANHA",
+      "start": "20:15",
+      "end": "21:30"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "LOVANA",
+      "start": "22:30",
+      "end": "23:45"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Vendredi",
+      "date": "2026-07-18",
+      "artist": "SUPER PARQUET",
+      "start": "01:00",
+      "end": "02:15"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "DJAZIA SATOUR",
+      "start": "16:15",
+      "end": "17:30"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "GALANT TU PERDS TON TEMPS",
+      "start": "18:45",
+      "end": "19:45"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "GREGAILH",
+      "start": "21:00",
+      "end": "22:00"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "FEST NOZ",
+      "start": "23:00",
+      "end": "02:00"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "PLOUZ&FOEN",
+      "start": "16:00",
+      "end": "17:00"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "GRAND ENSEMBLE FILOS",
+      "start": "18:30",
+      "end": "19:40"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "LINDIGO",
+      "start": "21:00",
+      "end": "22:15"
+    },
+    {
+      "scene": "Gwernig",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "ISAM ELIAS",
+      "start": "23:30",
+      "end": "00:45"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "DRAGSHOW",
+      "start": "18:30",
+      "end": "19:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "PUMPELOP",
+      "start": "19:30",
+      "end": "22:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "BATTLEDRUM GALACTICA",
+      "start": "14:00",
+      "end": "14:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "DRAGSHOW",
+      "start": "14:30",
+      "end": "15:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "KARAOKE SOCIAL CLUB",
+      "start": "16:00",
+      "end": "19:00"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "BATTLEDRUM GALACTICA",
+      "start": "19:00",
+      "end": "19:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "PUMPELOP",
+      "start": "19:30",
+      "end": "23:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "BATTLEDRUM GALACTICA",
+      "start": "23:30",
+      "end": "00:00"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "BATTLEDRUM GALACTICA",
+      "start": "14:00",
+      "end": "14:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "DRAGSHOW",
+      "start": "16:30",
+      "end": "17:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "PUMPELOP",
+      "start": "17:30",
+      "end": "19:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "BATTLEDRUM GALACTICA",
+      "start": "19:30",
+      "end": "20:00"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "PUMPELOP",
+      "start": "20:00",
+      "end": "00:00"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Samedi",
+      "date": "2026-07-19",
+      "artist": "BATTLEDRUM GALACTICA",
+      "start": "00:00",
+      "end": "00:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "DRAGSHOW",
+      "start": "14:30",
+      "end": "15:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "PUMPELOP",
+      "start": "16:00",
+      "end": "18:00"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "KARAOKE SOCIAL CLUB",
+      "start": "18:30",
+      "end": "21:30"
+    },
+    {
+      "scene": "Guinguette",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "PUMPELOP",
+      "start": "22:00",
+      "end": "00:00"
+    },
+    {
+      "scene": "Esplanade",
+      "day": "Jeudi",
+      "date": "2026-07-16",
+      "artist": "BOREAL SOUND SYSTEM",
+      "start": "14:30",
+      "end": "23:00"
+    },
+    {
+      "scene": "Esplanade",
+      "day": "Vendredi",
+      "date": "2026-07-17",
+      "artist": "BOREAL SOUND SYSTEM",
+      "start": "14:30",
+      "end": "01:00"
+    },
+    {
+      "scene": "Esplanade",
+      "day": "Samedi",
+      "date": "2026-07-18",
+      "artist": "BOREAL SOUND SYSTEM",
+      "start": "14:30",
+      "end": "01:00"
+    },
+    {
+      "scene": "Esplanade",
+      "day": "Dimanche",
+      "date": "2026-07-19",
+      "artist": "BOREAL SOUND SYSTEM",
+      "start": "14:30",
+      "end": "00:00"
+    }
+  ]
+}

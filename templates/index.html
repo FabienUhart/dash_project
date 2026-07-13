@@ -1499,6 +1499,18 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     position: static; background: none; border-top: none; padding: 0;
   }
 }
+/* [FESTIVAL-FRISE-FOCUS #4] Bulles Leaflet aux couleurs du thème (clair/sombre via tokens) —
+   toutes les cartes (passage + marqueurs classiques). Padding homogène ; liens .prio-btn intacts. */
+.leaflet-popup-content-wrapper {
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.leaflet-popup-content { margin: 10px 13px; color: var(--text); line-height: 1.35; }
+.leaflet-popup-tip { background: var(--panel); border: 1px solid var(--border); box-shadow: none; }
+.leaflet-popup-content a:not(.prio-btn) { color: var(--accent); }
+.leaflet-popup-close-button { color: var(--muted) !important; }
+.leaflet-popup-close-button:hover { color: var(--text) !important; }
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
@@ -1669,6 +1681,19 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <div class="actions" style="margin-top:0.6rem">
     <button type="button" id="map-close" class="primary">Fermer</button>
   </div>
+</dialog>
+
+<!-- [FESTIVAL-VOTE] Écran Résultats (podium / par ami / par jour). Corps rendu par
+     festivalResultsView (partial). Entrée CSS, pas de GSAP sur le <dialog> (invariant 8). -->
+<dialog id="festival-dialog" style="width:min(620px,96vw);padding:0.9rem">
+  <div style="display:flex;align-items:center;gap:0.5rem;margin:0 0 0.6rem">
+    <h3 id="festival-title" style="margin:0;font-size:1.05rem;flex:1;min-width:0">🏆 Résultats</h3>
+    <button type="button" id="festival-close" class="prio-btn" title="Fermer">✕</button>
+  </div>
+  <div id="festival-tabs" class="settings-tabs" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin:0 0 0.6rem"></div>
+  <div id="festival-daybar" style="display:flex;gap:0.35rem;flex-wrap:wrap;margin:0 0 0.6rem"></div>
+  <div id="festival-body" style="max-height:min(62vh,540px);overflow-y:auto"></div>
+  <div id="festival-foot" style="margin-top:0.6rem;font-size:0.8rem;color:var(--muted)"></div>
 </dialog>
 
 <!-- [PHOTO-TEMPLATE-MEMO] Vue « Photos » du projet (carrousel + frise), corps construit
@@ -3449,13 +3474,51 @@ function openMapDialog(title, points, recompute, extra) {
     voteData: realProject ? buildMapVoteData() : null,  // [VOTE-MAP]
     focusKey: 'mapFocus:' + state.memoProject,
     subKey: 'mapSubFilter:' + state.memoProject,
+    // [FESTIVAL-MAP-OVERLAY] surcouche de plan (owner : image servie depuis /static/).
+    assetBase: '/static/', overlayKey: 'mapPlan:' + state.memoProject,
     saveColor: savePointColor, saveGroups: savePointGroups,
     // [MAP-TIMELINE] frise (tout projet daté) + masquage persisté par projet.
     datedPoints: boardDatedPoints,
     timelineKey: 'mapTimeline:' + state.memoProject,
     loadPhotos: realProject ? (() => fetch('/api/projects/' + state.memoProject + '/photos').then(r => r.json())) : null,
     openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => '/uploads/' + x, downloadUrl: x => '/uploads/' + x, exifUrl: x => '/api/image-exif/' + x }),
+    passageInfo: mapPassageInfo,  // [FESTIVAL-FRISE-FOCUS] données du passage pour le popup frise (mémo sans point → scène)
+    // [FESTIVAL-FRISE-FOCUS #2] « 📝 Ouvrir le mémo » : ALLER-RETOUR. Ferme la carte (état mémorisé
+    // dans `snap`), ouvre la pop-in mémo ; à SA fermeture, ROUVRE la carte restaurée (vue/jour/chip/
+    // bulle, compteurs rafraîchis). Un seul niveau, réservé au parcours carte→mémo. Pas de dialogs empilés.
+    openMemo: (id, snap) => {
+      const dlg = document.getElementById('map-dialog'); if (dlg && dlg.open) dlg.close();
+      const m = state.memos.find(x => x.id === id); if (!m) return;
+      const nm = state.memoProject === 'all' ? 'Tous les mémos'
+        : state.memoProject === 'inbox' ? 'Inbox'
+        : ((state.projects.find(p => p.id === state.memoProject) || {}).name || 'Carte');
+      const reopen = snap ? () => openMapDialog(nm, boardMapPoints(), boardMapPoints, { restore: snap }) : null;
+      const memoDlg = document.getElementById('memo-edit-dialog');
+      if (openMemoEditor(m) === false) { if (reopen) reopen(); return; }
+      if (reopen) { const onClose = () => { memoDlg.removeEventListener('close', onClose); reopen(); }; memoDlg.addEventListener('close', onClose); }
+    },
   }, extra || {}));
+}
+
+// [FESTIVAL-FRISE-FOCUS] Données d'un passage pour le popup de la frise carte (owner). Tout vient
+// des données DÉJÀ chargées (state.memos + state.projects, incl. votes nommés) — aucune route.
+// Renvoie {ll:[lat,lng]|null, label, scene, artist, hearts, voters, votes} ou null.
+function mapPassageInfo(memoId) {
+  const m = state.memos.find(x => x.id === memoId);
+  if (!m) return null;
+  const byId = {}; state.projects.forEach(p => { byId[p.id] = p; });
+  let ll = null, label = '', scene = '', sceneColor = '', pid = m.project_id, g = 0;
+  while (pid != null && byId[pid] && g++ < 60) {  // porteur ou plus proche ancêtre géolocalisé
+    const pl = parseLoc(byId[pid].location);
+    if (pl) { ll = [pl.lat, pl.lng]; label = pl.label || ''; scene = byId[pid].name; sceneColor = provenanceColor(byId[pid]); break; }
+    pid = byId[pid].parent_id;
+  }
+  if (!scene && m.project_id && byId[m.project_id]) { scene = byId[m.project_id].name; sceneColor = provenanceColor(byId[m.project_id]); }  // même sans géoloc
+  let votes = 0;  // voix « Envies » = options des votes nommés contenant ce mémo
+  state.projects.forEach(p => (p.votes || []).forEach(v => (v.options || []).forEach(o => { if (o.memo_id === memoId) votes += o.vote_count || 0; })));
+  return { ll, label, scene, sceneColor, artist: m.title || stripHTML(m.content).slice(0, 60),
+    hearts: m.hearts_count || 0, voters: m.heart_voters || [], votes,
+    links: memoLinks(m.content) };  // [FESTIVAL-FRISE-FOCUS #3] sceneColor = pastille (invariant 9)
 }
 
 function openPhotoView() {
@@ -3547,6 +3610,7 @@ function boardMapPoints() {
       sub: (m.location.label || '') + (proj ? ' — ' + proj.name : ''),
       color: m.marker_color || (prioOf(m.priority) || {}).color || state.mapMarkerColor || '#e53935',
       kind: 'memo', id: m.id, override: m.marker_color || '', groups: m.map_groups || [], project_id: m.project_id || null,
+      links: memoLinks(m.content),  // [FESTIVAL-FRISE-FOCUS #3] liens dans la bulle du marqueur
       // [MAP-TIMELINE] date + flag voyage résolu (frise, reflet, tracé).
       due_date: m.due_date || '', due_time: m.due_time || '',
       trip: resolveTripLocal(projById, m.project_id),
@@ -3555,9 +3619,14 @@ function boardMapPoints() {
     });
   });
   if (scope && !searchActive) {
-    const proj = state.projects.find(p => p.id === state.memoProject);
-    const pl = proj && parseLoc(proj.location);
-    if (pl) points.push({ lat: pl.lat, lng: pl.lng, title: '📁 ' + proj.name, placeLabel: pl.label || '', sub: pl.label || '', color: proj.marker_color || proj.color || '#81c784', kind: 'project', id: proj.id, override: proj.marker_color || '', groups: [] });
+    // [FESTIVAL-MAP-OVERLAY fix] Aligné sur l'invité (shareMapPoints) : ajouter les locations du
+    // projet courant ET de ses SOUS-PROJETS descendants (cas festival : les 6 scènes portent la
+    // géoloc, pas les mémos) → même carte + overlay owner que les invités.
+    state.projects.forEach(proj => {
+      if (!scope.has(proj.id)) return;
+      const pl = parseLoc(proj.location);
+      if (pl) points.push({ lat: pl.lat, lng: pl.lng, title: '📁 ' + proj.name, placeLabel: pl.label || '', sub: pl.label || '', color: proj.marker_color || proj.color || '#81c784', kind: 'project', id: proj.id, override: proj.marker_color || '', groups: [] });
+    });
   }
   return points;
 }
@@ -3579,7 +3648,7 @@ function boardDatedPoints() {
   }).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
     title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || '(mémo)'),
-    due_date: m.due_date, due_time: m.due_time || '',
+    due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: resolveTripLocal(projById, m.project_id),
     imgUrl: (m.images && m.images.length) ? '/uploads/' + m.images[0] : '', // [MAP-TRIP-POLISH]
@@ -3853,6 +3922,63 @@ async function patchMemo(id, body) {
     flashSaved(false);
     throw e;  // préserve la propagation existante (aucun appelant ne l'avalait)
   }
+}
+
+// [FESTIVAL-VOTE] Toggle ❤️ coup de cœur (owner). 409 = créneau en conflit → confirmPopin
+// « remplacer ? » → re-POST {replace:true}. Le serveur tranche le chevauchement (dossier racine).
+async function toggleHeart(memo, replace = false) {
+  const r = await fetch(`/api/memos/${memo.id}/heart`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ replace }),
+  });
+  if (r.status === 409) {
+    const data = await r.json();
+    const c = (data && data.conflict) || {};
+    const range = fmtMemoRange(c.start, c.end);
+    const ok = await confirmPopin(
+      'Tu as déjà un coup de cœur ❤️ sur « ' + (c.artist || '') + ' » (' + (c.scene || '') + (range ? ', ' + range : '') + ') qui chevauche ce créneau. Le remplacer ?',
+      { title: '❤️ Créneau en conflit', okLabel: 'Remplacer', danger: false });
+    if (ok) return toggleHeart(memo, true);
+    return;
+  }
+  if (!r.ok) { flashSaved(false); return; }
+  await loadAll();
+  flashSaved(true);
+}
+
+// [FESTIVAL-VOTE] Écran Résultats (owner). Re-fetch à l'ouverture (live, pas de websocket).
+async function openFestivalResults(projectId) {
+  const dlg = document.getElementById('festival-dialog');
+  const tabsEl = document.getElementById('festival-tabs');
+  const daybar = document.getElementById('festival-daybar');
+  const body = document.getElementById('festival-body');
+  const foot = document.getElementById('festival-foot');
+  let data = { passages: [], voters: [], total_voters: 0 };
+  let tab = 'podium', day = null;
+  try { data = await api('/api/projects/' + projectId + '/festival-results'); }
+  catch (e) { notify('Impossible de charger les résultats.', { error: true }); return; }
+  // [FESTIVAL-PLANNINGS] pastille couleur scène = même provenanceColor que la carte (par project_id).
+  (data.passages || []).forEach(p => { p.sceneColor = provenanceColor(state.projects.find(x => x.id === p.project_id)); });
+  const draw = () => {
+    tabsEl.textContent = ''; daybar.textContent = ''; body.textContent = '';
+    [['podium', '🏆 Podium'], ['people', '❤️ Par ami'], ['day', '📅 Par jour']].forEach(([k, lbl]) => {
+      const b = el('button', { class: 'prio-btn' + (tab === k ? ' sel' : ''), text: lbl, attrs: { type: 'button' } });
+      b.addEventListener('click', () => { tab = k; if (k === 'day' && !day) day = FEST_DAYS[0][0]; draw(); });
+      tabsEl.appendChild(b);
+    });
+    if (tab === 'day') {
+      FEST_DAYS.forEach(([iso, lbl]) => {
+        const b = el('button', { class: 'prio-btn' + (day === iso ? ' sel' : ''), text: lbl, attrs: { type: 'button' } });
+        b.addEventListener('click', () => { day = iso; draw(); });
+        daybar.appendChild(b);
+      });
+    }
+    body.appendChild(festivalResultsView(data, tab, day));
+    foot.textContent = (data.total_voters || 0) + ' participant' + ((data.total_voters || 0) > 1 ? 's' : '') + ' · le vote reste ouvert';
+  };
+  draw();
+  document.getElementById('festival-close').onclick = () => dlg.close();
+  dlg.showModal();
 }
 
 function toggleCheckItem(memo, idx) {
@@ -4752,6 +4878,7 @@ async function renderShareList() {
     return;
   }
   mine.forEach(s => {
+    const item = el('div', {});  // conteneur : ligne + panneau QR dépliable [SHARE-QR]
     const row = el('div', { class: 'cat-manage-row' });
     row.appendChild(el('span', { icon: s.can_edit ? 'pencil' : 'eye', attrs: { title: s.can_edit ? 'Modifiable' : 'Lecture seule' } }));
     row.appendChild(el('span', {
@@ -4774,6 +4901,15 @@ async function renderShareList() {
       } catch (_) { input.focus(); input.select(); }
     });
     row.appendChild(copyBtn);
+    // [SHARE-QR] Bouton QR : déplie un panneau (QR ~200 px + PIN en gros + ⬇ PNG). Re-clic = replier.
+    const qrPanel = shareQrPanel(url, s.pin);
+    const qrBtn = el('button', { icon: 'qr', attrs: { title: 'QR code de ce lien (à scanner)' } });
+    qrBtn.addEventListener('click', () => {
+      const open = qrPanel.style.display === 'none';
+      qrPanel.style.display = open ? 'block' : 'none';
+      if (open) qrPanel.load();
+    });
+    row.appendChild(qrBtn);
     row.appendChild(el('button', {
       text: '×', attrs: { title: 'Révoquer ce lien' },
       on: { click: async () => {
@@ -4782,8 +4918,51 @@ async function renderShareList() {
         await renderShareList();
       } },
     }));
-    wrap.appendChild(row);
+    item.appendChild(row);
+    item.appendChild(qrPanel);
+    wrap.appendChild(item);
   });
+}
+
+// [SHARE-QR] Panneau QR dépliable (owner). Rendu 100 % LOCAL : SVG servi par /api/qr (pure-Python
+// qcode, AUCUN CDN ni API externe — invariant 6), taille forcée + fond blanc (scannable) via data-URL ;
+// PNG = raster canvas de ce même SVG (toDataURL). Chargement paresseux (`load()` au 1er dépliage).
+function shareQrPanel(url, pin) {
+  const panel = el('div', { attrs: { style: 'display:none;margin:0.4rem 0 0.6rem;padding:0.7rem;'
+    + 'background:var(--panel-2);border:1px solid var(--border);border-radius:10px;text-align:center' } });
+  const box = el('div', { attrs: { style: 'display:inline-block;background:#fff;padding:10px;border-radius:8px' } });
+  const img = el('img', { attrs: { alt: 'QR code du lien de partage', width: '200', height: '200', style: 'display:block;width:200px;height:200px' } });
+  box.appendChild(img);
+  panel.appendChild(box);
+  if (pin) panel.appendChild(el('div', { attrs: { style: 'margin-top:0.5rem;font-size:1.4rem;font-weight:800;letter-spacing:0.15em;color:var(--text);font-variant-numeric:tabular-nums' }, text: '🔑 ' + pin }));
+  const dl = el('button', { class: 'prio-btn', text: '⬇ PNG', attrs: { type: 'button', title: 'Télécharger le QR en image (WhatsApp, mail…)', style: 'margin-top:0.5rem' } });
+  panel.appendChild(dl);
+  let sizedSvg = null, loaded = false;
+  panel.load = async () => {
+    if (loaded) return; loaded = true;
+    try {
+      const svg = await fetch('/api/qr?data=' + encodeURIComponent(url)).then(r => r.text());
+      // Force une taille pixel (le SVG serveur est en mm) → net à l'affichage ET rasterisable en PNG.
+      sizedSvg = svg.replace(/width="[^"]*"/, 'width="512"').replace(/height="[^"]*"/, 'height="512"');
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sizedSvg);
+    } catch (_) { img.alt = 'QR indisponible'; }
+  };
+  dl.addEventListener('click', () => {
+    if (!sizedSvg) return;
+    const im = new Image();
+    im.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 512, 512);  // fond blanc = QR scannable
+      ctx.drawImage(im, 0, 0, 512, 512);
+      const a = document.createElement('a');
+      a.href = cv.toDataURL('image/png');
+      a.download = 'qr-partage' + (pin ? '-' + pin : '') + '.png';
+      a.click();
+    };
+    im.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sizedSvg);
+  });
+  return panel;
 }
 
 document.getElementById('share-close').addEventListener('click', () => shareDialog.close());
@@ -5560,9 +5739,12 @@ function taskEl(memo) {
   }
   const due = dueInfo(memo.due_date);
   if (due && !memo.done) {
-    const t = fmtMemoTime(memo.due_time);
+    const t = fmtMemoRange(memo.due_time, memo.end_time);  // [FESTIVAL-VOTE] plage début → fin
     badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label + (t ? ' · ' + t : '') }));
   }
+  // [FESTIVAL-VOTE] Chip ❤️ coup de cœur (mémos-passages uniquement). Owner peut toujours.
+  const hchip = heartChip(memo, true, toggleHeart);
+  if (hchip) badges.appendChild(hchip);
   if (memo.recurrence && !memo.done) {
     badges.appendChild(el('span', { class: 'badge', text: '🔁 ' + (RECUR_SHORT[memo.recurrence] || memo.recurrence), attrs: { title: 'Tâche récurrente — replanifiée automatiquement quand cochée' } }));
   }
@@ -5895,10 +6077,19 @@ function taskDetailEl(memo) {
   dateIn.addEventListener('change', () => patchMemo(memo.id, { due_date: dateIn.value }));
   mainRow.appendChild(dateIn);
   if (memo.due_date) {
-    const timeIn = el('input', { attrs: { type: 'time', title: 'Heure (optionnelle)' } });
+    const timeIn = el('input', { attrs: { type: 'time', title: 'Heure de début (optionnelle)' } });
     timeIn.value = memo.due_time || '';
     timeIn.addEventListener('change', () => patchMemo(memo.id, { due_time: timeIn.value }));
     mainRow.appendChild(timeIn);
+    // [FESTIVAL-VOTE] heure de fin (visible dès qu'une heure de début est posée ; une fin
+    // sans début n'existe pas — le serveur la vide sinon).
+    if (memo.due_time) {
+      mainRow.appendChild(el('span', { text: '→', attrs: { style: 'color:var(--muted)' } }));
+      const endIn = el('input', { attrs: { type: 'time', title: 'Heure de fin (optionnelle)' } });
+      endIn.value = memo.end_time || '';
+      endIn.addEventListener('change', () => patchMemo(memo.id, { end_time: endIn.value }));
+      mainRow.appendChild(endIn);
+    }
     mainRow.appendChild(el('button', {
       text: '× date', class: 'prio-btn', attrs: { title: "Retirer l'échéance" },
       on: { click: () => patchMemo(memo.id, { due_date: '' }) },
@@ -6194,6 +6385,18 @@ function renderBoard() {
           renderAll();
         } },
       }));
+      // [FESTIVAL-VOTE] Écran Résultats — générique : visible dès qu'un mémo-passage
+      // (due_date + due_time) existe dans le dossier ou ses descendants.
+      {
+        const fset = new Set([proj.id, ...projectDescendants(proj.id)]);
+        if (state.memos.some(m => fset.has(m.project_id) && m.due_date && m.due_time)) {
+          title.appendChild(el('button', {
+            class: 'prio-btn', text: '🏆 Résultats',
+            attrs: { title: 'Coups de cœur ❤️ et envies — podium, par ami, par jour' },
+            on: { click: () => openFestivalResults(proj.id) },
+          }));
+        }
+      }
       // [VOTE-DECISION] indicateur + clôture du vote (owner). Config/réouverture = pop-in projet.
       if (proj.vote_enabled) {
         title.appendChild(el('span', {
@@ -6458,6 +6661,9 @@ function renderBoard() {
   ];
 
   // Tri intra-jour : date croissante, puis mémos sans heure d'abord, puis heure croissante.
+  // [FESTIVAL-DATES] dates réelles → tri chronologique naturel (les séances de nuit portent le
+  // lendemain et se placent d'elles-mêmes le bon jour ; le regroupement « journée de festival »
+  // est purement visuel, côté frise/Résultats).
   const byTime = (a, b) =>
     (a.due_date || '').localeCompare(b.due_date || '') ||
     ((a.due_time ? 1 : 0) - (b.due_time ? 1 : 0)) ||

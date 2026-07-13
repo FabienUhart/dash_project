@@ -1,0 +1,821 @@
+{
+  "version": 23,
+  "projects": [
+    {
+      "name": "Vieilles Charrues 2026",
+      "emoji": "🎪",
+      "description": "Programmation officielle — coups de cœur ❤️ et envies. Un ❤️ = un incontournable ; pas deux ❤️ sur des créneaux qui se chevauchent."
+    },
+    {
+      "name": "Glenmor",
+      "parent": "Vieilles Charrues 2026",
+      "emoji": "🎤",
+      "location": {
+        "lat": 48.2729,
+        "lng": -3.5601,
+        "label": "Scène Glenmor, Kerampuilh"
+      }
+    },
+    {
+      "name": "Kerouac",
+      "parent": "Vieilles Charrues 2026",
+      "emoji": "🎤",
+      "location": {
+        "lat": 48.272,
+        "lng": -3.5596,
+        "label": "Scène Kerouac, Kerampuilh"
+      }
+    },
+    {
+      "name": "Grall",
+      "parent": "Vieilles Charrues 2026",
+      "emoji": "🎤",
+      "location": {
+        "lat": 48.2714,
+        "lng": -3.5576,
+        "label": "Scène Grall, Kerampuilh"
+      }
+    },
+    {
+      "name": "Gwernig",
+      "parent": "Vieilles Charrues 2026",
+      "emoji": "🎤",
+      "location": {
+        "lat": 48.273,
+        "lng": -3.5575,
+        "label": "Scène Gwernig, Kerampuilh"
+      }
+    },
+    {
+      "name": "Guinguette",
+      "parent": "Vieilles Charrues 2026",
+      "emoji": "🎪",
+      "location": {
+        "lat": 48.2722,
+        "lng": -3.5568,
+        "label": "Guinguette, Kerampuilh"
+      }
+    },
+    {
+      "name": "Esplanade",
+      "parent": "Vieilles Charrues 2026",
+      "emoji": "🎪",
+      "location": {
+        "lat": 48.27145,
+        "lng": -3.559,
+        "label": "Esplanade, Kerampuilh"
+      }
+    }
+  ],
+  "memos": [
+    {
+      "uid": "a8a8c8ce-5056-5273-a893-49833628eb83",
+      "title": "BIGA*RANX",
+      "content": "Glenmor · Jeudi 17:40 → 18:40",
+      "project": "Glenmor",
+      "due_date": "2026-07-16",
+      "due_time": "17:40",
+      "end_time": "18:40"
+    },
+    {
+      "uid": "590890de-ed8e-5208-b8ce-0de9e6863f18",
+      "title": "GIMS",
+      "content": "Glenmor · Jeudi 19:55 → 21:05",
+      "project": "Glenmor",
+      "due_date": "2026-07-16",
+      "due_time": "19:55",
+      "end_time": "21:05"
+    },
+    {
+      "uid": "bca616d5-a4ed-5ba9-aed6-db697129b882",
+      "title": "KATY PERRY",
+      "content": "Glenmor · Jeudi 22:30 → 00:00",
+      "project": "Glenmor",
+      "due_date": "2026-07-16",
+      "due_time": "22:30",
+      "end_time": "00:00"
+    },
+    {
+      "uid": "56184e1e-5e07-56c0-8f1d-20e7d598344d",
+      "title": "JOY CROOKES",
+      "content": "Glenmor · Vendredi 16:30 → 17:30",
+      "project": "Glenmor",
+      "due_date": "2026-07-17",
+      "due_time": "16:30",
+      "end_time": "17:30"
+    },
+    {
+      "uid": "408cfec5-a397-536e-841d-6d24e6aa471e",
+      "title": "JEAN-LOUIS AUBERT",
+      "content": "Glenmor · Vendredi 19:15 → 20:30",
+      "project": "Glenmor",
+      "due_date": "2026-07-17",
+      "due_time": "19:15",
+      "end_time": "20:30"
+    },
+    {
+      "uid": "7ebe8e76-fd3d-5e63-8df6-27b38ddf8985",
+      "title": "NICK CAVE & THE BAD SEEDS",
+      "content": "Glenmor · Vendredi 22:00 → 00:30",
+      "project": "Glenmor",
+      "due_date": "2026-07-17",
+      "due_time": "22:00",
+      "end_time": "00:30"
+    },
+    {
+      "uid": "5c584cff-2ad6-5916-8105-c0f56f8b8471",
+      "title": "MOSIMANN",
+      "content": "Glenmor · Vendredi 01:45 → 03:00",
+      "project": "Glenmor",
+      "due_date": "2026-07-18",
+      "due_time": "01:45",
+      "end_time": "03:00"
+    },
+    {
+      "uid": "7bc448fc-d1e9-557f-a77a-91cd357b2294",
+      "title": "DUB INC",
+      "content": "Glenmor · Samedi 17:00 → 18:15",
+      "project": "Glenmor",
+      "due_date": "2026-07-18",
+      "due_time": "17:00",
+      "end_time": "18:15"
+    },
+    {
+      "uid": "1ea8ff66-cbaa-59ce-94b9-b15d97c5b80c",
+      "title": "AYA NAKAMURA",
+      "content": "Glenmor · Samedi 19:45 → 21:00",
+      "project": "Glenmor",
+      "due_date": "2026-07-18",
+      "due_time": "19:45",
+      "end_time": "21:00"
+    },
+    {
+      "uid": "b4454a88-e7be-5e23-aec9-698a4cbefd2c",
+      "title": "MIKA",
+      "content": "Glenmor · Samedi 22:30 → 00:00",
+      "project": "Glenmor",
+      "due_date": "2026-07-18",
+      "due_time": "22:30",
+      "end_time": "00:00"
+    },
+    {
+      "uid": "7bda586e-2b95-5932-bd0e-73aad90263ed",
+      "title": "NICO MORENO",
+      "content": "Glenmor · Samedi 01:45 → 03:00",
+      "project": "Glenmor",
+      "due_date": "2026-07-19",
+      "due_time": "01:45",
+      "end_time": "03:00"
+    },
+    {
+      "uid": "72dc8397-2c8f-506b-9fda-1bce4de7f983",
+      "title": "SUZANE",
+      "content": "Glenmor · Dimanche 16:10 → 17:10",
+      "project": "Glenmor",
+      "due_date": "2026-07-19",
+      "due_time": "16:10",
+      "end_time": "17:10"
+    },
+    {
+      "uid": "f2ff8ac8-2565-596b-98cf-463c4b30a786",
+      "title": "FEU! CHATTERTON",
+      "content": "Glenmor · Dimanche 18:40 → 19:55",
+      "project": "Glenmor",
+      "due_date": "2026-07-19",
+      "due_time": "18:40",
+      "end_time": "19:55"
+    },
+    {
+      "uid": "6850eee4-78c0-599f-a36b-6e4318f5591a",
+      "title": "ORELSAN",
+      "content": "Glenmor · Dimanche 21:30 → 23:00",
+      "project": "Glenmor",
+      "due_date": "2026-07-19",
+      "due_time": "21:30",
+      "end_time": "23:00"
+    },
+    {
+      "uid": "3df57c5f-a66a-54b5-983a-ebb70ddb269a",
+      "title": "RILÈS",
+      "content": "Glenmor · Dimanche 00:30 → 02:00",
+      "project": "Glenmor",
+      "due_date": "2026-07-20",
+      "due_time": "00:30",
+      "end_time": "02:00"
+    },
+    {
+      "uid": "f6ec58cb-f11d-5ae9-bc51-e7b1998690a3",
+      "title": "PICHE",
+      "content": "Kerouac · Jeudi 16:30 → 17:30",
+      "project": "Kerouac",
+      "due_date": "2026-07-16",
+      "due_time": "16:30",
+      "end_time": "17:30"
+    },
+    {
+      "uid": "2842139d-2985-5fda-8524-e6d6e46b7073",
+      "title": "ILIONA",
+      "content": "Kerouac · Jeudi 18:50 → 19:40",
+      "project": "Kerouac",
+      "due_date": "2026-07-16",
+      "due_time": "18:50",
+      "end_time": "19:40"
+    },
+    {
+      "uid": "0a10333d-b34d-5ce9-9a4f-1a2b30338c48",
+      "title": "JOSMAN",
+      "content": "Kerouac · Jeudi 21:15 → 22:15",
+      "project": "Kerouac",
+      "due_date": "2026-07-16",
+      "due_time": "21:15",
+      "end_time": "22:15"
+    },
+    {
+      "uid": "a118acaf-586d-5776-ab13-7a55b9ffe470",
+      "title": "UPSILONE",
+      "content": "Kerouac · Jeudi 00:05 → 01:20",
+      "project": "Kerouac",
+      "due_date": "2026-07-17",
+      "due_time": "00:05",
+      "end_time": "01:20"
+    },
+    {
+      "uid": "65039d85-493f-51ee-9c9d-56d44334f967",
+      "title": "LUIZA",
+      "content": "Kerouac · Vendredi 15:15 → 16:15",
+      "project": "Kerouac",
+      "due_date": "2026-07-17",
+      "due_time": "15:15",
+      "end_time": "16:15"
+    },
+    {
+      "uid": "4a96f2ae-51e6-5083-8f28-cec626d35ce4",
+      "title": "PATRICK WATSON",
+      "content": "Kerouac · Vendredi 17:45 → 19:00",
+      "project": "Kerouac",
+      "due_date": "2026-07-17",
+      "due_time": "17:45",
+      "end_time": "19:00"
+    },
+    {
+      "uid": "e04db228-0960-52de-9e65-76363a5e7fec",
+      "title": "DISIZ",
+      "content": "Kerouac · Vendredi 20:45 → 21:45",
+      "project": "Kerouac",
+      "due_date": "2026-07-17",
+      "due_time": "20:45",
+      "end_time": "21:45"
+    },
+    {
+      "uid": "75c1b892-4ba6-52af-af2b-736aa2aac7fd",
+      "title": "VALD × VLADIMIR CAUCHEMAR × TODIEFOR",
+      "content": "Kerouac · Vendredi 00:35 → 01:35",
+      "project": "Kerouac",
+      "due_date": "2026-07-18",
+      "due_time": "00:35",
+      "end_time": "01:35"
+    },
+    {
+      "uid": "860df7a7-17b2-5377-9909-9fb45d706b0d",
+      "title": "OLLI & THE LONDON RADIO POP ORCHESTRA",
+      "content": "Kerouac · Samedi 15:45 → 16:45",
+      "project": "Kerouac",
+      "due_date": "2026-07-18",
+      "due_time": "15:45",
+      "end_time": "16:45"
+    },
+    {
+      "uid": "1c92f944-920c-5785-b358-8f5289bdec4f",
+      "title": "HOUDI",
+      "content": "Kerouac · Samedi 18:30 → 19:30",
+      "project": "Kerouac",
+      "due_date": "2026-07-18",
+      "due_time": "18:30",
+      "end_time": "19:30"
+    },
+    {
+      "uid": "3c39dbd4-3a0f-5137-834c-ca683fcecdf7",
+      "title": "YELLE",
+      "content": "Kerouac · Samedi 21:15 → 22:15",
+      "project": "Kerouac",
+      "due_date": "2026-07-18",
+      "due_time": "21:15",
+      "end_time": "22:15"
+    },
+    {
+      "uid": "06c15eae-8497-5d69-8650-36306030ae4e",
+      "title": "INTERPOL",
+      "content": "Kerouac · Samedi 00:15 → 01:30",
+      "project": "Kerouac",
+      "due_date": "2026-07-19",
+      "due_time": "00:15",
+      "end_time": "01:30"
+    },
+    {
+      "uid": "4036184b-22fa-534b-a6c7-770732d108b0",
+      "title": "MIOSSEC",
+      "content": "Kerouac · Dimanche 15:00 → 16:00",
+      "project": "Kerouac",
+      "due_date": "2026-07-19",
+      "due_time": "15:00",
+      "end_time": "16:00"
+    },
+    {
+      "uid": "18820f1a-9140-581e-90f6-77730ca915ce",
+      "title": "XAVIER RUDD",
+      "content": "Kerouac · Dimanche 17:20 → 18:30",
+      "project": "Kerouac",
+      "due_date": "2026-07-19",
+      "due_time": "17:20",
+      "end_time": "18:30"
+    },
+    {
+      "uid": "d86ef787-1493-5309-879b-1cfedf0afc03",
+      "title": "VANESSA PARADIS",
+      "content": "Kerouac · Dimanche 20:05 → 21:20",
+      "project": "Kerouac",
+      "due_date": "2026-07-19",
+      "due_time": "20:05",
+      "end_time": "21:20"
+    },
+    {
+      "uid": "3f029b4a-125c-52d3-bada-e276d11c88da",
+      "title": "TOMORA",
+      "content": "Kerouac · Dimanche 23:10 → 00:25",
+      "project": "Kerouac",
+      "due_date": "2026-07-19",
+      "due_time": "23:10",
+      "end_time": "00:25"
+    },
+    {
+      "uid": "67c7712c-f8a2-5236-b626-4cd3ebd16e37",
+      "title": "NE RANGEZ PAS LES JARDINS",
+      "content": "Grall · Vendredi 16:45 → 17:30",
+      "project": "Grall",
+      "due_date": "2026-07-17",
+      "due_time": "16:45",
+      "end_time": "17:30"
+    },
+    {
+      "uid": "ba76aa63-a9ea-5926-b076-06e3061ebe23",
+      "title": "BONNE NUIT",
+      "content": "Grall · Vendredi 18:15 → 19:15",
+      "project": "Grall",
+      "due_date": "2026-07-17",
+      "due_time": "18:15",
+      "end_time": "19:15"
+    },
+    {
+      "uid": "706851b4-811a-5069-a635-52c594dfb47a",
+      "title": "JEHNNY BETH",
+      "content": "Grall · Vendredi 20:00 → 21:00",
+      "project": "Grall",
+      "due_date": "2026-07-17",
+      "due_time": "20:00",
+      "end_time": "21:00"
+    },
+    {
+      "uid": "5bc11cf3-3789-54dd-813d-3c988060404a",
+      "title": "GEORGIO",
+      "content": "Grall · Vendredi 21:45 → 22:45",
+      "project": "Grall",
+      "due_date": "2026-07-17",
+      "due_time": "21:45",
+      "end_time": "22:45"
+    },
+    {
+      "uid": "ea852ed0-6561-514b-9fa4-74af9ab4c3d4",
+      "title": "JASMINE NOT JAFAR",
+      "content": "Grall · Vendredi 23:30 → 00:30",
+      "project": "Grall",
+      "due_date": "2026-07-17",
+      "due_time": "23:30",
+      "end_time": "00:30"
+    },
+    {
+      "uid": "54703c75-e013-5079-9f3e-d790691f6887",
+      "title": "JETLAG GANG",
+      "content": "Grall · Vendredi 01:00 → 03:00",
+      "project": "Grall",
+      "due_date": "2026-07-18",
+      "due_time": "01:00",
+      "end_time": "03:00"
+    },
+    {
+      "uid": "321323d1-a41b-59f7-bbba-60374294d246",
+      "title": "NO PAIN NO PAIN",
+      "content": "Grall · Samedi 16:30 → 17:30",
+      "project": "Grall",
+      "due_date": "2026-07-18",
+      "due_time": "16:30",
+      "end_time": "17:30"
+    },
+    {
+      "uid": "13b60615-1a01-5018-a7a2-0dc17bccac91",
+      "title": "ASFAR SHAMSI",
+      "content": "Grall · Samedi 18:15 → 19:15",
+      "project": "Grall",
+      "due_date": "2026-07-18",
+      "due_time": "18:15",
+      "end_time": "19:15"
+    },
+    {
+      "uid": "dcb34b70-6d3e-5d24-b947-b3456e9462fb",
+      "title": "SPRINTS",
+      "content": "Grall · Samedi 20:00 → 21:00",
+      "project": "Grall",
+      "due_date": "2026-07-18",
+      "due_time": "20:00",
+      "end_time": "21:00"
+    },
+    {
+      "uid": "bfa392f9-7c9a-58b7-a776-e9d6b57f34f5",
+      "title": "JOLAGREEN23",
+      "content": "Grall · Samedi 21:45 → 22:45",
+      "project": "Grall",
+      "due_date": "2026-07-18",
+      "due_time": "21:45",
+      "end_time": "22:45"
+    },
+    {
+      "uid": "ce6ee9fc-3190-5fd2-92c6-58f8c88febb4",
+      "title": "FOLIE'S",
+      "content": "Grall · Samedi 23:30 → 00:30",
+      "project": "Grall",
+      "due_date": "2026-07-18",
+      "due_time": "23:30",
+      "end_time": "00:30"
+    },
+    {
+      "uid": "16c0b8f5-6fa0-52ee-bc10-7a5dfb438db7",
+      "title": "CASSIUS",
+      "content": "Grall · Samedi 01:15 → 02:15",
+      "project": "Grall",
+      "due_date": "2026-07-19",
+      "due_time": "01:15",
+      "end_time": "02:15"
+    },
+    {
+      "uid": "d3bfae8b-e101-50dc-8c85-271032bd75ef",
+      "title": "GOODBYE KARELLE",
+      "content": "Grall · Dimanche 15:25 → 16:25",
+      "project": "Grall",
+      "due_date": "2026-07-19",
+      "due_time": "15:25",
+      "end_time": "16:25"
+    },
+    {
+      "uid": "c578b53a-80f6-5d80-b132-e35be445743d",
+      "title": "DANYL",
+      "content": "Grall · Dimanche 17:10 → 18:00",
+      "project": "Grall",
+      "due_date": "2026-07-19",
+      "due_time": "17:10",
+      "end_time": "18:00"
+    },
+    {
+      "uid": "257ea08f-df07-576e-aebc-dc2226070410",
+      "title": "MAUREEN",
+      "content": "Grall · Dimanche 18:45 → 19:45",
+      "project": "Grall",
+      "due_date": "2026-07-19",
+      "due_time": "18:45",
+      "end_time": "19:45"
+    },
+    {
+      "uid": "b9d79237-1b18-5855-96e0-0c6f6f562b3f",
+      "title": "47 TER",
+      "content": "Grall · Dimanche 20:30 → 21:30",
+      "project": "Grall",
+      "due_date": "2026-07-19",
+      "due_time": "20:30",
+      "end_time": "21:30"
+    },
+    {
+      "uid": "4ca8a5c0-6bfb-5486-a052-5a98d65d7431",
+      "title": "TVOD",
+      "content": "Grall · Dimanche 22:15 → 23:15",
+      "project": "Grall",
+      "due_date": "2026-07-19",
+      "due_time": "22:15",
+      "end_time": "23:15"
+    },
+    {
+      "uid": "51c3eae0-c608-5a0c-b136-db7f1fd6ae5d",
+      "title": "PACT",
+      "content": "Grall · Dimanche 00:15 → 01:45",
+      "project": "Grall",
+      "due_date": "2026-07-20",
+      "due_time": "00:15",
+      "end_time": "01:45"
+    },
+    {
+      "uid": "416631cd-7e7b-5617-b92a-4a73166b5f4d",
+      "title": "CAP KOZMIK",
+      "content": "Gwernig · Vendredi 17:30 → 18:30",
+      "project": "Gwernig",
+      "due_date": "2026-07-17",
+      "due_time": "17:30",
+      "end_time": "18:30"
+    },
+    {
+      "uid": "48951118-9bdc-5875-8aca-4d42fd6ee617",
+      "title": "COCANHA",
+      "content": "Gwernig · Vendredi 20:15 → 21:30",
+      "project": "Gwernig",
+      "due_date": "2026-07-17",
+      "due_time": "20:15",
+      "end_time": "21:30"
+    },
+    {
+      "uid": "dd5e6ca1-de09-5c4d-978e-128ebfa6ac48",
+      "title": "LOVANA",
+      "content": "Gwernig · Vendredi 22:30 → 23:45",
+      "project": "Gwernig",
+      "due_date": "2026-07-17",
+      "due_time": "22:30",
+      "end_time": "23:45"
+    },
+    {
+      "uid": "e0db0421-2069-5327-b9a9-73007e52345a",
+      "title": "SUPER PARQUET",
+      "content": "Gwernig · Vendredi 01:00 → 02:15",
+      "project": "Gwernig",
+      "due_date": "2026-07-18",
+      "due_time": "01:00",
+      "end_time": "02:15"
+    },
+    {
+      "uid": "73d8aea0-ae05-5eba-b2e3-5471b73ea5fe",
+      "title": "DJAZIA SATOUR",
+      "content": "Gwernig · Samedi 16:15 → 17:30",
+      "project": "Gwernig",
+      "due_date": "2026-07-18",
+      "due_time": "16:15",
+      "end_time": "17:30"
+    },
+    {
+      "uid": "00e2c567-7e33-56d9-ae3c-536e00980ec2",
+      "title": "GALANT TU PERDS TON TEMPS",
+      "content": "Gwernig · Samedi 18:45 → 19:45",
+      "project": "Gwernig",
+      "due_date": "2026-07-18",
+      "due_time": "18:45",
+      "end_time": "19:45"
+    },
+    {
+      "uid": "73bb6579-8048-5da7-890d-08a123389b2e",
+      "title": "GREGAILH",
+      "content": "Gwernig · Samedi 21:00 → 22:00",
+      "project": "Gwernig",
+      "due_date": "2026-07-18",
+      "due_time": "21:00",
+      "end_time": "22:00"
+    },
+    {
+      "uid": "dad56eeb-8de4-58d2-8cf5-08d7899ea3c0",
+      "title": "FEST NOZ",
+      "content": "Gwernig · Samedi 23:00 → 02:00",
+      "project": "Gwernig",
+      "due_date": "2026-07-18",
+      "due_time": "23:00",
+      "end_time": "02:00"
+    },
+    {
+      "uid": "cc523493-d899-5eff-9ff8-6cf58642ae04",
+      "title": "PLOUZ&FOEN",
+      "content": "Gwernig · Dimanche 16:00 → 17:00",
+      "project": "Gwernig",
+      "due_date": "2026-07-19",
+      "due_time": "16:00",
+      "end_time": "17:00"
+    },
+    {
+      "uid": "62bb74e2-8760-577c-9fc2-4454757024a5",
+      "title": "GRAND ENSEMBLE FILOS",
+      "content": "Gwernig · Dimanche 18:30 → 19:40",
+      "project": "Gwernig",
+      "due_date": "2026-07-19",
+      "due_time": "18:30",
+      "end_time": "19:40"
+    },
+    {
+      "uid": "f4c4797e-50e5-5da3-83d2-bfd4d19e8ace",
+      "title": "LINDIGO",
+      "content": "Gwernig · Dimanche 21:00 → 22:15",
+      "project": "Gwernig",
+      "due_date": "2026-07-19",
+      "due_time": "21:00",
+      "end_time": "22:15"
+    },
+    {
+      "uid": "85e93e87-54db-5811-b9d2-8c39c6189498",
+      "title": "ISAM ELIAS",
+      "content": "Gwernig · Dimanche 23:30 → 00:45",
+      "project": "Gwernig",
+      "due_date": "2026-07-19",
+      "due_time": "23:30",
+      "end_time": "00:45"
+    },
+    {
+      "uid": "250dfd1d-2206-56a5-af90-860a4e965e92",
+      "title": "DRAGSHOW",
+      "content": "Guinguette · Jeudi 18:30 → 19:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-16",
+      "due_time": "18:30",
+      "end_time": "19:30"
+    },
+    {
+      "uid": "64ac903b-9ed9-5c98-ae46-ece6d2fe2665",
+      "title": "PUMPELOP",
+      "content": "Guinguette · Jeudi 19:30 → 22:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-16",
+      "due_time": "19:30",
+      "end_time": "22:30"
+    },
+    {
+      "uid": "9f2bbec6-5ef0-51ee-878e-7c4ee8d2803c",
+      "title": "BATTLEDRUM GALACTICA",
+      "content": "Guinguette · Vendredi 14:00 → 14:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-17",
+      "due_time": "14:00",
+      "end_time": "14:30"
+    },
+    {
+      "uid": "55784d65-fb03-5840-9f19-186d14c797ce",
+      "title": "DRAGSHOW",
+      "content": "Guinguette · Vendredi 14:30 → 15:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-17",
+      "due_time": "14:30",
+      "end_time": "15:30"
+    },
+    {
+      "uid": "78e5bd9a-ef67-5dc9-88fd-e647b5742144",
+      "title": "KARAOKE SOCIAL CLUB",
+      "content": "Guinguette · Vendredi 16:00 → 19:00",
+      "project": "Guinguette",
+      "due_date": "2026-07-17",
+      "due_time": "16:00",
+      "end_time": "19:00"
+    },
+    {
+      "uid": "8e49c154-70cf-58fc-a104-9e4ae733d48c",
+      "title": "BATTLEDRUM GALACTICA",
+      "content": "Guinguette · Vendredi 19:00 → 19:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-17",
+      "due_time": "19:00",
+      "end_time": "19:30"
+    },
+    {
+      "uid": "b166f138-e2b6-5789-b3eb-2df6d8a15071",
+      "title": "PUMPELOP",
+      "content": "Guinguette · Vendredi 19:30 → 23:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-17",
+      "due_time": "19:30",
+      "end_time": "23:30"
+    },
+    {
+      "uid": "634d0b1a-2333-53e6-b2bd-a2a6cdfa594b",
+      "title": "BATTLEDRUM GALACTICA",
+      "content": "Guinguette · Vendredi 23:30 → 00:00",
+      "project": "Guinguette",
+      "due_date": "2026-07-17",
+      "due_time": "23:30",
+      "end_time": "00:00"
+    },
+    {
+      "uid": "0de74030-d7ca-5919-99a6-26f5b367e18a",
+      "title": "BATTLEDRUM GALACTICA",
+      "content": "Guinguette · Samedi 14:00 → 14:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-18",
+      "due_time": "14:00",
+      "end_time": "14:30"
+    },
+    {
+      "uid": "85b7de4a-c9a7-5274-abe7-7cd0eb800ac6",
+      "title": "DRAGSHOW",
+      "content": "Guinguette · Samedi 16:30 → 17:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-18",
+      "due_time": "16:30",
+      "end_time": "17:30"
+    },
+    {
+      "uid": "a94d08c2-74df-50ef-998c-7e4f3cec562c",
+      "title": "PUMPELOP",
+      "content": "Guinguette · Samedi 17:30 → 19:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-18",
+      "due_time": "17:30",
+      "end_time": "19:30"
+    },
+    {
+      "uid": "87c2cd5d-636a-55e4-8892-7d1fc44d7406",
+      "title": "BATTLEDRUM GALACTICA",
+      "content": "Guinguette · Samedi 19:30 → 20:00",
+      "project": "Guinguette",
+      "due_date": "2026-07-18",
+      "due_time": "19:30",
+      "end_time": "20:00"
+    },
+    {
+      "uid": "6ba2f758-153a-546f-93c1-12f24cb63b8f",
+      "title": "PUMPELOP",
+      "content": "Guinguette · Samedi 20:00 → 00:00",
+      "project": "Guinguette",
+      "due_date": "2026-07-18",
+      "due_time": "20:00",
+      "end_time": "00:00"
+    },
+    {
+      "uid": "69b9ec91-e1ef-5ea9-b21c-537ad6f40d90",
+      "title": "BATTLEDRUM GALACTICA",
+      "content": "Guinguette · Samedi 00:00 → 00:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-19",
+      "due_time": "00:00",
+      "end_time": "00:30"
+    },
+    {
+      "uid": "c4c75cc4-20cf-5611-b9a0-1d24d0ad8091",
+      "title": "DRAGSHOW",
+      "content": "Guinguette · Dimanche 14:30 → 15:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-19",
+      "due_time": "14:30",
+      "end_time": "15:30"
+    },
+    {
+      "uid": "7600d902-0872-5bbe-829c-58bafc4abe7d",
+      "title": "PUMPELOP",
+      "content": "Guinguette · Dimanche 16:00 → 18:00",
+      "project": "Guinguette",
+      "due_date": "2026-07-19",
+      "due_time": "16:00",
+      "end_time": "18:00"
+    },
+    {
+      "uid": "8d1f3e02-5954-5962-a81f-f4ff66d4830c",
+      "title": "KARAOKE SOCIAL CLUB",
+      "content": "Guinguette · Dimanche 18:30 → 21:30",
+      "project": "Guinguette",
+      "due_date": "2026-07-19",
+      "due_time": "18:30",
+      "end_time": "21:30"
+    },
+    {
+      "uid": "8cd30226-0dc8-50ef-9cee-a417b4584ec3",
+      "title": "PUMPELOP",
+      "content": "Guinguette · Dimanche 22:00 → 00:00",
+      "project": "Guinguette",
+      "due_date": "2026-07-19",
+      "due_time": "22:00",
+      "end_time": "00:00"
+    },
+    {
+      "uid": "d9ebb9f1-1221-55a6-8d3d-38628506833f",
+      "title": "BOREAL SOUND SYSTEM",
+      "content": "Esplanade · Jeudi 14:30 → 23:00",
+      "project": "Esplanade",
+      "due_date": "2026-07-16",
+      "due_time": "14:30",
+      "end_time": "23:00"
+    },
+    {
+      "uid": "ea088c8d-98de-56b0-9254-7b3b00f17b6b",
+      "title": "BOREAL SOUND SYSTEM",
+      "content": "Esplanade · Vendredi 14:30 → 01:00",
+      "project": "Esplanade",
+      "due_date": "2026-07-17",
+      "due_time": "14:30",
+      "end_time": "01:00"
+    },
+    {
+      "uid": "537213f8-c130-50f5-a4ae-e76e01628981",
+      "title": "BOREAL SOUND SYSTEM",
+      "content": "Esplanade · Samedi 14:30 → 01:00",
+      "project": "Esplanade",
+      "due_date": "2026-07-18",
+      "due_time": "14:30",
+      "end_time": "01:00"
+    },
+    {
+      "uid": "8d50a1d5-c40e-5596-819c-6eaa5b6cca01",
+      "title": "BOREAL SOUND SYSTEM",
+      "content": "Esplanade · Dimanche 14:30 → 00:00",
+      "project": "Esplanade",
+      "due_date": "2026-07-19",
+      "due_time": "14:30",
+      "end_time": "00:00"
+    }
+  ],
+  "links": [],
+  "categories": []
+}

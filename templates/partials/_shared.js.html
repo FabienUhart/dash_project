@@ -31,6 +31,175 @@ function fmtMemoTime(t) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(t || '') ? t.replace(':', 'h') : '';
 }
 
+// [FESTIVAL-VOTE] Plage horaire d'un passage « 22h30 → 00h00 » (fin omise si absente/invalide).
+// Le front affiche seulement — la normalisation post-minuit (+24h) vit côté serveur.
+// Un créneau de NUIT (🌙) reçoit un marqueur : après-minuit AVEC une fin (voir isNightSlot).
+function fmtMemoRange(start, end) {
+  const s = fmtMemoTime(start);
+  if (!s) return '';
+  const e = fmtMemoTime(end);
+  if (!e) return s;
+  return s + ' → ' + e + (isNightSlot(start, end) ? ' 🌙' : '');
+}
+
+// [FESTIVAL-DATES] Un passage d'APRÈS-MINUIT (due_time < 12:00) AVEC une heure de fin est une
+// séance de NUIT : en BASE il porte sa VRAIE date (le lendemain), mais à l'AFFICHAGE il compte
+// avec la JOURNÉE DE FESTIVAL de la veille (comme le programme officiel). Gardé par la présence
+// d'un `end_time` → AUCUN impact sur les autres dossiers (qui n'en ont pas). `isNightSlot` sert
+// le marqueur 🌙 ; `festivalDay` sert le regroupement (frise + « Par jour »). Purs, identiques
+// owner/invité/Résultats (invariant 9). Le TRI reste le datetime réel (naturellement juste).
+const _HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+function isNightSlot(due_time, end_time) {
+  return _HHMM_RE.test(due_time || '') && _HHMM_RE.test(end_time || '')
+      && parseInt(due_time.slice(0, 2), 10) < 12;
+}
+// Journée de festival d'un mémo (ISO) : la VEILLE de `due_date` si séance de nuit, sinon `due_date`.
+// UTC pour le décalage de jour (évite tout glissement de fuseau).
+function festivalDay(m) {
+  if (!m || !m.due_date || !isNightSlot(m.due_time, m.end_time)) return (m && m.due_date) || '';
+  const p = m.due_date.split('-').map(Number);
+  const d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// [FESTIVAL-VOTE] Chip coup de cœur ❤️ sur un mémo-passage (due_date + due_time). Gabarit
+// .prio-btn (invariant 9), ma voix = ❤️ accent, sinon 🤍. PUR : le clic délègue à onToggle(memo)
+// — la page gère le POST + le 409 (confirmPopin « remplacer ? »). canHeart=false → lecture
+// (anonyme). Renvoie null si le mémo n'est pas un passage (générique, pas de flag festival).
+function heartChip(memo, canHeart, onToggle) {
+  if (!(memo && memo.due_date && memo.due_time)) return null;
+  const n = memo.hearts_count || 0;
+  const mine = !!memo.hearts_mine;
+  const voters = memo.heart_voters || [];
+  const chip = el('button', { class: 'prio-btn',
+    text: (mine ? '❤️' : '🤍') + (n ? ' ' + n : ''),
+    attrs: { type: 'button',
+      title: voters.length ? ('Coup de cœur : ' + voters.join(', ')) : 'Marquer un coup de cœur (incontournable)',
+      style: 'padding:0.05rem 0.5rem;font-size:0.82rem' + (mine ? ';background:var(--accent);border-color:var(--accent);color:#10141a' : '') } });
+  if (canHeart) chip.addEventListener('click', (e) => { e.stopPropagation(); onToggle(memo); });
+  else { chip.disabled = true; chip.style.cursor = 'default'; }
+  return chip;
+}
+
+// [MAP-MEMO-ROUNDTRIP] Liens d'un mémo (bulle carte) : extraits du contenu Quill — balises <a href>
+// ET URLs nues en texte. Frontend pur (données déjà chargées, invariant 5). Dédup, max 4, http(s) seuls.
+function memoLinks(html) {
+  const s = String(html || '');
+  const urls = [];
+  const push = (u) => {
+    u = (u || '').trim().replace(/[)\]}.,;]+$/, '');  // ponctuation traînante
+    if (/^https?:\/\//i.test(u) && !urls.includes(u)) urls.push(u);
+  };
+  let m; const reA = /<a\b[^>]*\bhref\s*=\s*["']([^"']+)["']/gi;
+  while ((m = reA.exec(s))) push(m[1]);
+  const text = s.replace(/<[^>]+>/g, ' ');  // retire les balises avant de chercher les URLs nues
+  let b; const reU = /\bhttps?:\/\/[^\s<>"']+/gi;
+  while ((b = reU.exec(text))) push(b[0]);
+  return urls.slice(0, 4).map((u) => Object.assign({ url: u }, linkMeta(u)));
+}
+// Icône + label par domaine reconnu, sinon « 🌐 » + hostname court.
+function linkMeta(u) {
+  let host = '';
+  try { host = new URL(u).hostname.replace(/^www\./, ''); } catch (e) { host = ''; }
+  const h = host.toLowerCase();
+  if (h.includes('deezer')) return { icon: '🎵', label: 'Deezer' };
+  if (h.includes('spotify')) return { icon: '🎧', label: 'Spotify' };
+  if (h.includes('youtube') || h.includes('youtu.be')) return { icon: '▶️', label: 'YouTube' };
+  if (h.includes('instagram')) return { icon: '📸', label: 'Instagram' };
+  if (h.includes('tiktok')) return { icon: '🎬', label: 'TikTok' };
+  return { icon: '🌐', label: host || 'Site' };
+}
+// Rangée de boutons-liens (gabarit .prio-btn) pour une bulle carte, ou null si aucun lien.
+function linksRow(links) {
+  if (!links || !links.length) return null;
+  const row = el('div', { attrs: { style: 'display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.4rem' } });
+  links.forEach((l) => {
+    row.appendChild(el('a', { class: 'prio-btn', text: l.icon + ' ' + l.label,
+      attrs: { href: l.url, target: '_blank', rel: 'noopener noreferrer', title: l.url,
+        style: 'text-decoration:none;padding:0.1rem 0.5rem;font-size:0.75rem' } }));
+  });
+  return row;
+}
+
+// [FESTIVAL-VOTE] Rendu de l'écran Résultats (pur, DOM only). `data` = payload festival-results
+// {passages:[{memo_id,title,scene,due_date,due_time,end_time,hearts:[noms],votes}], voters, total_voters}.
+// `tab` = 'podium' | 'people' | 'day'. Renvoie un fragment prêt à injecter. Identique 3 pages.
+const FEST_DAYS = [['2026-07-16', 'Jeudi'], ['2026-07-17', 'Vendredi'], ['2026-07-18', 'Samedi'], ['2026-07-19', 'Dimanche']];
+function festivalResultsView(data, tab, dayFilter) {
+  const wrap = el('div', {});
+  const passages = (data && data.passages) || [];
+  if (tab === 'people') {
+    // [FESTIVAL-PLANNINGS] Par ami : chaque personne est DÉPLIABLE → son planning (emploi du temps
+    // festival) groupé par journée, chronologique, ❤️ incontournables en FORT + 🗳 envies en léger.
+    const people = new Map();  // nom → { hearts:Set(memo_id), votes:Set(memo_id) }
+    const ent = n => { if (!people.has(n)) people.set(n, { hearts: new Set(), votes: new Set() }); return people.get(n); };
+    passages.forEach(p => {
+      (p.hearts || []).forEach(n => ent(n).hearts.add(p.memo_id));
+      (p.vote_voters || []).forEach(n => ent(n).votes.add(p.memo_id));
+    });
+    if (!people.size) { wrap.appendChild(el('p', { class: 'muted', text: 'Personne n’a encore voté.' })); return wrap; }
+    const byId = {}; passages.forEach(p => { byId[p.memo_id] = p; });
+    [...people.entries()].sort((a, b) => b[1].hearts.size - a[1].hearts.size || b[1].votes.size - a[1].votes.size).forEach(([name, sets]) => {
+      const det = el('details', { attrs: { style: 'margin-bottom:0.5rem;background:var(--panel-2);border:1px solid var(--border);border-radius:9px;overflow:hidden' } });
+      const sum = el('summary', { attrs: { style: 'cursor:pointer;padding:0.5rem 0.6rem' } });
+      const hd = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.5rem;width:calc(100% - 1.3rem);vertical-align:middle' } });
+      hd.appendChild(el('span', { text: '👤 ' + name, attrs: { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600' } }));
+      hd.appendChild(el('span', { text: '❤️ ' + sets.hearts.size, attrs: { style: 'flex-shrink:0;color:var(--accent);font-weight:700' } }));
+      hd.appendChild(el('span', { text: '🗳 ' + sets.votes.size, attrs: { style: 'flex-shrink:0;color:var(--muted)' } }));
+      sum.appendChild(hd); det.appendChild(sum);
+      const body = el('div', { attrs: { style: 'padding:0.1rem 0.6rem 0.5rem' } });
+      const mine = [...new Set([...sets.hearts, ...sets.votes])].map(id => byId[id]).filter(Boolean);
+      const days = {};
+      mine.forEach(p => { const d = festivalDay(p); (days[d] = days[d] || []).push(p); });
+      Object.keys(days).sort().forEach(d => {
+        const lbl = (FEST_DAYS.find(x => x[0] === d) || [null, d])[1];
+        body.appendChild(el('div', { text: lbl, attrs: { style: 'font-weight:700;font-size:0.78rem;color:var(--muted);margin:0.45rem 0 0.15rem;text-transform:uppercase;letter-spacing:0.03em' } }));
+        days[d].sort((a, b) => (a.due_date + a.due_time).localeCompare(b.due_date + b.due_time)).forEach(p => {
+          const heart = sets.hearts.has(p.memo_id);
+          const line = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.4rem;padding:0.25rem 0.4rem;margin-top:0.15rem;border-radius:6px;font-size:0.84rem;'
+            + (heart ? 'background:var(--bg);border-left:3px solid var(--accent);font-weight:600' : 'opacity:0.7;border-left:3px solid transparent') } });
+          line.appendChild(el('span', { text: heart ? '❤️' : '🗳', attrs: { style: 'flex-shrink:0' } }));
+          line.appendChild(el('span', { text: '🕒 ' + fmtMemoRange(p.due_time, p.end_time), attrs: { style: 'flex-shrink:0;color:var(--text);font-variant-numeric:tabular-nums' } }));
+          line.appendChild(el('span', { text: p.title, attrs: { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+          if (p.scene) {
+            const sc = el('span', { attrs: { style: 'flex-shrink:0;display:inline-flex;align-items:center;gap:0.25rem;color:var(--muted);font-size:0.78rem;max-width:8rem;overflow:hidden' } });
+            if (p.sceneColor) sc.appendChild(el('span', { attrs: { style: 'width:9px;height:9px;border-radius:50%;flex-shrink:0;background:' + p.sceneColor } }));
+            sc.appendChild(el('span', { text: p.scene, attrs: { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+            line.appendChild(sc);
+          }
+          body.appendChild(line);
+        });
+      });
+      det.appendChild(body);
+      wrap.appendChild(det);
+    });
+    return wrap;
+  }
+  let list = passages;
+  // [FESTIVAL-DATES] Par jour = regroupé par JOURNÉE DE FESTIVAL (les séances de nuit comptent
+  // avec la soirée de la veille), ordre CHRONOLOGIQUE datetime réel ; Podium garde le tri serveur.
+  if (tab === 'day' && dayFilter) list = passages.filter(p => festivalDay(p) === dayFilter)
+    .slice().sort((a, b) => (a.due_date + a.due_time).localeCompare(b.due_date + b.due_time));
+  if (!list.length) { wrap.appendChild(el('p', { class: 'muted', text: 'Aucun passage.' })); return wrap; }
+  list.forEach((p, i) => {
+    const day = (FEST_DAYS.find(d => d[0] === festivalDay(p)) || [null, festivalDay(p)])[1];
+    const top = (tab !== 'day') && i === 0 && (p.hearts.length || p.votes);
+    const row = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0.6rem;border-bottom:1px solid var(--border)'
+      + (top ? ';background:var(--panel-2);border-radius:9px' : '') } });
+    row.appendChild(el('span', { attrs: { style: 'min-width:2.4rem;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)' },
+      text: (p.hearts.length ? '❤️' + p.hearts.length : '') + (p.votes ? ' 🗳' + p.votes : '') }));
+    const mid = el('div', { attrs: { style: 'flex:1;min-width:0' } });
+    mid.appendChild(el('div', { attrs: { style: 'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' }, text: (top ? '🏆 ' : '') + p.title }));
+    mid.appendChild(el('div', { attrs: { style: 'font-size:0.78rem;color:var(--muted)' },
+      text: day + ' ' + fmtMemoRange(p.due_time, p.end_time) + (p.scene ? ' · ' + p.scene : '') }));
+    row.appendChild(mid);
+    if (p.hearts.length) row.appendChild(el('span', { attrs: { style: 'font-size:0.74rem;color:var(--muted);max-width:9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis', title: p.hearts.join(', ') }, text: p.hearts.join(', ') }));
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
 // Initiales (1-2 lettres) d'un nom libre pour la pastille d'assigné [CARD-REDESIGN].
 // Retire un éventuel « <email> ». Pur, identique owner/invité.
 function initials(name) {
@@ -307,6 +476,22 @@ function resolveTripLocal(byId, pid) {
 //         périmètre (GPS OU NON — {kind:'memo', id, project_id, groups, title,
 //         due_date, due_time, lat?, lng?, trip}) + clef localStorage du masquage.
 // Dépend de globals présents sur les deux pages : L (Leaflet), activeMap, notify, el, provenanceColor.
+// [FESTIVAL-MAP-OVERLAY] Surcouches de plan par dossier RACINE (clé = NOM du dossier racine),
+// en dur — assumé V1 festival, généralisation ultérieure si besoin (zéro schéma, zéro route).
+// L'image est servie depuis static/ (owner) / share/assets/ (invité) : la page passe la base
+// via cfg.assetBase. `bounds` = coin Sud-Ouest puis Nord-Est. Le plan est STYLISÉ (pas à
+// l'échelle) → AJUSTER ces bornes pour que les scènes DESSINÉES tombent près de leurs pins.
+const MAP_OVERLAYS = {
+  'Vieilles Charrues 2026': {
+    file: 'plan-overlay-2026.png',
+    // Polygone OSM du site de Kerampuilh ~48.27114→48.27324 / -3.56073→-3.55630 ;
+    // l'overlay déborde un peu (marges du plan). Repères pins : Glenmor NO 48.2729,-3.5601 ;
+    // Grall S 48.2714,-3.5576 ; Gwernig NE 48.273,-3.5575.
+    bounds: [[48.2706, -3.5618], [48.2739, -3.5544]],
+    opacity: 0.9,
+  },
+};
+
 function runMapDialog(cfg) {
   if (typeof L === 'undefined') {
     notify('Carte non disponible : fichiers Leaflet manquants dans static/ (voir README).', { error: true });
@@ -339,6 +524,38 @@ function runMapDialog(cfg) {
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(activeMap);
   activeMap.setView([20, 0], 2);
   const markerLayer = L.layerGroup().addTo(activeMap);
+  // [FESTIVAL-MAP-OVERLAY] surcouche de plan (sous les marqueurs). Activée UNIQUEMENT si la carte
+  // est celle d'un dossier RACINE connu de MAP_OVERLAYS → pas de fuite sur les autres cartes.
+  let planOverlay = null, planLayer = null, planOn = false, planBtn = null;
+  const OVKEY = cfg.overlayKey || '';
+  if (cfg.assetBase) {
+    let rootName = '', byId = {};
+    projects.forEach(p => { byId[p.id] = p; });
+    let pid = curId, guard = 0;
+    while (pid != null && byId[pid] && guard++ < 60) { rootName = byId[pid].name; pid = byId[pid].parent_id; }
+    const ov = MAP_OVERLAYS[rootName];
+    if (ov) { planOverlay = ov; planOn = OVKEY ? localStorage.getItem(OVKEY) === '1' : false; }
+  }
+  function setPlan(on) {
+    planOn = on;
+    if (OVKEY) localStorage.setItem(OVKEY, on ? '1' : '0');
+    if (on && !planLayer && planOverlay) {
+      // Pane dédié entre tuiles (200) et vecteurs/marqueurs (≥400) → le plan reste SOUS les pins.
+      if (!activeMap.getPane('planPane')) {
+        activeMap.createPane('planPane');
+        activeMap.getPane('planPane').style.zIndex = 250;
+        activeMap.getPane('planPane').style.pointerEvents = 'none';
+      }
+      planLayer = L.imageOverlay(cfg.assetBase + planOverlay.file, planOverlay.bounds,
+        { opacity: planOverlay.opacity, pane: 'planPane', interactive: false }).addTo(activeMap);
+    } else if (!on && planLayer) { planLayer.remove(); planLayer = null; }
+    if (planBtn) {
+      planBtn.textContent = on ? '🎪 Plan ✓' : '🎪 Plan';
+      planBtn.style.background = on ? 'var(--accent)' : '';
+      planBtn.style.color = on ? '#10141a' : '';
+      planBtn.style.borderColor = on ? 'var(--accent)' : '';
+    }
+  }
   const listEl = document.getElementById('map-list');
   const subbar = document.getElementById('map-subbar');
   const groupbar = document.getElementById('map-groupbar');
@@ -359,6 +576,9 @@ function runMapDialog(cfg) {
   // [MAP-DAYCHIP-ACTIVE] jour actif de la frise (un seul, re-clic = désélection,
   // non persisté — remis à zéro à chaque ouverture de la carte).
   let tlActiveDay = null;
+  // [FESTIVAL-FRISE-FOCUS] chip de frise sélectionné (mémo) + popup ouvert sur le pin du projet
+  // porteur, pour un passage SANS point propre. Non persisté ; re-clic/clic ailleurs = ferme.
+  let tlSelId = null, tlSelEl = null, passagePopup = null;
   const markersByKey = {};
   let routeLine = null;
   const ACCENT = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#4fc3f7').trim() || '#4fc3f7';
@@ -717,9 +937,7 @@ function runMapDialog(cfg) {
       if (_vopt && selVote.state === 'closed' && !isWinnerOpt(p) && !votesOn && marker.setStyle) {
         marker.setStyle({ opacity: 0.35, fillOpacity: 0.12 });
       }
-      marker.bindPopup(
-        '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '')
-      );
+      marker.bindPopup(buildMarkerPopup(p));  // [MAP-MEMO-ROUNDTRIP] + bouton « Ouvrir le mémo » (kind memo)
       // [MAP-MARKER-DAY-SYNC] clic marqueur = sélectionner le jour du point via le MÊME
       // chemin que le chip « Jour N » (applyDay : filtre + zoom + surlignage de la frise) ;
       // point sans date → « 🌍 Tous » (applyDay(null)). La popup Leaflet s'ouvre toujours.
@@ -861,7 +1079,7 @@ function runMapDialog(cfg) {
       renderTimeline();
       const s = tlEl.querySelector('[data-day="' + tlActiveDay + '"]');
       if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-      fitTo(current.filter(p => isFocused(p) && p.kind === 'memo' && p.due_date === tlActiveDay && p.lat != null && p.lng != null)
+      fitTo(current.filter(p => isFocused(p) && p.kind === 'memo' && festivalDay(p) === tlActiveDay && p.lat != null && p.lng != null)
         .map(p => [p.lat, p.lng]));
     } else {
       refresh(true); // réaffiche points/segments/frise + fitBounds sur tout l'ensemble
@@ -871,8 +1089,143 @@ function runMapDialog(cfg) {
   // Frise : mémos datés du périmètre (GPS OU NON), mêmes filtres focus. Curseur
   // « aujourd'hui » = barre de progression + repère entre passé et futur ; passées
   // estompées ✓, étape du jour halo accent, sans-GPS non centrable (style discret).
+  // [FESTIVAL-FRISE-FOCUS] sélection visuelle du chip cliqué (anneau accent) + fermeture.
+  function clearStepSel() { if (tlSelEl) { tlSelEl.style.boxShadow = ''; tlSelEl = null; } }
+  function selectStep(elm, id) { clearStepSel(); tlSelEl = elm; tlSelId = id; if (elm) elm.style.boxShadow = '0 0 0 2px ' + ACCENT; }
+  function closePassagePopup() { if (passagePopup) { activeMap.closePopup(passagePopup); } clearStepSel(); tlSelId = null; }
+  // Contenu du popup d'un passage — hiérarchie typo soignée (titre marqué, horaires contrastés +
+  // 🕒, pastille couleur de scène = même que la liste de droite via provenanceColor). [FESTIVAL-FRISE-FOCUS #4]
+  function passagePopupHtml(p, inf) {
+    const esc = s => (s || '').replace(/</g, '&lt;');
+    const wd = new Date(p.due_date + 'T00:00').toLocaleDateString('fr-FR', { weekday: 'long' });
+    const day = wd.charAt(0).toUpperCase() + wd.slice(1);
+    const range = fmtMemoRange(p.due_time, p.end_time);  // inclut « 🌙 » si nuit
+    let h = '<div style="font-weight:800;font-size:1.02rem;line-height:1.2;margin-bottom:0.2rem">' + esc(inf.artist || p.title) + '</div>';
+    h += '<div style="color:var(--text);font-size:0.85rem">🕒 ' + esc(day) + (range ? ' · ' + range : '') + '</div>';
+    if (inf.scene) {
+      const dot = inf.sceneColor
+        ? '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + inf.sceneColor + ';margin-right:5px;vertical-align:middle"></span>'
+        : '🎪 ';
+      h += '<div style="color:var(--text);font-size:0.85rem;margin-top:0.1rem">' + dot + esc(inf.scene) + '</div>';
+    }
+    const bits = [];
+    if (inf.hearts) bits.push('❤️ ' + inf.hearts + (inf.voters && inf.voters.length ? ' (' + inf.voters.map(esc).join(', ') + ')' : ''));
+    if (inf.votes) bits.push('🗳 ' + inf.votes);
+    if (bits.length) h += '<div style="color:var(--muted);font-size:0.82rem;margin-top:0.1rem">' + bits.join(' · ') + '</div>';
+    return h;
+  }
+  // Icône crayon SVG inline (aucun CDN, invariant 6) — hérite de la couleur du bouton (currentColor).
+  function pencilSvg() {
+    return '<svg viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/>'
+      + '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+  }
+  // [FESTIVAL-FRISE-FOCUS] Si un filtre Jour est actif et que le chip cliqué appartient à un AUTRE
+  // journée de festival → basculer le filtre sur ce jour (comme un clic sur son bouton « Jour n » :
+  // frise re-filtrée, bouton actif à jour). `applyDay` re-rend la frise → les éléments de chips sont
+  // recréés : on re-trouve le chip par son data-memo-id pour le marquer actif + le garder visible.
+  // Renvoie l'élément (courant) du chip. En vue « Tous » (tlActiveDay null) → aucun changement.
+  function switchDayThenLocate(p) {
+    const fd = festivalDay(p);
+    if (tlActiveDay && tlActiveDay !== fd) applyDay(fd);
+    const cur = tlEl.querySelector('[data-memo-id="' + p.id + '"]');
+    if (cur) cur.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    return cur;
+  }
+  // [MAP-MEMO-ROUNDTRIP] Snapshot COMPLET de l'état carte, mémorisé à l'ouverture d'un mémo DEPUIS
+  // la carte (bulle de passage OU marqueur mémo), restauré au retour. Générique, toutes cartes. Les
+  // filtres persistés en localStorage (groupes `active`, sous-projets `subActive`, Voix, Frise, Plan)
+  // se restaurent seuls à la réouverture ; ici on capture le NON persisté : vue, jour+chip, scroll
+  // frise, calque photo, scrutin sélectionné, et la bulle ouverte ({kind:'passage'|'marker', id}).
+  function mapSnapshot(bubble) {
+    const strip = tlEl.querySelector('.map-frise-strip');
+    const c = activeMap.getCenter();
+    return { center: { lat: c.lat, lng: c.lng }, zoom: activeMap.getZoom(),
+      day: tlActiveDay, photoOn, friseScroll: strip ? strip.scrollLeft : 0,
+      voteSel: selVote ? (selVote.id === null ? '__dossier__' : selVote.id) : null,
+      bubble: bubble || null };
+  }
+  // Bouton « Ouvrir le mémo » — pleine largeur, coins arrondis cohérents .prio-btn, icône crayon SVG
+  // inline (pas d'emoji, pas de CDN). Délègue à la page avec le snapshot. [FESTIVAL-FRISE-FOCUS #4]
+  function openMemoBtn(memoId, bubbleKind, onBefore) {
+    const btn = el('button', { class: 'prio-btn',
+      attrs: { type: 'button', style: 'display:flex;align-items:center;justify-content:center;gap:0.35rem;'
+        + 'width:100%;margin-top:0.55rem;padding:0.2rem 0.55rem;border-radius:7px' } });
+    btn.innerHTML = pencilSvg() + '<span>Ouvrir le mémo</span>';
+    btn.addEventListener('click', () => { const s = mapSnapshot({ kind: bubbleKind, id: memoId }); if (onBefore) onBefore(); cfg.openMemo(memoId, s); });
+    return btn;
+  }
+  // Contenu DOM du popup passage : lignes propres (titre/créneau/scène/compteurs via HTML), puis
+  // rangée 🔗 liens, puis bouton pleine largeur. [FESTIVAL-FRISE-FOCUS #3]
+  function buildPassageBox(p, inf) {
+    const box = el('div', {});
+    const head = el('div', {}); head.innerHTML = passagePopupHtml(p, inf); box.appendChild(head);
+    const lr = linksRow(inf.links); if (lr) box.appendChild(lr);
+    if (cfg.openMemo) box.appendChild(openMemoBtn(p.id, 'passage', closePassagePopup));
+    return box;
+  }
+  // [MAP-MEMO-ROUNDTRIP] Contenu DOM du popup d'un MARQUEUR mémo classique (restaurants, points
+  // géolocalisés) : titre/sous-titre + rangée 🔗 liens + bouton « Ouvrir le mémo » (kind memo).
+  function buildMarkerPopup(p) {
+    const box = el('div', {});
+    const head = el('div', {});
+    head.innerHTML = '<strong>' + (p.title || '').replace(/</g, '&lt;') + '</strong>' + (p.sub ? '<br>' + p.sub.replace(/</g, '&lt;') : '');
+    box.appendChild(head);
+    const lr = linksRow(p.links); if (lr) box.appendChild(lr);
+    if (p.kind === 'memo' && cfg.openMemo) box.appendChild(openMemoBtn(p.id, 'marker', () => activeMap.closePopup()));
+    return box;
+  }
+  function showPassagePopup(p, inf, ll, autoPan) {
+    passagePopup = L.popup({ autoPan: !!autoPan }).setLatLng(ll).setContent(buildPassageBox(p, inf)).openOn(activeMap);
+    passagePopup.on('remove', () => { clearStepSel(); tlSelId = null; passagePopup = null; });  // clic ailleurs = fermeture
+  }
+  // Ouvre le popup d'un passage SANS point propre sur le pin de son projet porteur (flyTo).
+  function openPassageOnPorter(p) {
+    if (tlSelId === p.id && passagePopup) { closePassagePopup(); return; }  // re-clic = fermer
+    if (!cfg.passageInfo) return;
+    const inf = cfg.passageInfo(p.id);
+    if (!inf || !inf.ll) return;  // pas de porteur géolocalisé → no-op propre
+    const cur = switchDayThenLocate(p);  // bascule éventuelle du filtre de jour + re-localise le chip
+    selectStep(cur || null, p.id);
+    activeMap.flyTo(inf.ll, 16, { duration: 0.6 });
+    showPassagePopup(p, inf, inf.ll, true);
+  }
+  // [FESTIVAL-FRISE-FOCUS #2] Ré-ouvre la bulle d'un passage SANS flyTo (la vue est restaurée à part) ;
+  // compteurs ❤️/🗳 rafraîchis (passageInfo relu, l'utilisateur a pu voter/commenter depuis le mémo).
+  function reopenPassageBubble(p) {
+    if (!cfg.passageInfo) return;
+    const inf = cfg.passageInfo(p.id);
+    if (!inf || !inf.ll) return;
+    selectStep(tlEl.querySelector('[data-memo-id="' + p.id + '"]') || null, p.id);
+    showPassagePopup(p, inf, inf.ll, false);
+  }
+  // [MAP-MEMO-ROUNDTRIP] Restaure l'état carte mémorisé (parcours carte→mémo→retour). Générique.
+  function restoreMapState(rs) {
+    const after = () => {
+      // scrutin sélectionné (non persisté) : re-résoudre dans les scrutins reconstruits (par id ; null = dossier).
+      if (rs.voteSel !== undefined && scrutins.length) {
+        selVote = rs.voteSel == null ? null
+          : (rs.voteSel === '__dossier__' ? scrutins.find(s => s.id === null) : scrutins.find(s => s.id === rs.voteSel)) || null;
+      }
+      refresh(false);  // re-dessine marqueurs/pastilles avec le scrutin restauré (sans refit)
+      if (rs.day) applyDay(rs.day);  // re-filtre la frise sur le jour + scroll au jour
+      const b = rs.bubble;
+      if (b && b.kind === 'passage') { const p = datedAll().find(x => x.id === b.id); if (p) reopenPassageBubble(p); }
+      else if (b && b.kind === 'marker') { const mk = markersByKey['memo:' + b.id]; if (mk) mk.marker.openPopup(); }
+      setTimeout(() => {
+        activeMap.invalidateSize();
+        if (rs.center) activeMap.setView([rs.center.lat, rs.center.lng], rs.zoom);
+        const strip = tlEl.querySelector('.map-frise-strip');
+        if (strip && rs.friseScroll) strip.scrollLeft = rs.friseScroll;
+      }, 140);
+    };
+    if (rs.photoOn && cfg.loadPhotos && !photoOn) togglePhotos().then(after);  // calque photo non persisté
+    else after();
+  }
+
   function renderTimeline() {
     tlEl.innerHTML = '';
+    clearStepSel();  // les éléments de chips sont recréés → oublier l'ancienne réf (le popup reste)
     const dated = datedAll().filter(p => isFocused(p));
     if (!tlOn || !dated.length) { tlEl.style.display = 'none'; return; }
     tlEl.style.display = 'block';
@@ -881,10 +1234,10 @@ function runMapDialog(cfg) {
     const pct = Math.round((past / dated.length) * 100);
     // barre de progression remplie jusqu'à aujourd'hui
     tlEl.appendChild(el('div', { attrs: { style: 'height:4px;border-radius:999px;background:linear-gradient(90deg,' + ACCENT + ' ' + pct + '%, var(--border) ' + pct + '%);margin:0 0.2rem 0.3rem' } }));
-    const strip = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:stretch;overflow-x:auto;padding:0 0.2rem 0.3rem;-webkit-overflow-scrolling:touch' } });
+    const strip = el('div', { class: 'map-frise-strip', attrs: { style: 'display:flex;gap:0.3rem;align-items:stretch;overflow-x:auto;padding:0 0.2rem 0.3rem;-webkit-overflow-scrolling:touch' } });
     // [MAP-TRIP-POLISH] chips « Jour 1… » cliquables (si plusieurs jours distincts) :
     // clic = faire défiler la frise jusqu'à la première étape du jour.
-    const days = [...new Set(dated.map(p => p.due_date))];
+    const days = [...new Set(dated.map(festivalDay))];  // [FESTIVAL-DATES] regroupé par journée de festival
     const firstStepOfDay = {};
     if (tlActiveDay && !days.includes(tlActiveDay)) tlActiveDay = null; // jour disparu (focus)
     if (days.length > 1) {
@@ -929,18 +1282,21 @@ function runMapDialog(cfg) {
       const dayLbl = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (p.due_time ? ' ' + fmtMemoTime(p.due_time) : '');
       // [MAP-DAYCHIP-ACTIVE] jour actif : ses étapes ressortent (anneau accent),
       // les autres jours s'estompent ; sans jour actif, comportement classique.
-      const isActiveDay = tlActiveDay === p.due_date;
+      const isActiveDay = tlActiveDay === festivalDay(p);  // [FESTIVAL-DATES]
       const dimOtherDay = tlActiveDay && !isActiveDay;
       const step = el('button', {
         attrs: {
           type: 'button',
-          'data-day': p.due_date,
-          title: (p.title || '') + (hasGps ? '' : ' — sans position (non centrable)'),
+          'data-day': festivalDay(p),  // [FESTIVAL-DATES] chip filtré par journée de festival
+          'data-memo-id': p.id,  // [FESTIVAL-FRISE-FOCUS] re-trouver le chip après un re-render (bascule de jour)
+          // [FESTIVAL-FRISE-FOCUS] un passage sans point PROPRE reste cliquable si un projet
+          // porteur géolocalisé existe (cfg.passageInfo fourni) → pin de la scène.
+          title: (p.title || '') + (hasGps ? '' : (cfg.passageInfo ? ' — voir la scène sur la carte' : ' — sans position (non centrable)')),
           // overflow:hidden : les titres longs restent DANS leur étape (pas de chevauchement).
           style: 'flex-shrink:0;max-width:9.5rem;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;gap:0.08rem;'
             + 'background:var(--panel-2);border:1px ' + (hasGps ? 'solid' : 'dashed') + ' var(--border);border-radius:8px;'
             + 'padding:0.25rem 0.45rem;color:inherit;font:inherit;font-size:0.7rem;text-align:left;'
-            + 'cursor:' + (hasGps ? 'pointer' : 'default') + ';'
+            + 'cursor:' + ((hasGps || cfg.passageInfo) ? 'pointer' : 'default') + ';'
             + (dimOtherDay ? 'opacity:0.35;' : (isPast ? 'opacity:0.45;' : ''))
             + ((isActiveDay || isToday) ? 'box-shadow:0 0 0 2px ' + ACCENT + ';' : ''),
         },
@@ -962,10 +1318,16 @@ function runMapDialog(cfg) {
       if (!firstStepOfDay[p.due_date]) firstStepOfDay[p.due_date] = step;
       if (hasGps) {
         step.addEventListener('click', () => {
+          // [FESTIVAL-FRISE-FOCUS] chip d'un autre jour que le filtre actif → basculer le filtre d'abord.
+          const cur = switchDayThenLocate(p) || step;
+          selectStep(cur, p.id);  // même repère visuel que le porteur
           const mk = markersByKey['memo:' + p.id];
           activeMap.setView([p.lat, p.lng], 15);
           if (mk) mk.marker.openPopup();
         });
+      } else if (cfg.passageInfo) {
+        // [FESTIVAL-FRISE-FOCUS] mémo sans point propre → pin du projet porteur (scène) + popup.
+        step.addEventListener('click', () => openPassageOnPorter(p));
       }
       strip.appendChild(step);
     });
@@ -1053,8 +1415,15 @@ function runMapDialog(cfg) {
   // (fix au passage : la barre s'insérait à CHAQUE ouverture sans retrait → doublons)
   const oldBar = document.getElementById('map-toolbar');
   if (oldBar) oldBar.remove();
-  if (cfg.loadPhotos || hasDated || scrutins.length) {
+  if (cfg.loadPhotos || hasDated || scrutins.length || planOverlay) {
     const bar = el('div', { attrs: { id: 'map-toolbar', style: 'display:flex;gap:0.35rem;align-items:center;margin:0 0 0.45rem;flex-wrap:wrap' } });
+    // [FESTIVAL-MAP-OVERLAY] chip toggle « 🎪 Plan » (off par défaut, état localStorage).
+    if (planOverlay) {
+      planBtn = el('button', { class: 'prio-btn', text: '🎪 Plan',
+        attrs: { type: 'button', title: 'Afficher le plan illustré du festival en surcouche', style: 'padding:0.1rem 0.5rem' },
+        on: { click: () => setPlan(!planOn) } });
+      bar.appendChild(planBtn);
+    }
     // [VOTE-MAP] coche « 🗳 Voix » (gabarit « 🕒 Frise ») : pastilles visibles + perdants lisibles ;
     // décochée → pastilles masquées et (scrutin clos) perdants estompés. Persistée par projet/page.
     if (scrutins.length) {
@@ -1112,6 +1481,8 @@ function runMapDialog(cfg) {
   }
 
   refresh(true);
+  if (planOverlay) setPlan(planOn);  // [FESTIVAL-MAP-OVERLAY] applique l'état persisté (+ sync du chip)
+  if (cfg.restore) restoreMapState(cfg.restore);  // [FESTIVAL-FRISE-FOCUS #2] retour depuis la pop-in mémo
 
   // [PHOTO-TEMPLATE-MEMO] Ouverture directe sur le calque photo (cfg.autoPhoto), centrée
   // sur une photo si cfg.focusFilename. N'altère pas l'usage normal (cfg absents = inchangé).
@@ -1736,7 +2107,7 @@ function agendaDayCompare(a, b) {
   const ta = a.due_time || '', tb = b.due_time || '';
   if (!ta && tb) return -1;
   if (ta && !tb) return 1;
-  return ta.localeCompare(tb);
+  return ta.localeCompare(tb);  // [FESTIVAL-DATES] dates réelles → tri chronologique naturel
 }
 
 // Regroupe des mémos (déjà filtrés par la page : non terminés, avec due_date)

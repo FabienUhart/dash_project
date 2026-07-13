@@ -514,6 +514,10 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN map_groups TEXT DEFAULT '[]'")
     if "due_time" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN due_time TEXT DEFAULT ''")
+    # [FESTIVAL-VOTE] heure de fin optionnelle (même gabarit que due_time). NON exportée
+    # en V23.1 (comme votes.event_date) → pas de bump : format d'export reste v23.
+    if "end_time" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN end_time TEXT DEFAULT ''")
     if "created_by" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN created_by TEXT DEFAULT ''")
     # [VOTE-EXCLUDE] Mémo « hors vote » : visible/éditable mais PAS une option du vote.
@@ -673,6 +677,23 @@ def init_db():
             memo_id INTEGER NOT NULL,
             voter TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
+        )
+        """
+    )
+    # [FESTIVAL-VOTE] Coups de cœur ❤️ : voix nominatives « incontournable » sur un mémo
+    # (passage), portées par le dossier RACINE (project_id = racine → contrôle anti-chevauchement
+    # scopé au festival, cf. _toggle_heart). voter = même sémantique que memo_votes.voter
+    # ('' owner / « Nom <email> » invité). Unicité (memo_id, voter). Additive, NON exportée
+    # (donnée d'atelier éphémère, précédent memo_votes) → pas de bump : export reste v23.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memo_hearts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            memo_id INTEGER NOT NULL,
+            voter TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(memo_id, voter)
         )
         """
     )
@@ -1576,6 +1597,36 @@ def vote_memo(memo_id):
                     "options": _vote_options_payload(db, proj["id"], "", _owner_name(db), pv)})
 
 
+@app.route("/api/memos/<int:memo_id>/heart", methods=["POST"])
+def heart_memo(memo_id):
+    # [FESTIVAL-VOTE] Coup de cœur ❤️ (owner, voter = ''). Toggle ; contrôle serveur du
+    # chevauchement de créneau dans le dossier RACINE → 409 {conflict} sans `replace`, sinon
+    # retire l'ancien et pose le nouveau. Générique : marche pour tout mémo à créneau.
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    memo = db.execute(
+        "SELECT * FROM memos WHERE id = ? AND COALESCE(deleted_at, '') = ''", (memo_id,)
+    ).fetchone()
+    if not memo:
+        return jsonify({"error": "not found"}), 404
+    kind, payload = _toggle_heart(db, memo, "", bool(data.get("replace")))
+    if kind == "conflict":
+        return jsonify({"error": "créneau en conflit", "conflict": payload}), 409
+    db.commit()
+    return jsonify(_heart_result(db, memo_id, "", _owner_name(db)))
+
+
+@app.route("/api/projects/<int:project_id>/festival-results", methods=["GET"])
+def festival_results(project_id):
+    # [FESTIVAL-VOTE] Écran Résultats (owner). Agrège racine + descendants.
+    db = get_db()
+    proj = db.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+    if not proj:
+        return jsonify({"error": "not found"}), 404
+    scope = _project_descendants(db, project_id)
+    return jsonify(_festival_results(db, project_id, scope))
+
+
 # ─────────────────── [VOTE-GROUPS] routes votes nommés (owner, derrière Authelia) ───────────────────
 
 def _create_named_vote(db, project_id, data, created_by):
@@ -1716,6 +1767,10 @@ def delete_named_vote_route(vid):
 @app.route("/api/projects/<int:project_id>", methods=["DELETE"])
 def delete_project(project_id):
     db = get_db()
+    # [FESTIVAL-VOTE] ❤️ purgés : ceux des mémos du dossier (avant de les détacher) ET ceux
+    # portés par ce dossier comme racine (project_id = racine).
+    db.execute("DELETE FROM memo_hearts WHERE memo_id IN (SELECT id FROM memos WHERE project_id = ?)", (project_id,))
+    db.execute("DELETE FROM memo_hearts WHERE project_id = ?", (project_id,))
     db.execute("UPDATE memos SET project_id = NULL WHERE project_id = ?", (project_id,))
     db.execute("UPDATE projects SET parent_id = NULL WHERE parent_id = ?", (project_id,))
     db.execute("DELETE FROM memo_votes WHERE project_id = ?", (project_id,))  # [VOTE-DECISION] dossier + nommés (porteur)
@@ -2038,6 +2093,253 @@ def _delete_votes_for_email(db, email, project_ids):
     for r in rows:
         if _voter_email(r["voter"]) == email:
             db.execute("DELETE FROM memo_votes WHERE id = ?", (r["id"],))
+
+
+# ───────────────────────── [FESTIVAL-VOTE] coups de cœur ❤️ ─────────────────────────
+# « Incontournable » nominatif sur un passage. Règle dure (SERVEUR) : une même personne ne
+# peut avoir deux ❤️ dont les créneaux se CHEVAUCHENT (on n'est pas à deux concerts à la
+# fois), à l'échelle du dossier RACINE (Glenmor vs Gwernig = même festival → conflit).
+# Non exporté (donnée d'atelier, précédent memo_votes).
+
+def _project_root(db, project_id):
+    """Remonte au dossier RACINE (parent_id NULL) via les parents. Anti-cycle. None si pas de dossier."""
+    if not project_id:
+        return None
+    seen = set()
+    pid = project_id
+    while pid is not None and pid not in seen:
+        seen.add(pid)
+        row = db.execute("SELECT parent_id FROM projects WHERE id = ?", (pid,)).fetchone()
+        if not row:
+            return None
+        if row["parent_id"] is None:
+            return pid
+        pid = row["parent_id"]
+    return pid
+
+
+def _slot_minutes(due_date, due_time, end_time):
+    """Créneau ABSOLU en minutes (datetime réel), ou None si pas de créneau.
+
+    [FESTIVAL-DATES] Les mémos portent désormais leur VRAIE date calendaire (un passage
+    d'après-minuit est daté au lendemain — RILÈS = lundi 2026-07-20 00:30). Donc PLUS de
+    « début < 12:00 → +24h » : `due_date` gère déjà le passage au jour suivant. On garde
+    seulement « fin ≤ début → fin +1440 » (heure de fin après minuit, relative au début —
+    ex. NICK CAVE 22:00 → 00:30). Sans `end_time` → durée par défaut 60 min. La date est
+    repliée en minutes absolues (`toordinal()*1440`) → chevauchement = datetimes absolus.
+
+    Exemples :
+      KATY PERRY jeu 22:30→00:00 : début 1350, fin 1440 (00:00 ≤ 1350 → +1440).
+      NICK CAVE ven 22:00→00:30  : début 1320, fin 30 → 30 ≤ 1320 → 1470 (durée 150).
+      RILÈS lun 00:30→02:00      : début 30, fin 120 (base LUNDI) ; TOMORA dim 23:10→00:25 :
+      début 1390, fin 1465 (base DIMANCHE) → pas de conflit (jours réels différents).
+      VALD sam 00:35→01:35 vs JETLAG sam 01:00→03:00 (même date réelle) → conflit.
+    """
+    if not due_date or not due_time:
+        return None
+    dt = _clean_due_time(due_time)
+    if not dt:
+        return None
+    try:
+        d = datetime.strptime(due_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+    base = d.toordinal() * 1440
+    start = int(dt[:2]) * 60 + int(dt[3:5])
+    et = _clean_due_time(end_time)
+    if et:
+        end = int(et[:2]) * 60 + int(et[3:5])
+        if end <= start:  # fin après minuit, relative au début (ex. 22:00 → 00:30)
+            end += 1440
+    else:
+        end = start + 60
+    return (base + start, base + end)
+
+
+def _voter_hearts_in_root(db, root_id, voter):
+    """❤️ du votant (match e-mail stable) dans le dossier RACINE, avec le créneau du mémo."""
+    key = _voter_key(voter)
+    out = []
+    for r in db.execute(
+        "SELECT h.id AS hid, h.memo_id AS memo_id, h.voter AS voter, "
+        "m.due_date AS due_date, m.due_time AS due_time, m.end_time AS end_time, "
+        "m.title AS title, m.content AS content, m.location AS location, m.project_id AS project_id "
+        "FROM memo_hearts h JOIN memos m ON m.id = h.memo_id "
+        "WHERE h.project_id = ? AND COALESCE(m.deleted_at, '') = ''",
+        (root_id,),
+    ).fetchall():
+        if _voter_key(r["voter"]) == key:
+            out.append(r)
+    return out
+
+
+def _find_heart(db, memo_id, voter):
+    """❤️ existant du votant sur CE mémo (match par e-mail → robuste au renommage)."""
+    key = _voter_key(voter)
+    for r in db.execute(
+        "SELECT id, voter FROM memo_hearts WHERE memo_id = ?", (memo_id,)
+    ).fetchall():
+        if _voter_key(r["voter"]) == key:
+            return r
+    return None
+
+
+def _heart_conflict_payload(db, hrow):
+    """{memo_id, artist, scene, day, start, end} d'un ❤️ en conflit (pour le 409 + l'UI)."""
+    scene = ""
+    if hrow["project_id"]:
+        p = db.execute("SELECT name FROM projects WHERE id = ?", (hrow["project_id"],)).fetchone()
+        scene = p["name"] if p else ""
+    return {
+        "memo_id": hrow["memo_id"],
+        "artist": (hrow["title"] or _text_excerpt(hrow["content"], 60) or ""),
+        "scene": scene,
+        "day": hrow["due_date"] or "",
+        "start": hrow["due_time"] or "",
+        "end": _row_get(hrow, "end_time") or "",
+    }
+
+
+def _toggle_heart(db, memo, voter, replace=False):
+    """Toggle ❤️ (re-cliquer = retirer). Sinon contrôle de chevauchement contre les ❤️ du
+    même votant dans le dossier RACINE. Conflit → si `replace` retire l'ancien et pose le
+    nouveau (atomique) ; sinon renvoie ('conflict', payload). Renvoie ('removed'|'added', None)."""
+    root = _project_root(db, memo["project_id"]) if memo["project_id"] else None
+    existing = _find_heart(db, memo["id"], voter)
+    if existing:
+        db.execute("DELETE FROM memo_hearts WHERE id = ?", (existing["id"],))
+        return ("removed", None)
+    slot = _slot_minutes(memo["due_date"], memo["due_time"], _row_get(memo, "end_time"))
+    conflict = None
+    if slot and root:
+        for h in _voter_hearts_in_root(db, root, voter):
+            if h["memo_id"] == memo["id"]:
+                continue
+            hslot = _slot_minutes(h["due_date"], h["due_time"], _row_get(h, "end_time"))
+            if hslot and slot[0] < hslot[1] and hslot[0] < slot[1]:
+                conflict = h
+                break
+    if conflict is not None:
+        if not replace:
+            return ("conflict", _heart_conflict_payload(db, conflict))
+        db.execute("DELETE FROM memo_hearts WHERE id = ?", (conflict["hid"],))
+    db.execute(
+        "INSERT INTO memo_hearts (project_id, memo_id, voter, created_at) VALUES (?, ?, ?, ?)",
+        (root or 0, memo["id"], voter, datetime.now(timezone.utc).isoformat()),
+    )
+    return ("added", None)
+
+
+def _heart_fields(voters, me, owner_name):
+    """Champs ❤️ d'un mémo pour l'appelant `me` (voter, '' = owner). voters = liste brute."""
+    mine_key = _voter_key(me) if me is not None else "\x00none"
+    return {
+        "hearts_count": len(voters),
+        "heart_voters": [_vote_display_name(v, owner_name) for v in voters],
+        "hearts_mine": any(_voter_key(v) == mine_key for v in voters),
+    }
+
+
+def _hearts_map(db, memo_ids=None):
+    """{memo_id: [voter, ...]} des ❤️ (tous, ou restreints à memo_ids)."""
+    if memo_ids is None:
+        rows = db.execute("SELECT memo_id, voter FROM memo_hearts").fetchall()
+    else:
+        if not memo_ids:
+            return {}
+        ph = ",".join("?" * len(memo_ids))
+        rows = db.execute(
+            f"SELECT memo_id, voter FROM memo_hearts WHERE memo_id IN ({ph})", list(memo_ids)
+        ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["memo_id"], []).append(r["voter"])
+    return out
+
+
+def _heart_result(db, memo_id, me, owner_name):
+    """Payload renvoyé après un toggle ❤️ : compteur + ma voix + votants (noms affichables)."""
+    voters = [r["voter"] for r in db.execute(
+        "SELECT voter FROM memo_hearts WHERE memo_id = ?", (memo_id,)
+    ).fetchall()]
+    return _heart_fields(voters, me, owner_name)
+
+
+def _delete_hearts_for_email(db, email, project_ids):
+    """Miroir de `_delete_votes_for_email` : retire les ❤️ d'un e-mail (match STABLE),
+    restreints à `project_ids` (racines ; None = tous). Utilisé quand un invité perd un accès."""
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    if project_ids is None:
+        rows = db.execute("SELECT id, voter FROM memo_hearts").fetchall()
+    else:
+        if not project_ids:
+            return
+        ph = ",".join("?" * len(project_ids))
+        rows = db.execute(
+            f"SELECT id, voter FROM memo_hearts WHERE project_id IN ({ph})", list(project_ids)
+        ).fetchall()
+    for r in rows:
+        if _voter_email(r["voter"]) == email:
+            db.execute("DELETE FROM memo_hearts WHERE id = ?", (r["id"],))
+
+
+def _festival_results(db, project_id, scope_pids):
+    """Agrégat Résultats d'un dossier festival : passages (mémos à créneau) du périmètre
+    `scope_pids` avec leurs ❤️ (noms) et le total de voix « Envies » (votes nommés).
+    scene = nom du sous-dossier porteur. Trié (❤️ desc, votes desc)."""
+    if not scope_pids:
+        return {"passages": [], "voters": [], "total_voters": 0}
+    ph = ",".join("?" * len(scope_pids))
+    rows = db.execute(
+        f"SELECT * FROM memos WHERE project_id IN ({ph}) AND COALESCE(deleted_at, '') = '' "
+        "ORDER BY due_date, due_time, position, id",
+        list(scope_pids),
+    ).fetchall()
+    memo_ids = [r["id"] for r in rows]
+    hmap = _hearts_map(db, memo_ids)
+    # Voix « Envies » : voix des votes NOMMÉS (vote_id NON NULL) sur ces mémos — on collecte les
+    # VOTANTS (pour le planning « Par ami »), pas seulement le compte. [FESTIVAL-PLANNINGS]
+    vvoters = {}
+    if memo_ids:
+        mph = ",".join("?" * len(memo_ids))
+        for r in db.execute(
+            f"SELECT memo_id, voter FROM memo_votes "
+            f"WHERE memo_id IN ({mph}) AND vote_id IS NOT NULL",
+            memo_ids,
+        ).fetchall():
+            vvoters.setdefault(r["memo_id"], []).append(r["voter"])
+    pnames = {
+        p["id"]: p["name"]
+        for p in db.execute(f"SELECT id, name FROM projects WHERE id IN ({ph})", list(scope_pids)).fetchall()
+    }
+    owner_name = _owner_name(db)
+    all_voters = set()
+    passages = []
+    for r in rows:
+        if not (r["due_date"] and r["due_time"]):
+            continue  # un passage a un créneau (générique, pas de flag festival en dur)
+        voters = hmap.get(r["id"], [])
+        for v in voters:
+            all_voters.add(_voter_key(v))
+        wvoters = vvoters.get(r["id"], [])  # votants « Envies » (noms anonymisés comme les ❤️)
+        passages.append({
+            "memo_id": r["id"],
+            "project_id": r["project_id"],  # [FESTIVAL-PLANNINGS] → pastille couleur scène (front)
+            "title": r["title"] or _text_excerpt(r["content"], 60),
+            "scene": pnames.get(r["project_id"], ""),
+            "due_date": r["due_date"],
+            "due_time": r["due_time"],
+            "end_time": _row_get(r, "end_time"),
+            "hearts": [_vote_display_name(v, owner_name) for v in voters],
+            "votes": len(wvoters),
+            "vote_voters": [_vote_display_name(v, owner_name) for v in wvoters],  # [FESTIVAL-PLANNINGS]
+        })
+    passages.sort(key=lambda p: (-len(p["hearts"]), -p["votes"], p["due_date"], p["due_time"]))
+    voter_names = sorted({_vote_display_name(v, owner_name)
+                          for vs in hmap.values() for v in vs})
+    return {"passages": passages, "voters": voter_names, "total_voters": len(voter_names)}
 
 
 # ───────────────────── [VOTE-GROUPS] V20.9 : votes NOMMÉS multiples par dossier ─────────────────────
@@ -2674,10 +2976,12 @@ def list_memos():
     vpay = {pr["id"]: _vote_project_payload(db, pr, owner=True) for pr in enabled}
     vmap = {pr["id"]: _vote_voters_map(db, pr["id"]) for pr in enabled}
     amap = _attachments_map(db, [r["id"] for r in rows], lambda r: "/api/attachments/" + str(r["id"]))  # [ATTACHMENTS]
+    hmap = _hearts_map(db)  # [FESTIVAL-VOTE] ❤️ par mémo
     out = []
     for row in rows:
         d = _memo_dict(row, owner_name)
         d["attachments"] = amap.get(d["id"], [])  # [ATTACHMENTS]
+        d.update(_heart_fields(hmap.get(d["id"], []), "", owner_name))  # [FESTIVAL-VOTE] owner = voter ''
         g = guest_last.get(d["id"])
         if g:
             d["guest_editor"] = g["editor"]
@@ -2705,9 +3009,9 @@ def create_memo():
     uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, due_time, priority, subtasks, project_id, recurrence, emoji, location, "
+        "done, due_date, due_time, end_time, priority, subtasks, project_id, recurrence, emoji, location, "
         "title, assignees, marker_color, map_groups) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -2717,6 +3021,10 @@ def create_memo():
             1 if data.get("done") else 0,
             (data.get("due_date") or "").strip(),
             _clean_due_time(data.get("due_time")) if (data.get("due_date") or "").strip() else "",
+            # [FESTIVAL-VOTE] fin : dépend de la date ET de l'heure de début (une fin sans début n'existe pas)
+            _clean_due_time(data.get("end_time"))
+            if ((data.get("due_date") or "").strip() and _clean_due_time(data.get("due_time")))
+            else "",
             _valid_priority(db, data.get("priority")),
             _subtasks_json(data.get("subtasks")),
             _valid_project_id(db, data.get("project_id")),
@@ -2735,7 +3043,7 @@ def create_memo():
 
 
 def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
-                   title="", assignees_json="[]", due_time=""):
+                   title="", assignees_json="[]", due_time="", end_time=""):
     try:
         subs = json.loads(subtasks_json or "[]")
     except Exception:
@@ -2754,6 +3062,7 @@ def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
         "recurrence": recurrence or "",
         "title": title or "",
         "assignees": assignees,
+        "end_time": end_time or "",  # [FESTIVAL-VOTE]
     }
 
 
@@ -2769,7 +3078,7 @@ def _log_revision(db, memo_row, after, editor, share_id=None):
         memo_row["content"], memo_row["done"], memo_row["due_date"],
         memo_row["priority"], memo_row["subtasks"], memo_row["recurrence"],
         _row_get(memo_row, "title"), _row_get(memo_row, "assignees", "[]"),
-        _row_get(memo_row, "due_time"),
+        _row_get(memo_row, "due_time"), _row_get(memo_row, "end_time"),  # [FESTIVAL-VOTE]
     )
     if before == after:
         return
@@ -2825,6 +3134,11 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
         if "due_time" in data
         else _row_get(existing, "due_time")
     )
+    end_time = (  # [FESTIVAL-VOTE]
+        _clean_due_time(data.get("end_time"))
+        if "end_time" in data
+        else _row_get(existing, "end_time")
+    )
 
     now = datetime.now(timezone.utc).isoformat()
     was_done = bool(existing["done"])
@@ -2852,8 +3166,10 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
 
     if not due_date:
         due_time = ""
+    if not due_time:  # [FESTIVAL-VOTE] une fin sans début (ou sans date) n'existe pas
+        end_time = ""
     after = _memo_snapshot(content, done, due_date, priority, subtasks, recurrence,
-                           title, assignees, due_time)
+                           title, assignees, due_time, end_time)
     _log_revision(db, existing, after, editor, share_id)
 
     emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
@@ -2873,7 +3189,7 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
         else (_row_get(existing, "map_groups", "[]") or "[]")
     )
     db.execute(
-        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, subtasks=?, "
+        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, priority=?, subtasks=?, "
         "project_id=?, recurrence=?, emoji=?, location=?, title=?, assignees=?, "
         "marker_color=?, map_groups=?, updated_at=? WHERE id=?",
         (
@@ -2881,6 +3197,7 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             done,
             due_date,
             due_time,
+            end_time,  # [FESTIVAL-VOTE]
             priority,
             subtasks,
             project_id,
@@ -2951,6 +3268,7 @@ def _purge_memo_row(db, memo_id):
     db.execute("DELETE FROM memo_comments WHERE memo_id = ?", (memo_id,))
     db.execute("DELETE FROM memo_votes WHERE memo_id = ?", (memo_id,))  # [VOTE-DECISION] voix dossier + nommées
     db.execute("DELETE FROM vote_options WHERE memo_id = ?", (memo_id,))  # [VOTE-GROUPS] retire des options nommées
+    db.execute("DELETE FROM memo_hearts WHERE memo_id = ?", (memo_id,))  # [FESTIVAL-VOTE] ❤️ purgés
 
 
 @app.route("/api/trash", methods=["GET"])
@@ -3009,12 +3327,13 @@ def duplicate_memo(memo_id):
     new_title = (title + " (copie)") if title else ""
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, due_time, priority, subtasks, project_id, recurrence, emoji, location, "
+        "done, due_date, due_time, end_time, priority, subtasks, project_id, recurrence, emoji, location, "
         "title, assignees) "
-        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             src["content"], max_pos + 1, now, str(uuid.uuid4()), now,
             _row_get(src, "due_date", ""), _row_get(src, "due_time", ""),
+            _row_get(src, "end_time", ""),  # [FESTIVAL-VOTE]
             _row_get(src, "priority", 0),
             _row_get(src, "subtasks", "[]"), _row_get(src, "project_id"),
             _row_get(src, "recurrence", ""), _row_get(src, "emoji", ""),
@@ -3813,6 +4132,7 @@ def _share_memo_dict(row):
         "done": d["done"],
         "due_date": d["due_date"],
         "due_time": d.get("due_time", "") or "",
+        "end_time": d.get("end_time", "") or "",  # [FESTIVAL-VOTE]
         "priority": d["priority"],
         "subtasks": d["subtasks"],
         "images": d["images"],
@@ -4012,6 +4332,7 @@ def delete_share(share_id):
             "SELECT email FROM share_guests WHERE share_id = ?", (share_id,)
         ).fetchall():
             _delete_votes_for_email(db, g["email"], scope)
+            _delete_hearts_for_email(db, g["email"], scope)  # [FESTIVAL-VOTE]
     db.execute("DELETE FROM share_guests WHERE share_id = ?", (share_id,))
     db.execute("DELETE FROM shares WHERE id = ?", (share_id,))
     db.commit()
@@ -4348,7 +4669,9 @@ def delete_guest(guest_id):
         (guest_id,),
     ).fetchone()
     if g:  # [VOTE-DECISION] cascade des voix de cet accès (scope du partage concerné)
-        _delete_votes_for_email(db, g["email"], _share_scope_project_ids(db, g))
+        scope = _share_scope_project_ids(db, g)
+        _delete_votes_for_email(db, g["email"], scope)
+        _delete_hearts_for_email(db, g["email"], scope)  # [FESTIVAL-VOTE]
     db.execute("DELETE FROM share_guests WHERE id = ?", (guest_id,))
     db.commit()
     return "", 204
@@ -4401,6 +4724,7 @@ def delete_hub(hub_token):
     if not hub:
         return jsonify({"error": "hub introuvable"}), 404
     _delete_votes_for_email(db, hub["email"], None)  # [VOTE-DECISION] coupe tout → toutes ses voix
+    _delete_hearts_for_email(db, hub["email"], None)  # [FESTIVAL-VOTE] et tous ses ❤️
     db.execute("DELETE FROM share_guests WHERE lower(email) = ?", (hub["email"],))
     db.execute("DELETE FROM guest_hubs WHERE id = ?", (hub["id"],))
     db.commit()
@@ -4486,7 +4810,7 @@ def _data_version(db):
         "SELECT id, position, category_id, updated_at FROM links ORDER BY id",
         "SELECT id, name, color, emoji, position FROM categories ORDER BY id",
         "SELECT id, position, project_id, priority, done, due_date, due_time, "
-        "deleted_at, updated_at FROM memos ORDER BY id",
+        "end_time, deleted_at, updated_at FROM memos ORDER BY id",  # [FESTIVAL-VOTE] end_time
         "SELECT * FROM projects ORDER BY id",
         "SELECT * FROM priorities ORDER BY id",
         "SELECT * FROM shares ORDER BY id",
@@ -4497,6 +4821,8 @@ def _data_version(db):
         # [VOTE-DECISION] voix ; les flags/état de vote des projets sont déjà couverts par
         # le « SELECT * FROM projects » ci-dessus (vote_enabled/deadline/closed/winner…).
         "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_votes",
+        # [FESTIVAL-VOTE] coups de cœur ❤️ (poser/retirer un ❤️ rafraîchit les clients).
+        "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_hearts",
         # [VOTE-GROUPS] votes nommés + options + rattachement des voix (memo_votes.vote_id).
         "SELECT id, name, vote_mode, vote_deadline, vote_closed, vote_winner_ids, created_by, event_date FROM votes ORDER BY id",
         "SELECT vote_id, memo_id FROM vote_options ORDER BY vote_id, memo_id",
@@ -4614,16 +4940,20 @@ def memo_restore(memo_id):
                    else json.loads(_row_get(existing, "assignees", "[]") or "[]"),
                    ensure_ascii=False),
         _clean_due_time(snap.get("due_time")) if snap.get("due_date") else "",
+        # [FESTIVAL-VOTE] fin restaurée (dépend de la date ET de l'heure de début)
+        _clean_due_time(snap.get("end_time"))
+        if (snap.get("due_date") and _clean_due_time(snap.get("due_time"))) else "",
     )
     _log_revision(db, existing, after, "moi (restauration)")
     db.execute(
-        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, subtasks=?, "
+        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, priority=?, subtasks=?, "
         "recurrence=?, title=?, assignees=?, updated_at=? WHERE id=?",
         (
             after["content"],
             1 if after["done"] else 0,
             after["due_date"],
             after["due_time"],
+            after["end_time"],  # [FESTIVAL-VOTE]
             after["priority"],
             json.dumps(after["subtasks"], ensure_ascii=False),
             after["recurrence"],
@@ -4963,7 +5293,8 @@ def react_comment(comment_id):
 
 SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js", "favicon.svg", "Inter.woff2",
                 "leaflet.markercluster.js", "MarkerCluster.css", "MarkerCluster.Default.css",  # [PHOTO-CLUSTER]
-                "quill-table-better.js", "quill-table-better.css"}  # [MEMO-TABLES]
+                "quill-table-better.js", "quill-table-better.css",  # [MEMO-TABLES]
+                "plan-overlay-2026.png"}  # [FESTIVAL-MAP-OVERLAY] surcouche de plan du festival
 
 
 @app.route("/api/geocode")
@@ -5488,12 +5819,14 @@ def share_data(token):
         p["votes"] = _project_named_votes(db, p["id"], me, vote_owner_name, is_owner=False)
         p["can_create_vote"] = bool(share["can_edit"]) and me is not None and _resolve_vote_create(db, p["id"]) == "guests"
     att_map = _attachments_map(db, [r["id"] for r in rows], lambda a: "/share/" + token + "/attachment/" + str(a["id"]))  # [ATTACHMENTS]
+    hmap = _hearts_map(db, memo_ids)  # [FESTIVAL-VOTE] ❤️ par mémo (scope du partage)
     for r in rows:
         d = _share_memo_dict(r)
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
             d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(r["id"], [])
         d["attachments"] = att_map.get(r["id"], [])  # [ATTACHMENTS]
+        d.update(_heart_fields(hmap.get(r["id"], []), me, vote_owner_name))  # [FESTIVAL-VOTE]
         pv = vpay.get(r["project_id"])
         if pv and not _row_get(r, "vote_excluded", 0):  # [VOTE-EXCLUDE]
             voters = vmap[r["project_id"]].get(r["id"], [])
@@ -5636,7 +5969,7 @@ def share_update_memo(token, memo_id):
     raw = request.get_json(silent=True) or {}
     data = {
         k: raw[k]
-        for k in ("content", "done", "subtasks", "due_date", "due_time", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
+        for k in ("content", "done", "subtasks", "due_date", "due_time", "end_time", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
         if k in raw
     }
     if "project_id" in raw and share["kind"] == "project":
@@ -5961,6 +6294,7 @@ def _share_memo_dict_from_payload(d):
         "done": d["done"],
         "due_date": d["due_date"],
         "due_time": d.get("due_time", "") or "",
+        "end_time": d.get("end_time", "") or "",  # [FESTIVAL-VOTE]
         "priority": d["priority"],
         "subtasks": d["subtasks"],
         "images": d["images"],
@@ -6265,6 +6599,44 @@ def share_vote_memo(token, memo_id):
     pv = _vote_project_payload(db, proj, owner=False)
     return jsonify({"project_id": proj["id"], "vote": pv,
                     "options": _vote_options_payload(db, proj["id"], voter, _owner_name(db), pv)})
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/heart", methods=["POST"])
+def share_heart_memo(token, memo_id):
+    # [FESTIVAL-VOTE] Coup de cœur ❤️ côté invité. Route publique sous /share/* (bypass
+    # Authelia, invariant 5). can_edit NON requis (précédent COMMENT-REACTIONS : réagir/❤️
+    # n'est pas éditer) mais invité APPROUVÉ requis + scope revalidé serveur. Contrôle de
+    # chevauchement + 409 identiques à l'owner. anonyme 403, hors scope 404.
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    voter = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    data = request.get_json(silent=True) or {}
+    kind, payload = _toggle_heart(db, memo, voter, bool(data.get("replace")))
+    if kind == "conflict":
+        return jsonify({"error": "créneau en conflit", "conflict": payload}), 409
+    db.commit()
+    return jsonify(_heart_result(db, memo_id, voter, _owner_name(db)))
+
+
+@app.route("/share/<token>/festival-results", methods=["GET"])
+def share_festival_results(token):
+    # [FESTIVAL-VOTE] Écran Résultats côté invité (tout invité du lien, lecture). Scope =
+    # périmètre du partage (racine + descendants) — invariant 5, jamais au-delà.
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    scope = _share_scope_project_ids(db, share)
+    root = share["target_id"] if share["kind"] == "project" else None
+    return jsonify(_festival_results(db, root, scope))
 
 
 # ─────────────────── [VOTE-GROUPS] routes votes nommés côté invité (sous /share/*) ───────────────────
@@ -6590,6 +6962,7 @@ def _build_export(db, root_id=None):
         d = _memo_dict(r)
         mid = d.pop("id", None)
         d.pop("created_by_display", None)  # runtime-only, jamais exporté ; created_by (brut) reste
+        d.pop("end_time", None)  # [FESTIVAL-VOTE] non exporté (export reste v23, comme les voix)
         d["project"] = proj_names.get(d.pop("project_id", None), "")
         d["attachments"] = att_by_id.get(mid, [])  # [ATTACHMENTS] v22
         out_memos.append(d)
@@ -6734,6 +7107,7 @@ def _purge_trash():
                 "DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (mid,)
             )
             conn.execute("DELETE FROM memo_comments WHERE memo_id = ?", (mid,))
+            conn.execute("DELETE FROM memo_hearts WHERE memo_id = ?", (mid,))  # [FESTIVAL-VOTE]
         conn.commit()
     finally:
         conn.close()
@@ -7295,6 +7669,9 @@ def import_links():
             memo_marker = _clean_hex_color(memo.get("marker_color"), "")
             memo_groups = _map_groups_json(memo.get("map_groups"))
             memo_time = _clean_due_time(memo.get("due_time")) if due_date else ""
+            # [FESTIVAL-VOTE] end_time accepté EN ENTRÉE d'import (jamais réémis à l'export →
+            # sortie toujours v23). Dépend de la date ET de l'heure de début.
+            memo_end = _clean_due_time(memo.get("end_time")) if (due_date and memo_time) else ""
             memo_created_by = str(memo.get("created_by") or "").strip()[:200]
         else:
             content = str(memo).strip()
@@ -7315,6 +7692,7 @@ def import_links():
             memo_marker = ""
             memo_groups = "[]"
             memo_time = ""
+            memo_end = ""  # [FESTIVAL-VOTE]
             memo_created_by = ""
         if not content and not title:
             continue
@@ -7328,23 +7706,28 @@ def import_links():
             merged_time = memo_time or _row_get(existing, "due_time")
             if not due_date:
                 merged_time = ""
+            # [FESTIVAL-VOTE] fin : upsert non destructif (une fin présente n'est jamais
+            # écrasée par une absente) ; vidée si pas d'heure de début.
+            merged_end = memo_end or _row_get(existing, "end_time")
+            if not merged_time:
+                merged_end = ""
             merged_created_by = memo_created_by or _row_get(existing, "created_by")
             if res == "overwrite":
                 # [IMPORT-PREVIEW] Écraser/Restaurer : force la mise à jour, restaure si en corbeille
                 # (deleted_at=''), rattache au projet visé par l'import (project_id résolu du fichier).
                 db.execute(
-                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, "
+                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
                     "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, deleted_at='', updated_at=? WHERE id=?",
-                    (content, done, due_date, merged_time, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, (updated or now), existing["id"]),
+                    (content, done, due_date, merged_time, merged_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, (updated or now), existing["id"]),
                 )
                 updated_memos += 1
             elif updated and updated > (existing["updated_at"] or ""):
                 db.execute(
-                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, priority=?, "
+                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
                     "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, merged_time, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, updated, existing["id"]),
+                    (content, done, due_date, merged_time, merged_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -7364,10 +7747,10 @@ def import_links():
         new_uid = str(uuid.uuid4()) if res == "duplicate" else (uid or str(uuid.uuid4()))
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-            "done, due_date, due_time, priority, subtasks, project_id, images, recurrence, emoji, location, "
+            "done, due_date, due_time, end_time, priority, subtasks, project_id, images, recurrence, emoji, location, "
             "title, assignees, marker_color, map_groups, created_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups, memo_created_by),
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, memo_end, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups, memo_created_by),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)

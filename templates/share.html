@@ -349,6 +349,19 @@ span.prio-btn:hover { color: var(--muted); background: var(--panel-2); border-co
 .thumb-wrap { position: relative; }
 /* === [CARD-REDESIGN] parité visuelle invité === */
 .task-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* [MAP-MEMO-ROUNDTRIP] card ouverte depuis la carte : anneau accent net + halo + courte pulsation
+   (CSS, pas de GSAP — invariant 8). Maintenu jusqu'au nettoyage (clic / 5 s) par shareOpenMemo. */
+.task.card-focus {
+  box-shadow: 0 0 0 2px var(--accent), 0 0 22px -2px var(--accent);
+  border-color: var(--accent);
+  animation: cardFocusPulse 0.9s ease-out 2;
+}
+@keyframes cardFocusPulse {
+  0% { box-shadow: 0 0 0 2px var(--accent), 0 0 4px 0 var(--accent); }
+  50% { box-shadow: 0 0 0 3px var(--accent), 0 0 26px 2px var(--accent); }
+  100% { box-shadow: 0 0 0 2px var(--accent), 0 0 22px -2px var(--accent); }
+}
+@media (prefers-reduced-motion: reduce) { .task.card-focus { animation: none; } }
 .prio-chip { font-size: 0.66rem; font-weight: 700; border-radius: 4px; padding: 0.05rem 0.4rem; line-height: 1.45; white-space: nowrap; flex-shrink: 0; }
 .asg-stack { display: inline-flex; align-items: center; flex-shrink: 0; }
 .asg-stack .asg-av { margin-left: -6px; }
@@ -695,6 +708,18 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   /* [MAP-CLOSE-UX] carte : fermeture en haut → le pied Fermer ne flotte plus. */
   #map-dialog .dlg-actions { position: static; background: none; border-top: none; padding: 0; }
 }
+/* [FESTIVAL-FRISE-FOCUS #4] Bulles Leaflet aux couleurs du thème (clair/sombre via tokens) —
+   toutes les cartes (passage + marqueurs classiques). Padding homogène ; liens .prio-btn intacts. */
+.leaflet-popup-content-wrapper {
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.leaflet-popup-content { margin: 10px 13px; color: var(--text); line-height: 1.35; }
+.leaflet-popup-tip { background: var(--panel); border: 1px solid var(--border); box-shadow: none; }
+.leaflet-popup-content a:not(.prio-btn) { color: var(--accent); }
+.leaflet-popup-close-button { color: var(--muted) !important; }
+.leaflet-popup-close-button:hover { color: var(--text) !important; }
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
@@ -759,6 +784,18 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div class="dlg-actions" style="margin-top:0.6rem">
     <button type="button" id="map-close" class="primary">Fermer</button>
   </div>
+</dialog>
+
+<!-- [FESTIVAL-VOTE] Écran Résultats (invité). Corps rendu par festivalResultsView. -->
+<dialog id="festival-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.9rem;width:min(620px,96vw);color:var(--text)">
+  <div style="display:flex;align-items:center;gap:0.5rem;margin:0 0 0.6rem">
+    <h3 id="festival-title" style="margin:0;font-size:1.05rem;flex:1;min-width:0">🏆 Résultats</h3>
+    <button type="button" id="festival-close" class="prio-btn" title="Fermer">✕</button>
+  </div>
+  <div id="festival-tabs" style="display:flex;gap:0.4rem;flex-wrap:wrap;margin:0 0 0.6rem"></div>
+  <div id="festival-daybar" style="display:flex;gap:0.35rem;flex-wrap:wrap;margin:0 0 0.6rem"></div>
+  <div id="festival-body" style="max-height:min(62vh,540px);overflow-y:auto"></div>
+  <div id="festival-foot" style="margin-top:0.6rem;font-size:0.8rem;color:var(--muted)"></div>
 </dialog>
 
 <!-- [PHOTO-TEMPLATE-MEMO] Vue « Photos » du projet (invité) — corps par runPhotoView. -->
@@ -1328,6 +1365,27 @@ async function shareVote(memoId, voteId) {
   await load();
 }
 
+// [FESTIVAL-VOTE] Toggle ❤️ côté invité approuvé (can_edit NON requis). 409 → confirmPopin
+// « remplacer ? » → re-POST {replace:true}. Contrôle de chevauchement tranché serveur.
+async function shareToggleHeart(memo, replace = false) {
+  const r = await fetch(API + '/memo/' + memo.id + '/heart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+    body: JSON.stringify({ replace }),
+  });
+  if (r.status === 409) {
+    const data = await r.json().catch(() => ({}));
+    const c = (data && data.conflict) || {};
+    const range = fmtMemoRange(c.start, c.end);
+    const ok = await confirmPopin(
+      'Tu as déjà un coup de cœur ❤️ sur « ' + (c.artist || '') + ' » (' + (c.scene || '') + (range ? ', ' + range : '') + ') qui chevauche ce créneau. Le remplacer ?',
+      { title: '❤️ Créneau en conflit', okLabel: 'Remplacer', danger: false });
+    if (ok) return shareToggleHeart(memo, true);
+    return;
+  }
+  if (r.ok) { await load(); flashSaved(true); } else { flashSaved(false); }
+}
+
 // [VOTE-GROUPS] scrutin sélectionné dans le board invité (null = vote du dossier). Non persisté.
 let shareSelectedVoteId = null;
 let shareVoteCreate = null;   // { name, mode, deadline, sel:Set } en création
@@ -1500,6 +1558,10 @@ function openShareVoteManage(v) {
 let FILTER = 'all';
 let PFILTER = 'all';
 let GVIEW = 'board';   // 'board' | 'plan' (vue Plan invité)
+// [MAP-MEMO-ROUNDTRIP] mémo « ouvert » depuis la carte (invité, pas de modal) : la card cible est
+// DÉCLAMPÉE (contenu complet) + surlignée. État honoré au render (survit aux re-render) ; nettoyé
+// au 1er clic ailleurs ou après 5 s. null = aucun.
+let shareOpenMemo = null;
 // Repli persisté, scopé par partage (TOKEN) — sidebar et vue Plan séparés.
 function shareSbProjOpen(id) { return localStorage.getItem('shareSbProjOpen:' + TOKEN + ':' + id) !== '0'; }
 function toggleShareSbProj(id) { localStorage.setItem('shareSbProjOpen:' + TOKEN + ':' + id, shareSbProjOpen(id) ? '0' : '1'); }
@@ -1796,6 +1858,7 @@ function shareMapPoints() {
       sub: m.location.label || '',
       color: m.point_color || (prios[m.priority] || {}).color || DATA.marker_color || '#e53935',
       kind: 'memo', id: m.id, override: m.point_color || '', groups: m.map_groups || [], project_id: m.project_id || null,
+      links: memoLinks(m.content),  // [FESTIVAL-FRISE-FOCUS #3] liens dans la bulle du marqueur
       due_date: m.due_date || '', due_time: m.due_time || '', trip: shareTripOf(m.project_id), // [MAP-TIMELINE]
       // [MAP-TRIP-POLISH] 1re photo, URL scopée au partage (invariant 5).
       imgUrl: (m.images && m.images.length) ? API + '/image/' + m.images[0] : '',
@@ -1814,7 +1877,7 @@ function shareDatedPoints() {
   return scopedMemos().filter(m => m.due_date).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
     title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)'),
-    due_date: m.due_date, due_time: m.due_time || '',
+    due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: shareTripOf(m.project_id),
     imgUrl: (m.images && m.images.length) ? API + '/image/' + m.images[0] : '', // [MAP-TRIP-POLISH]
@@ -1879,7 +1942,35 @@ function buildShareMapVoteData() {
   };
 }
 
+// [FESTIVAL-FRISE-FOCUS] Données d'un passage pour le popup de la frise carte (invité). Tout
+// vient de DATA (memos + projects, incl. votes nommés) — scopé au partage, aucune route (invariant 5).
+function shareMapPassageInfo(memoId) {
+  const m = (DATA.memos || []).find(x => x.id === memoId);
+  if (!m) return null;
+  const byId = {}; (DATA.projects || []).forEach(p => { byId[p.id] = p; });
+  let ll = null, label = '', scene = '', sceneColor = '', pid = m.project_id, g = 0;
+  while (pid != null && byId[pid] && g++ < 60) {  // location DATA.projects = objet déjà parsé serveur
+    const pl = byId[pid].location;
+    if (pl && pl.lat != null) { ll = [pl.lat, pl.lng]; label = pl.label || ''; scene = byId[pid].name; sceneColor = provenanceColor(byId[pid]); break; }
+    pid = byId[pid].parent_id;
+  }
+  if (!scene && m.project_id && byId[m.project_id]) { scene = byId[m.project_id].name; sceneColor = provenanceColor(byId[m.project_id]); }
+  let votes = 0;
+  (DATA.projects || []).forEach(p => (p.votes || []).forEach(v => (v.options || []).forEach(o => { if (o.memo_id === memoId) votes += o.vote_count || 0; })));
+  return { ll, label, scene, sceneColor, artist: m.title || (isRich(m.content) ? stripTags(m.content) : m.content).slice(0, 60),
+    hearts: m.hearts_count || 0, voters: m.heart_voters || [], votes,
+    links: memoLinks(m.content) };  // [FESTIVAL-FRISE-FOCUS #3] sceneColor = pastille
+}
+
+// [FESTIVAL-FRISE-FOCUS #2] snapshot carte mémorisé quand un invité ouvre un mémo depuis la bulle,
+// restauré à la PROCHAINE ouverture de la carte (l'invité n'a pas de modal mémo — commentaires/
+// réactions/❤️ vivent inline dans la card du board —, donc pas de « close » pour rouvrir auto ;
+// le retour à la carte re-restaure vue/jour/chip/bulle avec compteurs à jour). Un seul niveau.
+let shareMapRestore = null;
+
 function openShareMap(extra) {
+  extra = extra || {};
+  if (shareMapRestore && !extra.restore) { extra = Object.assign({ restore: shareMapRestore }, extra); shareMapRestore = null; }
   // Thin wrapper : délègue à runMapDialog (partial) avec le config invité (scopé au partage).
   // [PHOTO-TEMPLATE-MEMO] `extra` = {autoPhoto, focusFilename} pour « 📍 localiser ».
   runMapDialog(Object.assign({
@@ -1888,13 +1979,16 @@ function openShareMap(extra) {
     // can_edit du lien : un visiteur anonyme ne voit plus le menu Groupes / les outils
     // d'édition que le serveur lui refuserait de toute façon (403 sans X-Guest-Token).
     editable: canEditNow(),
-    projects: DATA.projects || [], currentProjectId: PFILTER,
+    projects: DATA.projects || [], currentProjectId: (PFILTER !== 'all') ? PFILTER : DATA.root_id,
     subFilterScope: PFILTER !== 'all',
     defaultMarkerColor: DATA.marker_color,
     winnerIds: voteWinnerIdSet((DATA.projects || []).find(p => p.id === (PFILTER !== 'all' ? PFILTER : DATA.root_id))),
     voteData: buildShareMapVoteData(),  // [VOTE-MAP]
     focusKey: 'shareMapFocus:' + TOKEN + ':' + PFILTER,
     subKey: 'shareMapSubFilter:' + TOKEN + ':' + PFILTER,
+    // [FESTIVAL-MAP-OVERLAY] surcouche de plan (invité : image servie depuis /share/assets/,
+    // car /static est derrière Authelia — invariant 5/6, image whitelistée SHARE_ASSETS).
+    assetBase: '/share/assets/', overlayKey: 'shareMapPlan:' + TOKEN + ':' + PFILTER,
     saveColor: saveSharePointColor, saveGroups: saveShareGroups,
     // [MAP-TIMELINE] frise + tracé voyage (trip résolu serveur, lecture seule).
     datedPoints: shareDatedPoints,
@@ -1902,7 +1996,77 @@ function openShareMap(extra) {
     // [PHOTO-MAP] Calque photo scopé au partage (endpoint /share/<token>/photos).
     loadPhotos: () => fetch(API + '/photos', { headers: { 'X-Guest-Token': guestToken() } }).then(r => r.json()),
     openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => API + '/image/' + x, downloadUrl: x => API + '/image/' + x, exifUrl: x => API + '/image-exif/' + x }),
+    passageInfo: shareMapPassageInfo,  // [FESTIVAL-FRISE-FOCUS] données du passage pour le popup frise
+    // [MAP-MEMO-ROUNDTRIP] « Ouvrir le mémo » invité (pas de modal — détails/commentaires/réactions
+    // vivent inline sur la card). Mémorise l'état carte (restauré au retour), ferme la carte, va au
+    // board du dossier, DÉPLIE la card cible (contenu déclampé via shareOpenMemo) + surlignage accent
+    // net maintenu ~5 s / jusqu'au 1er clic, et scrolle vers ses commentaires. Scroll robuste : double
+    // rAF post-render (fiable même sur un board long, ex. ILIONA loin dans Kerouac). Scopé au partage.
+    openMemo: (id, snap) => {
+      shareMapRestore = snap || null;
+      const dlg = document.getElementById('map-dialog'); if (dlg && dlg.open) dlg.close();
+      const m = (DATA.memos || []).find(x => x.id === id); if (!m) return;
+      shareOpenMemo = id;
+      PFILTER = m.project_id || 'all'; GVIEW = 'board'; render();
+      const clearFocus = () => {
+        if (shareOpenMemo !== id) return;
+        shareOpenMemo = null;
+        const c = document.querySelector('.task[data-memo-id="' + id + '"]');
+        if (c) c.classList.remove('card-focus');
+      };
+      // double requestAnimationFrame : attend la fin du layout du render() (board potentiellement long).
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const c = document.querySelector('.task[data-memo-id="' + id + '"]');
+        if (!c) return;
+        // scroller vers les commentaires si présents, sinon vers la card (centrée).
+        (c.querySelector('.comment-row') || c).scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }));
+      // Nettoyage : au 1er clic ailleurs (armé après un tick pour ne pas capter le clic du bouton) OU après 5 s.
+      const onDocClick = () => { document.removeEventListener('click', onDocClick, true); clearFocus(); };
+      setTimeout(() => document.addEventListener('click', onDocClick, true), 350);
+      setTimeout(() => { document.removeEventListener('click', onDocClick, true); clearFocus(); }, 5000);
+    },
   }, extra || {}));
+}
+
+// [FESTIVAL-VOTE] Écran Résultats (invité, tout accès du lien en lecture). Re-fetch à l'ouverture.
+async function openShareFestivalResults() {
+  const dlg = document.getElementById('festival-dialog');
+  const tabsEl = document.getElementById('festival-tabs');
+  const daybar = document.getElementById('festival-daybar');
+  const body = document.getElementById('festival-body');
+  const foot = document.getElementById('festival-foot');
+  let data = { passages: [], voters: [], total_voters: 0 };
+  let tab = 'podium', day = null;
+  try {
+    const r = await fetch(API + '/festival-results', { headers: { 'X-Guest-Token': guestToken() } });
+    data = await r.json();
+  } catch (e) { notify('Impossible de charger les résultats.', { error: true }); return; }
+  // [FESTIVAL-PLANNINGS] pastille couleur scène = même provenanceColor que la carte (scopé partage).
+  (data.passages || []).forEach(p => { p.sceneColor = provenanceColor((DATA.projects || []).find(x => x.id === p.project_id)); });
+  const draw = () => {
+    tabsEl.textContent = ''; daybar.textContent = ''; body.textContent = '';
+    const acc = 'background:var(--accent);border-color:var(--accent);color:#10141a';
+    [['podium', '🏆 Podium'], ['people', '❤️ Par ami'], ['day', '📅 Par jour']].forEach(([k, lbl]) => {
+      const b = el('button', 'prio-btn', lbl);
+      if (tab === k) b.style.cssText = acc;
+      b.addEventListener('click', () => { tab = k; if (k === 'day' && !day) day = FEST_DAYS[0][0]; draw(); });
+      tabsEl.appendChild(b);
+    });
+    if (tab === 'day') {
+      FEST_DAYS.forEach(([iso, lbl]) => {
+        const b = el('button', 'prio-btn', lbl);
+        if (day === iso) b.style.cssText = acc;
+        b.addEventListener('click', () => { day = iso; draw(); });
+        daybar.appendChild(b);
+      });
+    }
+    body.appendChild(festivalResultsView(data, tab, day));
+    foot.textContent = (data.total_voters || 0) + ' participant' + ((data.total_voters || 0) > 1 ? 's' : '') + ' · le vote reste ouvert';
+  };
+  draw();
+  document.getElementById('festival-close').onclick = () => dlg.close();
+  dlg.showModal();
 }
 
 function openSharePhotos() {
@@ -1955,6 +2119,15 @@ function renderTiles() {
     l.style.color = '#4db6ac';
     tile.appendChild(l);
     tile.addEventListener('click', () => openShareMap());
+    tiles.appendChild(tile);
+  }
+  // [FESTIVAL-VOTE] Tuile « 🏆 Résultats » — générique : dès qu'un mémo-passage existe.
+  if (DATA.kind === 'project' && ms.some(m => m.due_date && m.due_time)) {
+    const tile = el('div', 'tile');
+    const l = el('span', 'tl', '🏆 Résultats'); l.style.color = '#e5a00d';
+    tile.appendChild(l);
+    tile.title = 'Coups de cœur ❤️ et envies — podium, par ami, par jour';
+    tile.addEventListener('click', openShareFestivalResults);
     tiles.appendChild(tile);
   }
   // [PHOTO-TEMPLATE-MEMO] Tuile « 📷 Photos » pour un partage de projet (charge à l'ouverture).
@@ -2406,6 +2579,7 @@ function render() {
   if (FILTER === 'trash') { renderShareTrash(list); return; }
   const visible = visibleShareMemos();
   // Tri intra-jour : date croissante, puis mémos sans heure d'abord, puis heure croissante.
+  // [FESTIVAL-DATES] dates réelles → tri chronologique naturel (voir board owner).
   visible.sort((a, b) =>
     (a.due_date || '').localeCompare(b.due_date || '') ||
     ((a.due_time ? 1 : 0) - (b.due_time ? 1 : 0)) ||
@@ -2426,7 +2600,8 @@ function render() {
   }
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
   shown.forEach(memo => {
-    const t = el('div', 'task' + (memo.done ? ' done' : ''));
+    const t = el('div', 'task' + (memo.done ? ' done' : '') + (shareOpenMemo === memo.id ? ' card-focus' : ''));
+    t.dataset.memoId = memo.id;  // [MAP-MEMO-ROUNDTRIP] cible du scroll « Ouvrir le mémo » depuis la carte
     if (canEditNow() && DATA.kind === 'project') {
       t.draggable = true;
       t.addEventListener('dragstart', (e) => { dragShareMemo = memo.id; e.dataTransfer.effectAllowed = 'move'; });
@@ -2474,7 +2649,8 @@ function render() {
     exc.querySelectorAll('.mention[data-mention]').forEach(sp => {
       if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
     });
-    if (!exc.querySelector('li[data-list], table')) exc.classList.add('task-clamp'); // [MEMO-TABLES] un tableau reste lisible (lecture seule incluse)
+    // [MAP-MEMO-ROUNDTRIP] la card ouverte depuis la carte est DÉCLAMPÉE (contenu complet visible).
+    if (shareOpenMemo !== memo.id && !exc.querySelector('li[data-list], table')) exc.classList.add('task-clamp'); // [MEMO-TABLES] un tableau reste lisible (lecture seule incluse)
     content.appendChild(exc);
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
       if (!canEditNow()) return;
@@ -2523,8 +2699,13 @@ function render() {
     }
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
     if (memo.due_date) {
-      const dt = fmtMemoTime(memo.due_time);
+      const dt = fmtMemoRange(memo.due_time, memo.end_time);  // [FESTIVAL-VOTE] plage début → fin
       row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (dt ? ' · ' + dt : '')));
+    }
+    // [FESTIVAL-VOTE] Chip ❤️ : invité APPROUVÉ peut poser (can_edit NON requis) ; anonyme = lecture.
+    {
+      const hchip = heartChip(memo, GUEST.status === 'approved', shareToggleHeart);
+      if (hchip) row.appendChild(hchip);
     }
     if ((memo.attachments || []).length) {  // [ATTACHMENTS-QUICKVIEW] badge 📎 n cliquable
       const ab = el('span', 'badge', '📎 ' + memo.attachments.length);
@@ -2729,9 +2910,19 @@ function render() {
         const timeIn = document.createElement('input');
         timeIn.type = 'time';
         timeIn.value = memo.due_time || '';
-        timeIn.title = 'Heure (optionnelle)';
+        timeIn.title = 'Heure de début (optionnelle)';
         timeIn.addEventListener('change', () => put(memo.id, { due_time: timeIn.value }));
         mainRow.appendChild(timeIn);
+        // [FESTIVAL-VOTE] heure de fin (visible dès qu'une heure de début est posée).
+        if (memo.due_time) {
+          mainRow.appendChild(el('span', '', '→'));
+          const endIn = document.createElement('input');
+          endIn.type = 'time';
+          endIn.value = memo.end_time || '';
+          endIn.title = 'Heure de fin (optionnelle)';
+          endIn.addEventListener('change', () => put(memo.id, { end_time: endIn.value }));
+          mainRow.appendChild(endIn);
+        }
       }
       mainRow.appendChild(el('span', 'detail-sep'));
 
