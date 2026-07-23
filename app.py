@@ -869,6 +869,16 @@ def init_db():
         conn.execute("ALTER TABLE projects ADD COLUMN perm_vote TEXT DEFAULT ''")
     if "perm_comment" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN perm_comment TEXT DEFAULT ''")
+    # [GUEST-ROLES passe 2] Zone invités : role_floor héritable (élévation SEULE du rôle dans un
+    # sous-arbre) ; guest_space = dossier « Espace invités » auto-provisionné ; created_by attribue
+    # un sous-dossier perso à un invité (par e-mail, pattern created_by v19). TOUTES additives,
+    # owner-only, NON exportées (précédent perm_*/voix). Absentes = comportement passe 1 identique.
+    if "role_floor" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN role_floor TEXT DEFAULT ''")
+    if "guest_space" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN guest_space INTEGER DEFAULT 0")
+    if "created_by" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN created_by TEXT DEFAULT ''")
     # [HUB-SESSION] jeton de session par hub (transporté en cookie HttpOnly) ; '' = aucune session.
     hcols = {r[1] for r in conn.execute("PRAGMA table_info(guest_hubs)").fetchall()}
     if "session_token" not in hcols:
@@ -1426,7 +1436,7 @@ def list_projects():
     db = get_db()
     sql = (
         "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, p.is_trip, "
-        "p.vote_enabled, p.vote_mode, p.vote_deadline, p.vote_closed, p.vote_winner_id, p.vote_winner_ids, p.vote_create, p.perm_vote, p.perm_comment, "
+        "p.vote_enabled, p.vote_mode, p.vote_deadline, p.vote_closed, p.vote_winner_id, p.vote_winner_ids, p.vote_create, p.perm_vote, p.perm_comment, p.role_floor, p.guest_space, "
         "COUNT(CASE WHEN m.done = 0 AND COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
         "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
         "GROUP BY p.id ORDER BY p.position, p.id"
@@ -1567,11 +1577,26 @@ def update_project(project_id):
         if "perm_comment" in data
         else (_row_get(existing, "perm_comment", "") or "")
     )
+    # [GUEST-ROLES passe 2] zone invités : role_floor héritable (élévation seule ; viewer interdit
+    # comme plancher) et guest_space (dossier perso auto-provisionné). Owner-only, non exportés.
+    def _clean_floor(v):
+        v = (str(v or "")).strip().lower()
+        return v if v in ("commenter", "contributor", "editor") else ""
+    role_floor = (
+        _clean_floor(data.get("role_floor"))
+        if "role_floor" in data
+        else (_row_get(existing, "role_floor", "") or "")
+    )
+    guest_space = (
+        (1 if data.get("guest_space") else 0)
+        if "guest_space" in data
+        else _row_get(existing, "guest_space", 0)
+    )
     db.execute(
         "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ?, is_trip = ?, "
-        "vote_enabled = ?, vote_mode = ?, vote_deadline = ?, vote_create = ?, perm_vote = ?, perm_comment = ? WHERE id = ?",
+        "vote_enabled = ?, vote_mode = ?, vote_deadline = ?, vote_create = ?, perm_vote = ?, perm_comment = ?, role_floor = ?, guest_space = ? WHERE id = ?",
         (name, color, tags, emoji, parent_id, location, description, marker_color, is_trip,
-         vote_enabled, vote_mode, vote_deadline, vote_create, perm_vote, perm_comment, project_id),
+         vote_enabled, vote_mode, vote_deadline, vote_create, perm_vote, perm_comment, role_floor, guest_space, project_id),
     )
     # [VOTE-MULTI] bascule multi→single : purge des voix surnuméraires (garde la + récente
     # par votant). Le front prévient (confirm danger) ; le serveur applique la règle.
@@ -1579,7 +1604,7 @@ def update_project(project_id):
         _collapse_votes_to_single(db, project_id)
     db.commit()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-    out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip, "perm_vote": perm_vote, "perm_comment": perm_comment}
+    out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip, "perm_vote": perm_vote, "perm_comment": perm_comment, "role_floor": role_floor, "guest_space": guest_space}
     out.update(_vote_project_payload(db, row, owner=True))
     out["vote_create"] = vote_create
     out["vote_create_resolved"] = _resolve_vote_create(db, project_id)
@@ -4161,11 +4186,71 @@ def _guest_owns(guest, row):
     return bool(ge) and _voter_email(_row_get(row, "created_by", "")) == ge
 
 
-def _role_allows(db, share, action, guest=None, memo_row=None):
-    """Cœur de la matrice : True si `share`+`guest` peuvent faire `action` (sur `memo_row`).
-    'own' = editor OU (contributor ET auteur). Autres = rang du rôle ≥ rang requis (override inclus)."""
-    role = _share_role(share)
-    rank = _ROLE_RANK[role]
+# ───────────── [GUEST-ROLES passe 2] rôle effectif : zone invités + dossier perso ─────────────
+# Le rôle effectif d'un invité sur un dossier/mémo = base du lien, ÉLEVÉE (jamais abaissée) par :
+#   1. `role_floor` héritable du sous-arbre (zone « Espace famille » : tous les invités du lien) ;
+#   2. la propriété d'un dossier perso (`projects.created_by` = son e-mail) → éditeur plein dans SON
+#      sous-arbre (dossiers `guest_space` auto-provisionnés). Résolution en UN point (invariant 5).
+
+def _resolve_role_floor(db, project_id):
+    """role_floor résolu « au plus proche » (modèle `_resolve_trip`) : le projet puis ses ancêtres,
+    la 1re valeur non vide tranche. Valeurs valides = commenter|contributor|editor (viewer interdit
+    comme plancher — un plancher n'abaisse jamais). Aucune → '' (pas de plancher)."""
+    seen = set()
+    pid = project_id
+    while pid is not None and pid not in seen:
+        seen.add(pid)
+        row = db.execute("SELECT parent_id, role_floor FROM projects WHERE id = ?", (pid,)).fetchone()
+        if not row:
+            return ""
+        v = _clean_role(_row_get(row, "role_floor", ""))
+        if v in ("commenter", "contributor", "editor"):
+            return v
+        pid = row["parent_id"]
+    return ""
+
+
+def _owns_guest_space_folder(db, guest_email, project_id):
+    """L'invité (par e-mail) possède-t-il un dossier ANCÊTRE de `project_id` (ou lui-même) ?
+    Un dossier perso auto-provisionné porte `projects.created_by = « Nom <email> »`. Si oui →
+    éditeur plein dans tout ce sous-arbre. Robuste au renommage (match e-mail)."""
+    ge = (guest_email or "").strip().lower()
+    if not ge:
+        return False
+    seen = set()
+    pid = project_id
+    while pid is not None and pid not in seen:
+        seen.add(pid)
+        row = db.execute("SELECT parent_id, created_by FROM projects WHERE id = ?", (pid,)).fetchone()
+        if not row:
+            return False
+        if _voter_email(_row_get(row, "created_by", "")) == ge:
+            return True
+        pid = row["parent_id"]
+    return False
+
+
+def _effective_rank(db, share, guest_email, project_id):
+    """Rang de rôle EFFECTIF d'un invité sur `project_id` : base du lien, élevée par role_floor
+    (zone) et par la propriété d'un dossier perso (éditeur plein). Jamais abaissée."""
+    rank = _ROLE_RANK[_share_role(share)]
+    if project_id is not None:
+        fl = _resolve_role_floor(db, project_id)
+        if fl:
+            rank = max(rank, _ROLE_RANK[fl])
+        if rank < _ROLE_RANK["editor"] and _owns_guest_space_folder(db, guest_email, project_id):
+            rank = _ROLE_RANK["editor"]
+    return rank
+
+
+def _role_allows(db, share, action, guest=None, memo_row=None, project_id=None):
+    """Cœur de la matrice : True si `share`+`guest` peuvent faire `action`. Le rang de base est
+    ÉLEVÉ par la zone (role_floor) et le dossier perso via `_effective_rank` sur le contexte projet.
+    'own' = editor OU (contributor ET auteur). Autres = rang effectif ≥ rang requis (override inclus)."""
+    if project_id is None and memo_row is not None:
+        project_id = _row_get(memo_row, "project_id", None)
+    ge = (guest["email"] if guest else "") or ""
+    rank = _effective_rank(db, share, ge, project_id)
     if action == "own":
         if rank >= _ROLE_RANK["editor"]:
             return True
@@ -4173,10 +4258,56 @@ def _role_allows(db, share, action, guest=None, memo_row=None):
     return rank >= _ROLE_RANK[_min_role_for(db, action, memo_row)]
 
 
-def _role_gate(db, share, action, memo_row=None, require_approved=True):
+def _provision_guest_spaces(db, guest_email, guest_name, scope_pids):
+    """[GUEST-ROLES passe 2] Provision PARESSEUSE et IDEMPOTENTE du dossier perso d'un invité.
+    Au premier accès (déclenché par share_data / hub_data d'un invité APPROUVÉ), pour chaque dossier
+    `guest_space` du périmètre, crée s'il n'existe pas un sous-dossier au prénom de l'invité,
+    attribué par e-mail (`projects.created_by`). Rejouable sans doublon (dédup par (parent, e-mail)).
+    Renvoie True si au moins un dossier a été créé (→ commit + relire le scope)."""
+    ge = (guest_email or "").strip().lower()
+    if not ge or "@" not in ge or not scope_pids:
+        return False
+    ph = ",".join("?" * len(scope_pids))
+    spaces = db.execute(
+        f"SELECT id FROM projects WHERE guest_space = 1 AND id IN ({ph})", list(scope_pids)
+    ).fetchall()
+    if not spaces:
+        return False
+    created_by = f"{(guest_name or '').strip() or ge} <{ge}>"
+    base = (guest_name or "").strip() or ge.split("@")[0]
+    created = False
+    for sp in spaces:
+        # Déjà provisionné pour cet e-mail sous CE dossier (idempotent) ?
+        existing = db.execute(
+            "SELECT id FROM projects WHERE parent_id = ? AND lower(created_by) LIKE ?",
+            (sp["id"], "%<" + ge + ">"),
+        ).fetchone()
+        if existing:
+            continue
+        # Nom = prénom, suffixe discret si déjà pris (noms de projets globalement uniques).
+        name = base
+        if db.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
+            name = base + " · " + ge.split("@")[0]
+            n = 2
+            while db.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
+                name = base + " · " + ge.split("@")[0] + " " + str(n)
+                n += 1
+        max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
+        db.execute(
+            "INSERT INTO projects (name, color, position, tags, emoji, parent_id, created_by) "
+            "VALUES (?, '', ?, '', '🏠', ?, ?)",
+            (name, max_pos + 1, sp["id"], created_by),
+        )
+        created = True
+    if created:
+        db.commit()
+    return created
+
+
+def _role_gate(db, share, action, memo_row=None, project_id=None, require_approved=True):
     """Garde unique des routes /share d'écriture. Retourne (guest, None) si OK, sinon
     (None, (json, code)). Approbation TOUJOURS requise pour écrire (invariant 5) ;
-    403 générique (pas de fuite). Passer `memo_row` pour 'own' et les overrides vote/comment."""
+    403 générique (pas de fuite). `memo_row`/`project_id` donnent le contexte (own, overrides, zone)."""
     guest = _guest_from_request(db, share) if require_approved else None
     if require_approved and (not guest or guest["status"] != "approved"):
         return None, (
@@ -4184,15 +4315,15 @@ def _role_gate(db, share, action, memo_row=None, require_approved=True):
                      "status": guest["status"] if guest else "anonymous"}),
             403,
         )
-    if not _role_allows(db, share, action, guest=guest, memo_row=memo_row):
+    if not _role_allows(db, share, action, guest=guest, memo_row=memo_row, project_id=project_id):
         return None, (jsonify({"error": "non autorisé"}), 403)
     return guest, None
 
 
-def _memo_guest_caps(db, share_role, memo_row, guest_email):
-    """Capacités RÉSOLUES d'un invité (rôle + e-mail) sur un mémo → booléens serveur exposés
-    à share_data/hub (invariant 5 : l'UI s'y fie mais la vérité reste le serveur)."""
-    rank = _ROLE_RANK.get(share_role, 0)
+def _memo_guest_caps(db, share, memo_row, guest_email):
+    """Capacités RÉSOLUES d'un invité (lien + e-mail) sur un mémo → booléens serveur exposés à
+    share_data/hub (invariant 5). Rang EFFECTIF (zone + dossier perso) sur le projet du mémo."""
+    rank = _effective_rank(db, share, guest_email, _row_get(memo_row, "project_id", None))
     can_comment = rank >= 1 or _resolve_memo_perm(db, memo_row, "comment") == "all"
     can_vote = rank >= 1 or _resolve_memo_perm(db, memo_row, "vote") == "all"
     ge = (guest_email or "").strip().lower()
@@ -5846,6 +5977,16 @@ def hub_data(hub_token):
     if not _hub_proof(db, hub):
         return jsonify({"error": "code requis"}), 403
     _touch_guest_seen(db, hub["email"])  # [GUEST-EDIT] preuve valide (cookie ou header)
+    # [GUEST-ROLES passe 2] provision paresseuse du dossier perso (idempotent) AVANT le calcul du
+    # scope → le nouveau dossier apparaît immédiatement dans l'arbre du hub.
+    _prov_scope = set()
+    for _r in db.execute(
+        "SELECT DISTINCT s.target_id FROM shares s JOIN share_guests g ON g.share_id = s.id "
+        "WHERE lower(g.email) = ? AND g.status = 'approved' AND s.kind = 'project'",
+        ((hub["email"] or "").strip().lower(),),
+    ).fetchall():
+        _prov_scope |= set(_project_descendants(db, _r["target_id"]))
+    _provision_guest_spaces(db, hub["email"], hub["name"], _prov_scope)
     shares = _hub_approved_shares(db, hub["email"])
     proj_shares = [s for s in shares if s["kind"] == "project"]
     memo_shares = [s for s in shares if s["kind"] == "memo"]
@@ -5878,7 +6019,8 @@ def hub_data(hub_token):
             "description": _row_get(p, "description"), "point_color": _row_get(p, "marker_color"),
             "share_token": win["token"], "can_edit": win["can_edit"],
             "role": win.get("role", "viewer"),  # [GUEST-ROLES]
-            "can_add": _ROLE_RANK[win.get("role", "viewer")] >= _ROLE_RANK["contributor"],
+            # [GUEST-ROLES passe 2] rang EFFECTIF sur CE dossier (zone role_floor + dossier perso).
+            "can_add": _effective_rank(db, win, hub["email"], p["id"]) >= _ROLE_RANK["contributor"],
             # [MAP-TIMELINE] booléen résolu serveur (lecture seule côté invité).
             "trip": _resolve_trip(db, p["id"]),
         })
@@ -5957,7 +6099,7 @@ def hub_data(hub_token):
         d["comments"] = comments_by_memo.get(mid, [])
         d["share_token"] = win["token"]
         # [GUEST-ROLES] caps résolues au rôle du share gagnant + e-mail du hub (can_edit = own-or-editor).
-        d.update(_memo_guest_caps(db, win.get("role", "viewer"), r, hub["email"]))
+        d.update(_memo_guest_caps(db, win, r, hub["email"]))
         # [ATTACHMENTS] URL scopée au share couvrant ce mémo (token propre à chaque dossier du hub).
         d["attachments"] = _attachments_map(db, [mid], lambda r, t=win["token"]: "/share/" + t + "/attachment/" + str(r["id"])).get(mid, [])
         pv = vpay.get(r["project_id"])
@@ -5976,7 +6118,7 @@ def hub_data(hub_token):
             roots.append({
                 "share_token": s["token"], "can_edit": s["can_edit"], "kind": "project",
                 "role": s.get("role", "viewer"),  # [GUEST-ROLES]
-                "can_add": _ROLE_RANK[s.get("role", "viewer")] >= _ROLE_RANK["contributor"],
+                "can_add": _effective_rank(db, s, hub["email"], s["target_id"]) >= _ROLE_RANK["contributor"],
                 "root_id": s["target_id"],
                 "label": p["name"], "emoji": p["emoji"], "color": p["color"],
             })
@@ -6009,7 +6151,7 @@ def hub_data(hub_token):
         td = _share_memo_dict(r)
         td["deleted_at"] = _row_get(r, "deleted_at", "")
         td["share_token"] = win["token"]
-        td.update(_memo_guest_caps(db, win.get("role", "viewer"), r, hub["email"]))
+        td.update(_memo_guest_caps(db, win, r, hub["email"]))
         trash.append(td)
 
     # ── Membres : union (propriétaire + invités approuvés de tous ses shares) ──
@@ -6126,6 +6268,9 @@ def share_data(token):
             _touch_guest_seen(db, g["email"])
             me = f"{g['name'] or g['email']} <{g['email']}>"
             my_email = g["email"] or ""
+            # [GUEST-ROLES passe 2] provision paresseuse du dossier perso (idempotent, avant le scope).
+            if share["kind"] == "project":
+                _provision_guest_spaces(db, my_email, g["name"], _share_scope_project_ids(db, share))
     my_role = _share_role(share)  # [GUEST-ROLES] rôle du lien
     rows = _share_scope_memos(db, share)
     memos = []
@@ -6206,7 +6351,9 @@ def share_data(token):
         p.update(vpay.get(p["id"], {"vote_enabled": False}))
         # [VOTE-GROUPS] votes nommés + permission résolue (booléen lecture seule, façon `trip`).
         p["votes"] = _project_named_votes(db, p["id"], me, vote_owner_name, is_owner=False)
-        p["can_create_vote"] = _ROLE_RANK[my_role] >= _ROLE_RANK["contributor"] and me is not None and _resolve_vote_create(db, p["id"]) == "guests"  # [GUEST-ROLES]
+        # [GUEST-ROLES passe 2] rang EFFECTIF sur CE dossier (zone role_floor + dossier perso perso).
+        p["can_add"] = _effective_rank(db, share, my_email, p["id"]) >= _ROLE_RANK["contributor"]
+        p["can_create_vote"] = p["can_add"] and me is not None and _resolve_vote_create(db, p["id"]) == "guests"
     att_map = _attachments_map(db, [r["id"] for r in rows], lambda a: "/share/" + token + "/attachment/" + str(a["id"]))  # [ATTACHMENTS]
     hmap = _hearts_map(db, memo_ids)  # [FESTIVAL-VOTE] ❤️ par mémo (scope du partage)
     for r in rows:
@@ -6220,7 +6367,7 @@ def share_data(token):
         if pv and not _row_get(r, "vote_excluded", 0):  # [VOTE-EXCLUDE]
             voters = vmap[r["project_id"]].get(r["id"], [])
             d.update(_memo_vote_fields(voters, me, vote_owner_name, pv, r["id"]))
-        d.update(_memo_guest_caps(db, my_role, r, my_email))  # [GUEST-ROLES] caps résolues serveur
+        d.update(_memo_guest_caps(db, share, r, my_email))  # [GUEST-ROLES] caps résolues serveur
         memos.append(d)
     payload = {
         "projects": scope_projects,
@@ -6228,7 +6375,9 @@ def share_data(token):
         "kind": share["kind"],
         "can_edit": bool(share["can_edit"]),
         "role": my_role,  # [GUEST-ROLES]
-        "can_add": _ROLE_RANK[my_role] >= _ROLE_RANK["contributor"],  # créer mémo/sous-projet/upload
+        # can_add global = au moins un dossier du périmètre addable (zone/perso inclus) ; l'UI filtre
+        # le sélecteur de dossier sur `project.can_add`. [GUEST-ROLES passe 2]
+        "can_add": (_ROLE_RANK[my_role] >= _ROLE_RANK["contributor"]) or any(p.get("can_add") for p in scope_projects),
         "can_comment_default": _ROLE_RANK[my_role] >= _ROLE_RANK["commenter"],
         "can_vote_default": _ROLE_RANK[my_role] >= _ROLE_RANK["commenter"],
         "memos": memos,
@@ -6271,7 +6420,7 @@ def share_data(token):
         for r in _share_scope_memos(db, share, deleted=True):
             td = _share_memo_dict(r)
             td["deleted_at"] = _row_get(r, "deleted_at", "")
-            td.update(_memo_guest_caps(db, my_role, r, my_email))
+            td.update(_memo_guest_caps(db, share, r, my_email))
             trash.append(td)
     payload["trash"] = trash
     return jsonify(payload)
@@ -6376,7 +6525,14 @@ def share_update_memo(token, memo_id):
             wanted = int(raw["project_id"])
         except (TypeError, ValueError):
             wanted = None
-        if wanted in _project_descendants(db, share["target_id"]):
+        # [GUEST-ROLES passe 2] déplacer un mémo = créer à destination : rang effectif contributeur
+        # sur le dossier CIBLE (un invité élevé seulement dans sa zone n'en sort rien). Un vrai
+        # changement vers une cible interdite/hors scope = 403 EXPLICITE (cohérent avec le
+        # déplacement de dossier) ; une cible == projet courant est un no-op toléré.
+        if wanted is not None and wanted != _row_get(existing, "project_id", None):
+            if wanted not in _project_descendants(db, share["target_id"]) \
+               or not _role_allows(db, share, "create", guest=guest, project_id=wanted):
+                return jsonify({"error": "non autorisé"}), 403
             data["project_id"] = wanted
     editor = guest["name"] or guest["email"]
     payload, status = _perform_memo_update(
@@ -6448,12 +6604,15 @@ def share_add_image(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] uploader = contributeur
-    if err:
-        return err
-    allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
-    if memo_id not in allowed_ids:
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    scope = {r["id"]: r for r in _share_scope_memos(db, share)}
+    if memo_id not in scope:
         return jsonify({"error": "not found"}), 404
+    # [GUEST-ROLES] uploader = contributeur (rang effectif sur le dossier du mémo : zone/perso inclus).
+    if not _role_allows(db, share, "create", guest=guest, project_id=_row_get(scope[memo_id], "project_id", None)):
+        return jsonify({"error": "non autorisé"}), 403
     f = request.files.get("image")
     if not f or not f.filename:
         return jsonify({"error": "image file required"}), 400
@@ -6527,11 +6686,15 @@ def share_add_attachment(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] uploader = contributeur
-    if err:
-        return err
-    if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    scope = {r["id"]: r for r in _share_scope_memos(db, share)}
+    if memo_id not in scope:
         return jsonify({"error": "not found"}), 404
+    # [GUEST-ROLES] uploader = contributeur (rang effectif sur le dossier du mémo).
+    if not _role_allows(db, share, "create", guest=guest, project_id=_row_get(scope[memo_id], "project_id", None)):
+        return jsonify({"error": "non autorisé"}), 403
     files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
     files = [f for f in files if f and f.filename]
     if not files:
@@ -6565,11 +6728,14 @@ def share_add_project_attachment(token, project_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] uploader = contributeur
+    if share["kind"] != "project" or project_id not in set(_project_descendants(db, share["target_id"])):
+        guest = _guest_from_request(db, share)
+        if not guest or guest["status"] != "approved":
+            return jsonify({"error": "guest_required"}), 403
+        return jsonify({"error": "not found"}), 404
+    guest, err = _role_gate(db, share, "create", project_id=project_id)  # [GUEST-ROLES] contributeur (zone incluse)
     if err:
         return err
-    if share["kind"] != "project" or project_id not in set(_project_descendants(db, share["target_id"])):
-        return jsonify({"error": "not found"}), 404
     files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
     files = [f for f in files if f and f.filename]
     if not files:
@@ -6725,9 +6891,9 @@ def share_add_memo(token):
         return jsonify({"error": "invalid"}), 404
     if share["kind"] != "project":
         return jsonify({"error": "non autorisé"}), 403
-    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] créer un mémo = contributeur
-    if err:
-        return err
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
     data = request.get_json(silent=True) or {}
     content = (data.get("content") or "").strip()
     title = _clean_title(data.get("title"))
@@ -6742,6 +6908,9 @@ def share_add_memo(token):
             wanted = None
         if wanted in _project_descendants(db, share["target_id"]):
             target_project = wanted
+    # [GUEST-ROLES] créer = contributeur sur le dossier CIBLE (zone role_floor / dossier perso inclus).
+    if not _role_allows(db, share, "create", guest=guest, project_id=target_project):
+        return jsonify({"error": "non autorisé"}), 403
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
     now = datetime.now(timezone.utc).isoformat()
     new_uid = str(uuid.uuid4())
@@ -6778,9 +6947,9 @@ def share_add_project(token):
         return jsonify({"error": "invalid"}), 404
     if share["kind"] != "project":
         return jsonify({"error": "non autorisé"}), 403
-    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] créer un sous-projet = contributeur
-    if err:
-        return err
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -6795,6 +6964,9 @@ def share_add_project(token):
             wanted = None
         if wanted in _project_descendants(db, share["target_id"]):
             parent_id = wanted
+    # [GUEST-ROLES] créer un sous-projet = contributeur sur le dossier PARENT (zone/perso inclus).
+    if not _role_allows(db, share, "create", guest=guest, project_id=parent_id):
+        return jsonify({"error": "non autorisé"}), 403
     max_pos = db.execute(
         "SELECT COALESCE(MAX(position), -1) FROM projects"
     ).fetchone()[0]
@@ -6833,9 +7005,9 @@ def share_update_project(token, proj_id):
         return jsonify({"error": "invalid"}), 404
     if share["kind"] != "project":
         return jsonify({"error": "non autorisé"}), 403
-    guest, err = _role_gate(db, share, "edit")  # [GUEST-ROLES] éditer un dossier = éditeur
-    if err:
-        return err
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
     scope = set(_project_descendants(db, share["target_id"]))
     if proj_id not in scope:
         return jsonify({"error": "projet hors du partage"}), 404
@@ -6844,6 +7016,11 @@ def share_update_project(token, proj_id):
     ).fetchone()
     if not existing:
         return jsonify({"error": "not found"}), 404
+    # [GUEST-ROLES] éditer un dossier = éditeur effectif SUR ce dossier (zone/perso peut élever).
+    if not _role_allows(db, share, "edit", guest=guest, project_id=proj_id):
+        return jsonify({"error": "non autorisé"}), 403
+    # Garde-fou : l'invité ne peut PAS supprimer/renommer la racine d'un dossier perso qui n'est
+    # pas le sien via cette route ; la suppression du dossier reste owner-only (aucune route /share).
     data = request.get_json(silent=True) or {}
     updates = {}
 
@@ -6856,6 +7033,10 @@ def share_update_project(token, proj_id):
             return jsonify({"error": "parent invalide"}), 400
         if parent_id not in scope:
             return jsonify({"error": "parent hors du partage"}), 400
+        # [GUEST-ROLES passe 2] pas de déplacement HORS de sa zone d'édition : la cible doit être
+        # éditable par l'invité (un invité élevé seulement dans sa zone ne sort rien de la zone).
+        if not _role_allows(db, share, "edit", guest=guest, project_id=parent_id):
+            return jsonify({"error": "non autorisé"}), 403
         resolved, err = _resolve_parent(db, proj_id, parent_id)
         if err:
             return jsonify({"error": err}), 400
@@ -7061,11 +7242,11 @@ def share_festival_results(token):
 # gestion = créateur seulement (match e-mail). 403 « non autorisé » GÉNÉRIQUE (indiscernable).
 
 def _share_vote_guest_or_403(db, share):
-    # [GUEST-ROLES] créer/gérer un scrutin nommé = contributeur (auteur de contenu) + permission
-    # de création héritée ('guests', vérifiée par l'appelant). 403 générique.
-    guest, err = _role_gate(db, share, "create")
-    if err:
-        return None, err
+    # [GUEST-ROLES] approbation requise ; le rang « create » EFFECTIF est vérifié par l'appelant
+    # AVEC le contexte projet (zone/perso peuvent élever), en plus de la permission 'guests'.
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return None, (jsonify({"error": "non autorisé"}), 403)
     return guest, None
 
 
@@ -7113,7 +7294,10 @@ def share_create_vote(token):
             wanted = None
         if wanted in scope_pids:
             pid = wanted
-    if pid is None or pid not in scope_pids or _resolve_vote_create(db, pid) != "guests":
+    # [GUEST-ROLES] créer un scrutin = rang « create » EFFECTIF sur le dossier (zone/perso inclus)
+    # ET permission de création 'guests' héritée.
+    if pid is None or pid not in scope_pids or _resolve_vote_create(db, pid) != "guests" \
+       or not _role_allows(db, share, "create", guest=guest, project_id=pid):
         return jsonify({"error": "non autorisé"}), 403
     data["memo_ids"] = _share_restrict_memo_ids(db, share, data.get("memo_ids"))
     created_by = f"{guest['name'] or guest['email']} <{guest['email']}>"

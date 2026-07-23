@@ -2657,20 +2657,30 @@ function render() {
       }));
     }
   }
-  document.getElementById('add-bar').hidden = !(canAddNow() && DATA.kind === 'project');
-  document.getElementById('proj-bar').hidden = !(canAddNow() && DATA.kind === 'project');
+  // [GUEST-ROLES passe 2] on ne peut ajouter que dans les dossiers OÙ on a le droit (can_add) :
+  // zone (role_floor) et dossier perso inclus. Le sélecteur ne liste que ces dossiers.
+  const addable = (DATA.projects || []).filter(p => p.can_add && approved());
+  const canAddHere = canAddNow() && DATA.kind === 'project' && addable.length > 0;
+  document.getElementById('add-bar').hidden = !canAddHere;
+  document.getElementById('proj-bar').hidden = !canAddHere;
   const projSel = document.getElementById('add-project');
-  if (canAddNow() && DATA.kind === 'project' && (DATA.projects || []).length > 1) {
+  if (canAddHere && addable.length > 1) {
     projSel.hidden = false;
     const prev = projSel.value;
     projSel.innerHTML = '';
-    DATA.projects.forEach(p => {
+    addable.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.id;
       opt.textContent = p.name;
       projSel.appendChild(opt);
     });
-    if (prev) projSel.value = prev;
+    if (prev && addable.some(p => String(p.id) === prev)) projSel.value = prev;
+  } else if (canAddHere) {
+    // un seul dossier addable → sélecteur caché mais on cible ce dossier
+    projSel.hidden = true;
+    projSel.innerHTML = '';
+    const opt = document.createElement('option'); opt.value = addable[0].id; projSel.appendChild(opt);
+    projSel.value = String(addable[0].id);
   } else {
     projSel.hidden = true;
   }
@@ -2682,7 +2692,8 @@ function render() {
   // pour caler la barre de projets collante.
   syncHeaderHeight();
 
-  if (!projSel.hidden && PFILTER !== 'all') projSel.value = String(PFILTER);
+  // pré-sélection sur le projet courant s'il est addable (sinon on garde le 1er addable)
+  if (!projSel.hidden && PFILTER !== 'all' && [...projSel.options].some(o => o.value === String(PFILTER))) projSel.value = String(PFILTER);
 
   // Vues Plan / Agenda : plein écran (board et barres d'ajout masqués).
   const treeBoard = document.getElementById('tree-board');

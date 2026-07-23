@@ -1843,6 +1843,16 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <div id="create-trip-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
       <span style="font-size:0.72rem;color:var(--muted)">Un « voyage » trace l'itinéraire chronologique de ses points sur la carte. « Hérité » suit le réglage du projet parent.</span>
     </label>
+    <!-- [GUEST-ROLES passe 2] zone invités : élève le rôle de TOUS les invités dans ce sous-arbre -->
+    <label id="create-floor-label">🏖 Zone invités (élévation de rôle)
+      <div id="create-floor-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
+      <span style="font-size:0.72rem;color:var(--muted)">Dans ce dossier et ses sous-dossiers, tous les invités du lien ont AU MOINS ce rôle (jamais moins). « Hérité » suit le parent.</span>
+    </label>
+    <!-- [GUEST-ROLES passe 2] dossier « Espace invités » : un sous-dossier perso par invité -->
+    <label id="create-space-label">🏠 Espace invités (dossiers persos)
+      <div id="create-space-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
+      <span style="font-size:0.72rem;color:var(--muted)">Chaque invité approuvé reçoit, à son 1er accès, un sous-dossier à son nom où il est éditeur plein. Chez les autres, il garde le rôle du lien.</span>
+    </label>
     <!-- [VOTE-DECISION] mode vote (projets seulement) : les mémos directs deviennent les options. -->
     <label id="create-vote-label">🗳 Vote « choisir un »
       <div id="create-vote-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
@@ -3026,6 +3036,9 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-trip-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-vote-label').style.display = kind === 'project' ? '' : 'none';
+  ['create-floor-label', 'create-space-label'].forEach(id => {  // [GUEST-ROLES passe 2]
+    document.getElementById(id).style.display = kind === 'project' ? '' : 'none';
+  });
   document.getElementById('create-votecreate-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
@@ -3064,6 +3077,13 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-vote-reopen-row').style.display = closed ? '' : 'none';
   createVoteCreate = item ? (item.vote_create || '') : '';  // [VOTE-GROUPS] permission héritable
   if (kind === 'project') { renderVoteChips(); renderVoteModeChips(); renderVoteCreateChips(); }
+  // [GUEST-ROLES passe 2] zone invités (role_floor) + espace invités (guest_space)
+  createFloor = item ? (item.role_floor || '') : '';
+  createGuestSpace = (item && item.guest_space) ? 1 : 0;
+  ['create-floor-label', 'create-space-label'].forEach(id => {
+    const elm = document.getElementById(id); if (elm) elm.style.display = (kind === 'project') ? '' : 'none';
+  });
+  if (kind === 'project') { renderFloorChips(); renderGuestSpaceChips(); }
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
@@ -3111,6 +3131,44 @@ function renderTripChips() {
       attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
       on: { click: () => { createTrip = v; renderTripChips(); } },
     }));
+  });
+}
+
+// [GUEST-ROLES passe 2] chips zone invités (role_floor héritable) + espace invités (guest_space).
+let createFloor = '';       // '' hérite / commenter / contributor / editor
+let createGuestSpace = 0;
+const FLOOR_LABELS = { '': 'Hérité', commenter: '💬 Commentateur', contributor: '➕ Contributeur', editor: '✏️ Éditeur' };
+function renderFloorChips() {
+  const wrap = document.getElementById('create-floor-chips');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const byId = (id) => state.projects.find(p => p.id === id);
+  // rôle plancher hérité = plus proche ancêtre tranché
+  let inh = 'aucun', src = null, pid = editingItem ? editingItem.parent_id : null, seen = new Set();
+  while (pid != null && !seen.has(pid)) {
+    seen.add(pid); const p = byId(pid); if (!p) break;
+    const v = (p.role_floor || '').trim();
+    if (v === 'commenter' || v === 'contributor' || v === 'editor') { inh = FLOOR_LABELS[v]; src = p; break; }
+    pid = p.parent_id;
+  }
+  const opts = [['', 'Hérité (' + inh + (src ? ', via ' + (src.emoji ? src.emoji + ' ' : '') + src.name : '') + ')'],
+    ['commenter', FLOOR_LABELS.commenter], ['contributor', FLOOR_LABELS.contributor], ['editor', FLOOR_LABELS.editor]];
+  opts.forEach(([v, label]) => {
+    const on = createFloor === v;
+    wrap.appendChild(el('button', { class: 'prio-btn', text: label,
+      attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+      on: { click: () => { createFloor = v; renderFloorChips(); } } }));
+  });
+}
+function renderGuestSpaceChips() {
+  const wrap = document.getElementById('create-space-chips');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  [[0, 'Désactivé'], [1, '🏠 Activé']].forEach(([v, label]) => {
+    const on = createGuestSpace === v;
+    wrap.appendChild(el('button', { class: 'prio-btn', text: label,
+      attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
+      on: { click: () => { createGuestSpace = v; renderGuestSpaceChips(); } } }));
   });
 }
 
@@ -3405,6 +3463,8 @@ createForm.addEventListener('submit', async (e) => {
     payload.vote_mode = createVoteMode;  // [VOTE-MULTI]
     payload.vote_deadline = createVoteEnabled ? (document.getElementById('create-vote-deadline').value || '') : '';
     payload.vote_create = createVoteCreate;  // [VOTE-GROUPS] permission héritable
+    payload.role_floor = createFloor;        // [GUEST-ROLES passe 2] zone invités (élévation)
+    payload.guest_space = createGuestSpace;   // [GUEST-ROLES passe 2] espace invités (dossiers persos)
   }
   // [VOTE-MULTI] bascule multi→single : avertit (danger) — le serveur purge les voix surnuméraires.
   if (createKind === 'project' && editingItem && editingItem.vote_mode === 'multi' && createVoteMode === 'single') {
