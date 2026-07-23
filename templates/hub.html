@@ -6,6 +6,14 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Vos dossiers partagés</title>
 <link rel="icon" type="image/svg+xml" href="/share/assets/favicon.svg">
+<!-- [PWA] manifest du hub : href dérivé de l'URL en JS (shell sans token embarqué) -->
+<link rel="manifest" id="pwa-manifest">
+<meta name="theme-color" content="#0e1217">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Partages">
+<link rel="apple-touch-icon" href="/share/assets/apple-touch-icon.png">
+<script>(function(){var l=document.getElementById('pwa-manifest');if(l)l.href=location.pathname.replace(/\/+$/,'')+'/manifest.webmanifest';})();</script>
 <!-- [HUB-INLINE-EDIT] Quill pour l'édition riche inline (mêmes assets que share.html). -->
 <link rel="stylesheet" href="/share/assets/quill.snow.css">
 <script src="/share/assets/quill.min.js" defer></script>
@@ -377,6 +385,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 
 {% include 'partials/_shared.js.html' %}
 <script>
+const EMBEDDED_BUILD = "{{ build }}";  // [UPDATE-PROMPT] version embarquée au rendu
 // [HUB-ROUTE-PREFIX] URL = /share/hub/<token> → le token est le dernier segment.
 const HUB_TOKEN = location.pathname.split('/').filter(Boolean).pop();
 const HUB_BASE = '/share/hub/' + HUB_TOKEN;
@@ -491,6 +500,7 @@ async function loadDash(knownFolders) {
   persistFolderTokens(data.folders);  // [HUB-TOKEN-REFRESH] dossiers ajoutés après coup deviennent éditables
   DATA = data;
   if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis;  // [REACTION-PALETTE]
+  promptReloadIfStale(EMBEDDED_BUILD, DATA.build_version);  // [UPDATE-PROMPT]
   document.getElementById('code-screen').hidden = true;
   document.getElementById('dash').hidden = false;
   if (data.name) document.getElementById('dash-name').textContent = '📂 ' + data.name;

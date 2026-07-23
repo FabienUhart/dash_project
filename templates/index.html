@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<!-- [PWA] installable (manifest + icônes committées ; pas de service worker phase 1) -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0e1217">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dashboard">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/static/quill.snow.css">
 <script src="/static/quill.min.js" defer></script>
 <!-- [MEMO-TABLES] tableaux dans l'éditeur (quill-table-better 1.2.3, vendorisé) ; chargé
@@ -2133,6 +2140,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 
 {% include 'partials/_shared.js.html' %}
 <script>
+const EMBEDDED_BUILD = "{{ version }}";  // [UPDATE-PROMPT] version embarquée au rendu (comparée au poll)
 const RECUR_OPTIONS = [
   ['', '🔁 Récurrence'], ['daily', 'Quotidienne'], ['weekly', 'Hebdomadaire'],
   ['monthly', 'Mensuelle'], ['quarterly', 'Trimestrielle'], ['yearly', 'Annuelle'],
@@ -4436,6 +4444,7 @@ async function refreshActivityBadge() {
     if (pendingReload && !uiBusy()) { pendingReload = false; await loadAll(); }
     const a = await api('/api/activity');
     state.activity = a;
+    promptReloadIfStale(EMBEDDED_BUILD, a.build_version);  // [UPDATE-PROMPT]
     const badge = document.getElementById('activity-badge');
     const n = (a.pending_guests || 0) + (a.unseen || 0);
     badge.textContent = String(n);
@@ -7573,13 +7582,16 @@ function handleCapture() {
   let params;
   try { params = new URLSearchParams(location.search); } catch (_) { return; }
   const cap = params.get('capture');
-  if (cap !== 'link' && cap !== 'memo') return;
   const title = String(params.get('title') || '').slice(0, 200);
   const text = String(params.get('text') || '').slice(0, 2000);
   let url = '';
   try { const u = new URL(params.get('url') || ''); if (u.protocol === 'http:' || u.protocol === 'https:') url = u.href; } catch (_) {}
+  // [PWA] Share Target Android : /?title=&text=&url= (SANS capture=). URL valide → « lien » ;
+  // sinon titre/texte → « note ». Sinon capture= explicite ([WEB-CAPTURE]). Rien à traiter → sortie.
+  let mode = (cap === 'link' || cap === 'memo') ? cap : (url ? 'link' : ((title || text) ? 'memo' : null));
+  if (!mode) return;
   try { history.replaceState(null, '', location.pathname); } catch (_) {}
-  if (cap === 'link') {
+  if (mode === 'link') {
     openDialog();  // flux existant : catégorie active éventuelle pré-remplie par openDialog
     if (title) form.elements.name.value = title;
     if (url) form.elements.url_public.value = url;

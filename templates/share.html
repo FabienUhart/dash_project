@@ -6,6 +6,13 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Partage — Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="/share/assets/favicon.svg">
+<!-- [PWA] manifest invité GÉNÉRÉ (start_url = ce partage ; pas de share_target ; invariant 5) -->
+<link rel="manifest" href="/share/{{ share_token }}/manifest.webmanifest">
+<meta name="theme-color" content="#0e1217">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Partage">
+<link rel="apple-touch-icon" href="/share/assets/apple-touch-icon.png">
 <link rel="stylesheet" href="/share/assets/quill.snow.css">
 <script src="/share/assets/quill.min.js" defer></script>
 <!-- [MEMO-TABLES] tableaux dans l'éditeur (quill-table-better 1.2.3, vendorisé) ; chargé
@@ -887,6 +894,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 
 {% include 'partials/_shared.js.html' %}
 <script>
+const EMBEDDED_BUILD = "{{ build }}";  // [UPDATE-PROMPT] version embarquée au rendu
 const TOKEN = location.pathname.split('/')[2];
 const API = '/share/' + TOKEN;
 // [FX-CONVERTER] widget convertisseur de devises (invité → /share/<token>/fx, taux publics).
@@ -3078,6 +3086,7 @@ async function load() {
   }
   DATA = await r.json();
   if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis;  // [REACTION-PALETTE]
+  promptReloadIfStale(EMBEDDED_BUILD, DATA.build_version);  // [UPDATE-PROMPT]
   await refreshGuest();
   render();
 }

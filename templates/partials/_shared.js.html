@@ -1858,6 +1858,36 @@ function undoToast(msg, onUndo, ms) {
   return t;
 }
 
+// [UPDATE-PROMPT] Invite de rechargement quand le serveur a une version PLUS RÉCENTE que celle
+// embarquée au rendu de la page (JS en mémoire périmé après un déploiement — critique en PWA
+// standalone : pas de bouton recharger). Appelée à CHAQUE tick de poll des 3 pages avec
+// (version embarquée Jinja, version renvoyée par le serveur). Bannière persistante, PAS de reload
+// sauvage. Respecte uiBusy() (pop-in/saisie) : si occupé, on ne montre pas → le prochain tick
+// réessaie. Une seule bannière (idempotent). Tokens invariant 9, pas de GSAP (invariant 8).
+let _updatePromptShown = false;
+function promptReloadIfStale(embedded, server) {
+  if (!embedded || !server || embedded === server || _updatePromptShown) return;
+  if (typeof uiBusy === 'function' && uiBusy()) return;  // différé : le poll rappellera
+  _updatePromptShown = true;
+  const t = document.createElement('div');
+  t.id = 'update-toast';
+  t.setAttribute('role', 'status');
+  t.style.cssText = 'position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);z-index:4200;'
+    + 'display:flex;align-items:center;gap:0.75rem;padding:0.55rem 0.9rem;border-radius:10px;'
+    + 'background:var(--panel);border:1px solid var(--accent);color:var(--text);font-size:0.85rem;'
+    + 'box-shadow:0 6px 24px rgba(0,0,0,0.35);max-width:calc(100vw - 2rem)';
+  const label = document.createElement('span');
+  label.textContent = '⬆ Nouvelle version (' + server + ')';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Recharger';
+  btn.className = 'prio-btn';
+  btn.style.cssText = 'background:var(--accent);border-color:var(--accent);color:#10141a;padding:0.15rem 0.6rem';
+  btn.addEventListener('click', () => { try { location.reload(); } catch (e) { location.href = location.href; } });
+  t.appendChild(label); t.appendChild(btn);
+  document.body.appendChild(t);
+}
+
 // [SAVE-INDICATOR] Petit ✓ discret (~1,2 s) à chaque sauvegarde OK d'un mémo ; état d'erreur
 // discret (~2,2 s) si l'enregistrement échoue. Élément flottant créé à la volée (aucun markup à
 // ajouter aux pages), tokens CSS (--green/--red), aria-live. Pas de GSAP (invariant 8). PUR :

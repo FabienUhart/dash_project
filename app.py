@@ -920,6 +920,41 @@ def api_version():
     return jsonify({"version": BUILD_VERSION, "export": int(APP_VERSION)})
 
 
+# ─────────────────────────── [PWA] manifest + Share Target (owner) ───────────────────────────
+# Icônes committées dans static/ (générées depuis favicon.svg, invariant 6 — zéro build/CDN).
+# Pas de service worker (phase 1) : installabilité = manifest + HTTPS.
+PWA_THEME = "#0e1217"
+
+def _pwa_icons(base):
+    """Liste d'icônes du manifest (base = préfixe d'URL : /static ou /share/assets)."""
+    return [
+        {"src": base + "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": base + "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": base + "/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+        {"src": base + "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    ]
+
+
+def _manifest_response(data):
+    resp = jsonify(data)
+    resp.headers["Content-Type"] = "application/manifest+json; charset=utf-8"
+    return resp
+
+
+@app.route("/manifest.webmanifest")
+def pwa_manifest():
+    """Manifest owner (derrière Authelia — l'installation se fait connecté). Share Target Android
+    → l'app s'ouvre sur /?title=&text=&url= (repris par le lecteur [WEB-CAPTURE], forme sans capture=)."""
+    return _manifest_response({
+        "name": "Dashboard", "short_name": "Dashboard", "lang": "fr",
+        "start_url": "/", "scope": "/", "display": "standalone",
+        "background_color": PWA_THEME, "theme_color": PWA_THEME,
+        "icons": _pwa_icons("/static"),
+        "share_target": {"action": "/", "method": "GET",
+                         "params": {"title": "title", "text": "text", "url": "url"}},
+    })
+
+
 # ---------------------------------------------------------------- links
 
 LINK_FIELDS = (
@@ -5383,6 +5418,7 @@ def activity():
             "unseen": unseen,
             "revisions": out_rev,
             "data_version": _data_version(db),
+            "build_version": BUILD_VERSION,  # [UPDATE-PROMPT] invite si ≠ version embarquée au rendu
         }
     )
 
@@ -5800,7 +5836,9 @@ def react_comment(comment_id):
 SHARE_ASSETS = {"quill.min.js", "quill.snow.css", "leaflet.js", "leaflet.css", "gsap.min.js", "favicon.svg", "Inter.woff2",
                 "leaflet.markercluster.js", "MarkerCluster.css", "MarkerCluster.Default.css",  # [PHOTO-CLUSTER]
                 "quill-table-better.js", "quill-table-better.css",  # [MEMO-TABLES]
-                "plan-overlay-2026.png"}  # [FESTIVAL-MAP-OVERLAY] surcouche de plan du festival
+                "plan-overlay-2026.png",  # [FESTIVAL-MAP-OVERLAY] surcouche de plan du festival
+                "icon-192.png", "icon-512.png", "icon-192-maskable.png", "icon-512-maskable.png",  # [PWA] icônes invité
+                "apple-touch-icon.png"}
 
 
 @app.route("/api/geocode")
@@ -5838,7 +5876,22 @@ def share_assets(name):
 def share_page(token):
     if not _share_by_token(get_db(), token):
         return "Lien de partage invalide ou révoqué.", 404
-    return render_template("share.html", version=APP_VERSION)
+    return render_template("share.html", version=APP_VERSION, build=BUILD_VERSION, share_token=token)
+
+
+@app.route("/share/<token>/manifest.webmanifest")
+def share_manifest(token):
+    """[PWA] Manifest invité GÉNÉRÉ (un manifest statique ne connaît pas le token). N'expose que
+    l'URL que l'invité connaît déjà (invariant 5) : start_url = son accès. PAS de share_target
+    (capture owner-only). Sous /share/* (bypass Authelia). Token invalide → 404."""
+    if not _share_by_token(get_db(), token):
+        return "", 404
+    return _manifest_response({
+        "name": "Dossier partagé", "short_name": "Partage", "lang": "fr",
+        "start_url": "/share/" + token, "scope": "/share/" + token,
+        "display": "standalone", "background_color": PWA_THEME, "theme_color": PWA_THEME,
+        "icons": _pwa_icons("/share/assets"),
+    })
 
 
 # ───────────── [ONE-LINK-MULTI] routes publiques du hub (bypass Authelia) ─────────────
@@ -5851,7 +5904,22 @@ def hub_page(hub_token):
     # Shell statique : aucune donnée invité dans le HTML (la liste vient de /approve après PIN).
     if not _hub_by_token(get_db(), hub_token):
         return "Lien invalide ou révoqué.", 404
-    return render_template("hub.html", version=APP_VERSION)
+    return render_template("hub.html", version=APP_VERSION, build=BUILD_VERSION)
+
+
+@app.route("/share/hub/<hub_token>/manifest.webmanifest")
+def hub_manifest(hub_token):
+    """[PWA] Manifest du hub invité (généré, start_url = le hub que l'invité connaît). Invariant 5,
+    sous /share/*. Pas de share_target. Hub invalide → 404."""
+    if not _hub_by_token(get_db(), hub_token):
+        return "", 404
+    url = "/share/hub/" + hub_token
+    return _manifest_response({
+        "name": "Mes dossiers partagés", "short_name": "Partages", "lang": "fr",
+        "start_url": url, "scope": url,
+        "display": "standalone", "background_color": PWA_THEME, "theme_color": PWA_THEME,
+        "icons": _pwa_icons("/share/assets"),
+    })
 
 
 # [HUB-SESSION] Cookie de session du hub : HttpOnly (illisible en JS), Path scopé à CE hub
@@ -6183,6 +6251,7 @@ def hub_data(hub_token):
         ],
         "marker_color": _map_marker_color(db),
         "reaction_emojis": _reaction_palette(db),  # [REACTION-PALETTE] palette consommée par les invités
+        "build_version": BUILD_VERSION,  # [UPDATE-PROMPT] invite de rechargement si ≠ version embarquée
         # [HUB-TOKEN-REFRESH] jetons par dossier rafraîchis à CHAQUE chargement (pas qu'à approve)
         # → un dossier ajouté après coup devient éditable sans re-saisir le code. L'invité est
         # déjà prouvé (hubProof) ; on ne fait que reposer des guest_token qu'il a droit d'avoir.
@@ -6389,6 +6458,7 @@ def share_data(token):
         ],
         "marker_color": _map_marker_color(db),
         "reaction_emojis": _reaction_palette(db),  # [REACTION-PALETTE] palette consommée par les invités
+        "build_version": BUILD_VERSION,  # [UPDATE-PROMPT] invite de rechargement si ≠ version embarquée
     }
     if share["kind"] == "project":
         proj = db.execute(
