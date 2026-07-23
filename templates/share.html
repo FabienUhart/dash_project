@@ -1897,7 +1897,7 @@ function shareMapPoints() {
       links: memoLinks(m.content),  // [FESTIVAL-FRISE-FOCUS #3] liens dans la bulle du marqueur
       due_date: m.due_date || '', due_time: m.due_time || '', trip: shareTripOf(m.project_id), // [MAP-TIMELINE]
       // [MAP-TRIP-POLISH] 1re photo, URL scopée au partage (invariant 5).
-      imgUrl: (m.images && m.images.length) ? API + '/image/' + m.images[0] : '',
+      imgUrl: imgSize((m.images && m.images.length) ? API + '/image/' + m.images[0] : '', 't'),
     });
   });
   (DATA.projects || []).forEach(p => {
@@ -1916,7 +1916,7 @@ function shareDatedPoints() {
     due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: shareTripOf(m.project_id),
-    imgUrl: (m.images && m.images.length) ? API + '/image/' + m.images[0] : '', // [MAP-TRIP-POLISH]
+    imgUrl: imgSize((m.images && m.images.length) ? API + '/image/' + m.images[0] : '', 't'), // [MAP-TRIP-POLISH]
   }));
 }
 
@@ -2888,7 +2888,7 @@ function render() {
       memo.images.slice(0, 1).forEach(name => {
         const wrap = el('span', 'thumb-wrap');
         const img = document.createElement('img');
-        img.src = API + '/image/' + name;
+        img.src = imgSize(API + '/image/' + name, 't');   // [IMAGE-THUMBS] vignette
         img.loading = 'lazy';
         img.addEventListener('click', () => {
           runImageViewer({

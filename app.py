@@ -41,6 +41,15 @@ except Exception:
 import exifread
 import requests
 import urllib3
+
+# [IMAGE-THUMBS] Pillow pour les dérivées (vignettes + taille écran). Originaux JAMAIS modifiés.
+# Import gardé : si absent, la génération est no-op et les routes servent l'original (dégradation
+# propre). ExifRead reste la lib d'EXIF (inchangée).
+try:
+    from PIL import Image, ImageOps
+except Exception:  # pragma: no cover
+    Image = None
+    ImageOps = None
 from flask import (
     Flask,
     Response,
@@ -84,6 +93,78 @@ ALLOWED_IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
 SAFE_IMG_NAME = re.compile(r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp)$")
 DUE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
+# [IMAGE-THUMBS] Images dérivées (donnée DÉRIVÉE, re-calculable → jamais dans l'export). Deux
+# tailles JPEG q82, orientation EXIF appliquée. Stockées sous data/uploads/derived/ (préfixe
+# t_/s_, pas de collision avec les noms uuid4 originaux). Ne JAMAIS toucher ce dossier dans un
+# commit (même règle que data/uploads/). GIF (animé) → pas de dérivée ; image plus petite que la
+# cible → pas d'agrandissement (route sert l'original) ; échec Pillow → fallback original.
+DERIVED_DIR = os.path.join(UPLOAD_DIR, "derived")
+DERIVED_SIZES = {"t": 400, "s": 1600}
+DERIVED_QUALITY = 82
+
+
+def _derived_name(size, name):
+    return size + "_" + name + ".jpg"
+
+
+def _gen_derived(name):
+    """Génère les dérivées t/s manquantes de l'image ORIGINALE `name`. Idempotent (skip si déjà
+    présent). Silencieux : ne lève jamais (fallback original assuré côté route)."""
+    if Image is None or not SAFE_IMG_NAME.match(name):
+        return
+    ext = name.rsplit(".", 1)[-1].lower()
+    if ext == "gif":  # animé possible → jamais de dérivée
+        return
+    src = os.path.join(UPLOAD_DIR, name)
+    if not os.path.isfile(src):
+        return
+    try:
+        os.makedirs(DERIVED_DIR, exist_ok=True)
+        with Image.open(src) as im:
+            im = ImageOps.exif_transpose(im)  # applique l'orientation EXIF
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            w, h = im.size
+            for size, target in DERIVED_SIZES.items():
+                dpath = os.path.join(DERIVED_DIR, _derived_name(size, name))
+                if os.path.isfile(dpath):
+                    continue
+                if max(w, h) <= target:  # pas d'agrandissement → l'original suffit
+                    continue
+                cp = im.copy()
+                cp.thumbnail((target, target), Image.LANCZOS)
+                cp.save(dpath, "JPEG", quality=DERIVED_QUALITY, optimize=True)
+    except Exception:
+        pass
+
+
+def _derived_ready(name, size):
+    """Nom de fichier dérivé SERVABLE (dans DERIVED_DIR) pour (name, size), généré à la volée si
+    absent (filet backfill). None si pas de dérivée (gif / plus petit que la cible / échec) →
+    l'appelant sert l'original (jamais de 404 pour une image existante)."""
+    if size not in DERIVED_SIZES or not SAFE_IMG_NAME.match(name):
+        return None
+    if name.rsplit(".", 1)[-1].lower() == "gif":
+        return None
+    dname = _derived_name(size, name)
+    dpath = os.path.join(DERIVED_DIR, dname)
+    if os.path.isfile(dpath):
+        return dname
+    _gen_derived(name)  # filet : génère à la volée puis re-teste
+    return dname if os.path.isfile(dpath) else None
+
+
+def _delete_derived(name):
+    """Supprime les dérivées t_/s_ d'une image (purge en cascade avec l'original)."""
+    name = os.path.basename(str(name or ""))
+    if not name:
+        return
+    for size in DERIVED_SIZES:
+        try:
+            os.remove(os.path.join(DERIVED_DIR, _derived_name(size, name)))
+        except OSError:
+            pass
+
 
 def _looks_like_image(head, ext):
     if ext in ("jpg", "jpeg"):
@@ -108,6 +189,7 @@ def _save_uploaded_image(f, allowed_ext):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     name = f"{uuid.uuid4().hex}.{ext}"
     f.save(os.path.join(UPLOAD_DIR, name))
+    _gen_derived(name)  # [IMAGE-THUMBS] vignettes t/s (owner + invité, tous les appelants)
     return name, None
 
 app = Flask(__name__)
@@ -2883,6 +2965,7 @@ def _delete_image_files(images_json_str):
                 os.remove(os.path.join(UPLOAD_DIR, name))
             except OSError:
                 pass
+            _delete_derived(name)  # [IMAGE-THUMBS] purge t_/s_ avec l'original
 
 
 def _subtasks_json(value):
@@ -3351,6 +3434,12 @@ def serve_upload(filename):
     name = os.path.basename(filename)
     if not SAFE_IMG_NAME.match(name):
         return "", 404
+    # [IMAGE-THUMBS] ?size=t|s → dérivée servable si dispo, sinon original (compat totale).
+    size = request.args.get("size")
+    if size in DERIVED_SIZES:
+        dname = _derived_ready(name, size)
+        if dname:
+            return send_from_directory(DERIVED_DIR, dname, max_age=86400)
     return send_from_directory(UPLOAD_DIR, name, max_age=86400)
 
 
@@ -3413,6 +3502,7 @@ def delete_memo_image(memo_id, name):
             os.remove(os.path.join(UPLOAD_DIR, name))
         except OSError:
             pass
+        _delete_derived(name)  # [IMAGE-THUMBS] purge t_/s_ avec l'original
     _forget_image_meta(db, name)  # [PHOTO-MAP] la méta suit le fichier
     db.execute(
         "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
@@ -6193,6 +6283,7 @@ def share_delete_image(token, memo_id, name):
             os.remove(os.path.join(UPLOAD_DIR, name))
         except OSError:
             pass
+        _delete_derived(name)  # [IMAGE-THUMBS] purge t_/s_ avec l'original
     _forget_image_meta(db, name)  # [PHOTO-MAP] la méta suit le fichier
     db.execute(
         "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
@@ -6919,9 +7010,17 @@ def share_image(token, name):
     name = os.path.basename(name)
     if not SAFE_IMG_NAME.match(name):
         return "", 404
+    # [IMAGE-THUMBS] taille dérivée demandée (validée par liste blanche). Le contrôle de scope
+    # ci-dessous est INCHANGÉ (invariant 5) : la dérivée n'est servie que si l'original est
+    # dans le périmètre du partage.
+    size = request.args.get("size")
     for row in _share_scope_memos(db, share):
         try:
             if name in json.loads(row["images"] or "[]"):
+                if size in DERIVED_SIZES:
+                    dname = _derived_ready(name, size)
+                    if dname:
+                        return send_from_directory(DERIVED_DIR, dname, max_age=3600)
                 return send_from_directory(UPLOAD_DIR, name, max_age=3600)
         except Exception:
             continue
@@ -7248,6 +7347,58 @@ def _backfill_image_meta():
             conn.close()
         except Exception:
             pass
+
+
+def _backfill_derived():
+    # [IMAGE-THUMBS] Génère les dérivées t/s des images ajoutées AVANT la feature. Modèle de
+    # _backfill_image_meta : daemon, connexion propre, idempotent (skip si les 2 dérivées existent
+    # déjà OU inutiles = gif/petite), throttle CPU léger, jamais bloquant, un échec par image
+    # silencieux. Log le nombre d'images traitées à la fin.
+    if Image is None:
+        return
+    time.sleep(25)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+    except Exception:
+        return
+    done = 0
+    try:
+        os.makedirs(DERIVED_DIR, exist_ok=True)
+        rows = conn.execute(
+            "SELECT images FROM memos WHERE COALESCE(deleted_at, '') = ''"
+        ).fetchall()
+        seen = set()
+        for r in rows:
+            try:
+                names = json.loads(r["images"] or "[]")
+            except Exception:
+                names = []
+            for name in names:
+                name = os.path.basename(str(name))
+                if not name or name in seen or not SAFE_IMG_NAME.match(name):
+                    continue
+                seen.add(name)
+                if name.rsplit(".", 1)[-1].lower() == "gif":
+                    continue
+                t_ok = os.path.isfile(os.path.join(DERIVED_DIR, _derived_name("t", name)))
+                s_ok = os.path.isfile(os.path.join(DERIVED_DIR, _derived_name("s", name)))
+                if t_ok and s_ok:
+                    continue
+                _gen_derived(name)
+                done += 1
+                time.sleep(0.05)  # throttle CPU léger, jamais bloquant
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    try:
+        app.logger.info("[IMAGE-THUMBS] backfill dérivées : %d image(s) traitée(s)", done)
+    except Exception:
+        pass
 
 
 def _backup_loop():
@@ -7945,5 +8096,7 @@ def import_links():
 
 
 init_db()
+os.makedirs(DERIVED_DIR, exist_ok=True)  # [IMAGE-THUMBS] dossier des dérivées (même volume)
 threading.Thread(target=_backup_loop, daemon=True).start()
 threading.Thread(target=_backfill_image_meta, daemon=True).start()  # [PHOTO-MAP]
+threading.Thread(target=_backfill_derived, daemon=True).start()  # [IMAGE-THUMBS]

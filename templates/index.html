@@ -3662,7 +3662,7 @@ function boardMapPoints() {
       due_date: m.due_date || '', due_time: m.due_time || '',
       trip: resolveTripLocal(projById, m.project_id),
       // [MAP-TRIP-POLISH] 1re photo du mémo, URL résolue owner (invariant 5).
-      imgUrl: (m.images && m.images.length) ? '/uploads/' + m.images[0] : '',
+      imgUrl: imgSize((m.images && m.images.length) ? '/uploads/' + m.images[0] : '', 't'),
     });
   });
   if (scope && !searchActive) {
@@ -3698,7 +3698,7 @@ function boardDatedPoints() {
     due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: resolveTripLocal(projById, m.project_id),
-    imgUrl: (m.images && m.images.length) ? '/uploads/' + m.images[0] : '', // [MAP-TRIP-POLISH]
+    imgUrl: imgSize((m.images && m.images.length) ? '/uploads/' + m.images[0] : '', 't'), // [MAP-TRIP-POLISH]
   }));
 }
 
@@ -5395,7 +5395,7 @@ function thumbsEl(memo, editable, collapsed = false) {
   const wrap = el('div', { class: 'task-thumbs' + (collapsed ? ' thumbs-collapsed' : '') });
   shown.forEach(name => {
     const tw = el('div', { class: 'thumb-wrap' });
-    const img = el('img', { attrs: { src: `/uploads/${name}`, alt: '', loading: 'lazy' } });
+    const img = el('img', { attrs: { src: imgSize(`/uploads/${name}`, 't'), alt: '', loading: 'lazy' } });   // [IMAGE-THUMBS] vignette
     img.addEventListener('click', (e) => {
       e.stopPropagation();
       runImageViewer({

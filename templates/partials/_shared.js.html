@@ -31,6 +31,15 @@ function fmtMemoTime(t) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(t || '') ? t.replace(':', 'h') : '';
 }
 
+// [IMAGE-THUMBS] Ajoute ?size=t|s à une URL d'image (dérivée serveur) : 't' = vignette ~400px
+// (cards, bande, calque photo, section 📷), 's' = taille écran ~1600px (image de la visionneuse).
+// Le serveur retombe sur l'original si pas de dérivée (gif / plus petite / échec) → jamais de 404.
+// URL vide inchangée. Le téléchargement (⬇) et l'EXIF continuent d'utiliser l'original (sans size).
+function imgSize(url, sz) {
+  if (!url) return url;
+  return url + (url.indexOf('?') < 0 ? '?' : '&') + 'size=' + sz;
+}
+
 // [MEMO-TITLE-FALLBACK] Intitulé de repli pour les mémos sans titre. Placeholder unique
 // (harmonise « (mémo) » / « (sans titre) » / « (mémo vide) » → une seule chaîne, 3 pages).
 // Purs, sans état, sans dépendance au strip page-spécifique (le texte plein est passé en arg).
@@ -2031,8 +2040,8 @@ function runImageViewer(cfg) {
   }
   function render() {
     const name = images[idx];
-    img.src = cfg.imageUrl(name);
-    dl.href = cfg.downloadUrl(name);
+    img.src = imgSize(cfg.imageUrl(name), 's');   // [IMAGE-THUMBS] image écran ~1600px (dérivée)
+    dl.href = cfg.downloadUrl(name);              // ⬇ = original brut (inchangé)
     rot = 0; scale = 1; tx = 0; ty = 0;
     stage.classList.remove('zoomed');
     applyTransform();
@@ -2102,7 +2111,7 @@ function runImageViewer(cfg) {
     strip.style.display = '';
     images.forEach((name, i) => {
       const t = el('button', { class: 'iv-thumb', attrs: { type: 'button', title: 'Image ' + (i + 1), 'aria-label': 'Aller à l\'image ' + (i + 1) } });
-      t.appendChild(el('img', { attrs: { src: cfg.imageUrl(name), alt: '', loading: 'lazy' } }));
+      t.appendChild(el('img', { attrs: { src: imgSize(cfg.imageUrl(name), 't'), alt: '', loading: 'lazy' } }));   // [IMAGE-THUMBS] vignette
       t.addEventListener('click', () => { if (i !== idx) { idx = i; render(); } });
       thumbEls.push(t);
       strip.appendChild(t);
@@ -2433,7 +2442,7 @@ function renderMemoPhotos(cfg) {
     const grid = el('div', { class: 'mp-grid' });
     images.forEach(name => {
       const tw = el('div', { class: 'mp-thumb' });
-      const img = el('img', { attrs: { src: url(name), alt: '', loading: 'lazy' } });
+      const img = el('img', { attrs: { src: imgSize(url(name), 't'), alt: '', loading: 'lazy' } });   // [IMAGE-THUMBS] vignette
       img.addEventListener('click', () => {
         if (typeof runImageViewer !== 'function') { window.open(url(name), '_blank', 'noopener'); return; }
         runImageViewer({
