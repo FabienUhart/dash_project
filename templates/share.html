@@ -348,7 +348,7 @@ span.prio-btn:hover { color: var(--muted); background: var(--panel-2); border-co
 .thumbs img { height: 72px; max-width: 140px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: zoom-in; }
 .thumb-wrap { position: relative; }
 /* === [CARD-REDESIGN] parité visuelle invité === */
-.task-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.task-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* [MAP-MEMO-ROUNDTRIP] card ouverte depuis la carte : anneau accent net + halo + courte pulsation
    (CSS, pas de GSAP — invariant 8). Maintenu jusqu'au nettoyage (clic / 5 s) par shareOpenMemo. */
 .task.card-focus {
@@ -661,7 +661,9 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
    rendu statique aux tokens quand le contenu complet est affiché (card dépliée / non
    clampée) — sinon un invité lecture seule n'y aurait jamais accès. table-layout:fixed
    partage la largeur de la card, pas de débordement. */
-.task-content .task-clamp, .task-clamp table { display: none; }
+/* [CARD-PREVIEW fix V23.6.99] Ne masquer QUE les tableaux du clamp, pas l'extrait lui-même
+   (l'ancien `.task-content .task-clamp` effondrait tout l'extrait à 0×0). */
+.task-clamp table { display: none; }
 .task-content table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .task-content td, .task-content th { border: 1px solid var(--border); padding: 2px 5px; word-break: break-word; }
 .task-content th { background: var(--panel-2); }
@@ -840,6 +842,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="q-wrap"><div id="q-editor"></div></div>
   <label class="me-label">Assigné·es</label>
   <div id="q-people" class="q-people"></div>
+  <!-- [LESS-BUTTONS] échéance / priorité / position déplacées de la card vers la pop-in. -->
+  <div id="q-meta"></div>
   <div id="q-photos"></div>
   <div id="q-attachments"></div>
   <div class="dlg-actions">
@@ -1313,6 +1317,75 @@ function renderQPhotos(memo) {
   if (sec) box.appendChild(sec);
 }
 
+// [LESS-BUTTONS] Échéance / priorité / position dans la pop-in invité (déplacées de la card ;
+// routes existantes via `put` → _perform_memo_update, invariant 5). Live-patch puis re-rend depuis
+// DATA frais. Réservé à can_edit (l'anonyme/lecture n'ouvre pas la pop-in).
+function renderQMeta(memo) {
+  const box = document.getElementById('q-meta');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!canEditNow()) return;
+  const rowStyle = 'display:flex;gap:0.45rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;font-size:0.85rem;color:var(--muted)';
+  const inStyle = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.3rem 0.45rem';
+  const patch = async (body) => { await put(memo.id, body); const m = (DATA.memos || []).find(x => x.id === memo.id) || memo; renderQMeta(m); };
+
+  // Échéance (date + heure début/fin + × date)
+  const dateRow = el('div', { attrs: { style: rowStyle } });
+  dateRow.appendChild(el('span', { text: '📅', attrs: { title: 'Échéance' } }));
+  const dateIn = el('input', { attrs: { type: 'date', style: inStyle } }); dateIn.value = memo.due_date || '';
+  dateIn.addEventListener('change', () => patch({ due_date: dateIn.value }));
+  dateRow.appendChild(dateIn);
+  if (memo.due_date) {
+    const timeIn = el('input', { attrs: { type: 'time', title: 'Heure de début (optionnelle)', style: inStyle } }); timeIn.value = memo.due_time || '';
+    timeIn.addEventListener('change', () => patch({ due_time: timeIn.value }));
+    dateRow.appendChild(timeIn);
+    if (memo.due_time) {
+      dateRow.appendChild(el('span', { text: '→' }));
+      const endIn = el('input', { attrs: { type: 'time', title: 'Heure de fin (optionnelle)', style: inStyle } }); endIn.value = memo.end_time || '';
+      endIn.addEventListener('change', () => patch({ end_time: endIn.value }));
+      dateRow.appendChild(endIn);
+    }
+    dateRow.appendChild(el('button', { class: 'prio-btn', text: '× date', attrs: { title: "Retirer l'échéance" }, on: { click: () => patch({ due_date: '' }) } }));
+  }
+  box.appendChild(dateRow);
+
+  // Priorité (chips)
+  const prios = DATA.priorities || [];
+  const prioRow = el('div', { attrs: { style: rowStyle } });
+  prioRow.appendChild(el('span', { text: '⚑', attrs: { title: 'Priorité' } }));
+  prioRow.appendChild(el('button', { class: 'prio-btn' + ((memo.priority || 0) === 0 ? ' sel-none' : ''), text: 'Aucune', on: { click: () => patch({ priority: 0 }) } }));
+  prios.forEach(p => {
+    const btn = el('button', { class: 'prio-btn', text: p.name, on: { click: () => patch({ priority: p.id }) } });
+    if (memo.priority === p.id && p.color) { btn.style.background = p.color; btn.style.borderColor = p.color; btn.style.color = '#10141a'; }
+    else if (p.color) { btn.style.color = p.color; }
+    prioRow.appendChild(btn);
+  });
+  box.appendChild(prioRow);
+
+  // Position (GPS + adresse)
+  const posRow = el('div', { attrs: { style: rowStyle } });
+  posRow.appendChild(el('span', { text: '📍', attrs: { title: 'Position' } }));
+  posRow.appendChild(el('button', { class: 'prio-btn', text: memo.location ? '× Position' : 'Ma position', on: { click: () => {
+    if (memo.location) { patch({ location: null }); return; }
+    if (!navigator.geolocation) { notify('Géolocalisation non disponible.', { error: true }); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => patch({ location: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
+      () => notify('Position refusée ou indisponible.', { error: true }),
+      { enableHighAccuracy: true, timeout: 10000 });
+  } } }));
+  const addrIn = el('input', { attrs: { type: 'text', placeholder: '📍 Adresse… (Entrée)', style: inStyle + ';flex:1;min-width:9rem' } });
+  addrIn.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return; e.preventDefault();
+    const q = addrIn.value.trim(); if (q.length < 3) return;
+    const r = await fetch(API + '/geocode?q=' + encodeURIComponent(q), { headers: { 'X-Guest-Token': guestToken() } });
+    const data = r.ok ? await r.json() : { results: [] };
+    if (!data.results.length) { notify('Adresse introuvable : « ' + q + ' »'); return; }
+    await patch({ location: data.results[0] });
+  });
+  posRow.appendChild(addrIn);
+  box.appendChild(posRow);
+}
+
 // [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur invité (scopée au partage).
 function renderQAttachments(memo) {
   const box = document.getElementById('q-attachments');
@@ -1353,6 +1426,7 @@ function openEditor(memo, contentEl, taskEl) {
   }
   editingId = memo.id;
   renderQContext(memo);
+  renderQMeta(memo);         // [LESS-BUTTONS] échéance / priorité / position
   renderQPhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderQAttachments(memo);  // [ATTACHMENTS]
   const titleEl = document.getElementById('q-title');
@@ -2698,7 +2772,11 @@ function render() {
         const rest = memoRestText(memo.content);
         if (rest) content.appendChild(buildExc(rest, true));
       } else {
-        content.appendChild(buildExc(memo.content, false));
+        // [V23.6.100] Riche sans titre : 1re ligne/paragraphe/item promu en titre gras, extrait =
+        // reste du contenu riche (checklists/tableaux préservés → clic conservé), sans duplication.
+        const sp = splitLeadHtml(memo.content);
+        const tl = mkTitle(false); tl.appendChild(document.createTextNode(memoLeadText(sp.lead))); content.appendChild(tl);
+        if (stripTags(sp.restHtml).trim()) content.appendChild(buildExc(sp.restHtml, false));
       }
     }
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
@@ -2714,6 +2792,19 @@ function render() {
         put(memo.id, { content: tpl.innerHTML });
       });
     });
+    // [CARD-PREVIEW] Pictos signature 📷 / 📎 (les sous-tâches et commentaires sont déjà affichés
+    // inline plus bas sur la card invité → pas de compteur ☑/💬 en double). Clics existants conservés.
+    const _pic = memoPictosRow({
+      images: (memo.images || []).length,
+      attachments: (memo.attachments || []).length,
+      onImages: (memo.images || []).length ? () => runImageViewer({
+        images: memo.images, startIndex: 0,
+        imageUrl: (n) => API + '/image/' + n, downloadUrl: (n) => API + '/image/' + n, exifUrl: (n) => API + '/image-exif/' + n,
+        canDelete: canEditNow(), onDelete: async (n) => { const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }); if (r.ok) await load(); },
+      }) : null,
+      onAttach: (memo.attachments || []).length ? () => openShareMemoAttachments(memo) : null,
+    });
+    if (_pic) content.appendChild(_pic);
     const _vr = shareVoteRow(memo);
     if (_vr) content.appendChild(_vr);
     row.appendChild(content);
@@ -2756,18 +2847,26 @@ function render() {
       const hchip = heartChip(memo, GUEST.status === 'approved', shareToggleHeart);
       if (hchip) row.appendChild(hchip);
     }
-    if ((memo.attachments || []).length) {  // [ATTACHMENTS-QUICKVIEW] badge 📎 n cliquable
-      const ab = el('span', 'badge', '📎 ' + memo.attachments.length);
-      ab.style.cursor = 'pointer'; ab.title = 'Voir les fichiers joints';
-      ab.addEventListener('click', (e) => { e.stopPropagation(); openShareMemoAttachments(memo); });
-      row.appendChild(ab);
-    }
+    // [CARD-PREVIEW] Le compteur 📎 passe dans la rangée de pictos (avec 📷) — anti-doublon.
     if (canEditNow()) {
       const eBtn = el('button', 'task-edit');
       eBtn.appendChild(shareIcon('pencil'));
       eBtn.title = 'Modifier ce mémo';
       eBtn.addEventListener('click', () => openEditor(memo, content, t));
       row.appendChild(eBtn);
+      // [LESS-BUTTONS] Menu ⋯ compact : Déplacer / Supprimer (le reste des contrôles passe en pop-in).
+      const more = el('div', 'task-more'); more.style.cssText = 'position:relative;display:inline-flex';
+      const moreBtn = el('button', 'task-edit', '⋯'); moreBtn.title = "Plus d'actions";
+      const moreMenu = el('div', 'card-menu'); moreMenu.hidden = true;
+      const mv = el('button', '', '↗ Déplacer vers…');
+      mv.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = true; openMoveShareMemo(memo); });
+      moreMenu.appendChild(mv);
+      const del = el('button', 'danger-item', '🗑 Supprimer');
+      del.addEventListener('click', async (e) => { e.stopPropagation(); moreMenu.hidden = true; const r = await fetch(API + '/memo/' + memo.id, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }); if (r.ok) await load(); });
+      moreMenu.appendChild(del);
+      moreBtn.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
+      more.appendChild(moreBtn); more.appendChild(moreMenu);
+      row.appendChild(more);
     }
     t.appendChild(row);
 
@@ -2915,239 +3014,10 @@ function render() {
       t.appendChild(th);
     }
 
-    if (canEditNow()) {
-      const tools = el('div', 'memo-tools');
-
-      // 1. EN-TÊTE : fil d'Ariane scopé au partage + date de création (lecture). [EXPAND-DETAIL-REORG]
-      const crumb = el('div', 'memo-tools-row task-crumb');
-      crumb.appendChild(el('span', '', '📁'));
-      const byId = {}; (DATA.projects || []).forEach(p => { byId[p.id] = p; });
-      const chain = []; let pcur = memo.project_id, pg = 0;
-      while (pcur != null && byId[pcur] && pg++ < 50) { chain.push(byId[pcur]); pcur = byId[pcur].parent_id; }
-      chain.reverse();
-      if (!chain.length) {
-        crumb.appendChild(el('span', 'me-crumb-node', '📥 Inbox'));
-      } else {
-        chain.forEach((p, i) => {
-          if (i) crumb.appendChild(el('span', '', '›'));
-          const node = el('span', 'me-crumb-node');
-          node.appendChild(projIcon(p));
-          node.appendChild(el('span', '', ' ' + p.name));
-          crumb.appendChild(node);
-        });
-      }
-      tools.appendChild(crumb);
-      if (memo.created_at) {
-        const cd = new Date(memo.created_at);
-        if (!isNaN(cd)) {
-          tools.appendChild(el('div', 'memo-tools-row task-crumb',
-            '🕒 Créé le ' + cd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-            + ' à ' + cd.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })));
-        }
-      }
-
-      // 2. LIGNE PRINCIPALE : date | priorité. [EXPAND-DETAIL-REORG]
-      const mainRow = el('div', 'memo-tools-row');
-      const dateIn = document.createElement('input');
-      dateIn.type = 'date';
-      dateIn.value = memo.due_date || '';
-      dateIn.title = 'Échéance';
-      dateIn.addEventListener('change', () => put(memo.id, { due_date: dateIn.value }));
-      mainRow.appendChild(dateIn);
-
-      if (memo.due_date) {
-        const timeIn = document.createElement('input');
-        timeIn.type = 'time';
-        timeIn.value = memo.due_time || '';
-        timeIn.title = 'Heure de début (optionnelle)';
-        timeIn.addEventListener('change', () => put(memo.id, { due_time: timeIn.value }));
-        mainRow.appendChild(timeIn);
-        // [FESTIVAL-VOTE] heure de fin (visible dès qu'une heure de début est posée).
-        if (memo.due_time) {
-          mainRow.appendChild(el('span', '', '→'));
-          const endIn = document.createElement('input');
-          endIn.type = 'time';
-          endIn.value = memo.end_time || '';
-          endIn.title = 'Heure de fin (optionnelle)';
-          endIn.addEventListener('change', () => put(memo.id, { end_time: endIn.value }));
-          mainRow.appendChild(endIn);
-        }
-      }
-      mainRow.appendChild(el('span', 'detail-sep'));
-
-      const prios = DATA.priorities || [];
-      const pBtn = document.createElement('button');
-      pBtn.className = 'tool-btn';
-      pBtn.title = 'Priorité — cliquer pour changer';
-      const cur = prios.find(x => x.id === memo.priority);
-      pBtn.textContent = ''; pBtn.append(shareIcon('flag'), ' ' + (cur ? cur.name : 'Priorité'));
-      if (cur && cur.color) {
-        pBtn.style.background = cur.color;
-        pBtn.style.borderColor = cur.color;
-        pBtn.style.color = '#10141a';
-      }
-      pBtn.addEventListener('click', () => {
-        const ids = [0, ...prios.map(p => p.id)];
-        const next = ids[(ids.indexOf(memo.priority || 0) + 1) % ids.length];
-        put(memo.id, { priority: next });
-      });
-      mainRow.appendChild(pBtn);
-      tools.appendChild(mainRow);
-
-      // 3. LIGNE D'ACTIONS : Photo, Liste, Position, Modifier, Corbeille. [EXPAND-DETAIL-REORG]
-      const actionRow = el('div', 'memo-tools-row');
-      const fileIn = document.createElement('input');
-      fileIn.type = 'file';
-      fileIn.accept = 'image/png,image/jpeg';
-      fileIn.multiple = true;
-      fileIn.hidden = true;
-      fileIn.addEventListener('change', async () => {
-        for (const f of fileIn.files) {
-          const fd = new FormData();
-          fd.append('image', f);
-          const r = await fetch(API + '/memo/' + memo.id + '/images', {
-            method: 'POST', headers: { 'X-Guest-Token': guestToken() }, body: fd,
-          });
-          if (!r.ok) {
-            const err = await r.json().catch(() => ({}));
-            notify('Image refusée : ' + (err.error || r.statusText), { error: true });
-          }
-        }
-        await load();
-      });
-      const photoBtn = document.createElement('button');
-      photoBtn.className = 'tool-btn';
-      photoBtn.append(shareIcon('camera'), ' Photo');
-      photoBtn.title = 'Ajouter une photo (JPG ou PNG uniquement)';
-      photoBtn.addEventListener('click', () => fileIn.click());
-      actionRow.appendChild(photoBtn);
-      actionRow.appendChild(fileIn);
-
-      if (!hasChecklist) {
-        const listBtn = document.createElement('button');
-        listBtn.className = 'tool-btn';
-        listBtn.append(shareIcon('checklist'), ' Liste');
-        listBtn.title = 'Démarrer une liste à cocher dans ce mémo';
-        listBtn.addEventListener('click', () => {
-          if (t.querySelector('.item-add')) { t.querySelector('.item-add').focus(); return; }
-          const input = makeItemAdd();
-          tools.before(input);
-          input.focus();
-        });
-        actionRow.appendChild(listBtn);
-      }
-
-      const locBtn = document.createElement('button');
-      locBtn.className = 'tool-btn';
-      locBtn.append(shareIcon('map-pin'), memo.location ? ' ×' : ' Position');
-      locBtn.title = memo.location ? 'Retirer la position' : 'Attacher ma position GPS à ce mémo';
-      locBtn.addEventListener('click', () => {
-        if (memo.location) { put(memo.id, { location: null }); return; }
-        if (!navigator.geolocation) { notify('Géolocalisation non disponible.', { error: true }); return; }
-        navigator.geolocation.getCurrentPosition(
-          (pos) => put(memo.id, { location: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
-          () => notify('Position refusée ou indisponible.', { error: true }),
-          { enableHighAccuracy: true, timeout: 10000 }
-        );
-      });
-      actionRow.appendChild(locBtn);
-
-      const eBtn = document.createElement('button');
-      eBtn.className = 'tool-btn';
-      eBtn.append(shareIcon('pencil'), ' Modifier');
-      eBtn.title = 'Éditer le texte (mise en forme, listes, couleurs…)';
-      eBtn.addEventListener('click', () => openEditor(memo, content, t));
-      actionRow.appendChild(eBtn);
-
-      // [MOVE-TO] Déplacer le mémo vers un autre projet du partage (cas tactile).
-      const mvBtn = document.createElement('button');
-      mvBtn.className = 'tool-btn';
-      mvBtn.textContent = '↗ Déplacer';
-      mvBtn.title = 'Déplacer ce mémo vers un autre projet';
-      mvBtn.addEventListener('click', () => openMoveShareMemo(memo));
-      actionRow.appendChild(mvBtn);
-
-      const dBtn = document.createElement('button');
-      dBtn.className = 'tool-btn';
-      dBtn.appendChild(shareIcon('trash'));
-      dBtn.title = 'Mettre ce mémo à la corbeille (restaurable depuis la tuile 🗑)';
-      dBtn.addEventListener('click', async () => {
-        const r = await fetch(API + '/memo/' + memo.id, {
-          method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
-        });
-        if (r.ok) await load();
-      });
-      actionRow.appendChild(dBtn);
-      tools.appendChild(actionRow);
-
-      // 4. META : adresse, titre, assignés. [EXPAND-DETAIL-REORG]
-      const metaRow = el('div', 'memo-tools-row');
-      const addrIn = document.createElement('input');
-      addrIn.type = 'text';
-      addrIn.placeholder = '📍 Adresse… (Entrée)';
-      addrIn.title = 'Chercher une adresse et l\'attacher au mémo';
-      addrIn.style.cssText = 'flex:1;min-width:10rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.78rem;padding:0.25rem 0.45rem';
-      addrIn.addEventListener('keydown', async (e) => {
-        if (e.key !== 'Enter') return;
-        e.preventDefault();
-        const q = addrIn.value.trim();
-        if (q.length < 3) return;
-        const r = await fetch(API + '/geocode?q=' + encodeURIComponent(q), { headers: { 'X-Guest-Token': guestToken() } });
-        const data = r.ok ? await r.json() : { results: [] };
-        if (!data.results.length) { notify('Adresse introuvable : « ' + q + ' »'); return; }
-        const best = data.results[0];
-        await put(memo.id, { location: best });
-      });
-      metaRow.appendChild(addrIn);
-
-      const titleIn = document.createElement('input');
-      titleIn.type = 'text';
-      titleIn.placeholder = '🏷 Titre…';
-      titleIn.maxLength = 200;
-      titleIn.value = memo.title || '';
-      titleIn.title = 'Titre du mémo (optionnel)';
-      titleIn.style.cssText = 'width:9rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.78rem;font-weight:600;padding:0.25rem 0.45rem';
-      titleIn.addEventListener('change', () => put(memo.id, { title: titleIn.value.trim() }));
-      titleIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); titleIn.blur(); } });
-      metaRow.appendChild(titleIn);
-
-      const asgIn = document.createElement('input');
-      asgIn.type = 'text';
-      asgIn.placeholder = '+ @personne';
-      asgIn.title = 'Rattacher une personne à cette tâche (Entrée). Cliquer un badge @ pour retirer.';
-      asgIn.setAttribute('list', 'share-assignees');
-      let sdl = document.getElementById('share-assignees');
-      if (!sdl) {
-        sdl = document.createElement('datalist');
-        sdl.id = 'share-assignees';
-        document.body.appendChild(sdl);
-      }
-      sdl.innerHTML = '';
-      (DATA.members || []).forEach(n => {
-        const o = document.createElement('option');
-        o.value = n;
-        sdl.appendChild(o);
-      });
-      asgIn.style.cssText = 'width:8rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.78rem;padding:0.25rem 0.45rem';
-      asgIn.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
-        e.preventDefault();
-        const name = asgIn.value.replace(/^@/, '').trim();
-        if (!name) return;
-        put(memo.id, { assignees: [...(memo.assignees || []), name] });
-      });
-      metaRow.appendChild(asgIn);
-      if ((memo.assignees || []).length) {
-        const rmBtn = document.createElement('button');
-        rmBtn.className = 'tool-btn';
-        rmBtn.textContent = '× @';
-        rmBtn.title = 'Retirer le dernier assigné (' + memo.assignees[memo.assignees.length - 1] + ')';
-        rmBtn.addEventListener('click', () => put(memo.id, { assignees: memo.assignees.slice(0, -1) }));
-        metaRow.appendChild(rmBtn);
-      }
-      tools.appendChild(metaRow);
-      t.appendChild(tools);
-    }
+    // [LESS-BUTTONS] L'ancien bloc « memo-tools » (crumb, date/heure, priorité, Photo, Liste,
+    // Position, Modifier, Déplacer, Corbeille, adresse, titre, assignés) a été retiré : ces
+    // contrôles vivent désormais dans la pop-in « Modifier le mémo » (renderQMeta + sections
+    // existantes) et dans le menu ⋯ de la rangée. La card ne garde que la consultation active.
     list.appendChild(t);
   });
 }
@@ -3171,6 +3041,8 @@ async function load() {
 }
 
 document.getElementById('lightbox').addEventListener('click', () => document.getElementById('lightbox').close());
+// [LESS-BUTTONS] ferme les menus ⋯ des cards au clic ailleurs (un seul handler global).
+document.addEventListener('click', () => { document.querySelectorAll('.task-more .card-menu:not([hidden])').forEach(m => { m.hidden = true; }); });
 const addInput = document.getElementById('add-input');
 async function addMemo() {
   const content = addInput.value.trim();

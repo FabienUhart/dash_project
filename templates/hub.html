@@ -93,7 +93,7 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .task.done .task-check { background: var(--green); border-color: var(--green); color: #fff; }
 .task-check[disabled] { cursor: default; opacity: 0.5; }
 .task-content { flex: 1; min-width: 0; font-size: 0.92rem; white-space: pre-wrap; word-break: break-word; cursor: pointer; }
-.task-content.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.task-content.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }  /* [CARD-PREVIEW] extrait 2 lignes */
 .task-title { font-weight: 600; margin-bottom: 0.15rem; }
 .task.done .task-title, .task.done .task-content { text-decoration: line-through; color: var(--muted); }
 .task-content a { color: var(--accent); }
@@ -666,21 +666,36 @@ function memoCard(m) {
       const rest = memoRestText(m.content);
       if (rest) { const c = el('div'); c.appendChild(linkify(rest)); content.appendChild(c); }
     } else {
-      const c = el('div'); c.appendChild(sanitize(m.content)); content.appendChild(c);
+      // [V23.6.100] Riche sans titre : 1re ligne/paragraphe/item promu en titre gras, extrait =
+      // reste du contenu riche (checklists/tableaux préservés), sans duplication.
+      const sp = splitLeadHtml(m.content);
+      content.appendChild(el('div', { class: 'task-title', text: memoLeadText(sp.lead) }));
+      if (stripTags(sp.restHtml).trim()) { const c = el('div'); c.appendChild(sanitize(sp.restHtml)); content.appendChild(c); }
       if (m.can_edit) wireChecklist(content, m);
     }
   }
+  // [CARD-PREVIEW] Pictos signature ☑/📷/📎/💬 (la card hub est compacte : rien inline → tous les
+  // pictos utiles). Clics : 📷 → visionneuse, 📎 → pop-in fichiers, 💬 → éditeur ; ☑ passif.
+  const _pic = memoPictosRow({
+    subtasks: m.subtasks,
+    images: (m.images || []).length,
+    attachments: (m.attachments || []).length,
+    comments: (m.comments || []).length,
+    onImages: (m.images || []).length ? () => runImageViewer({
+      images: m.images, startIndex: 0,
+      imageUrl: (n) => '/share/' + m.share_token + '/image/' + n, downloadUrl: (n) => '/share/' + m.share_token + '/image/' + n, exifUrl: (n) => '/share/' + m.share_token + '/image-exif/' + n,
+    }) : null,
+    onAttach: (m.attachments || []).length ? () => openHubMemoAttachments(m) : null,
+    onComments: (m.comments || []).length ? () => openEditor(m) : null,
+  });
+  if (_pic) content.appendChild(_pic);
   content.addEventListener('click', () => openEditor(m));
   row.appendChild(content);
   const badges = el('div', { class: 'badges' });
   if (prio && prio.color && !m.done) badges.appendChild(el('span', { class: 'prio-chip', text: prio.name, attrs: { style: 'background:' + prio.color + ';color:' + textOn(prio.color) } }));
   const due = dueInfo(m); if (due) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: due.label }));
   if (m.project) badges.appendChild(el('span', { class: 'badge', text: '📁 ' + m.project }));
-  if ((m.attachments || []).length) {  // [ATTACHMENTS-QUICKVIEW] badge 📎 n cliquable
-    const ab = el('span', { class: 'badge', text: '📎 ' + m.attachments.length, attrs: { style: 'cursor:pointer', title: 'Voir les fichiers joints' } });
-    ab.addEventListener('click', (e) => { e.stopPropagation(); openHubMemoAttachments(m); });
-    badges.appendChild(ab);
-  }
+  // [CARD-PREVIEW] Le compteur 📎 est dans la rangée de pictos (anti-doublon).
   (m.assignees || []).forEach(a => badges.appendChild(el('span', { class: 'asg-av', text: initials(a), attrs: { title: a } })));
   if (!m.can_edit) badges.appendChild(el('span', { class: 'lock', text: '🔒 lecture' }));
   if (badges.children.length) row.appendChild(badges);

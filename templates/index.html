@@ -860,7 +860,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .task .task-actions .texp, .task .task-actions .tedit { color: var(--accent); border-color: var(--accent); }
 /* === [CARD-REDESIGN] cards mémo resserrées === */
 /* Extrait tronqué à 3 lignes sur la card (contenu complet dans l'éditeur / au déplier). */
-.task .task-clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.task .task-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }  /* [CARD-PREVIEW] extrait 2 lignes */
 .task .task-badges:empty { display: none; }
 /* Chip de priorité (couleur = couleur de la priorité, texte via textOn()). */
 .prio-chip { font-size: 0.66rem; font-weight: 700; border-radius: 4px; padding: 0.05rem 0.4rem; line-height: 1.45; white-space: nowrap; }
@@ -1475,7 +1475,10 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
    rendu statique aux tokens quand le contenu complet est affiché (card dépliée / non
    clampée) — sinon un invité lecture seule n'y aurait jamais accès. table-layout:fixed
    partage la largeur de la card, pas de débordement. */
-.task-content .task-clamp, .task-clamp table { display: none; }
+/* [CARD-PREVIEW fix V23.6.99] Ne masquer QUE les tableaux dans l'extrait clampé (un tableau ne
+   se clampe pas) — surtout PAS le `.task-clamp` lui-même (l'ancien sélecteur `.task-content
+   .task-clamp` effondrait tout l'extrait à 0×0, invisible ; visible = but de [CARD-PREVIEW]). */
+.task-clamp table { display: none; }
 .task-content table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .task-content td, .task-content th { border: 1px solid var(--border); padding: 2px 5px; word-break: break-word; }
 .task-content th { background: var(--panel-2); }
@@ -1883,6 +1886,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <h3 style="margin:0">Éditer le mémo</h3>
     <button type="button" id="memo-menu-btn" class="icon-btn" title="Actions" aria-label="Actions">⋯</button>
     <div id="memo-menu" class="card-menu" hidden>
+      <button type="button" id="memo-edit-share">🔗 Partager</button>
       <button type="button" id="memo-edit-dup">⧉ Dupliquer</button>
       <button type="button" id="memo-edit-delete" class="danger-item">🗑 Supprimer</button>
     </div>
@@ -1895,6 +1899,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <div id="quill-wrap"><div id="quill-editor"></div></div>
   <label class="me-label">Assigné·es</label>
   <div id="me-people" style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-top:0.2rem"></div>
+  <!-- [LESS-BUTTONS] Métadonnées d'édition déplacées de la card vers la pop-in (projet, échéance,
+       priorité, emoji, couleur du point, récurrence, hors-vote). Rendu par renderMeMeta(). -->
+  <div id="me-meta"></div>
   <label class="me-label">📍 Position</label>
   <div id="me-loc-row" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.2rem">
     <button type="button" id="me-loc-set" class="prio-btn">📍 Ma position</button>
@@ -5257,6 +5264,118 @@ function renderMePhotos(memo) {
   if (sec) box.appendChild(sec);
 }
 
+// [LESS-BUTTONS] Métadonnées d'édition dans la pop-in (déplacées de la card) : projet, échéance,
+// priorité, emoji, couleur du point, récurrence, hors-vote. Chaque contrôle live-patch (comme sur
+// l'ancienne card) puis re-rend la section depuis l'état frais (les champs conditionnels — heure,
+// × date, ↺ couleur — suivent). Réutilise `.prio-btn` et les tokens (invariant 9).
+async function metaPatch(memo, body) {
+  await patchMemo(memo.id, body);
+  const fresh = state.memos.find((m) => m.id === memo.id);
+  if (fresh) { editingMemo = fresh; renderMeMeta(fresh); }
+}
+function renderMeMeta(memo) {
+  const box = document.getElementById('me-meta');
+  if (!box) return;
+  box.innerHTML = '';
+  const rowStyle = 'display:flex;gap:0.45rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;font-size:0.85rem;color:var(--muted)';
+  const inStyle = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.3rem 0.45rem';
+
+  // — Projet
+  const projRow = el('div', { attrs: { style: rowStyle } });
+  projRow.appendChild(el('span', { text: '📁', attrs: { title: 'Projet' } }));
+  const projSel = el('select', { attrs: { style: inStyle } });
+  projSel.appendChild(el('option', { attrs: { value: '' }, text: '📥 Inbox' }));
+  state.projects.forEach((p) => {
+    const opt = el('option', { attrs: { value: p.id }, text: (p.emoji ? p.emoji + ' ' : '') + p.name });
+    if (memo.project_id === p.id) opt.selected = true;
+    projSel.appendChild(opt);
+  });
+  projSel.addEventListener('change', () => metaPatch(memo, { project_id: projSel.value ? Number(projSel.value) : null }));
+  projRow.appendChild(projSel);
+  box.appendChild(projRow);
+
+  // — Échéance (date + heure début/fin + × date)
+  const dateRow = el('div', { attrs: { style: rowStyle } });
+  dateRow.appendChild(el('span', { text: '📅', attrs: { title: 'Échéance' } }));
+  const dateIn = el('input', { attrs: { type: 'date', style: inStyle } });
+  dateIn.value = memo.due_date || '';
+  dateIn.addEventListener('change', () => metaPatch(memo, { due_date: dateIn.value }));
+  dateRow.appendChild(dateIn);
+  if (memo.due_date) {
+    const timeIn = el('input', { attrs: { type: 'time', title: 'Heure de début (optionnelle)', style: inStyle } });
+    timeIn.value = memo.due_time || '';
+    timeIn.addEventListener('change', () => metaPatch(memo, { due_time: timeIn.value }));
+    dateRow.appendChild(timeIn);
+    if (memo.due_time) {
+      dateRow.appendChild(el('span', { text: '→' }));
+      const endIn = el('input', { attrs: { type: 'time', title: 'Heure de fin (optionnelle)', style: inStyle } });
+      endIn.value = memo.end_time || '';
+      endIn.addEventListener('change', () => metaPatch(memo, { end_time: endIn.value }));
+      dateRow.appendChild(endIn);
+    }
+    dateRow.appendChild(el('button', { class: 'prio-btn', text: '× date', attrs: { title: "Retirer l'échéance" }, on: { click: () => metaPatch(memo, { due_date: '' }) } }));
+  }
+  box.appendChild(dateRow);
+
+  // — Priorité
+  const prioRow = el('div', { attrs: { style: rowStyle } });
+  prioRow.appendChild(el('span', { icon: 'flag', attrs: { title: 'Priorité' } }));
+  prioRow.appendChild(el('button', { class: 'prio-btn' + (memo.priority === 0 ? ' sel-none' : ''), text: 'Aucune', on: { click: () => metaPatch(memo, { priority: 0 }) } }));
+  state.priorities.forEach((p) => {
+    const btn = el('button', { class: 'prio-btn', text: p.name, on: { click: () => metaPatch(memo, { priority: p.id }) } });
+    if (memo.priority === p.id && p.color) { btn.style.background = p.color; btn.style.borderColor = p.color; btn.style.color = textOn(p.color); }
+    else if (p.color) { btn.style.color = p.color; }
+    prioRow.appendChild(btn);
+  });
+  box.appendChild(prioRow);
+
+  // — Emoji + couleur du point + récurrence
+  const styleRow = el('div', { attrs: { style: rowStyle } });
+  styleRow.appendChild(el('span', { text: '😀', attrs: { title: 'Emoji du mémo' } }));
+  const emojiIn = el('input', { attrs: { type: 'text', maxlength: '4', placeholder: '😀', title: 'Emoji du mémo', style: inStyle + ';width:2.8rem;text-align:center' } });
+  emojiIn.value = memo.emoji || '';
+  emojiIn.addEventListener('change', () => metaPatch(memo, { emoji: emojiIn.value.trim() }));
+  styleRow.appendChild(emojiIn);
+  styleRow.appendChild(el('span', { text: '📍', attrs: { title: 'Couleur du point sur la carte' } }));
+  const ptColorIn = el('input', { attrs: { type: 'color', title: 'Couleur du point sur la carte', style: 'width:2.2rem;height:1.8rem;padding:0;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer' } });
+  ptColorIn.value = memo.marker_color || (prioOf(memo.priority) || {}).color || state.mapMarkerColor || '#e53935';
+  ptColorIn.addEventListener('change', () => metaPatch(memo, { marker_color: ptColorIn.value }));
+  styleRow.appendChild(ptColorIn);
+  if (memo.marker_color) {
+    styleRow.appendChild(el('button', { class: 'prio-btn', text: '↺', attrs: { title: 'Couleur du point par défaut' }, on: { click: () => metaPatch(memo, { marker_color: '' }) } }));
+  }
+  styleRow.appendChild(el('span', { text: '🔁', attrs: { title: 'Récurrence', style: 'margin-left:0.3rem' } }));
+  const recurSel = el('select', { attrs: { style: inStyle } });
+  RECUR_OPTIONS.forEach(([v, label]) => {
+    const opt = el('option', { attrs: { value: v }, text: v === '' ? 'Aucune' : label });
+    if ((memo.recurrence || '') === v) opt.selected = true;
+    recurSel.appendChild(opt);
+  });
+  recurSel.addEventListener('change', () => metaPatch(memo, { recurrence: recurSel.value }));
+  styleRow.appendChild(recurSel);
+  box.appendChild(styleRow);
+
+  // — Hors-vote (owner-only, seulement si le dossier direct est au vote)
+  const voteProj = state.projects.find((p) => p.id === memo.project_id);
+  if (voteProj && voteProj.vote_enabled) {
+    const exRow = el('div', { attrs: { style: rowStyle } });
+    const lbl = el('label', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.4rem;cursor:pointer' } });
+    const cb = el('input', { attrs: { type: 'checkbox' } });
+    cb.checked = !!memo.vote_excluded;
+    cb.addEventListener('change', async () => {
+      if (cb.checked && (memo.vote_count || 0) > 0) {
+        const n = memo.vote_count;
+        if (!(await confirmPopin(`Ce mémo a ${n} voix. Le sortir du vote les supprimera.`, { title: 'Sortir du vote ?', okLabel: 'Sortir du vote', danger: true }))) { cb.checked = false; return; }
+      }
+      metaPatch(memo, { vote_excluded: cb.checked ? 1 : 0 });
+    });
+    lbl.appendChild(cb);
+    lbl.appendChild(el('span', { text: "🗳 Hors vote (ce mémo n'est pas une option)" }));
+    exRow.appendChild(lbl);
+    box.appendChild(exRow);
+  }
+}
+
 // [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur mémo (owner).
 function renderMeAttachments(memo) {
   const box = document.getElementById('me-attachments');
@@ -5289,6 +5408,7 @@ function openMemoEditor(memo) {
   editingLoc = (memo.location && typeof memo.location.lat === 'number') ? { ...memo.location } : null;
   document.getElementById('me-loc-addr').value = '';
   renderMeLoc();
+  renderMeMeta(memo);         // [LESS-BUTTONS] projet/échéance/priorité/emoji/couleur/récurrence/hors-vote
   renderMePhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderMeAttachments(memo);  // [ATTACHMENTS]
   const mc = document.getElementById('me-comments');
@@ -5329,6 +5449,12 @@ document.getElementById('memo-edit-dup').addEventListener('click', async () => {
   memoEditDialog.close();
   editingMemoId = null;
   await duplicateMemo(id);
+});
+// [LESS-BUTTONS] Partager depuis la pop-in (parité avec le menu ⋯ de la card).
+document.getElementById('memo-edit-share').addEventListener('click', () => {
+  if (!editingMemo) return;
+  document.getElementById('memo-menu').hidden = true;
+  openShareDialog('memo', editingMemo.id, stripHTML(editingMemo.content).slice(0, 40));
 });
 const memoMenu = document.getElementById('memo-menu');
 const memoMenuBtn = document.getElementById('memo-menu-btn');
@@ -5822,7 +5948,7 @@ function taskEl(memo) {
     content.appendChild(tl);
     if (memo.content) {
       const cn = contentNode(memo.content, memo);
-      if (!expanded) cn.classList.add('task-clamp'); // extrait 3 lignes ; déplier = complet
+      if (!expanded) cn.classList.add('task-clamp'); // [CARD-PREVIEW] extrait 2 lignes ; déplier = complet
       content.appendChild(cn);
     }
   } else {
@@ -5840,10 +5966,30 @@ function taskEl(memo) {
       const rest = memoRestText(memo.content);
       if (rest) { const cn = contentNode(rest, memo); cn.classList.add('task-clamp'); content.appendChild(cn); }
     } else {
-      const cn = contentNode(memo.content, memo); cn.classList.add('task-clamp'); content.appendChild(cn); // riche : extrait inchangé
+      // [V23.6.100] Contenu riche sans titre : 1re ligne/paragraphe/item promu en titre gras,
+      // extrait = reste du contenu riche (checklists/tableaux préservés), aucune duplication.
+      const sp = splitLeadHtml(memo.content);
+      content.appendChild(el('div', { class: 'task-title', text: memoLeadText(sp.lead) }));
+      if (stripHTML(sp.restHtml).trim()) { const cn = contentNode(sp.restHtml, memo); cn.classList.add('task-clamp'); content.appendChild(cn); }
     }
   }
   wireChecklist(content, memo);
+  // [CARD-PREVIEW] rangée de pictos « signature » sous le titre/extrait (☑/📷/📎/💬), qui absorbe
+  // les anciens badges 📎/💬/☑. Clics : 📷 → visionneuse, 📎 → pop-in fichiers, 💬 → déplier.
+  const pictos = memoPictosRow({
+    subtasks: memo.subtasks,
+    images: (memo.images || []).length,
+    attachments: (memo.attachments || []).length,
+    comments: memo.comment_count || 0,
+    onImages: (memo.images || []).length ? () => runImageViewer({
+      images: memo.images, startIndex: 0,
+      imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`, exifUrl: (n) => `/api/image-exif/${n}`,
+      canDelete: true, onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
+    }) : null,
+    onAttach: (memo.attachments || []).length ? () => openMemoAttachments(memo) : null,
+    onComments: memo.comment_count ? () => { expandedMemos.add(memo.id); renderBoard(); } : null,
+  });
+  if (pictos) content.appendChild(pictos);
   const vrow = voteRowEl(memo);
   if (vrow) content.appendChild(vrow);
   row.appendChild(content);
@@ -5881,31 +6027,8 @@ function taskEl(memo) {
     });
     badges.appendChild(stack);
   }
-  if ((memo.attachments || []).length) {  // [ATTACHMENTS] badge 📎 n cliquable → pop-in fichiers
-    const ab = el('span', { class: 'badge', text: '📎 ' + memo.attachments.length, attrs: { title: 'Voir les fichiers joints', style: 'cursor:pointer' } });
-    ab.addEventListener('click', (e) => { e.stopPropagation(); openMemoAttachments(memo); });
-    badges.appendChild(ab);
-  }
-  if (memo.comment_count) {
-    const cb = el('span', {
-      class: 'badge',
-      icon: 'message', text: '' + memo.comment_count,
-      attrs: { title: 'Commentaires — cliquer pour les voir', style: 'cursor:pointer;color:#ffcc80' },
-    });
-    cb.addEventListener('click', (e) => {
-      e.stopPropagation();
-      expandedMemos.add(memo.id);
-      renderBoard();
-    });
-    badges.appendChild(cb);
-  }
-  const subs = memo.subtasks || [];
-  if (subs.length) {
-    badges.appendChild(el('span', {
-      class: 'badge',
-      icon: 'checklist', text: `${subs.filter(s => s.done).length}/${subs.length}`,
-    }));
-  }
+  // [CARD-PREVIEW] Les compteurs 📎 / 💬 / ☑ sont désormais dans la rangée de pictos (voir plus bas),
+  // pas dans les badges — une seule rangée d'indicateurs (anti-doublon).
   if (memo.guest_editor) {
     const gname = memo.guest_editor.replace(/\s*<[^>]*>/, '');
     badges.appendChild(el('span', {
@@ -5942,9 +6065,18 @@ function taskEl(memo) {
     text: '↗ Déplacer vers…',
     on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; openMoveMemo(memo); } },
   }));
+  // [LESS-BUTTONS] Partager + Supprimer rejoignent le menu ⋯ de la card (actions rares hors édition).
+  moreMenu.appendChild(el('button', {
+    text: '🔗 Partager',
+    on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; openShareDialog('memo', memo.id, stripHTML(memo.content).slice(0, 40)); } },
+  }));
   moreMenu.appendChild(el('button', {
     text: '⧉ Dupliquer',
     on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; duplicateMemo(memo.id); } },
+  }));
+  moreMenu.appendChild(el('button', {
+    class: 'danger-item', text: '🗑 Supprimer',
+    on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; deleteMemo(memo.id); } },
   }));
   moreBtn.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
   more.appendChild(moreBtn);
@@ -6147,229 +6279,10 @@ function taskDetailEl(memo) {
   const recap = guestRecapEl('memo', memo.id);
   if (recap) detail.appendChild(recap);
 
-  // 1. EN-TÊTE : fil d'Ariane projet + ligne « créé par ». [EXPAND-DETAIL-REORG]
-  const crumb = el('div', { class: 'detail-row task-crumb' });
-  crumb.appendChild(el('span', { text: '📁', attrs: { title: 'Projet' } }));
-  const ancIds = projectAncestorIds(memo.project_id).reverse(); // racine → feuille
-  const crumbProjs = ancIds.map(id => state.projects.find(p => p.id === id)).filter(Boolean);
-  if (!crumbProjs.length) {
-    crumb.appendChild(el('span', { class: 'me-crumb-node', text: '📥 Inbox' }));
-  } else {
-    crumbProjs.forEach((p, i) => {
-      if (i) crumb.appendChild(el('span', { text: '›', attrs: { style: 'color:var(--muted)' } }));
-      const node = el('span', { class: 'me-crumb-node' });
-      node.appendChild(comboIcon(p.emoji, usableProjColor(p.color), '📁'));
-      node.appendChild(el('span', { text: ' ' + p.name }));
-      crumb.appendChild(node);
-    });
-  }
-  detail.appendChild(crumb);
-  if (memo.created_at) {
-    const cd = new Date(memo.created_at);
-    if (!isNaN(cd)) {
-      const who = memo.created_by_display || state.ownerName || 'Fabien';
-      const txt = '👤 Créé par @' + who + ' le '
-        + cd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
-        + ' à ' + cd.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      detail.appendChild(el('div', { class: 'detail-row task-crumb', text: txt }));
-    }
-  }
-
-  const titleRow = el('div', { class: 'detail-row' });
-  titleRow.appendChild(el('span', { text: '🏷', attrs: { title: 'Titre du mémo' } }));
-  const titleIn = el('input', { attrs: { type: 'text', placeholder: 'Titre (optionnel)', maxlength: '200' } });
-  titleIn.style.cssText = 'flex:1;min-width:10rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.88rem;font-weight:600;padding:0.25rem 0.45rem';
-  titleIn.value = memo.title || '';
-  titleIn.addEventListener('change', () => patchMemo(memo.id, { title: titleIn.value.trim() }));
-  titleIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); titleIn.blur(); } });
-  titleRow.appendChild(titleIn);
-  detail.appendChild(titleRow);
-
-  detail.appendChild(assigneeRowEl(memo));
-
-  // 3. LIGNE PRINCIPALE : [date] | [priorités] | [🎨 Style / Options ▾]. [EXPAND-DETAIL-REORG]
-  const mainRow = el('div', { class: 'detail-row' });
-  // — zone date
-  mainRow.appendChild(el('span', { text: '📅' }));
-  const dateIn = el('input', { attrs: { type: 'date' } });
-  dateIn.value = memo.due_date || '';
-  dateIn.addEventListener('change', () => patchMemo(memo.id, { due_date: dateIn.value }));
-  mainRow.appendChild(dateIn);
-  if (memo.due_date) {
-    const timeIn = el('input', { attrs: { type: 'time', title: 'Heure de début (optionnelle)' } });
-    timeIn.value = memo.due_time || '';
-    timeIn.addEventListener('change', () => patchMemo(memo.id, { due_time: timeIn.value }));
-    mainRow.appendChild(timeIn);
-    // [FESTIVAL-VOTE] heure de fin (visible dès qu'une heure de début est posée ; une fin
-    // sans début n'existe pas — le serveur la vide sinon).
-    if (memo.due_time) {
-      mainRow.appendChild(el('span', { text: '→', attrs: { style: 'color:var(--muted)' } }));
-      const endIn = el('input', { attrs: { type: 'time', title: 'Heure de fin (optionnelle)' } });
-      endIn.value = memo.end_time || '';
-      endIn.addEventListener('change', () => patchMemo(memo.id, { end_time: endIn.value }));
-      mainRow.appendChild(endIn);
-    }
-    mainRow.appendChild(el('button', {
-      text: '× date', class: 'prio-btn', attrs: { title: "Retirer l'échéance" },
-      on: { click: () => patchMemo(memo.id, { due_date: '' }) },
-    }));
-  }
-  mainRow.appendChild(el('span', { class: 'detail-sep' }));
-  // — zone priorités
-  mainRow.appendChild(el('span', { icon: 'flag' }));
-  const noneBtn = el('button', {
-    class: 'prio-btn' + (memo.priority === 0 ? ' sel-none' : ''),
-    text: 'Aucune',
-    on: { click: () => patchMemo(memo.id, { priority: 0 }) },
-  });
-  mainRow.appendChild(noneBtn);
-  state.priorities.forEach(p => {
-    const btn = el('button', { class: 'prio-btn', text: p.name, on: { click: () => patchMemo(memo.id, { priority: p.id }) } });
-    if (memo.priority === p.id && p.color) {
-      btn.style.background = p.color;
-      btn.style.borderColor = p.color;
-      btn.style.color = textOn(p.color);
-    } else if (p.color) {
-      btn.style.color = p.color;
-    }
-    mainRow.appendChild(btn);
-  });
-  mainRow.appendChild(el('span', { class: 'detail-sep' }));
-  // — zone style / options (repli card-menu : contrôles les moins utilisés)
-  const styleWrap = el('div', { class: 'task-more' });
-  const styleMenu = el('div', { class: 'card-menu', attrs: { hidden: '' } });
-  styleMenu.addEventListener('click', (e) => e.stopPropagation()); // garder ouvert pendant l'édition
-  const styleBtn = el('button', {
-    class: 'prio-btn', text: '🎨 Style / Options ▾', attrs: { title: 'Emoji, couleur du point, récurrence, projet' },
-  });
-  styleBtn.addEventListener('click', (e) => { e.stopPropagation(); styleMenu.hidden = !styleMenu.hidden; });
-  // emoji
-  const emojiRow = el('div', { class: 'detail-row' });
-  emojiRow.appendChild(el('span', { text: '😀', attrs: { title: 'Emoji du mémo' } }));
-  const emojiIn = el('input', { attrs: { type: 'text', maxlength: '4', title: 'Emoji du mémo', placeholder: '😀' } });
-  emojiIn.style.cssText = 'width:2.6rem;text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.95rem;padding:0.15rem';
-  emojiIn.value = memo.emoji || '';
-  emojiIn.addEventListener('change', () => patchMemo(memo.id, { emoji: emojiIn.value.trim() }));
-  emojiRow.appendChild(emojiIn);
-  styleMenu.appendChild(emojiRow);
-  // couleur du point sur la carte (override). Vide = couleur priorité / défaut.
-  const colorRow = el('div', { class: 'detail-row' });
-  colorRow.appendChild(el('span', { text: '📍', attrs: { title: 'Couleur du point sur la carte' } }));
-  const ptColorIn = el('input', { attrs: { type: 'color', title: 'Couleur du point sur la carte' } });
-  ptColorIn.style.cssText = 'width:2rem;height:1.7rem;padding:0;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer';
-  ptColorIn.value = memo.marker_color || (prioOf(memo.priority) || {}).color || state.mapMarkerColor || '#e53935';
-  ptColorIn.addEventListener('change', () => patchMemo(memo.id, { marker_color: ptColorIn.value }));
-  colorRow.appendChild(ptColorIn);
-  if (memo.marker_color) {
-    colorRow.appendChild(el('button', {
-      class: 'prio-btn', text: '↺ couleur', attrs: { title: 'Couleur du point par défaut' },
-      on: { click: () => patchMemo(memo.id, { marker_color: '' }) },
-    }));
-  }
-  styleMenu.appendChild(colorRow);
-  // récurrence
-  const recurRow = el('div', { class: 'detail-row' });
-  recurRow.appendChild(el('span', { text: '🔁', attrs: { title: 'Récurrence' } }));
-  const recurSel = el('select');
-  RECUR_OPTIONS.forEach(([v, label]) => {
-    const opt = el('option', { attrs: { value: v }, text: v === '' ? 'Aucune' : label });
-    if ((memo.recurrence || '') === v) opt.selected = true;
-    recurSel.appendChild(opt);
-  });
-  recurSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.18rem 0.3rem';
-  recurSel.addEventListener('change', () => patchMemo(memo.id, { recurrence: recurSel.value }));
-  recurRow.appendChild(recurSel);
-  styleMenu.appendChild(recurRow);
-  // projet
-  const projRow = el('div', { class: 'detail-row' });
-  projRow.appendChild(el('span', { text: '📁', attrs: { title: 'Projet' } }));
-  const projSel = el('select');
-  projSel.appendChild(el('option', { attrs: { value: '' }, text: 'Inbox' }));
-  state.projects.forEach(p => {
-    const opt = el('option', { attrs: { value: p.id }, text: (p.emoji ? p.emoji + ' ' : '') + p.name });
-    if (memo.project_id === p.id) opt.selected = true;
-    projSel.appendChild(opt);
-  });
-  projSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.18rem 0.3rem';
-  projSel.addEventListener('change', () => patchMemo(memo.id, { project_id: projSel.value ? Number(projSel.value) : null }));
-  projRow.appendChild(projSel);
-  styleMenu.appendChild(projRow);
-  styleWrap.appendChild(styleBtn);
-  styleWrap.appendChild(styleMenu);
-  mainRow.appendChild(styleWrap);
-  detail.appendChild(mainRow);
-
-  // [VOTE-EXCLUDE] case « Hors vote » — visible seulement si le dossier direct est au vote.
-  const voteProj = state.projects.find(p => p.id === memo.project_id);
-  if (voteProj && voteProj.vote_enabled) {
-    const exRow = el('div', { class: 'detail-row' });
-    const lbl = el('label', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer' } });
-    const cb = el('input', { attrs: { type: 'checkbox' } });
-    cb.checked = !!memo.vote_excluded;
-    cb.addEventListener('change', async () => {
-      if (cb.checked && (memo.vote_count || 0) > 0) {
-        const n = memo.vote_count;
-        if (!(await confirmPopin(`Ce mémo a ${n} voix. Le sortir du vote les supprimera.`,
-              { title: 'Sortir du vote ?', okLabel: 'Sortir du vote', danger: true }))) { cb.checked = false; return; }
-      }
-      patchMemo(memo.id, { vote_excluded: cb.checked ? 1 : 0 });
-    });
-    lbl.appendChild(cb);
-    lbl.appendChild(el('span', { text: "🗳 Hors vote (ce mémo n'est pas une option)" }));
-    exRow.appendChild(lbl);
-    detail.appendChild(exRow);
-  }
-
-  // 4. LIGNE D'ACTIONS : Image, Partager, Versions, Ma position. [EXPAND-DETAIL-REORG]
-  const actionRow = el('div', { class: 'detail-row' });
-  const fileIn = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: '' } });
-  fileIn.style.display = 'none';
-  fileIn.addEventListener('change', () => { if (fileIn.files.length) uploadMemoImages(memo.id, [...fileIn.files]); });
-  actionRow.appendChild(el('button', {
-    class: 'prio-btn', icon: 'paperclip', text: 'Image',
-    attrs: { title: 'Ajouter une image (ou glisser un fichier sur le mémo)' },
-    on: { click: () => fileIn.click() },
-  }));
-  actionRow.appendChild(fileIn);
-  actionRow.appendChild(el('button', {
-    class: 'prio-btn', icon: 'link', text: 'Partager',
-    attrs: { title: 'Partager ce mémo par lien (sans compte)' },
-    on: { click: () => openShareDialog('memo', memo.id, stripHTML(memo.content).slice(0, 40)) },
-  }));
-  actionRow.appendChild(el('button', {
-    class: 'prio-btn', icon: 'history', text: 'Versions',
-    attrs: { title: 'Historique des modifications et restauration' },
-    on: { click: () => openRevisions(memo) },
-  }));
-  actionRow.appendChild(el('button', {
-    class: 'prio-btn', icon: 'map-pin', text: 'Ma position',
-    attrs: { title: 'Attacher ta position GPS actuelle à ce mémo' },
-    on: { click: () => capturePosition((loc) => patchMemo(memo.id, { location: loc })) },
-  }));
-  detail.appendChild(actionRow);
-
-  // 5. BAS : adresse, sous-tâches, commentaires. [EXPAND-DETAIL-REORG]
-  const addrRow = el('div', { class: 'detail-row' });
-  const addrIn = el('input', {
-    attrs: { type: 'text', placeholder: '📍 Adresse… (Entrée)', title: 'Chercher une adresse et l\'attacher au mémo' },
-  });
-  addrIn.style.cssText = 'flex:1;min-width:11rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
-  addrIn.addEventListener('keydown', async (e) => {
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
-    const loc = await geocodeAddress(addrIn.value);
-    if (loc) await patchMemo(memo.id, { location: loc });
-  });
-  addrRow.appendChild(addrIn);
-  if (memo.location) {
-    addrRow.appendChild(el('button', {
-      class: 'prio-btn', text: '× 📍',
-      attrs: { title: 'Retirer la position' },
-      on: { click: () => patchMemo(memo.id, { location: null }) },
-    }));
-  }
-  detail.appendChild(addrRow);
-
+  // [LESS-BUTTONS] La card dépliée ne garde que la consultation active : sous-tâches cochables +
+  // « + sous-tâche » et le fil de commentaires. Tous les contrôles d'édition (titre, projet,
+  // échéance, priorité, emoji, couleur du point, récurrence, position, images, Partager, Versions,
+  // hors-vote) vivent désormais dans la pop-in « Éditer le mémo » (✎ / renderMeMeta).
   const subs = memo.subtasks || [];
   subs.forEach((st, i) => {
     const stRow = el('div', { class: 'subtask' + (st.done ? ' stdone' : '') });

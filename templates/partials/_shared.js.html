@@ -66,6 +66,25 @@ function memoRestText(plain) {
   const nl = t.indexOf('\n');
   return nl < 0 ? '' : t.slice(nl + 1).trim();
 }
+// [V23.6.100] Contenu RICHE sans titre : détache la 1re « ligne » (1er paragraphe/`<li>`/titre non
+// vide) pour la promouvoir en accroche, et renvoie le HTML RESTANT pour l'extrait — les checklists
+// et tableaux du reste sont donc PRÉSERVÉS (contrairement à un strip texte), et jamais de doublon
+// de la phrase promue. { lead: texte de la 1re ligne, restHtml: HTML sans cette ligne }. Purs.
+function splitLeadHtml(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html || '';
+  const frag = tpl.content;
+  let first = null;
+  const blocks = frag.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6, blockquote');
+  for (const b of blocks) { if ((b.textContent || '').trim()) { first = b; break; } }
+  if (!first) {  // aucun bloc textuel (pur inline) → tout en accroche, pas d'extrait
+    return { lead: (frag.textContent || '').replace(/\s+/g, ' ').trim(), restHtml: '' };
+  }
+  const lead = (first.textContent || '').replace(/\s+/g, ' ').trim();
+  first.remove();  // retire la 1re ligne du reste → aucune duplication
+  const div = document.createElement('div'); div.appendChild(frag);
+  return { lead: lead, restHtml: div.innerHTML };
+}
 
 // [FESTIVAL-VOTE] Plage horaire d'un passage « 22h30 → 00h00 » (fin omise si absente/invalide).
 // Le front affiche seulement — la normalisation post-minuit (+24h) vit côté serveur.
@@ -2410,6 +2429,43 @@ function renderAttachments(cfg) {
   list.forEach(a => wrap.appendChild(attachRow(a, cfg)));
   if (cfg.canEdit) wrap.appendChild(attachUploader(cfg));
   return wrap;
+}
+
+// [CARD-PREVIEW] Rangée de pictos « signature » sous le titre/extrait de la card : ☑ n/m ·
+// 📷 n · 📎 n · 💬 n. Chaque picto masqué à zéro ; rangée nulle si tout est à zéro. Absorbe les
+// anciens badges 📎/💬 (une seule rangée d'indicateurs, aucun compteur en double). Emoji-texte
+// (pas d'icône SVG → cross-page sûr), chips `.badge` muted (invariant 9). cfg = { subtasks:[],
+// images:n, attachments:n, comments:n, onImages?, onAttach?, onComments? } — les handlers de clic
+// existants sont passés par la page (invariant 5, rien de nouveau exposé). Purs, identiques 3 pages.
+function _pictosStyle() {
+  if (document.getElementById('pictos-style')) return;
+  const st = document.createElement('style'); st.id = 'pictos-style';
+  st.textContent = '.task-pictos{display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;margin-top:0.35rem}'
+    + '.task-pictos .badge{color:var(--muted)}'
+    + '.task-pictos .badge.clickable{cursor:pointer}'
+    + '.task-pictos .badge.clickable:hover{color:var(--text);border-color:var(--muted)}';
+  document.head.appendChild(st);
+}
+function memoPictosRow(cfg) {
+  const subs = cfg.subtasks || [];
+  const nImg = cfg.images || 0, nAtt = cfg.attachments || 0, nCom = cfg.comments || 0;
+  if (!subs.length && !nImg && !nAtt && !nCom) return null;
+  _pictosStyle();
+  const row = el('div', { class: 'task-pictos' });
+  const plural = (n, sing, plur) => n + ' ' + (n > 1 ? (plur || sing + 's') : sing);
+  const chip = (text, title, on) => {
+    const b = el('span', { class: 'badge' + (on ? ' clickable' : ''), text: text, attrs: { title: title } });
+    if (on) b.addEventListener('click', (e) => { e.stopPropagation(); on(); });
+    row.appendChild(b);
+  };
+  if (subs.length) {
+    const done = subs.filter((s) => s.done).length;
+    chip('☑ ' + done + '/' + subs.length, done + ' ' + (done > 1 ? 'sous-tâches cochées' : 'sous-tâche cochée') + ' sur ' + subs.length, null);
+  }
+  if (nImg) chip('📷 ' + nImg, plural(nImg, 'photo') + (cfg.onImages ? ' — voir' : ''), cfg.onImages || null);
+  if (nAtt) chip('📎 ' + nAtt, plural(nAtt, 'fichier joint') + (cfg.onAttach ? ' — voir' : ''), cfg.onAttach || null);
+  if (nCom) chip('💬 ' + nCom, plural(nCom, 'commentaire') + (cfg.onComments ? ' — voir' : ''), cfg.onComments || null);
+  return row;
 }
 
 // [MEMO-EDITOR-IMAGES] Section « 📷 Photos » de l'éditeur mémo, partagée owner/invité/hub
