@@ -905,9 +905,21 @@ window.addEventListener('load', syncHeaderHeight);
 
 function guestToken() { return localStorage.getItem('dashguest:' + TOKEN) || ''; }
 function canEditNow() { return DATA && DATA.can_edit && GUEST.status === 'approved'; }
+// [GUEST-ROLES] capacités résolues (le serveur reste la vérité — ces helpers ne font que
+// piloter l'affichage). Un lien « suiveur » avec un override par mémo reste « writable ».
+function approved() { return GUEST && GUEST.status === 'approved'; }
+function linkWritable() {
+  if (!DATA) return false;
+  if (DATA.role && DATA.role !== 'viewer') return true;
+  return (DATA.memos || []).some(m => m.can_comment || m.can_vote);
+}
+function canAddNow() { return !!(DATA && DATA.can_add) && approved(); }
+function canEditMemo(m) { return !!(m && m.can_edit) && approved(); }
+function canCommentMemo(m) { return !!(m && m.can_comment) && approved(); }
+function canVoteMemo(m) { return !!(m && m.can_vote) && approved(); }
 
 async function refreshGuest() {
-  if (!DATA || !DATA.can_edit) return;
+  if (!linkWritable()) return;
   const t = guestToken();
   if (!t) { GUEST = { status: 'anonymous' }; return; }
   try {
@@ -918,8 +930,8 @@ async function refreshGuest() {
 
 function renderGuestBanner() {
   const b = document.getElementById('guest-banner');
-  b.hidden = !DATA.can_edit;
-  if (!DATA.can_edit) return;
+  b.hidden = !linkWritable();
+  if (b.hidden) return;
   // Le formulaire de connexion invité est affiché tant que l'invité n'est ni
   // approuvé, ni en attente, ni refusé. S'il est déjà à l'écran, NE PAS le
   // reconstruire : le refresh auto (setInterval 15s → load → ici) effacerait
@@ -1290,7 +1302,7 @@ function openShareMemoAttachments(memo) {
     const m = (DATA.memos || []).find((x) => x.id === memo.id) || memo;
     return {
       attachments: m.attachments || [],
-      canEdit: canEditNow(),
+      canEdit: canEditMemo(memo),
       uploadUrl: API + '/memo/' + memo.id + '/attachments',
       zip: { url: API + '/memo/' + memo.id + '/download.zip', images: (m.images || []).length },
       headers: { 'X-Guest-Token': guestToken() },
@@ -1310,7 +1322,7 @@ function renderQPhotos(memo) {
   const sync = (imgs) => { memo.images = imgs; const m = (DATA.memos || []).find((x) => x.id === memo.id); if (m) m.images = imgs; };
   const sec = renderMemoPhotos({
     images: memo.images || [],
-    canEdit: canEditNow(),
+    canEdit: canEditMemo(memo),
     imageUrl: (n) => API + '/image/' + n,
     downloadUrl: (n) => API + '/image/' + n,
     exifUrl: (n) => API + '/image-exif/' + n,
@@ -1339,7 +1351,7 @@ function renderQMeta(memo) {
   const box = document.getElementById('q-meta');
   if (!box) return;
   box.innerHTML = '';
-  if (!canEditNow()) return;
+  if (!canEditMemo(memo)) return;  // [GUEST-ROLES] own-or-editor
   const rowStyle = 'display:flex;gap:0.45rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;font-size:0.85rem;color:var(--muted)';
   const inStyle = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.3rem 0.45rem';
   const patch = async (body) => { await put(memo.id, body); const m = (DATA.memos || []).find(x => x.id === memo.id) || memo; renderQMeta(m); };
@@ -1408,7 +1420,7 @@ function renderQAttachments(memo) {
   box.innerHTML = '';
   box.appendChild(renderAttachments({
     attachments: memo.attachments || [],
-    canEdit: canEditNow(),
+    canEdit: canEditMemo(memo),
     uploadUrl: API + '/memo/' + memo.id + '/attachments',
     zip: { url: API + '/memo/' + memo.id + '/download.zip', images: (memo.images || []).length },
     headers: { 'X-Guest-Token': guestToken() },
@@ -1540,19 +1552,19 @@ function shareVoteRow(memo) {
   if (nv) {
     const opt = (nv.options || []).find(o => o.memo_id === memo.id);
     if (!opt) return null;
-    return shareVoteControls({ mode: nv.vote_mode, closed: nv.vote_state === 'closed', mine: !!opt.vote_mine, count: opt.vote_count || 0, voters: opt.vote_voters || [], isWinner: nv.vote_state === 'closed' && opt.is_winner, winnerText: voteWinnerText(nv), memoId: memo.id, voteId: nv.id });
+    return shareVoteControls({ mode: nv.vote_mode, closed: nv.vote_state === 'closed', mine: !!opt.vote_mine, count: opt.vote_count || 0, voters: opt.vote_voters || [], isWinner: nv.vote_state === 'closed' && opt.is_winner, winnerText: voteWinnerText(nv), memoId: memo.id, voteId: nv.id, canVote: canVoteMemo(memo) });
   }
   const proj = (DATA.projects || []).find(p => p.id === memo.project_id);
   if (!proj || !proj.vote_enabled) return null;
   const row0 = el('div', ''); row0.style.cssText = 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.45rem';
   if (memo.vote_excluded) { const b = el('span', 'badge', '🗳 hors vote'); b.title = "Ce mémo n'est pas une option du vote"; row0.appendChild(b); return row0; }
-  return shareVoteControls({ mode: proj.vote_mode, closed: proj.vote_state === 'closed', mine: !!memo.vote_mine, count: memo.vote_count || 0, voters: memo.vote_voters || [], isWinner: proj.vote_state === 'closed' && memo.is_winner, winnerText: voteWinnerText(proj), memoId: memo.id, voteId: null });
+  return shareVoteControls({ mode: proj.vote_mode, closed: proj.vote_state === 'closed', mine: !!memo.vote_mine, count: memo.vote_count || 0, voters: memo.vote_voters || [], isWinner: proj.vote_state === 'closed' && memo.is_winner, winnerText: voteWinnerText(proj), memoId: memo.id, voteId: null, canVote: canVoteMemo(memo) });
 }
 
 function shareVoteControls(o) {
   const row = el('div', '');
   row.style.cssText = 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-top:0.45rem';
-  if (GUEST.status === 'approved') {
+  if (o.canVote) {  // [GUEST-ROLES] voter = commentateur (ou override perm_vote='all')
     const btn = el('button', 'prio-btn', voteBtnLabel(o.mode, o.mine));
     btn.type = 'button'; btn.disabled = o.closed;
     btn.title = o.closed ? 'Vote clos' : (o.mine ? 'Retirer ma voix' : 'Voter pour ce mémo');
@@ -1734,7 +1746,7 @@ function openShareFileSource(s) {
   if (!s) return;
   if (s.type === 'memo') {
     const m = (DATA.memos || []).find(x => x.id === s.id);
-    if (m) { if (canEditNow()) { openEditor(m, el('span', ''), el('span', '')); return; } PFILTER = m.project_id || 'all'; GVIEW = 'board'; render(); return; }
+    if (m) { if (canEditMemo(m)) { openEditor(m, el('span', ''), el('span', '')); return; } PFILTER = m.project_id || 'all'; GVIEW = 'board'; render(); return; }
   }
   if (s.type === 'project') { PFILTER = s.id; GVIEW = 'board'; render(); }
 }
@@ -2393,7 +2405,7 @@ function renderShareTreeView() {
 
   function memoRow(m, conn) {
     const row = el('div', 'tree-row tree-memo');
-    if (canEditNow()) row.addEventListener('click', () => openEditor(m, null, null));
+    if (canEditMemo(m)) row.addEventListener('click', () => openEditor(m, null, null));  // [GUEST-ROLES]
     row.appendChild(el('span', 'tree-pre', conn));
     row.appendChild(el('span', 'tree-check', m.done ? '✓' : ''));
     const pip = el('span', 'tree-pip');
@@ -2484,7 +2496,7 @@ function agendaMemoTitle(m) {
 function agendaOpen(m) {
   // Pop-in d'édition existante, gatée can_edit (les spans factices couvrent le
   // repli sans-Quill d'openEditor, qui attend contentEl/taskEl).
-  if (canEditNow()) openEditor(m, el('span', ''), el('span', ''));
+  if (canEditMemo(m)) openEditor(m, el('span', ''), el('span', ''));  // [GUEST-ROLES] own-or-editor
 }
 
 function agendaRow(m) {
@@ -2634,10 +2646,10 @@ function render() {
   if (DATA.kind === 'project' && GVIEW === 'board') {
     const zpid = PFILTER !== 'all' ? PFILTER : DATA.root_id;
     const fp = (DATA.projects || []).find(p => p.id === zpid);
-    if (fp && ((fp.attachments || []).length || canEditNow())) {
+    if (fp && ((fp.attachments || []).length || canAddNow())) {  // [GUEST-ROLES] PJ dossier = contributeur
       pfiles.appendChild(renderAttachments({
         attachments: fp.attachments || [],
-        canEdit: canEditNow(),
+        canEdit: canAddNow(),
         uploadUrl: API + '/project/' + fp.id + '/attachments',
         headers: { 'X-Guest-Token': guestToken() },
         onChange: async () => { await load(); },
@@ -2645,10 +2657,10 @@ function render() {
       }));
     }
   }
-  document.getElementById('add-bar').hidden = !(canEditNow() && DATA.kind === 'project');
-  document.getElementById('proj-bar').hidden = !(canEditNow() && DATA.kind === 'project');
+  document.getElementById('add-bar').hidden = !(canAddNow() && DATA.kind === 'project');
+  document.getElementById('proj-bar').hidden = !(canAddNow() && DATA.kind === 'project');
   const projSel = document.getElementById('add-project');
-  if (canEditNow() && DATA.kind === 'project' && (DATA.projects || []).length > 1) {
+  if (canAddNow() && DATA.kind === 'project' && (DATA.projects || []).length > 1) {
     projSel.hidden = false;
     const prev = projSel.value;
     projSel.innerHTML = '';
@@ -2727,7 +2739,7 @@ function render() {
   shown.forEach(memo => {
     const t = el('div', 'task' + (memo.done ? ' done' : '') + (shareOpenMemo === memo.id ? ' card-focus' : ''));
     t.dataset.memoId = memo.id;  // [MAP-MEMO-ROUNDTRIP] cible du scroll « Ouvrir le mémo » depuis la carte
-    if (canEditNow() && DATA.kind === 'project') {
+    if (canEditMemo(memo) && DATA.kind === 'project') {  // [GUEST-ROLES] D&D = éditer ce mémo
       t.draggable = true;
       t.addEventListener('dragstart', (e) => { dragShareMemo = memo.id; e.dataTransfer.effectAllowed = 'move'; });
       t.addEventListener('dragend', () => { dragShareMemo = null; });
@@ -2745,9 +2757,10 @@ function render() {
 
     const row = el('div', 'task-row');
     const check = el('button', 'task-check', '✓');
-    check.disabled = !canEditNow();
-    check.title = canEditNow() ? (memo.done ? 'Rouvrir' : 'Terminer') : 'Identification requise pour modifier';
-    check.addEventListener('click', () => { if (canEditNow()) put(memo.id, { done: !memo.done }); });
+    const _ceMemo = canEditMemo(memo);  // [GUEST-ROLES] cocher = éditer ce mémo (own-or-editor)
+    check.disabled = !_ceMemo;
+    check.title = _ceMemo ? (memo.done ? 'Rouvrir' : 'Terminer') : 'Modification réservée';
+    check.addEventListener('click', () => { if (canEditMemo(memo)) put(memo.id, { done: !memo.done }); });
     row.appendChild(check);
 
     const content = el('div', 'task-content');
@@ -2795,7 +2808,7 @@ function render() {
       }
     }
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
-      if (!canEditNow()) return;
+      if (!canEditMemo(memo)) return;  // [GUEST-ROLES] cocher un item = éditer ce mémo
       li.classList.add('cl-edit');
       li.title = 'Cliquer pour cocher / décocher';
       li.addEventListener('click', () => {
@@ -2815,7 +2828,7 @@ function render() {
       onImages: (memo.images || []).length ? () => runImageViewer({
         images: memo.images, startIndex: 0,
         imageUrl: (n) => API + '/image/' + n, downloadUrl: (n) => API + '/image/' + n, exifUrl: (n) => API + '/image-exif/' + n,
-        canDelete: canEditNow(), onDelete: async (n) => { const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }); if (r.ok) await load(); },
+        canDelete: canEditMemo(memo), onDelete: async (n) => { const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }); if (r.ok) await load(); },
       }) : null,
       onAttach: (memo.attachments || []).length ? () => openShareMemoAttachments(memo) : null,
     });
@@ -2859,11 +2872,11 @@ function render() {
     }
     // [FESTIVAL-VOTE] Chip ❤️ : invité APPROUVÉ peut poser (can_edit NON requis) ; anonyme = lecture.
     {
-      const hchip = heartChip(memo, GUEST.status === 'approved', shareToggleHeart);
+      const hchip = heartChip(memo, canVoteMemo(memo), shareToggleHeart);  // [GUEST-ROLES] ❤️ = voter
       if (hchip) row.appendChild(hchip);
     }
     // [CARD-PREVIEW] Le compteur 📎 passe dans la rangée de pictos (avec 📷) — anti-doublon.
-    if (canEditNow()) {
+    if (canEditMemo(memo)) {  // [GUEST-ROLES] ✎/⋯ (éditer/supprimer) = own-or-editor
       const eBtn = el('button', 'task-edit');
       eBtn.appendChild(shareIcon('pencil'));
       eBtn.title = 'Modifier ce mémo';
@@ -2890,7 +2903,7 @@ function render() {
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.checked = !!st.done;
-      cb.disabled = !canEditNow();
+      cb.disabled = !canEditMemo(memo);  // [GUEST-ROLES] own-or-editor
       cb.addEventListener('change', () => {
         const next = memo.subtasks.map((x, j) => j === i ? { ...x, done: cb.checked } : x);
         put(memo.id, { subtasks: next });
@@ -2928,11 +2941,11 @@ function render() {
       return addItem;
     };
     const hasChecklist = !!content.querySelector('li[data-list]');
-    if (canEditNow() && hasChecklist) {
+    if (canEditMemo(memo) && hasChecklist) {  // [GUEST-ROLES] ajouter un item = éditer ce mémo
       t.appendChild(makeItemAdd());
     }
 
-    if ((memo.comments || []).length || canEditNow()) {
+    if ((memo.comments || []).length || canCommentMemo(memo)) {  // [GUEST-ROLES] commentateur+ ou override
       const cwrap = el('div', '');
       cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
       const comments = memo.comments || [];
@@ -2967,7 +2980,7 @@ function render() {
           s.title = 'Vu par ' + others.join(', ');
           r.appendChild(s);
         }
-        if (!isReply && canEditNow()) {
+        if (!isReply && canCommentMemo(memo)) {  // [GUEST-ROLES] répondre = commenter
           const rep = el('span', ''); rep.appendChild(shareIcon('reply'));
           rep.style.cssText = 'cursor:pointer;color:var(--muted);flex-shrink:0';
           rep.title = 'Répondre';
@@ -2983,7 +2996,7 @@ function render() {
         }
         cwrap.appendChild(r);
         // [COMMENT-REACTIONS] chips + palette : invité APPROUVÉ peut réagir (can_edit non requis).
-        const rr = reactionRow(c.reactions, GUEST.status === 'approved', async (emoji) => {
+        const rr = reactionRow(c.reactions, canCommentMemo(memo), async (emoji) => {  // [GUEST-ROLES] réagir = commentateur/override
           const resp = await fetch(API + '/comment/' + c.id + '/react', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify({ emoji }) });
           if (resp.ok) await load(); else notify('Réaction impossible.', { error: true });
         });
@@ -2994,9 +3007,9 @@ function render() {
         renderC(c, false);
         comments.filter(ch => ch.parent_id === c.id).forEach(ch => renderC(ch, true));
       });
-      if (canEditNow()) cwrap.appendChild(shareCommentInput(memo, null));
+      if (canCommentMemo(memo)) cwrap.appendChild(shareCommentInput(memo, null));  // [GUEST-ROLES]
       t.appendChild(cwrap);
-      if (comments.length && canEditNow()) markMemoSeen(memo.id);
+      if (comments.length && canCommentMemo(memo)) markMemoSeen(memo.id);
     }
 
     if ((memo.images || []).length) {
@@ -3013,7 +3026,7 @@ function render() {
             imageUrl: (n) => API + '/image/' + n,
             downloadUrl: (n) => API + '/image/' + n,
             exifUrl: (n) => API + '/image-exif/' + n,
-            canDelete: canEditNow(),
+            canDelete: canEditMemo(memo),
             onDelete: async (n) => {
               const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, {
                 method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },

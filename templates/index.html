@@ -1697,10 +1697,17 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   <h3 id="share-title">🔗 Partager</h3>
   <p id="share-warning" hidden style="background:#38301a;border:1px solid var(--yellow);border-radius:6px;color:var(--yellow);font-size:0.82rem;padding:0.5rem 0.7rem;margin:0 0 0.75rem"></p>
   <div id="share-list"></div>
-  <div class="settings-row" style="margin-top:0.75rem">
-    <button id="share-add-ro">+ Lien lecture seule</button>
-    <button id="share-add-rw">+ Lien modifiable</button>
+  <!-- [GUEST-ROLES] sélecteur de rôle à 4 niveaux (la matrice serveur reste la vérité) -->
+  <div class="settings-row" style="margin-top:0.75rem;gap:0.5rem;align-items:center;flex-wrap:wrap">
+    <select id="share-role-sel" style="flex:1 1 auto;min-width:170px">
+      <option value="viewer">👁 Suiveur — lecture seule</option>
+      <option value="commenter">💬 Commentateur — commente, réagit, vote</option>
+      <option value="contributor">➕ Contributeur — ajoute et gère SES ajouts</option>
+      <option value="editor" selected>✏️ Éditeur — tout modifier</option>
+    </select>
+    <button id="share-add-role" class="primary">+ Créer le lien</button>
   </div>
+  <p id="share-role-hint" style="font-size:0.78rem;color:var(--muted);margin:0.4rem 0 0"></p>
   <p style="font-size:0.78rem;color:var(--muted);margin:0.75rem 0 0">
     Toute personne ayant le lien y accède sans compte (la page passe Authelia).
     Révoque un lien à tout moment avec ×.
@@ -4925,10 +4932,10 @@ async function renderShares() {
     projSel.appendChild(el('option', { attrs: { value: '' }, text: '+ Partager un projet…' }));
     (state.projects || []).forEach(p => projSel.appendChild(el('option', { attrs: { value: String(p.id) }, text: (p.emoji ? p.emoji + ' ' : '') + p.name })));
     grantRow.appendChild(projSel);
-    const rightsSel = el('select');
+    const rightsSel = el('select');  // [GUEST-ROLES] 4 rôles
     rightsSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.82rem;padding:0.2rem 0.4rem';
-    rightsSel.appendChild(el('option', { attrs: { value: '1' }, text: '✏️ Modifiable' }));
-    rightsSel.appendChild(el('option', { attrs: { value: '0' }, text: '👁 Lecture seule' }));
+    ['viewer', 'commenter', 'contributor', 'editor'].forEach(rk => rightsSel.appendChild(el('option', { attrs: { value: rk }, text: ROLE_LABELS[rk] })));
+    rightsSel.value = 'editor';
     grantRow.appendChild(rightsSel);
     const result = el('span', { class: 'rev-meta', attrs: { style: 'flex-basis:100%' } });
     grantRow.appendChild(el('button', {
@@ -4937,11 +4944,11 @@ async function renderShares() {
         const pid = parseInt(projSel.value, 10);
         if (!pid) { result.textContent = 'Choisis un projet.'; return; }
         try {
-          const r = await api('/api/guests/grant', { method: 'POST', body: JSON.stringify({ email, name: realName, project_id: pid, can_edit: rightsSel.value === '1' }) });
+          const r = await api('/api/guests/grant', { method: 'POST', body: JSON.stringify({ email, name: realName, project_id: pid, role: rightsSel.value }) });
           const url = location.origin + r.url;
           let copied = '';
           try { await navigator.clipboard.writeText(url); copied = ' · lien copié'; } catch (_) {}
-          result.textContent = `✓ ${r.project} ouvert à ${dispName} (${r.can_edit ? 'modifiable' : 'lecture'}, PIN ${r.pin})${copied} — ${url}`;
+          result.textContent = `✓ ${r.project} ouvert à ${dispName} (${ROLE_LABELS[r.role] || r.role}, PIN ${r.pin})${copied} — ${url}`;
           projSel.value = '';
         } catch (e) { result.textContent = '⚠ ' + (e.message || 'échec'); }
       } },
@@ -5139,7 +5146,19 @@ async function renderShareList() {
   mine.forEach(s => {
     const item = el('div', {});  // conteneur : ligne + panneau QR dépliable [SHARE-QR]
     const row = el('div', { class: 'cat-manage-row' });
-    row.appendChild(el('span', { icon: s.can_edit ? 'pencil' : 'eye', attrs: { title: s.can_edit ? 'Modifiable' : 'Lecture seule' } }));
+    // [GUEST-ROLES] sélecteur de rôle par lien (badge + changement à la volée via update_share).
+    const srole = s.role || (s.can_edit ? 'editor' : 'viewer');
+    const roleSel = el('select', { attrs: { title: 'Rôle des invités de ce lien', style: 'font-size:0.72rem;padding:0.15rem 0.3rem;max-width:160px' } });
+    ['viewer', 'commenter', 'contributor', 'editor'].forEach(rk => {
+      const o = el('option', { attrs: { value: rk }, text: ROLE_LABELS[rk] });
+      if (rk === srole) o.selected = true;
+      roleSel.appendChild(o);
+    });
+    roleSel.addEventListener('change', async () => {
+      await api('/api/shares/' + s.id, { method: 'PUT', body: JSON.stringify({ role: roleSel.value }) });
+      await renderShareList();
+    });
+    row.appendChild(roleSel);
     row.appendChild(el('span', {
       class: 'pin-input',
       text: s.pin || '----',
@@ -5226,14 +5245,25 @@ function shareQrPanel(url, pin) {
 }
 
 document.getElementById('share-close').addEventListener('click', () => shareDialog.close());
-document.getElementById('share-add-ro').addEventListener('click', async () => {
+// [GUEST-ROLES] libellés des rôles (réutilisés par le sélecteur, les badges et le récap QR).
+const ROLE_LABELS = {
+  viewer: '👁 Suiveur', commenter: '💬 Commentateur',
+  contributor: '➕ Contributeur', editor: '✏️ Éditeur',
+};
+const ROLE_HINTS = {
+  viewer: 'Voit tout le contenu partagé (mémos, photos, carte, fichiers). Ne poste rien.',
+  commenter: 'En plus : commente (texte et vocal), réagit 😊 et vote. Idéal familles/amis.',
+  contributor: 'En plus : ajoute mémos, photos, fichiers, sous-dossiers — et modifie/supprime SES ajouts.',
+  editor: 'Peut tout modifier, déplacer, grouper sur la carte, cocher les mémos des autres.',
+};
+function shareRole() { return (document.getElementById('share-role-sel') || {}).value || 'editor'; }
+const _shareRoleSel = document.getElementById('share-role-sel');
+const _shareRoleHint = document.getElementById('share-role-hint');
+function syncShareRoleHint() { if (_shareRoleHint) _shareRoleHint.textContent = ROLE_HINTS[shareRole()] || ''; }
+if (_shareRoleSel) { _shareRoleSel.addEventListener('change', syncShareRoleHint); syncShareRoleHint(); }
+document.getElementById('share-add-role').addEventListener('click', async () => {
   if (!(await confirmShareCreation())) return;
-  await api('/api/shares', { method: 'POST', body: JSON.stringify({ kind: shareCtx.kind, target_id: shareCtx.targetId, can_edit: false }) });
-  await renderShareList();
-});
-document.getElementById('share-add-rw').addEventListener('click', async () => {
-  if (!(await confirmShareCreation())) return;
-  await api('/api/shares', { method: 'POST', body: JSON.stringify({ kind: shareCtx.kind, target_id: shareCtx.targetId, can_edit: true }) });
+  await api('/api/shares', { method: 'POST', body: JSON.stringify({ kind: shareCtx.kind, target_id: shareCtx.targetId, role: shareRole() }) });
   await renderShareList();
 });
 

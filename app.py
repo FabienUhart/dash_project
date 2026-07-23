@@ -848,6 +848,27 @@ def init_db():
     scols = {r[1] for r in conn.execute("PRAGMA table_info(shares)").fetchall()}
     if "pin" not in scols:
         conn.execute("ALTER TABLE shares ADD COLUMN pin TEXT DEFAULT ''")
+    # [GUEST-ROLES] Rôle d'invité à 4 niveaux (viewer/commenter/contributor/editor). Additif,
+    # jamais destructif (invariant 1) ; `can_edit` CONSERVÉ (= editor). Migration douce : à la
+    # 1re fois, les liens existants sont figés dans leur comportement actuel — can_edit=1 → editor,
+    # can_edit=0 → commenter (préserve réactions/vote/commentaires des liens « lecture » d'aujourd'hui).
+    if "role" not in scols:
+        conn.execute("ALTER TABLE shares ADD COLUMN role TEXT DEFAULT ''")
+        conn.execute(
+            "UPDATE shares SET role = CASE WHEN can_edit = 1 THEN 'editor' ELSE 'commenter' END "
+            "WHERE COALESCE(role, '') = ''"
+        )
+    # [GUEST-ROLES] Overrides granulaires (abaissent l'exigence d'UNE action sur UN mémo/dossier,
+    # héritables comme is_trip). NON exportés (donnée d'atelier, précédent vote_excluded) : '' = hérite,
+    # 'all' = ouvert à tous les invités (viewer). Absents = compat ascendante v1→v23 identique.
+    if "perm_vote" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN perm_vote TEXT DEFAULT ''")
+    if "perm_comment" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN perm_comment TEXT DEFAULT ''")
+    if "perm_vote" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN perm_vote TEXT DEFAULT ''")
+    if "perm_comment" not in pcols:
+        conn.execute("ALTER TABLE projects ADD COLUMN perm_comment TEXT DEFAULT ''")
     # [HUB-SESSION] jeton de session par hub (transporté en cookie HttpOnly) ; '' = aucune session.
     hcols = {r[1] for r in conn.execute("PRAGMA table_info(guest_hubs)").fetchall()}
     if "session_token" not in hcols:
@@ -1405,7 +1426,7 @@ def list_projects():
     db = get_db()
     sql = (
         "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, p.is_trip, "
-        "p.vote_enabled, p.vote_mode, p.vote_deadline, p.vote_closed, p.vote_winner_id, p.vote_winner_ids, p.vote_create, "
+        "p.vote_enabled, p.vote_mode, p.vote_deadline, p.vote_closed, p.vote_winner_id, p.vote_winner_ids, p.vote_create, p.perm_vote, p.perm_comment, "
         "COUNT(CASE WHEN m.done = 0 AND COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
         "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
         "GROUP BY p.id ORDER BY p.position, p.id"
@@ -1535,11 +1556,22 @@ def update_project(project_id):
         if "vote_create" in data
         else (_row_get(existing, "vote_create", "") or "")
     )
+    # [GUEST-ROLES] overrides héritables owner-only ('' hérite / 'all' ouvre à tous les invités).
+    perm_vote = (
+        _clean_perm(data.get("perm_vote"))
+        if "perm_vote" in data
+        else (_row_get(existing, "perm_vote", "") or "")
+    )
+    perm_comment = (
+        _clean_perm(data.get("perm_comment"))
+        if "perm_comment" in data
+        else (_row_get(existing, "perm_comment", "") or "")
+    )
     db.execute(
         "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ?, is_trip = ?, "
-        "vote_enabled = ?, vote_mode = ?, vote_deadline = ?, vote_create = ? WHERE id = ?",
+        "vote_enabled = ?, vote_mode = ?, vote_deadline = ?, vote_create = ?, perm_vote = ?, perm_comment = ? WHERE id = ?",
         (name, color, tags, emoji, parent_id, location, description, marker_color, is_trip,
-         vote_enabled, vote_mode, vote_deadline, vote_create, project_id),
+         vote_enabled, vote_mode, vote_deadline, vote_create, perm_vote, perm_comment, project_id),
     )
     # [VOTE-MULTI] bascule multi→single : purge des voix surnuméraires (garde la + récente
     # par votant). Le front prévient (confirm danger) ; le serveur applique la règle.
@@ -1547,7 +1579,7 @@ def update_project(project_id):
         _collapse_votes_to_single(db, project_id)
     db.commit()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-    out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip}
+    out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip, "perm_vote": perm_vote, "perm_comment": perm_comment}
     out.update(_vote_project_payload(db, row, owner=True))
     out["vote_create"] = vote_create
     out["vote_create_resolved"] = _resolve_vote_create(db, project_id)
@@ -3319,11 +3351,22 @@ def update_memo(memo_id):
     payload, status = _perform_memo_update(db, existing, data)
     # [VOTE-EXCLUDE] owner-only (jamais dans _perform_memo_update → share ne peut pas le poser).
     # Sortir un mémo du vote supprime ses voix (cohérent : plus une option).
+    touched = False
     if status == 200 and "vote_excluded" in data:
         excl = 1 if data.get("vote_excluded") else 0
         db.execute("UPDATE memos SET vote_excluded = ? WHERE id = ?", (excl, memo_id))
         if excl:
             db.execute("DELETE FROM memo_votes WHERE memo_id = ?", (memo_id,))
+        touched = True
+    # [GUEST-ROLES] overrides granulaires owner-only (jamais via /share). '' = hérite, 'all' = ouvert
+    # à tous les invités (abaisse à viewer). Non exportés (donnée d'atelier, précédent vote_excluded).
+    if status == 200 and "perm_vote" in data:
+        db.execute("UPDATE memos SET perm_vote = ? WHERE id = ?", (_clean_perm(data.get("perm_vote")), memo_id))
+        touched = True
+    if status == 200 and "perm_comment" in data:
+        db.execute("UPDATE memos SET perm_comment = ? WHERE id = ?", (_clean_perm(data.get("perm_comment")), memo_id))
+        touched = True
+    if touched:
         db.commit()
         row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
         payload = _memo_dict(row, _owner_name(db))
@@ -4030,6 +4073,135 @@ def _share_by_token(db, token):
     return db.execute("SELECT * FROM shares WHERE token = ?", (token,)).fetchone()
 
 
+# ───────────────────────── [GUEST-ROLES] matrice serveur des rôles ─────────────────────────
+# 4 rôles cumulatifs. La matrice `_ACTION_MIN_ROLE` est l'UNIQUE source de vérité (invariant 5) :
+# toute route /share d'écriture passe par `_role_gate`. `can_edit` reste = editor (jamais supprimé).
+
+SHARE_ROLES = ("viewer", "commenter", "contributor", "editor")
+_ROLE_RANK = {"viewer": 0, "commenter": 1, "contributor": 2, "editor": 3}
+
+# action → rôle minimal requis (cf. spec « Matrice serveur »)
+_ACTION_MIN_ROLE = {
+    "read": "viewer",          # lire / écouter / télécharger
+    "comment": "commenter",    # commenter, vocal-commentaire, marquer vu
+    "react": "commenter",      # réagir 😊 (gouverné par perm_comment)
+    "vote": "commenter",       # voter / coup de cœur (gouverné par perm_vote)
+    "create": "contributor",   # créer mémo/sous-projet, uploader photo/fichier/vocal-mémo
+    "own": "contributor",      # modifier/supprimer SES propres items (created_by = son e-mail)
+    "edit": "editor",          # tout modifier, grouper carte, déplacer, cocher les mémos des autres
+}
+
+
+def _clean_role(value):
+    v = (str(value or "")).strip()
+    return v if v in _ROLE_RANK else ""
+
+
+def _share_role(share):
+    """Rôle résolu d'un partage : `role` non vide sinon repli sur `can_edit`
+    (editor / viewer). Les liens migrés portent déjà un role explicite."""
+    r = _clean_role(_row_get(share, "role", ""))
+    if r:
+        return r
+    return "editor" if share["can_edit"] else "viewer"
+
+
+def _clean_perm(value):
+    """Override d'action : '' = hérite (matrice), 'all' = ouvert à tous les invités (viewer)."""
+    v = (str(value or "")).strip().lower()
+    return "all" if v == "all" else ""
+
+
+def _resolve_project_perm(db, project_id, col):
+    """Override héritable d'un dossier (modèle `_resolve_trip`) : le projet puis ses
+    ancêtres, la 1re valeur 'all' l'emporte. Aucun → '' (hérite de la matrice)."""
+    seen = set()
+    pid = project_id
+    while pid is not None and pid not in seen:
+        seen.add(pid)
+        row = db.execute(
+            f"SELECT parent_id, {col} FROM projects WHERE id = ?", (pid,)
+        ).fetchone()
+        if not row:
+            return ""
+        if _clean_perm(_row_get(row, col, "")) == "all":
+            return "all"
+        pid = row["parent_id"]
+    return ""
+
+
+def _resolve_memo_perm(db, memo_row, action):
+    """Override RÉSOLU d'un mémo pour 'vote'/'comment' : override du mémo, sinon héritage
+    dossier. Renvoie 'all' (abaisse à viewer) ou '' (matrice). Ne peut qu'abaisser."""
+    col = "perm_vote" if action == "vote" else "perm_comment"
+    if _clean_perm(_row_get(memo_row, col, "")) == "all":
+        return "all"
+    pid = _row_get(memo_row, "project_id", None)
+    if pid:
+        return _resolve_project_perm(db, pid, col)
+    return ""
+
+
+def _min_role_for(db, action, memo_row=None):
+    """Rôle minimal effectif pour `action` sur `memo_row` (overrides inclus, ne remonte jamais)."""
+    base = _ACTION_MIN_ROLE.get(action, "editor")
+    if memo_row is not None and action in ("vote", "comment", "react"):
+        pa = "vote" if action == "vote" else "comment"
+        if _resolve_memo_perm(db, memo_row, pa) == "all":
+            return "viewer"
+    return base
+
+
+def _guest_owns(guest, row):
+    """L'invité est-il l'auteur de `row` ? Match par e-mail sur `created_by`
+    (« Nom <email> », robuste au renommage). Owner (created_by='') → False."""
+    if not guest:
+        return False
+    ge = (guest["email"] or "").strip().lower()
+    return bool(ge) and _voter_email(_row_get(row, "created_by", "")) == ge
+
+
+def _role_allows(db, share, action, guest=None, memo_row=None):
+    """Cœur de la matrice : True si `share`+`guest` peuvent faire `action` (sur `memo_row`).
+    'own' = editor OU (contributor ET auteur). Autres = rang du rôle ≥ rang requis (override inclus)."""
+    role = _share_role(share)
+    rank = _ROLE_RANK[role]
+    if action == "own":
+        if rank >= _ROLE_RANK["editor"]:
+            return True
+        return rank >= _ROLE_RANK["contributor"] and _guest_owns(guest, memo_row)
+    return rank >= _ROLE_RANK[_min_role_for(db, action, memo_row)]
+
+
+def _role_gate(db, share, action, memo_row=None, require_approved=True):
+    """Garde unique des routes /share d'écriture. Retourne (guest, None) si OK, sinon
+    (None, (json, code)). Approbation TOUJOURS requise pour écrire (invariant 5) ;
+    403 générique (pas de fuite). Passer `memo_row` pour 'own' et les overrides vote/comment."""
+    guest = _guest_from_request(db, share) if require_approved else None
+    if require_approved and (not guest or guest["status"] != "approved"):
+        return None, (
+            jsonify({"error": "guest_required",
+                     "status": guest["status"] if guest else "anonymous"}),
+            403,
+        )
+    if not _role_allows(db, share, action, guest=guest, memo_row=memo_row):
+        return None, (jsonify({"error": "non autorisé"}), 403)
+    return guest, None
+
+
+def _memo_guest_caps(db, share_role, memo_row, guest_email):
+    """Capacités RÉSOLUES d'un invité (rôle + e-mail) sur un mémo → booléens serveur exposés
+    à share_data/hub (invariant 5 : l'UI s'y fie mais la vérité reste le serveur)."""
+    rank = _ROLE_RANK.get(share_role, 0)
+    can_comment = rank >= 1 or _resolve_memo_perm(db, memo_row, "comment") == "all"
+    can_vote = rank >= 1 or _resolve_memo_perm(db, memo_row, "vote") == "all"
+    ge = (guest_email or "").strip().lower()
+    owns = bool(ge) and _voter_email(_row_get(memo_row, "created_by", "")) == ge
+    can_edit = rank >= 3 or (rank >= 2 and owns)
+    return {"can_comment": bool(can_comment), "can_vote": bool(can_vote),
+            "can_edit": bool(can_edit), "mine": owns}
+
+
 # ───────────────────────── [ONE-LINK-MULTI] hubs invité ─────────────────────────
 # Le lien appartient à la personne (e-mail), pas au dossier. Un hub agrège les
 # share_guests d'un e-mail sous un seul hub_token + un seul pin (invariant 5 :
@@ -4303,7 +4475,9 @@ def grant_guest_project():
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     name = (data.get("name") or "").strip()[:60]
-    can_edit = 1 if data.get("can_edit") else 0
+    # [GUEST-ROLES] role prioritaire ; repli can_edit pour compat API.
+    role = _clean_role(data.get("role")) or ("editor" if data.get("can_edit") else "viewer")
+    can_edit = 1 if role == "editor" else 0
     try:
         project_id = int(data.get("project_id"))
     except (TypeError, ValueError):
@@ -4314,10 +4488,12 @@ def grant_guest_project():
     if not proj:
         return jsonify({"error": "projet introuvable"}), 404
     now = datetime.now(timezone.utc).isoformat()
+    # Réutilise un partage projet de MÊME rôle (sinon un contributeur hériterait des droits d'un éditeur).
     share = db.execute(
-        "SELECT * FROM shares WHERE kind = 'project' AND target_id = ? AND can_edit = ? "
+        "SELECT * FROM shares WHERE kind = 'project' AND target_id = ? "
+        "AND COALESCE(NULLIF(role, ''), CASE WHEN can_edit = 1 THEN 'editor' ELSE 'commenter' END) = ? "
         "ORDER BY id LIMIT 1",
-        (project_id, can_edit),
+        (project_id, role),
     ).fetchone()
     if share:
         share_id, token, pin, reused = share["id"], share["token"], share["pin"], True
@@ -4325,9 +4501,9 @@ def grant_guest_project():
         token = secrets.token_urlsafe(24)
         pin = f"{secrets.randbelow(10000):04d}"
         cur = db.execute(
-            "INSERT INTO shares (token, kind, target_id, can_edit, created_at, pin) "
-            "VALUES (?, 'project', ?, ?, ?, ?)",
-            (token, project_id, can_edit, now, pin),
+            "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin) "
+            "VALUES (?, 'project', ?, ?, ?, ?, ?)",
+            (token, project_id, can_edit, role, now, pin),
         )
         share_id, reused = cur.lastrowid, False
     existing = db.execute(
@@ -4348,7 +4524,7 @@ def grant_guest_project():
     db.commit()
     hub = _ensure_hub(db, email, name)  # [ONE-LINK-MULTI] garantit le hub de l'e-mail
     return jsonify({
-        "share_id": share_id, "token": token, "pin": pin, "can_edit": bool(can_edit),
+        "share_id": share_id, "token": token, "pin": pin, "can_edit": bool(can_edit), "role": role,
         "project": proj["name"], "reused": reused, "url": f"/share/{token}",
         "hub_token": hub["hub_token"] if hub else "", "hub_pin": hub["pin"] if hub else "",
     })
@@ -4370,14 +4546,19 @@ def create_share():
         return jsonify({"error": "target not found"}), 404
     token = secrets.token_urlsafe(24)
     pin = f"{secrets.randbelow(10000):04d}"
+    # [GUEST-ROLES] `role` (4 niveaux) est la source de vérité ; `can_edit` en dérive (= editor)
+    # pour rester cohérent avec le code historique. Repli sur can_edit si role absent (compat API).
+    role = _clean_role(data.get("role")) or ("editor" if data.get("can_edit") else "viewer")
+    can_edit = 1 if role == "editor" else 0
     cur = db.execute(
-        "INSERT INTO shares (token, kind, target_id, can_edit, created_at, pin) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
             token,
             kind,
             target_id,
-            1 if data.get("can_edit") else 0,
+            can_edit,
+            role,
             datetime.now(timezone.utc).isoformat(),
             pin,
         ),
@@ -4390,7 +4571,8 @@ def create_share():
                 "token": token,
                 "kind": kind,
                 "target_id": target_id,
-                "can_edit": bool(data.get("can_edit")),
+                "can_edit": bool(can_edit),
+                "role": role,
                 "pin": pin,
             }
         ),
@@ -4408,13 +4590,20 @@ def update_share(share_id):
     pin = (str(data.get("pin", existing["pin"])) or "").strip()
     if not re.match(r"^\d{4}$", pin):
         return jsonify({"error": "le code doit faire 4 chiffres"}), 400
-    can_edit = 1 if data.get("can_edit", existing["can_edit"]) else 0
+    # [GUEST-ROLES] `role` prioritaire (repli can_edit pour compat) ; can_edit = (role==editor).
+    if "role" in data or _clean_role(data.get("role")):
+        role = _clean_role(data.get("role")) or _share_role(existing)
+    elif "can_edit" in data:
+        role = "editor" if data.get("can_edit") else "viewer"
+    else:
+        role = _share_role(existing)
+    can_edit = 1 if role == "editor" else 0
     db.execute(
-        "UPDATE shares SET pin = ?, can_edit = ? WHERE id = ?",
-        (pin, can_edit, share_id),
+        "UPDATE shares SET pin = ?, can_edit = ?, role = ? WHERE id = ?",
+        (pin, can_edit, role, share_id),
     )
     db.commit()
-    return jsonify({"id": share_id, "pin": pin, "can_edit": bool(can_edit)})
+    return jsonify({"id": share_id, "pin": pin, "can_edit": bool(can_edit), "role": role})
 
 
 @app.route("/api/shares/<int:share_id>", methods=["DELETE"])
@@ -4995,7 +5184,7 @@ def _data_version(db):
         "SELECT id, position, category_id, updated_at FROM links ORDER BY id",
         "SELECT id, name, color, emoji, position FROM categories ORDER BY id",
         "SELECT id, position, project_id, priority, done, due_date, due_time, "
-        "end_time, deleted_at, updated_at FROM memos ORDER BY id",  # [FESTIVAL-VOTE] end_time
+        "end_time, deleted_at, updated_at, perm_vote, perm_comment FROM memos ORDER BY id",  # [FESTIVAL-VOTE] end_time ; [GUEST-ROLES] perm_*
         "SELECT * FROM projects ORDER BY id",
         "SELECT * FROM priorities ORDER BY id",
         "SELECT * FROM shares ORDER BY id",
@@ -5591,7 +5780,7 @@ def _hub_approved_shares(db, email):
     cet e-mail (invariant 5). Chaque share : token, can_edit, kind, target, desc_set, spec."""
     email = (email or "").strip().lower()
     rows = db.execute(
-        "SELECT s.id, s.token, s.kind, s.target_id, s.can_edit "
+        "SELECT s.id, s.token, s.kind, s.target_id, s.can_edit, s.role "
         "FROM shares s JOIN share_guests g ON g.share_id = s.id "
         "WHERE lower(g.email) = ? AND g.status = 'approved' ORDER BY s.id",
         (email,),
@@ -5608,17 +5797,19 @@ def _hub_approved_shares(db, email):
         else:
             desc = set()
             spec = 0  # un share mémo est le plus spécifique possible
+        role = _share_role(r)  # [GUEST-ROLES]
         out.append({
             "id": r["id"], "token": r["token"], "can_edit": bool(r["can_edit"]),
-            "kind": r["kind"], "target_id": r["target_id"], "desc": desc, "spec": spec,
+            "role": role, "kind": r["kind"], "target_id": r["target_id"], "desc": desc, "spec": spec,
         })
     return out
 
 
 def _hub_winner(covering):
-    """Share gagnant pour un item couvert par plusieurs shares : can_edit > spécificité > id."""
+    """Share gagnant pour un item couvert par plusieurs shares : [GUEST-ROLES] rôle le PLUS haut
+    (editor>contributor>commenter>viewer) > spécificité > id."""
     return sorted(
-        covering, key=lambda s: (0 if s["can_edit"] else 1, s["spec"], s["id"])
+        covering, key=lambda s: (-_ROLE_RANK.get(s.get("role", "viewer"), 0), s["spec"], s["id"])
     )[0]
 
 
@@ -5686,6 +5877,8 @@ def hub_data(hub_token):
             "parent_id": parent, "location": _parse_location(p["location"]),
             "description": _row_get(p, "description"), "point_color": _row_get(p, "marker_color"),
             "share_token": win["token"], "can_edit": win["can_edit"],
+            "role": win.get("role", "viewer"),  # [GUEST-ROLES]
+            "can_add": _ROLE_RANK[win.get("role", "viewer")] >= _ROLE_RANK["contributor"],
             # [MAP-TIMELINE] booléen résolu serveur (lecture seule côté invité).
             "trip": _resolve_trip(db, p["id"]),
         })
@@ -5743,7 +5936,7 @@ def hub_data(hub_token):
         pr.update(vpay.get(pr["id"], {"vote_enabled": False}))
         # [VOTE-GROUPS] votes nommés + permission résolue (can_edit du dossier ET 'guests').
         pr["votes"] = _project_named_votes(db, pr["id"], me, vote_owner_name, is_owner=False)
-        pr["can_create_vote"] = bool(pr.get("can_edit")) and _resolve_vote_create(db, pr["id"]) == "guests"
+        pr["can_create_vote"] = bool(pr.get("can_add")) and _resolve_vote_create(db, pr["id"]) == "guests"  # [GUEST-ROLES]
     # [FOLDER-ATTACHMENTS] pièces jointes de dossier, URL scopée au share couvrant CE dossier.
     if union_pids:
         ph = ",".join("?" * len(union_pids))
@@ -5763,7 +5956,8 @@ def hub_data(hub_token):
         d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(mid, [])
         d["share_token"] = win["token"]
-        d["can_edit"] = win["can_edit"]
+        # [GUEST-ROLES] caps résolues au rôle du share gagnant + e-mail du hub (can_edit = own-or-editor).
+        d.update(_memo_guest_caps(db, win.get("role", "viewer"), r, hub["email"]))
         # [ATTACHMENTS] URL scopée au share couvrant ce mémo (token propre à chaque dossier du hub).
         d["attachments"] = _attachments_map(db, [mid], lambda r, t=win["token"]: "/share/" + t + "/attachment/" + str(r["id"])).get(mid, [])
         pv = vpay.get(r["project_id"])
@@ -5781,6 +5975,8 @@ def hub_data(hub_token):
                 continue
             roots.append({
                 "share_token": s["token"], "can_edit": s["can_edit"], "kind": "project",
+                "role": s.get("role", "viewer"),  # [GUEST-ROLES]
+                "can_add": _ROLE_RANK[s.get("role", "viewer")] >= _ROLE_RANK["contributor"],
                 "root_id": s["target_id"],
                 "label": p["name"], "emoji": p["emoji"], "color": p["color"],
             })
@@ -5793,6 +5989,8 @@ def hub_data(hub_token):
                 continue
             roots.append({
                 "share_token": s["token"], "can_edit": s["can_edit"], "kind": "memo",
+                "role": s.get("role", "viewer"),  # [GUEST-ROLES]
+                "can_add": _ROLE_RANK[s.get("role", "viewer")] >= _ROLE_RANK["contributor"],
                 "memo_id": s["target_id"],
                 "label": _row_get(m, "title") or _text_excerpt(m["content"], 60),
                 "emoji": _row_get(m, "emoji"), "color": "",
@@ -5802,14 +6000,16 @@ def hub_data(hub_token):
     trash = []
     del_rows = _collect_memos(True)
     for mid, r in del_rows.items():
-        covering = [s for s in _cover_memo(r["project_id"], mid) if s["can_edit"]]
+        # [GUEST-ROLES] visible dès contributeur ; la restauration reste own-or-editor (route).
+        covering = [s for s in _cover_memo(r["project_id"], mid)
+                    if _ROLE_RANK[s.get("role", "viewer")] >= _ROLE_RANK["contributor"]]
         if not covering:
             continue
         win = _hub_winner(covering)
         td = _share_memo_dict(r)
         td["deleted_at"] = _row_get(r, "deleted_at", "")
         td["share_token"] = win["token"]
-        td["can_edit"] = True
+        td.update(_memo_guest_caps(db, win.get("role", "viewer"), r, hub["email"]))
         trash.append(td)
 
     # ── Membres : union (propriétaire + invités approuvés de tous ses shares) ──
@@ -5915,6 +6115,7 @@ def share_data(token):
     # (sans passer par le hub). Header APPROUVÉ uniquement ; sans hub → no-op.
     gtok = (request.headers.get("X-Guest-Token") or "").strip()
     me = None  # [VOTE-DECISION] identité du votant appelant (None = anonyme)
+    my_email = ""  # [GUEST-ROLES] e-mail de l'appelant approuvé (pour les caps « SES items »)
     if gtok:
         g = db.execute(
             "SELECT name, email FROM share_guests WHERE guest_token = ? AND share_id = ? "
@@ -5924,6 +6125,8 @@ def share_data(token):
         if g:
             _touch_guest_seen(db, g["email"])
             me = f"{g['name'] or g['email']} <{g['email']}>"
+            my_email = g["email"] or ""
+    my_role = _share_role(share)  # [GUEST-ROLES] rôle du lien
     rows = _share_scope_memos(db, share)
     memos = []
     proj_names = {}
@@ -6003,7 +6206,7 @@ def share_data(token):
         p.update(vpay.get(p["id"], {"vote_enabled": False}))
         # [VOTE-GROUPS] votes nommés + permission résolue (booléen lecture seule, façon `trip`).
         p["votes"] = _project_named_votes(db, p["id"], me, vote_owner_name, is_owner=False)
-        p["can_create_vote"] = bool(share["can_edit"]) and me is not None and _resolve_vote_create(db, p["id"]) == "guests"
+        p["can_create_vote"] = _ROLE_RANK[my_role] >= _ROLE_RANK["contributor"] and me is not None and _resolve_vote_create(db, p["id"]) == "guests"  # [GUEST-ROLES]
     att_map = _attachments_map(db, [r["id"] for r in rows], lambda a: "/share/" + token + "/attachment/" + str(a["id"]))  # [ATTACHMENTS]
     hmap = _hearts_map(db, memo_ids)  # [FESTIVAL-VOTE] ❤️ par mémo (scope du partage)
     for r in rows:
@@ -6017,12 +6220,17 @@ def share_data(token):
         if pv and not _row_get(r, "vote_excluded", 0):  # [VOTE-EXCLUDE]
             voters = vmap[r["project_id"]].get(r["id"], [])
             d.update(_memo_vote_fields(voters, me, vote_owner_name, pv, r["id"]))
+        d.update(_memo_guest_caps(db, my_role, r, my_email))  # [GUEST-ROLES] caps résolues serveur
         memos.append(d)
     payload = {
         "projects": scope_projects,
         "root_id": share["target_id"] if share["kind"] == "project" else None,
         "kind": share["kind"],
         "can_edit": bool(share["can_edit"]),
+        "role": my_role,  # [GUEST-ROLES]
+        "can_add": _ROLE_RANK[my_role] >= _ROLE_RANK["contributor"],  # créer mémo/sous-projet/upload
+        "can_comment_default": _ROLE_RANK[my_role] >= _ROLE_RANK["commenter"],
+        "can_vote_default": _ROLE_RANK[my_role] >= _ROLE_RANK["commenter"],
         "memos": memos,
         "priorities": [
             dict(r)
@@ -6059,10 +6267,11 @@ def share_data(token):
     payload["members"] = members
     # Corbeille du périmètre (mémos supprimés, restaurables) — visible si modifiable.
     trash = []
-    if share["can_edit"]:
+    if _ROLE_RANK[my_role] >= _ROLE_RANK["contributor"]:  # [GUEST-ROLES] contributeur+ (restore = own-or-editor)
         for r in _share_scope_memos(db, share, deleted=True):
             td = _share_memo_dict(r)
             td["deleted_at"] = _row_get(r, "deleted_at", "")
+            td.update(_memo_guest_caps(db, my_role, r, my_email))
             trash.append(td)
     payload["trash"] = trash
     return jsonify(payload)
@@ -6082,7 +6291,10 @@ def _guest_from_request(db, share):
 def share_register(token):
     db = get_db()
     share = _share_by_token(db, token)
-    if not share or not share["can_edit"]:
+    # [GUEST-ROLES] tout lien (même « suiveur ») peut approuver par PIN : un suiveur reste en
+    # lecture, mais un override perm_comment/perm_vote='all' peut lui ouvrir une action. L'approbation
+    # ne donne aucun droit d'écriture par elle-même — chaque écriture repasse par la matrice.
+    if not share:
         return jsonify({"error": "invalid"}), 404
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
@@ -6143,8 +6355,6 @@ def share_update_memo(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"]:
-        return jsonify({"error": "lecture seule"}), 403
     guest = _guest_from_request(db, share)
     if not guest or guest["status"] != "approved":
         return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
@@ -6152,6 +6362,9 @@ def share_update_memo(token, memo_id):
     if memo_id not in allowed_ids:
         return jsonify({"error": "not found"}), 404
     existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    # [GUEST-ROLES] éditeur → tout ; contributeur → uniquement SES mémos (created_by).
+    if not _role_allows(db, share, "own", guest=guest, memo_row=existing):
+        return jsonify({"error": "non autorisé"}), 403
     raw = request.get_json(silent=True) or {}
     data = {
         k: raw[k]
@@ -6193,11 +6406,14 @@ def share_delete_memo(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    guest, err = _share_guest_or_403(db, share)
-    if err:
-        return err
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
     if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not _role_allows(db, share, "own", guest=guest, memo_row=row):  # [GUEST-ROLES] own-or-editor
+        return jsonify({"error": "non autorisé"}), 403
     now = datetime.now(timezone.utc).isoformat()
     db.execute("UPDATE memos SET deleted_at = ? WHERE id = ?", (now, memo_id))
     db.commit()
@@ -6210,11 +6426,14 @@ def share_restore_memo(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    guest, err = _share_guest_or_403(db, share)
-    if err:
-        return err
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
     if memo_id not in {r["id"] for r in _share_scope_memos(db, share, deleted=True)}:
         return jsonify({"error": "not found"}), 404
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if not _role_allows(db, share, "own", guest=guest, memo_row=row):  # [GUEST-ROLES] own-or-editor
+        return jsonify({"error": "non autorisé"}), 403
     db.execute("UPDATE memos SET deleted_at = '' WHERE id = ?", (memo_id,))
     db.commit()
     return "", 204
@@ -6229,11 +6448,9 @@ def share_add_image(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"]:
-        return jsonify({"error": "lecture seule"}), 403
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return jsonify({"error": "guest_required"}), 403
+    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] uploader = contributeur
+    if err:
+        return err
     allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
     if memo_id not in allowed_ids:
         return jsonify({"error": "not found"}), 404
@@ -6265,7 +6482,7 @@ def share_add_image(token, memo_id):
 def share_delete_image(token, memo_id, name):
     db = get_db()
     share = _share_by_token(db, token)
-    if not share or not share["can_edit"]:
+    if not share:
         return jsonify({"error": "invalid"}), 404
     guest = _guest_from_request(db, share)
     if not guest or guest["status"] != "approved":
@@ -6275,6 +6492,9 @@ def share_delete_image(token, memo_id, name):
         return jsonify({"error": "not found"}), 404
     name = os.path.basename(name)
     existing = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    # [GUEST-ROLES] supprimer une image = éditer le mémo (own-or-editor : pas de created_by par image).
+    if not _role_allows(db, share, "own", guest=guest, memo_row=existing):
+        return jsonify({"error": "non autorisé"}), 403
     try:
         images = json.loads(existing["images"] or "[]")
     except Exception:
@@ -6307,11 +6527,9 @@ def share_add_attachment(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"]:
-        return jsonify({"error": "lecture seule"}), 403
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return jsonify({"error": "guest_required"}), 403
+    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] uploader = contributeur
+    if err:
+        return err
     if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
     files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
@@ -6347,11 +6565,9 @@ def share_add_project_attachment(token, project_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"]:
-        return jsonify({"error": "lecture seule"}), 403
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return jsonify({"error": "guest_required"}), 403
+    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] uploader = contributeur
+    if err:
+        return err
     if share["kind"] != "project" or project_id not in set(_project_descendants(db, share["target_id"])):
         return jsonify({"error": "not found"}), 404
     files = request.files.getlist("files") or ([request.files["file"]] if "file" in request.files else [])
@@ -6422,7 +6638,7 @@ def share_download_attachment(token, att_id):
 def share_delete_attachment(token, att_id):
     db = get_db()
     share = _share_by_token(db, token)
-    if not share or not share["can_edit"]:
+    if not share:
         return jsonify({"error": "invalid"}), 404
     guest = _guest_from_request(db, share)
     if not guest or guest["status"] != "approved":
@@ -6430,6 +6646,9 @@ def share_delete_attachment(token, att_id):
     r = db.execute("SELECT * FROM attachments WHERE id = ?", (att_id,)).fetchone()
     if not r or not _attach_in_share_scope(db, share, r):
         return jsonify({"error": "not found"}), 404
+    # [GUEST-ROLES] éditeur → toute PJ ; contributeur → uniquement les siennes (attachment.created_by).
+    if not _role_allows(db, share, "own", guest=guest, memo_row=r):
+        return jsonify({"error": "non autorisé"}), 403
     _delete_attachment_file(r["filename"])
     db.execute("DELETE FROM attachments WHERE id = ?", (att_id,))
     memo = db.execute("SELECT id, uid FROM memos WHERE id = ?", (r["memo_id"],)).fetchone()
@@ -6504,11 +6723,11 @@ def share_add_memo(token):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"] or share["kind"] != "project":
+    if share["kind"] != "project":
         return jsonify({"error": "non autorisé"}), 403
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
+    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] créer un mémo = contributeur
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     content = (data.get("content") or "").strip()
     title = _clean_title(data.get("title"))
@@ -6557,11 +6776,11 @@ def share_add_project(token):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"] or share["kind"] != "project":
+    if share["kind"] != "project":
         return jsonify({"error": "non autorisé"}), 403
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return jsonify({"error": "guest_required"}), 403
+    guest, err = _role_gate(db, share, "create")  # [GUEST-ROLES] créer un sous-projet = contributeur
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -6612,11 +6831,11 @@ def share_update_project(token, proj_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"] or share["kind"] != "project":
+    if share["kind"] != "project":
         return jsonify({"error": "non autorisé"}), 403
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return jsonify({"error": "guest_required"}), 403
+    guest, err = _role_gate(db, share, "edit")  # [GUEST-ROLES] éditer un dossier = éditeur
+    if err:
+        return err
     scope = set(_project_descendants(db, share["target_id"]))
     if proj_id not in scope:
         return jsonify({"error": "projet hors du partage"}), 404
@@ -6699,8 +6918,6 @@ def share_add_comment(token, memo_id):
     share = _share_by_token(db, token)
     if not share:
         return jsonify({"error": "invalid"}), 404
-    if not share["can_edit"]:
-        return jsonify({"error": "lecture seule"}), 403
     guest = _guest_from_request(db, share)
     if not guest or guest["status"] != "approved":
         return jsonify({"error": "guest_required"}), 403
@@ -6708,6 +6925,9 @@ def share_add_comment(token, memo_id):
     if memo_id not in allowed_ids:
         return jsonify({"error": "not found"}), 404
     memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    # [GUEST-ROLES] commenter = commentateur (ou override perm_comment='all' → viewer).
+    if not _role_allows(db, share, "comment", guest=guest, memo_row=memo):
+        return jsonify({"error": "non autorisé"}), 403
     data = request.get_json(silent=True) or {}
     body = _clean_comment_body(data.get("body"))
     if not body:
@@ -6735,6 +6955,10 @@ def share_react_comment(token, comment_id):
     crow = db.execute("SELECT id, memo_id FROM memo_comments WHERE id = ?", (comment_id,)).fetchone()
     if not crow or crow["memo_id"] not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
+    # [GUEST-ROLES] réagir = commentateur (ou override perm_comment='all' du mémo → viewer).
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (crow["memo_id"],)).fetchone()
+    if not _role_allows(db, share, "react", guest=guest, memo_row=memo):
+        return jsonify({"error": "non autorisé"}), 403
     emoji = _valid_reaction_emoji((request.get_json(silent=True) or {}).get("emoji"), _reaction_palette(db))
     if not emoji:
         return jsonify({"error": "emoji hors palette"}), 400
@@ -6758,9 +6982,12 @@ def share_vote_memo(token, memo_id):
         return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
     if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
-    memo = db.execute("SELECT id, project_id, vote_excluded FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
     if not memo or not memo["project_id"]:
         return jsonify({"error": "pas une option de vote"}), 400
+    # [GUEST-ROLES] voter = commentateur (ou override perm_vote='all' du mémo/dossier → viewer).
+    if not _role_allows(db, share, "vote", guest=guest, memo_row=memo):
+        return jsonify({"error": "non autorisé"}), 403
     voter = f"{guest['name'] or guest['email']} <{guest['email']}>"
     vid = (request.get_json(silent=True) or {}).get("vote_id")
     if vid not in (None, "", 0):  # [VOTE-GROUPS] vote nommé — porteur DOIT être dans le scope partagé
@@ -6804,6 +7031,9 @@ def share_heart_memo(token, memo_id):
     if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
     memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    # [GUEST-ROLES] coup de cœur = voter (commentateur, ou override perm_vote='all' → viewer).
+    if not _role_allows(db, share, "vote", guest=guest, memo_row=memo):
+        return jsonify({"error": "non autorisé"}), 403
     voter = f"{guest['name'] or guest['email']} <{guest['email']}>"
     data = request.get_json(silent=True) or {}
     kind, payload = _toggle_heart(db, memo, voter, bool(data.get("replace")))
@@ -6831,11 +7061,11 @@ def share_festival_results(token):
 # gestion = créateur seulement (match e-mail). 403 « non autorisé » GÉNÉRIQUE (indiscernable).
 
 def _share_vote_guest_or_403(db, share):
-    if not share["can_edit"]:
-        return None, (jsonify({"error": "non autorisé"}), 403)
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return None, (jsonify({"error": "non autorisé"}), 403)
+    # [GUEST-ROLES] créer/gérer un scrutin nommé = contributeur (auteur de contenu) + permission
+    # de création héritée ('guests', vérifiée par l'appelant). 403 générique.
+    guest, err = _role_gate(db, share, "create")
+    if err:
+        return None, err
     return guest, None
 
 
@@ -6985,6 +7215,9 @@ def share_mark_seen(token, memo_id):
         return jsonify({"error": "guest_required"}), 403
     if memo_id not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
+    # [GUEST-ROLES] marquer vu = commentateur (le suiveur lit sans écrire d'accusé).
+    if not _role_allows(db, share, "comment", guest=guest):
+        return jsonify({"error": "non autorisé"}), 403
     _mark_comments_seen(db, memo_id, guest["name"] or guest["email"])
     db.commit()
     return "", 204
@@ -6994,11 +7227,12 @@ def share_mark_seen(token, memo_id):
 def share_geocode(token):
     db = get_db()
     share = _share_by_token(db, token)
-    if not share or not share["can_edit"]:
+    if not share:
         return jsonify({"error": "invalid"}), 404
-    guest = _guest_from_request(db, share)
-    if not guest or guest["status"] != "approved":
-        return jsonify({"error": "guest_required"}), 403
+    # [GUEST-ROLES] géocodage = aide à la création/édition → contributeur mini.
+    guest, err = _role_gate(db, share, "create")
+    if err:
+        return err
     q = (request.args.get("q") or "").strip()
     if len(q) < 3:
         return jsonify({"results": []})
@@ -7158,6 +7392,8 @@ def _build_export(db, root_id=None):
         mid = d.pop("id", None)
         d.pop("created_by_display", None)  # runtime-only, jamais exporté ; created_by (brut) reste
         d.pop("end_time", None)  # [FESTIVAL-VOTE] non exporté (export reste v23, comme les voix)
+        d.pop("perm_vote", None)  # [GUEST-ROLES] override d'atelier, jamais exporté (comme les voix)
+        d.pop("perm_comment", None)
         d["project"] = proj_names.get(d.pop("project_id", None), "")
         d["attachments"] = att_by_id.get(mid, [])  # [ATTACHMENTS] v22
         out_memos.append(d)

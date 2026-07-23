@@ -749,19 +749,21 @@ function hubVoteRow(m) {
 
 function hubVoteControls(m, o) {
   const row = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0.15rem 0 0 1.9rem' } });
-  const btn = el('button', {
-    class: 'prio-btn', text: voteBtnLabel(o.mode, o.mine),
-    attrs: Object.assign({ type: 'button', title: o.closed ? 'Vote clos' : (o.mine ? 'Retirer ma voix' : 'Voter pour ce mémo') }, o.closed ? { disabled: '' } : {}, { style: o.mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' }),
-  });
-  if (!o.closed) btn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    try {
-      const r = await api(o.token, '/memo/' + m.id + '/vote', { method: 'POST', body: JSON.stringify(o.voteId ? { vote_id: o.voteId } : {}) });
-      if (r.ok) await reload();
-      else { const er = await r.json().catch(() => ({})); notify(er.error || 'Vote impossible.', { error: true }); }
-    } catch (err) { notify('Vote impossible.', { error: true }); }
-  });
-  row.appendChild(btn);
+  if (m.can_vote) {  // [GUEST-ROLES] voter = commentateur (ou override perm_vote='all') ; sinon résultats en lecture
+    const btn = el('button', {
+      class: 'prio-btn', text: voteBtnLabel(o.mode, o.mine),
+      attrs: Object.assign({ type: 'button', title: o.closed ? 'Vote clos' : (o.mine ? 'Retirer ma voix' : 'Voter pour ce mémo') }, o.closed ? { disabled: '' } : {}, { style: o.mine ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' }),
+    });
+    if (!o.closed) btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const r = await api(o.token, '/memo/' + m.id + '/vote', { method: 'POST', body: JSON.stringify(o.voteId ? { vote_id: o.voteId } : {}) });
+        if (r.ok) await reload();
+        else { const er = await r.json().catch(() => ({})); notify(er.error || 'Vote impossible.', { error: true }); }
+      } catch (err) { notify('Vote impossible.', { error: true }); }
+    });
+    row.appendChild(btn);
+  }
   row.appendChild(el('span', { class: 'badge', text: (o.count || 0) + ' voix' }));
   (o.voters || []).slice(0, 6).forEach(v => row.appendChild(el('span', { class: 'asg-av', text: initials(v), attrs: { title: v } })));
   if (o.isWinner) row.appendChild(el('span', { class: 'badge', text: o.winnerText, attrs: { style: 'background:var(--accent);color:#10141a;font-weight:600' } }));
@@ -933,10 +935,10 @@ function renderBoard() {
       }
       board.appendChild(hd);
       // [FOLDER-ATTACHMENTS] fichiers rattachés au dossier courant (sous l'en-tête).
-      if ((fp.attachments || []).length || fp.can_edit) {
+      if ((fp.attachments || []).length || fp.can_add) {  // [GUEST-ROLES] PJ dossier = contributeur
         board.appendChild(renderAttachments({
           attachments: fp.attachments || [],
-          canEdit: !!fp.can_edit,
+          canEdit: !!fp.can_add,
           uploadUrl: '/share/' + fp.share_token + '/project/' + fp.id + '/attachments',
           headers: { 'X-Guest-Token': gtFor(fp.share_token) },
           onChange: async () => { await reload(); },
@@ -963,7 +965,8 @@ function renderBoard() {
   shown.forEach(m => board.appendChild(memoCard(m)));
 }
 
-function editableProjects() { return (DATA.projects || []).filter(p => p.can_edit); }
+// [GUEST-ROLES] dossiers où l'invité peut AJOUTER (contributeur+) — pilote les barres d'ajout.
+function editableProjects() { return (DATA.projects || []).filter(p => p.can_add); }
 
 // [GUEST-SUBPROJECT] création de sous-projet depuis le hub (parité share.html) :
 // routée vers le POST /share/<share_token>/projects du dossier PARENT choisi —
@@ -1334,14 +1337,14 @@ function renderEdComments(m, ro) {
     const vf = renderVoiceBody(c.body, voiceUrlFor(m.attachments));
     if (vf) cb.appendChild(vf); else cb.textContent = c.body;
     r.appendChild(cb); cw.appendChild(r);
-    // [COMMENT-REACTIONS] l'invité du hub est approuvé → peut réagir (can_edit non requis).
-    cw.appendChild(reactionRow(c.reactions, true, async (emoji) => {
+    // [GUEST-ROLES] réagir = commentateur (ou override perm_comment='all' du mémo).
+    cw.appendChild(reactionRow(c.reactions, !!m.can_comment, async (emoji) => {
       const resp = await api(m.share_token, '/comment/' + c.id + '/react', { method: 'POST', body: JSON.stringify({ emoji }) });
       if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
       else notify('Réaction impossible.', { error: true });
     }));
   });
-  if (!ro) { const inp = el('input', { attrs: { type: 'text', placeholder: '+ Commentaire…', style: 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.35rem 0.5rem;margin-top:0.4rem' } });
+  if (m.can_comment) { const inp = el('input', { attrs: { type: 'text', placeholder: '+ Commentaire…', style: 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.35rem 0.5rem;margin-top:0.4rem' } });  // [GUEST-ROLES]
     inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b }) }); inp.value = ''; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); });
     cw.appendChild(inp);
     // [VOICE-MESSAGES] Commentaire vocal (invité hub approuvé, routes /share existantes, invariant 5).
