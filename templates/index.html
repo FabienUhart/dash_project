@@ -1322,6 +1322,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 /* [SETTINGS-TABS] onglets de la pop-in Paramètres — chips .prio-btn (invariant 9),
    dimensions explicites (la règle tactile min-height:44px déformerait les chips). */
 .settings-tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 1.1rem; }
+/* [WEB-CAPTURE] Ligne d'un favori magique : le lien draggable + le bouton 📋 copier. */
+.capture-bm { display: flex; gap: 0.4rem; align-items: center; }
+.capture-bm a { cursor: grab; }
 .settings-tabs .prio-btn { min-height: 0; padding: 0.3rem 0.7rem; }
 .settings-tabs .prio-btn.sel { background: var(--accent); border-color: var(--accent); color: #10141a; }
 .backup-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.65rem; font-size: 0.82rem; margin-bottom: 0.4rem; }
@@ -1948,6 +1951,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <button type="button" class="prio-btn" data-tab="cats" role="tab">🗂️ Catégories</button>
     <button type="button" class="prio-btn" data-tab="prios" role="tab">🚩 Priorités</button>
     <button type="button" class="prio-btn" data-tab="reactions" role="tab">😊 Réactions</button>
+    <button type="button" class="prio-btn" data-tab="capture" role="tab">🔖 Capture</button>
   </div>
 
   <div class="settings-panel" data-panel="identity">
@@ -2074,6 +2078,33 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <p style="font-size:0.78rem;color:var(--muted);margin:0.6rem 0 0">
         Les emojis proposés sous les commentaires (owner et invités). Les 6 de base sont là par défaut ;
         ajoute les tiens (colle ou tape un seul emoji) ou retire ceux dont tu ne veux pas. Enregistré automatiquement.
+      </p>
+    </div>
+  </div>
+
+  <!-- [WEB-CAPTURE] Deux favoris « magiques » (bookmarklets) à glisser dans la barre du navigateur.
+       Les href javascript: sont générés au rendu avec l'origin courant (renderCaptureTab). -->
+  <div class="settings-panel" data-panel="capture">
+    <div class="settings-section">
+      <h4>🔖 CAPTURE WEB</h4>
+      <p style="font-size:0.82rem;color:var(--muted);margin:0 0 0.8rem">
+        Glisse ces deux liens dans la <strong>barre de favoris</strong> de ton navigateur.
+        Depuis n'importe quelle page, un clic l'envoie ici, pré-remplie. Rien à installer.
+      </p>
+      <div class="capture-bm">
+        <a id="bm-link" class="prio-btn" draggable="true" style="text-decoration:none">➕ Capturer la page</a>
+        <button type="button" id="bm-link-copy" class="prio-btn" title="Copier le code du favori">📋</button>
+      </div>
+      <p style="font-size:0.76rem;color:var(--muted);margin:0.3rem 0 0.9rem">
+        Ouvre la pop-in « Nouveau lien » avec le titre et l'URL de la page.
+      </p>
+      <div class="capture-bm">
+        <a id="bm-memo" class="prio-btn" draggable="true" style="text-decoration:none">📝 Note depuis la page</a>
+        <button type="button" id="bm-memo-copy" class="prio-btn" title="Copier le code du favori">📋</button>
+      </div>
+      <p style="font-size:0.76rem;color:var(--muted);margin:0.3rem 0 0">
+        Crée une note d'Inbox pré-remplie avec le texte sélectionné (s'il y en a) + la source.
+        Le drag ne marche pas ? Copie le code (📋) et crée le favori à la main (URL = le code).
       </p>
     </div>
   </div>
@@ -7398,7 +7429,7 @@ window.addEventListener('load', syncHeaderHeight);
 const settingsDialog = document.getElementById('settings-dialog');
 
 // [SETTINGS-TABS] un seul panneau visible ; onglet actif persisté (localStorage `settingsTab`).
-const SETTINGS_TABS = ['identity', 'map', 'backups', 'cats', 'prios', 'reactions'];
+const SETTINGS_TABS = ['identity', 'map', 'backups', 'cats', 'prios', 'reactions', 'capture'];
 function setSettingsTab(tab) {
   if (!SETTINGS_TABS.includes(tab)) tab = 'identity';
   localStorage.setItem('settingsTab', tab);
@@ -7413,6 +7444,46 @@ function setSettingsTab(tab) {
 document.querySelectorAll('#settings-tabs .prio-btn').forEach(b => {
   b.addEventListener('click', () => setSettingsTab(b.dataset.tab));
 });
+
+// [WEB-CAPTURE] Génère les 2 bookmarklets (favoris « magiques ») avec l'origin courant. Le href
+// `javascript:` est draggable vers la barre de favoris ; le bouton 📋 copie le code (favori manuel).
+function renderCaptureTab() {
+  const origin = location.origin;
+  const bmLink = "javascript:location.href='" + origin + "/?capture=link&url='+encodeURIComponent(location.href)+'&title='+encodeURIComponent(document.title)";
+  const bmMemo = "javascript:location.href='" + origin + "/?capture=memo&url='+encodeURIComponent(location.href)+'&title='+encodeURIComponent(document.title)+'&text='+encodeURIComponent(String(getSelection()).slice(0,2000))";
+  const a1 = document.getElementById('bm-link'); if (a1) a1.setAttribute('href', bmLink);
+  const a2 = document.getElementById('bm-memo'); if (a2) a2.setAttribute('href', bmMemo);
+  const copy = async (code, btn) => { try { await navigator.clipboard.writeText(code); btn.textContent = '✓'; setTimeout(() => { btn.textContent = '📋'; }, 1200); } catch (_) {} };
+  const c1 = document.getElementById('bm-link-copy'); if (c1 && !c1._wired) { c1._wired = true; c1.addEventListener('click', () => copy(a1.getAttribute('href') || bmLink, c1)); }
+  const c2 = document.getElementById('bm-memo-copy'); if (c2 && !c2._wired) { c2._wired = true; c2.addEventListener('click', () => copy(a2.getAttribute('href') || bmMemo, c2)); }
+}
+
+// [WEB-CAPTURE] À l'ouverture : si l'URL porte des params de capture, pré-remplir puis NETTOYER
+// l'URL (history.replaceState — ne pollue ni reload ni favori). Valeurs traitées en TEXTE brut
+// (attributs/valeurs de formulaire uniquement, aucune interpolation HTML → pas de XSS par titre
+// piégé). Bornes : title 200, text 2000, url http(s) sinon vide. Param inconnu = ignoré.
+function handleCapture() {
+  let params;
+  try { params = new URLSearchParams(location.search); } catch (_) { return; }
+  const cap = params.get('capture');
+  if (cap !== 'link' && cap !== 'memo') return;
+  const title = String(params.get('title') || '').slice(0, 200);
+  const text = String(params.get('text') || '').slice(0, 2000);
+  let url = '';
+  try { const u = new URL(params.get('url') || ''); if (u.protocol === 'http:' || u.protocol === 'https:') url = u.href; } catch (_) {}
+  try { history.replaceState(null, '', location.pathname); } catch (_) {}
+  if (cap === 'link') {
+    openDialog();  // flux existant : catégorie active éventuelle pré-remplie par openDialog
+    if (title) form.elements.name.value = title;
+    if (url) form.elements.url_public.value = url;
+    setTimeout(() => { (title ? form.elements.url_public : form.elements.name).focus(); }, 60);
+  } else {  // memo → note d'Inbox pré-remplie dans le composeur rapide (validation manuelle = Entrée)
+    const src = url ? ('🔗 ' + (title || url) + ' — ' + url) : (title ? ('🔗 ' + title) : '');
+    const body = [text, src].filter(Boolean).join('\n\n');
+    const q = document.getElementById('memo-quick');
+    if (q) { q.value = body; try { q.scrollIntoView({ block: 'nearest' }); } catch (_) {} q.focus(); }
+  }
+}
 
 // [SETTINGS-TABS] feedback de sauvegarde auto : ✓ discret dans l'en-tête (~1,2 s, aria-live).
 let settingsSavedTimer = null;
@@ -7432,6 +7503,7 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   renderPrioManage();
   renderReactionManage();
   renderBackups();
+  renderCaptureTab();  // [WEB-CAPTURE] génère les 2 bookmarklets avec l'origin courant
   // [POMODORO V1.1] reflète l'état d'affichage du widget minuteur (piloté dans le partial).
   const pvcb = document.getElementById('pomo-visible-cb');
   if (pvcb) pvcb.checked = !(window.pomoIsHidden && window.pomoIsHidden());
@@ -7745,7 +7817,8 @@ function adaptMemoPanel() { memoDetails.open = !mq.matches; }
 adaptMemoPanel();
 mq.addEventListener('change', adaptMemoPanel);
 
-loadAll();
+// [WEB-CAPTURE] handleCapture après le 1er loadAll (openDialog a besoin des catégories chargées).
+loadAll().then(() => { try { handleCapture(); } catch (_) {} });
 refreshActivityBadge();
 setInterval(refreshActivityBadge, 15 * 1000);
 
