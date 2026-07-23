@@ -6,8 +6,9 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Partage — Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="/share/assets/favicon.svg">
-<!-- [PWA] manifest invité GÉNÉRÉ (start_url = ce partage ; pas de share_target ; invariant 5) -->
-<link rel="manifest" href="/share/{{ share_token }}/manifest.webmanifest">
+<!-- [PWA] manifest invité GÉNÉRÉ (start_url = ce partage ; pas de share_target ; invariant 5).
+     crossorigin=use-credentials inoffensif ici (route /share/* publique, hors Authelia). [PWA-MANIFEST-AUTH] -->
+<link rel="manifest" href="/share/{{ share_token }}/manifest.webmanifest" crossorigin="use-credentials">
 <meta name="theme-color" content="#0e1217">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">

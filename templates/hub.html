@@ -6,8 +6,9 @@
 <meta name="robots" content="noindex, nofollow">
 <title>Vos dossiers partagés</title>
 <link rel="icon" type="image/svg+xml" href="/share/assets/favicon.svg">
-<!-- [PWA] manifest du hub : href dérivé de l'URL en JS (shell sans token embarqué) -->
-<link rel="manifest" id="pwa-manifest">
+<!-- [PWA] manifest du hub : href dérivé de l'URL en JS (shell sans token embarqué).
+     crossorigin=use-credentials inoffensif (route /share/hub/* publique). [PWA-MANIFEST-AUTH] -->
+<link rel="manifest" id="pwa-manifest" crossorigin="use-credentials">
 <meta name="theme-color" content="#0e1217">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
