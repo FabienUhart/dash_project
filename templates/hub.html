@@ -650,9 +650,26 @@ function memoCard(m) {
   if (m.can_edit) check.addEventListener('click', () => putMemo(m, { done: !m.done }));
   row.appendChild(check);
   const content = el('div', { class: 'task-content clamp' });
-  if (m.title) { const tl = el('div', { class: 'task-title' }); if (m.emoji) tl.appendChild(el('span', { text: m.emoji + ' ' })); tl.appendChild(el('span', { text: m.title })); content.appendChild(tl); }
-  if (m.content) { const c = el('div'); if (isRich(m.content)) c.appendChild(sanitize(m.content)); else c.appendChild(linkify(m.content)); content.appendChild(c);
-    if (m.can_edit) wireChecklist(content, m); }
+  if (m.title) {
+    const tl = el('div', { class: 'task-title' }); if (m.emoji) tl.appendChild(el('span', { text: m.emoji + ' ' })); tl.appendChild(el('span', { text: m.title })); content.appendChild(tl);
+    if (m.content) { const c = el('div'); if (isRich(m.content)) c.appendChild(sanitize(m.content)); else c.appendChild(linkify(m.content)); content.appendChild(c);
+      if (m.can_edit) wireChecklist(content, m); }
+  } else {
+    // [MEMO-TITLE-FALLBACK] Pas de titre : accroche du contenu en style titre (gras), sans doublon
+    // (1re ligne = titre, reste = extrait). Contenu vide/HTML sans texte → placeholder unique.
+    if (m.emoji) content.appendChild(el('span', { text: m.emoji + ' ' }));
+    const stripped = stripTags(m.content || '').trim();
+    if (!stripped) {
+      content.appendChild(el('div', { class: 'task-title', attrs: { style: 'font-weight:500;color:var(--muted);font-style:italic' }, text: MEMO_EMPTY_LABEL }));
+    } else if (!isRich(m.content)) {
+      content.appendChild(el('div', { class: 'task-title', text: memoLeadText(stripped) }));
+      const rest = memoRestText(m.content);
+      if (rest) { const c = el('div'); c.appendChild(linkify(rest)); content.appendChild(c); }
+    } else {
+      const c = el('div'); c.appendChild(sanitize(m.content)); content.appendChild(c);
+      if (m.can_edit) wireChecklist(content, m);
+    }
+  }
   content.addEventListener('click', () => openEditor(m));
   row.appendChild(content);
   const badges = el('div', { class: 'badges' });
@@ -805,7 +822,7 @@ function openHubVoteManage(v) {
     const r = el('label', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;font-size:0.85rem;cursor:pointer' } });
     const cb = el('input', { attrs: { type: 'checkbox', style: 'accent-color:var(--accent)' } }); cb.checked = sel.has(m.id);
     cb.addEventListener('change', () => { if (cb.checked) sel.add(m.id); else sel.delete(m.id); });
-    r.appendChild(cb); r.appendChild(el('span', { text: (m.emoji ? m.emoji + ' ' : '') + (m.title || (m.content || '').replace(/<[^>]*>/g, '').slice(0, 50) || '(sans titre)') })); ow.appendChild(r);
+    r.appendChild(cb); r.appendChild(el('span', { text: (m.emoji ? m.emoji + ' ' : '') + (m.title || (m.content || '').replace(/<[^>]*>/g, '').slice(0, 50) || MEMO_EMPTY_LABEL) })); ow.appendChild(r);
   });
   body.appendChild(ow);
   const post = (path, bodyObj) => api(token, '/votes/' + v.id + (path ? '/' + path : ''), { method: path ? 'POST' : 'PUT', body: JSON.stringify(bodyObj || {}) });
@@ -996,7 +1013,7 @@ function renderPlan() {
     const items = [...mm.map(m => ({ m })), ...kids.map(c => ({ c }))];
     items.forEach((it, i) => { const l = i === items.length - 1;
       if (it.m) { const r = el('div', { class: 'tree-row tree-memo' }); r.appendChild(el('span', { class: 'tree-pre', text: treeConnector([...anc, last], l) }));
-        r.appendChild(el('span', { text: it.m.done ? '✓ ' : '' })); r.appendChild(el('span', { class: 'nm', text: it.m.title || stripTags(it.m.content).slice(0, 60) || '(mémo)' }));
+        r.appendChild(el('span', { text: it.m.done ? '✓ ' : '' })); r.appendChild(el('span', { class: 'nm', text: it.m.title || stripTags(it.m.content).slice(0, 60) || MEMO_EMPTY_LABEL }));
         r.addEventListener('click', () => openEditor(it.m)); wrap.appendChild(r); }
       else node(it.c, [...anc, last], l);
     });
@@ -1024,7 +1041,7 @@ function agendaChipColor(m) {
 }
 
 function agendaMemoTitle(m) {
-  return (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)');
+  return (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || MEMO_EMPTY_LABEL);
 }
 
 function agendaRow(m) {
@@ -1260,14 +1277,38 @@ function renderEdAttachments(m, ro) {
     openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
   }));
 }
+// [MEMO-EDITOR-IMAGES] Section « 📷 Photos » de l'éditeur hub (scopée au share du dossier, routes
+// /share existantes — AUCUNE route nouvelle, invariant 5). Helper partagé : visionneuse = toutes les
+// images, suppression via confirmPopin (plus de confirm ni de fermeture de pop-in), rafraîchit la
+// section + la card (render(), pas de reload complet). Section masquée si vide + lecture seule.
 function renderEdImages(m, ro) {
-  const iw = document.getElementById('ed-images'); iw.innerHTML = '';
-  (m.images || []).forEach(name => { const img = el('img', { attrs: { src: '/share/' + m.share_token + '/image/' + name, style: 'height:54px;border-radius:6px;border:1px solid var(--border);cursor:zoom-in' } });
-    img.addEventListener('click', () => runImageViewer({ images: m.images, startIndex: m.images.indexOf(name), imageUrl: n => '/share/' + m.share_token + '/image/' + n, downloadUrl: n => '/share/' + m.share_token + '/image/' + n, exifUrl: n => '/share/' + m.share_token + '/image-exif/' + n,
-      canDelete: !ro, onDelete: async (n) => { await api(m.share_token, '/memo/' + m.id + '/images/' + n, { method: 'DELETE' }); await reload(); edDialog.close(); } })); iw.appendChild(img); });
-  if (!ro) { const f = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg', multiple: '', style: 'display:none' } });
-    f.addEventListener('change', async () => { for (const file of f.files) { const fd = new FormData(); fd.append('image', file); await api(m.share_token, '/memo/' + m.id + '/images', { method: 'POST', body: fd }); } await reload(); edDialog.close(); });
-    iw.appendChild(el('button', { class: 'btn', text: '＋ Photo', on: { click: () => f.click() } })); iw.appendChild(f); }
+  const box = document.getElementById('ed-images');
+  if (!box) return;
+  box.innerHTML = '';
+  const base = '/share/' + m.share_token;
+  const sync = (imgs) => { m.images = imgs; const f = (DATA.memos || []).find((x) => x.id === m.id); if (f) f.images = imgs; };
+  const sec = renderMemoPhotos({
+    images: m.images || [],
+    canEdit: !ro,
+    imageUrl: (n) => base + '/image/' + n,
+    downloadUrl: (n) => base + '/image/' + n,
+    exifUrl: (n) => base + '/image-exif/' + n,
+    onDelete: async (n) => {
+      const r = await api(m.share_token, '/memo/' + m.id + '/images/' + n, { method: 'DELETE' });
+      if (r && r.ok) { const d = await r.json().catch(() => null); sync((d && d.images) ? d.images : (m.images || []).filter((x) => x !== n)); }
+      else notify('Suppression impossible.', { error: true });
+    },
+    onUpload: async (files) => {
+      for (const file of files) {
+        const fd = new FormData(); fd.append('image', file);
+        const r = await api(m.share_token, '/memo/' + m.id + '/images', { method: 'POST', body: fd });
+        if (r && r.ok) { const d = await r.json().catch(() => null); if (d && d.images) sync(d.images); }
+        else { const e = r ? await r.json().catch(() => ({})) : {}; notify('Image refusée : ' + (e.error || 'erreur'), { error: true }); }
+      }
+    },
+    onChange: async () => { const f = (DATA.memos || []).find((x) => x.id === m.id) || m; renderEdImages(f, !f.can_edit); if (typeof render === 'function') render(); },
+  });
+  if (sec) box.appendChild(sec);
 }
 function renderEdComments(m, ro) {
   const cw = document.getElementById('ed-comments'); cw.innerHTML = '';
@@ -1319,7 +1360,7 @@ function hubMapPoints() {
 function hubDatedPoints() {
   return focusedMemos().filter(m => m.due_date).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
-    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)'),
+    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || MEMO_EMPTY_LABEL),
     due_date: m.due_date, due_time: m.due_time || '',
     lat: (m.location && typeof m.location.lat === 'number') ? m.location.lat : null,
     lng: (m.location && typeof m.location.lat === 'number') ? m.location.lng : null,

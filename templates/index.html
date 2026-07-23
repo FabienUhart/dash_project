@@ -194,6 +194,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
      On garde largeur = hauteur (donc parfaitement ronds), un poil plus grands pour le tactile. */
   .task-check { min-height: 0; width: 1.5rem; height: 1.5rem; }
   .thumb-del { min-height: 0; }
+  /* [HEADER-ADD-CONTEXT] même gotcha : min-height:44px ovalise le « + » rond → carré explicite,
+     un poil plus grand pour le tactile (zone ≥ 36px). */
+  .mini-add-btn { min-height: 0; width: 2.25rem; height: 2.25rem; }
   /* Boutons de la barre Quill : ne pas les gonfler à 44px (sinon barre d'outils énorme,
      icônes SVG étirées). On garde leur taille native. */
   #quill-wrap .ql-toolbar button { min-height: 0; }
@@ -1290,6 +1293,21 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 .card-menu button { background: none; border: none; color: var(--text); text-align: left; padding: 0.4rem 0.6rem; border-radius: 6px; cursor: pointer; font: inherit; font-size: 0.85rem; white-space: nowrap; }
 .card-menu button:hover { background: var(--panel); }
 .card-menu .danger-item { color: var(--red); }
+/* [HEADER-ADD-CONTEXT] « + » contextuel par bloc — MOBILE ≤900px uniquement (masqué desktop ici,
+   révélé dans le bloc « Overrides mémos mobile »). Bouton rond secondaire (PAS accent) au gabarit
+   `.task .task-actions button` (invariant 9), tokens uniquement. */
+#links-blockhead { display: none; }              /* desktop : jamais (barre #links-actions visible) */
+#memo-add-btn { display: none; }                 /* desktop : jamais (le summary suffit) */
+.block-head { align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.block-head-label { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.block-head-add { position: relative; margin-left: auto; }
+.mini-add-btn {
+  display: inline-flex; min-width: 0; width: 2.25rem; height: 2.25rem; padding: 0; flex: 0 0 auto;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2);
+  color: var(--muted); cursor: pointer; font-size: 1.05rem; line-height: 1;
+  align-items: center; justify-content: center;
+}
+.mini-add-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 .settings-section { margin-bottom: 1.25rem; }
 .settings-section h4 { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--muted); letter-spacing: 0.04em; }
 .settings-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -1404,6 +1422,12 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
      en flex nowrap → débordait le viewport ≤900px (bouton Carte clippé) et rendait la page
      scrollable horizontalement. On autorise le retour à la ligne. Desktop inchangé. */
   #board-title { flex-wrap: wrap; row-gap: 0.4rem; }
+  /* [HEADER-ADD-CONTEXT] Mobile ≤900px : la barre 2 boutons #links-actions disparaît (masquée
+     ci-dessous), remplacée par l'en-tête de bloc « 🔗 Liens + » ; « + » du bloc Mémos révélé.
+     `:not([hidden])` bat le base `#links-blockhead{display:none}` (renderAll toggle [hidden] par vue). */
+  #links-actions { display: none !important; }
+  #links-blockhead:not([hidden]) { display: flex; }
+  #memo-add-btn { display: inline-flex; }
   .task .task-badges { order: 2; flex-basis: 100%; max-width: 100%; margin-left: 2.1rem; }
   /* Carte visible d'emblée (le survol n'existe pas au doigt). */
   .card .actions { opacity: 1; }
@@ -1586,6 +1610,19 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <button id="add-link" class="primary">+ Ajouter un lien</button>
       <button id="add-cat-page">+ Ajouter une catégorie</button>
     </div>
+    <!-- [HEADER-ADD-CONTEXT] En-tête de bloc Liens : remplace la barre 2 boutons en mobile ≤900px
+         (vue Liens uniquement, togglée dans renderAll comme #links-actions). « + » → mini-menu
+         (pattern card-menu) → openDialog() / addCategory(). Desktop : masqué (barre visible). -->
+    <div id="links-blockhead" hidden>
+      <span class="block-head-label">🔗 Liens</span>
+      <div class="block-head-add">
+        <button type="button" id="links-add-btn" class="mini-add-btn" title="Ajouter" aria-label="Ajouter un lien ou une catégorie" aria-haspopup="true">＋</button>
+        <div id="links-add-menu" class="card-menu" hidden>
+          <button type="button" id="links-add-link">＋ Lien</button>
+          <button type="button" id="links-add-cat">＋ Catégorie</button>
+        </div>
+      </div>
+    </div>
     <ul id="links" class="cards"></ul>
     <div id="memo-board" hidden></div>
     <div id="shares-board" hidden></div>
@@ -1596,7 +1633,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
-      <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span></summary>
+      <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span><button type="button" id="memo-add-btn" class="mini-add-btn" title="Ajouter un mémo" aria-label="Ajouter un mémo">＋</button></summary>
       <div id="memos"></div>
       <textarea id="memo-quick" rows="2" placeholder="+ Note rapide… (Entrée pour ajouter)"></textarea>
     </details>
@@ -1866,6 +1903,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <button type="button" id="me-loc-clear" class="prio-btn" style="display:none">×</button>
     <span id="me-loc-label" style="font-size:0.8rem;color:var(--muted)">aucune</span>
   </div>
+  <div id="me-photos"></div>
   <div id="me-attachments"></div>
   <details id="me-comments-acc" class="me-acc">
     <summary id="me-comments-sum">💬 Commentaires</summary>
@@ -2194,6 +2232,9 @@ function renderAll() {
   document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
   // [LINK-ADD-RELOCATE] La barre « + Ajouter un lien » vit dans la vue Liens → visible seulement là.
   document.getElementById('links-actions').style.display = v === 'links' ? '' : 'none';
+  // [HEADER-ADD-CONTEXT] En-tête de bloc Liens (mobile ≤900px, cf. CSS) : présent en vue Liens
+  // uniquement (togglé par `hidden` comme #links-actions). Le CSS le masque sur desktop.
+  document.getElementById('links-blockhead').hidden = v !== 'links';
   if (v === 'memos') renderBoard();
   else if (v === 'shares') renderShares();
   else if (v === 'trash') renderTrash();
@@ -2729,7 +2770,7 @@ function agendaChipColor(m) {
 }
 
 function agendaMemoTitle(m) {
-  return (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || '(mémo)');
+  return (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || MEMO_EMPTY_LABEL);
 }
 
 function agendaRow(m) {
@@ -3175,7 +3216,7 @@ function openImportPreview(report, fileData, targetId, targetName, fileName) {
       renderedUids.add(m);
       const row = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.4rem;padding:0.1rem 0;margin-left:' + (depth * 1.1) + 'rem;font-size:0.85rem' } });
       row.appendChild(el('span', { text: '📝', attrs: { style: 'opacity:0.65' } }));
-      row.appendChild(el('span', { text: m.title || '(mémo)', attrs: { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+      row.appendChild(el('span', { text: m.title || MEMO_EMPTY_LABEL, attrs: { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
       row.appendChild(badge(m.status));
       tree.appendChild(row);
       if (m.status === 'conflict') {
@@ -3653,7 +3694,7 @@ function boardDatedPoints() {
     return scope.has(m.project_id);
   }).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
-    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || '(mémo)'),
+    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || MEMO_EMPTY_LABEL),
     due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: resolveTripLocal(projById, m.project_id),
@@ -4224,7 +4265,7 @@ function renderTrash() {
   items.forEach(m => {
     const row = el('div', { class: 'trash-row' });
     const main = el('div', { class: 'grow' });
-    const label = m.title || stripHTML(m.content || '').slice(0, 90) || '(mémo vide)';
+    const label = m.title || stripHTML(m.content || '').slice(0, 90) || MEMO_EMPTY_LABEL;
     main.appendChild(el('div', { class: 'trash-heading', text: (m.emoji ? m.emoji + ' ' : '') + label }));
     main.appendChild(el('div', { class: 'trash-meta', text: 'Supprimé le ' + fmtDeleted(m.deleted_at) }));
     row.appendChild(main);
@@ -4286,7 +4327,7 @@ function renderTreeView() {
     const prio = prioOf(m.priority);
     if (prio && prio.color) pip.style.background = prio.color; else pip.style.visibility = 'hidden';
     row.appendChild(pip);
-    const label = m.title || stripHTML(m.content || '').slice(0, 60) || '(sans titre)';
+    const label = m.title || stripHTML(m.content || '').slice(0, 60) || MEMO_EMPTY_LABEL;
     row.appendChild(el('span', { class: 'tree-title' + (m.done ? ' done' : ''), text: label }));
     // Colonnes de métadonnées (masquées en mobile via CSS).
     const meta = el('div', { class: 'tree-meta' });
@@ -4492,6 +4533,18 @@ function openGuestEditDialog(email, currentName, rerender) {
   dlg.showModal();
 }
 
+// [SHARE-OPEN-AS-GUEST] Bouton rond ↗ « Ouvrir en tant qu'invité » à côté de chaque 📋 de la vue
+// Partages. Ouvre l'URL du partage dans un nouvel onglet (l'identité invité dépend du guest_token
+// déjà en localStorage pour ce lien ; sinon formulaire PIN = comportement voulu). Owner only,
+// frontend pur, invariant 9 (gabarit .task-actions). window.open avec 'noopener' (sécurité).
+function guestOpenBtn(url) {
+  return el('button', {
+    text: '↗',
+    attrs: { title: 'Ouvrir en tant qu\'invité (nouvel onglet)', 'aria-label': 'Ouvrir en tant qu\'invité' },
+    on: { click: () => { window.open(url, '_blank', 'noopener'); } },
+  });
+}
+
 async function renderShares() {
   const board = document.getElementById('shares-board');
   board.innerHTML = '';
@@ -4555,6 +4608,7 @@ async function renderShares() {
         text: '📋', attrs: { title: 'Copier le lien unique' },
         on: { click: async (e) => { try { await navigator.clipboard.writeText(hubUrl); e.target.textContent = '✓'; setTimeout(() => { e.target.textContent = '📋'; }, 1200); } catch (_) {} } },
       }));
+      hubRow.appendChild(guestOpenBtn(hubUrl));  // [SHARE-OPEN-AS-GUEST]
       hubRow.appendChild(el('button', {
         icon: 'qr', attrs: { title: 'QR du lien unique' },
         on: { click: () => openQr(hubUrl, { kind: 'project', target: dispName + ' — tous ses dossiers', can_edit: false, pin: hub.pin }) },
@@ -4633,6 +4687,7 @@ async function renderShares() {
           } catch (_) {}
         } },
       }));
+      row.appendChild(guestOpenBtn(location.origin + '/share/' + g.token));  // [SHARE-OPEN-AS-GUEST]
       row.appendChild(el('button', {
         icon: 'qr', attrs: { title: 'QR code de cet accès' },
         on: { click: () => {
@@ -4728,6 +4783,7 @@ async function renderShares() {
         try { await navigator.clipboard.writeText(url); e.target.textContent = '✓'; setTimeout(() => { e.target.textContent = '📋'; }, 1200); } catch (_) {}
       } },
     }));
+    r1.appendChild(guestOpenBtn(url));  // [SHARE-OPEN-AS-GUEST]
     r1.appendChild(el('button', {
       icon: 'qr', attrs: { title: 'QR code du lien' },
       on: { click: () => openQr(url, { kind: s.kind, target: s.target, can_edit: s.can_edit, pin: s.pin, guests: s.guests }) },
@@ -4907,6 +4963,7 @@ async function renderShareList() {
       } catch (_) { input.focus(); input.select(); }
     });
     row.appendChild(copyBtn);
+    row.appendChild(guestOpenBtn(url));  // [SHARE-OPEN-AS-GUEST]
     // [SHARE-QR] Bouton QR : déplie un panneau (QR ~200 px + PIN en gros + ⬇ PNG). Re-clic = replier.
     const qrPanel = shareQrPanel(url, s.pin);
     const qrBtn = el('button', { icon: 'qr', attrs: { title: 'QR code de ce lien (à scanner)' } });
@@ -5160,6 +5217,46 @@ function openMemoAttachments(memo) {
   });
 }
 
+// [MEMO-EDITOR-IMAGES] Section « 📷 Photos » de l'éditeur mémo (owner). Mêmes routes que la card
+// (upload/suppression images + visionneuse + EXIF). Rafraîchit la section ET la card derrière SANS
+// reload réseau complet (mise à jour de state + re-rendu depuis state).
+function _syncMemoImages(memo, images) {
+  memo.images = images;
+  const m = state.memos.find((x) => x.id === memo.id); if (m) m.images = images;
+}
+function _refreshCardsFromState() {
+  renderMemos();
+  if (state.view === 'memos') renderBoard();
+}
+function renderMePhotos(memo) {
+  const box = document.getElementById('me-photos');
+  if (!box) return;
+  box.innerHTML = '';
+  const sec = renderMemoPhotos({
+    images: memo.images || [],
+    canEdit: true,
+    imageUrl: (n) => `/uploads/${n}`,
+    downloadUrl: (n) => `/uploads/${n}`,
+    exifUrl: (n) => `/api/image-exif/${n}`,
+    onDelete: async (n) => {
+      const r = await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' });
+      if (r.ok) { const d = await r.json().catch(() => null); _syncMemoImages(memo, (d && d.images) ? d.images : (memo.images || []).filter((x) => x !== n)); }
+      else await notify('Suppression impossible.', { error: true });
+    },
+    onUpload: async (files) => {
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue;
+        const fd = new FormData(); fd.append('image', file);
+        const r = await fetch(`/api/memos/${memo.id}/images`, { method: 'POST', body: fd });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); await notify('Image refusée : ' + (e.error || r.statusText), { error: true }); }
+        else { const d = await r.json().catch(() => null); if (d && d.images) _syncMemoImages(memo, d.images); }
+      }
+    },
+    onChange: async () => { renderMePhotos(memo); _refreshCardsFromState(); },
+  });
+  if (sec) box.appendChild(sec);
+}
+
 // [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur mémo (owner).
 function renderMeAttachments(memo) {
   const box = document.getElementById('me-attachments');
@@ -5192,6 +5289,7 @@ function openMemoEditor(memo) {
   editingLoc = (memo.location && typeof memo.location.lat === 'number') ? { ...memo.location } : null;
   document.getElementById('me-loc-addr').value = '';
   renderMeLoc();
+  renderMePhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderMeAttachments(memo);  // [ATTACHMENTS]
   const mc = document.getElementById('me-comments');
   mc.innerHTML = '';
@@ -5355,7 +5453,7 @@ async function duplicateMemo(id) {
 // [MOVE-TO] Déplacer un mémo (cibles = projets + Inbox) via la pop-in mutualisée.
 function openMoveMemo(memo) {
   runMoveDialog({
-    subtitle: memo.title || stripHTML(memo.content).slice(0, 60) || '(sans titre)',
+    subtitle: memo.title || stripHTML(memo.content).slice(0, 60) || MEMO_EMPTY_LABEL,
     projects: state.projects,
     topLabel: '📥 Inbox (sans projet)',
     currentValue: memo.project_id || null,
@@ -5637,7 +5735,7 @@ function openVoteManage(v) {
     cb.checked = sel.has(m.id);
     cb.addEventListener('change', () => { if (cb.checked) sel.add(m.id); else sel.delete(m.id); });
     r.appendChild(cb);
-    r.appendChild(el('span', { text: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 50) || '(sans titre)') }));
+    r.appendChild(el('span', { text: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 50) || MEMO_EMPTY_LABEL) }));
     optWrap.appendChild(r);
   });
   body.appendChild(optWrap);
@@ -5722,13 +5820,28 @@ function taskEl(memo) {
     if (memo.emoji) tl.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
     tl.appendChild(el('span', { text: memo.title }));
     content.appendChild(tl);
-  } else if (memo.emoji) {
-    content.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
-  }
-  if (memo.content) {
-    const cn = contentNode(memo.content, memo);
-    if (!expanded) cn.classList.add('task-clamp'); // extrait 3 lignes ; déplier = complet
-    content.appendChild(cn);
+    if (memo.content) {
+      const cn = contentNode(memo.content, memo);
+      if (!expanded) cn.classList.add('task-clamp'); // extrait 3 lignes ; déplier = complet
+      content.appendChild(cn);
+    }
+  } else {
+    // [MEMO-TITLE-FALLBACK] Pas de titre : l'accroche du contenu prend le style titre (gras), sans
+    // dupliquer le texte (1re ligne = titre, lignes suivantes = extrait). Contenu vide (ou HTML sans
+    // texte, ex. « <p><br></p> ») → placeholder unique (corrige la card totalement vide).
+    if (memo.emoji) content.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
+    const stripped = stripHTML(memo.content || '').trim();
+    if (expanded && memo.content) {
+      content.appendChild(contentNode(memo.content, memo)); // lecture : contenu complet, pas de titre synthétique
+    } else if (!stripped) {
+      content.appendChild(el('div', { class: 'task-title', attrs: { style: 'font-weight:500;color:var(--muted);font-style:italic' }, text: MEMO_EMPTY_LABEL }));
+    } else if (!isRichHTML(memo.content)) {
+      content.appendChild(el('div', { class: 'task-title', text: memoLeadText(stripped) }));
+      const rest = memoRestText(memo.content);
+      if (rest) { const cn = contentNode(rest, memo); cn.classList.add('task-clamp'); content.appendChild(cn); }
+    } else {
+      const cn = contentNode(memo.content, memo); cn.classList.add('task-clamp'); content.appendChild(cn); // riche : extrait inchangé
+    }
   }
   wireChecklist(content, memo);
   const vrow = voteRowEl(memo);
@@ -7072,6 +7185,33 @@ document.getElementById('add-link').addEventListener('click', () => openDialog()
 // [LINK-ADD-RELOCATE] « + Ajouter une catégorie » dans la page Liens (même handler que le « + »
 // de la section LIENS de la sidebar — pas de logique nouvelle, invariant 9).
 document.getElementById('add-cat-page').addEventListener('click', () => addCategory());
+
+// [HEADER-ADD-CONTEXT] « + » contextuel par bloc en mobile (≤900px). Mêmes flux que les boutons
+// desktop (openDialog / addCategory / focus #memo-quick) — zéro nouvelle logique.
+(function () {
+  const linksAddBtn = document.getElementById('links-add-btn');
+  const linksAddMenu = document.getElementById('links-add-menu');
+  // Mini-menu 2 entrées via le pattern card-menu (comme #create-menu-btn), invariant 8 (natif).
+  linksAddBtn.addEventListener('click', (e) => { e.stopPropagation(); linksAddMenu.hidden = !linksAddMenu.hidden; });
+  document.addEventListener('click', (e) => {
+    if (!linksAddMenu.hidden && !linksAddMenu.contains(e.target) && e.target !== linksAddBtn) linksAddMenu.hidden = true;
+  });
+  document.getElementById('links-add-link').addEventListener('click', () => { linksAddMenu.hidden = true; openDialog(); });
+  document.getElementById('links-add-cat').addEventListener('click', () => { linksAddMenu.hidden = true; addCategory(); });
+
+  // « + » du bloc Mémos : ouvre le <details> si replié, puis scroll + focus #memo-quick.
+  // ⚠️ Le bouton est dans un <summary> : sans preventDefault+stopPropagation, le clic toggle
+  // le <details> (même précaution que #memo-open).
+  const memoAddBtn = document.getElementById('memo-add-btn');
+  memoAddBtn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const det = document.getElementById('memo-details');
+    if (!det.open) det.open = true;
+    const q = document.getElementById('memo-quick');
+    q.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    q.focus();
+  });
+})();
 
 // [HOME-RESET] Clic sur le titre « Dashboard » → accueil : vue Liens par défaut, projet/vue
 // désélectionné, recherche + filtre réinitialisés, scroll en haut. Idempotent. Desk + mobile.

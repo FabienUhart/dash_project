@@ -31,6 +31,33 @@ function fmtMemoTime(t) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(t || '') ? t.replace(':', 'h') : '';
 }
 
+// [MEMO-TITLE-FALLBACK] Intitulé de repli pour les mémos sans titre. Placeholder unique
+// (harmonise « (mémo) » / « (sans titre) » / « (mémo vide) » → une seule chaîne, 3 pages).
+// Purs, sans état, sans dépendance au strip page-spécifique (le texte plein est passé en arg).
+const MEMO_EMPTY_LABEL = '(mémo vide)';
+// Première « accroche » d'un contenu plein-texte (1re ligne, bornée à ~n car. sur une frontière de
+// mot, ellipsée). Sert de titre gras sur la card quand `title` est vide, SANS dupliquer le texte
+// (le reste des lignes va dans l'extrait). Vide si pas de texte.
+function memoLeadText(plain, n) {
+  n = n || 60;
+  const t = (plain || '').replace(/\r/g, '').trim();
+  if (!t) return '';
+  let seg = t.split('\n')[0].trim();
+  if (seg.length > n) {
+    seg = seg.slice(0, n);
+    const sp = seg.lastIndexOf(' ');
+    if (sp > n * 0.6) seg = seg.slice(0, sp);
+    seg = seg.replace(/[\s,.;:–—-]+$/, '') + '…';
+  }
+  return seg;
+}
+// Lignes de l'extrait APRÈS l'accroche (évite de répéter la 1re ligne déjà en titre). Vide si mono-ligne.
+function memoRestText(plain) {
+  const t = (plain || '').replace(/\r/g, '').trim();
+  const nl = t.indexOf('\n');
+  return nl < 0 ? '' : t.slice(nl + 1).trim();
+}
+
 // [FESTIVAL-VOTE] Plage horaire d'un passage « 22h30 → 00h00 » (fin omise si absente/invalide).
 // Le front affiche seulement — la normalisation post-minuit (+24h) vit côté serveur.
 // Un créneau de NUIT (🌙) reçoit un marqueur : après-minuit AVEC une fin (voir isNightSlot).
@@ -1932,12 +1959,27 @@ function setupMentions(quill, getNames, onPick) {
 // volée côté serveur. Affichage SEUL (badge 📷), aucune écriture mémo.
 // Rotation/zoom = AFFICHAGE SEUL (transform CSS, non persisté, aucun fetch),
 // remis à zéro à chaque navigation et fermeture. Pas de GSAP sur le dialog (invariant 8).
+// [VIEWER-FILMSTRIP] Style de la bande de vignettes, auto-contenu (injecté une fois) → parité
+// owner/invité/hub/carte sans toucher aux 3 blocs CSS. Tokens uniquement (invariant 9).
+function _ivStripStyle() {
+  if (document.getElementById('iv-strip-style')) return;
+  const st = document.createElement('style'); st.id = 'iv-strip-style';
+  st.textContent = '.iv-strip{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;max-width:100%;'
+    + 'padding:6px 8px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}'
+    + '.iv-thumb{flex:0 0 auto;width:52px;height:52px;min-height:0;padding:0;border:2px solid transparent;'
+    + 'border-radius:6px;background:none;cursor:pointer;overflow:hidden;opacity:0.55;transition:opacity .15s,border-color .15s}'
+    + '.iv-thumb img{width:100%;height:100%;object-fit:cover;display:block}'
+    + '.iv-thumb:hover{opacity:0.85}'
+    + '.iv-thumb.active{opacity:1;border-color:var(--accent)}';
+  document.head.appendChild(st);
+}
 function runImageViewer(cfg) {
   const dlg = document.getElementById('lightbox');
   if (!dlg || !cfg || !(cfg.images || []).length) return;
   const images = cfg.images.slice();
   let idx = Math.min(Math.max(cfg.startIndex || 0, 0), images.length - 1);
   let rot = 0, scale = 1, tx = 0, ty = 0;
+  let strip = null; const thumbEls = [];   // [VIEWER-FILMSTRIP] bande de vignettes (>1 image)
 
   dlg.innerHTML = '';
   // Conteneur : stoppe la propagation pour que seul un clic sur le backdrop (le
@@ -1998,6 +2040,15 @@ function runImageViewer(cfg) {
     const multi = images.length > 1;
     prev.style.visibility = multi ? '' : 'hidden';
     next.style.visibility = multi ? '' : 'hidden';
+    // [VIEWER-FILMSTRIP] met en évidence la vignette courante + auto-scroll (bande seule).
+    if (strip) {
+      thumbEls.forEach((t, i) => t.classList.toggle('active', i === idx));
+      const cur = thumbEls[idx];
+      if (cur) {
+        const tr = cur.getBoundingClientRect(), sr = strip.getBoundingClientRect();
+        strip.scrollBy({ left: (tr.left - sr.left) - (sr.width - tr.width) / 2, behavior: 'smooth' });
+      }
+    }
     // [IMAGE-EXIF] récupère les métadonnées de l'image courante (jeton de course :
     // ignore une réponse arrivée après une navigation). Aucune écriture mémo.
     exifBadge.style.display = 'none';
@@ -2030,6 +2081,7 @@ function runImageViewer(cfg) {
       images.splice(idx, 1);
       if (!images.length) { dlg.close(); return; }
       if (idx >= images.length) idx = images.length - 1;
+      buildThumbs();  // [VIEWER-FILMSTRIP] la bande suit la suppression (disparaît si ≤ 1 image)
       render();
     });
   }
@@ -2040,6 +2092,28 @@ function runImageViewer(cfg) {
   stage.appendChild(indicator);
   stage.appendChild(exifBadge);
   wrap.appendChild(stage);
+  // [VIEWER-FILMSTRIP] bande de vignettes sous l'image, au-dessus de la barre (si > 1 image).
+  // Miniatures = mêmes URLs (loading lazy), clic = saut direct à l'index. Défilable (tactile inclus).
+  // buildThumbs() (re)construit la bande — rappelée après une suppression pour rester à jour.
+  function buildThumbs() {
+    if (!strip) return;
+    strip.innerHTML = ''; thumbEls.length = 0;
+    if (images.length <= 1) { strip.style.display = 'none'; return; }
+    strip.style.display = '';
+    images.forEach((name, i) => {
+      const t = el('button', { class: 'iv-thumb', attrs: { type: 'button', title: 'Image ' + (i + 1), 'aria-label': 'Aller à l\'image ' + (i + 1) } });
+      t.appendChild(el('img', { attrs: { src: cfg.imageUrl(name), alt: '', loading: 'lazy' } }));
+      t.addEventListener('click', () => { if (i !== idx) { idx = i; render(); } });
+      thumbEls.push(t);
+      strip.appendChild(t);
+    });
+  }
+  if (images.length > 1) {
+    _ivStripStyle();
+    strip = el('div', { class: 'iv-strip' });
+    buildThumbs();
+    wrap.appendChild(strip);
+  }
   wrap.appendChild(bar);
   dlg.appendChild(wrap);
 
@@ -2076,6 +2150,12 @@ function runImageViewer(cfg) {
 
   render();
   dlg.showModal();
+  // [VIEWER-FILMSTRIP] recale la bande sur la vignette de départ APRÈS l'ouverture (avant
+  // showModal le <dialog> est display:none → rectangles nuls). Saut instantané (pas de smooth).
+  if (strip && thumbEls[idx]) {
+    const cur = thumbEls[idx], tr = cur.getBoundingClientRect(), sr = strip.getBoundingClientRect();
+    strip.scrollBy({ left: (tr.left - sr.left) - (sr.width - tr.width) / 2 });
+  }
 }
 
 /* ── [AGENDA] helpers purs de la vue calendrier (ADR-001) — aucune dépendance à
@@ -2320,6 +2400,73 @@ function renderAttachments(cfg) {
   wrap.appendChild(head);
   list.forEach(a => wrap.appendChild(attachRow(a, cfg)));
   if (cfg.canEdit) wrap.appendChild(attachUploader(cfg));
+  return wrap;
+}
+
+// [MEMO-EDITOR-IMAGES] Section « 📷 Photos » de l'éditeur mémo, partagée owner/invité/hub
+// (invariant 9 — même frame `.attach-sec` que « Fichiers », miniatures au look de la card).
+// cfg = { images:[noms], canEdit, imageUrl(n), downloadUrl(n)?, exifUrl(n)?, onDelete(n):Promise,
+// onUpload(files):Promise, onChange():Promise }. Renvoie la section, ou null si aucune image ET
+// lecture seule (section masquée). AUCUNE route ici : le réseau vit dans la cfg par page
+// (invariant 5). Suppression via confirmPopin (jamais de confirm natif). Pas de GSAP (invariant 8).
+function _photoSecStyle() {
+  if (document.getElementById('photo-sec-style')) return;
+  const st = document.createElement('style'); st.id = 'photo-sec-style';
+  st.textContent = '.mp-grid{display:flex;gap:0.4rem;flex-wrap:wrap;margin:0.4rem 0 0.2rem}'
+    + '.mp-thumb{position:relative}'
+    + '.mp-thumb img{height:64px;max-width:130px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:zoom-in;display:block}'
+    + '.mp-thumb img:hover{border-color:var(--accent)}'
+    + '.mp-del{position:absolute;top:-6px;right:-6px;width:1.2rem;height:1.2rem;min-height:0;padding:0;font-size:0.75rem;line-height:1;border-radius:50%;background:var(--red);color:#fff;border:none;cursor:pointer;display:none}'
+    + '.mp-thumb:hover .mp-del{display:block}.mp-del:hover{background:#d32f2f}';
+  document.head.appendChild(st);
+}
+function renderMemoPhotos(cfg) {
+  const images = cfg.images || [];
+  if (!images.length && !cfg.canEdit) return null;   // rien à voir ni à ajouter → section masquée
+  _attachStyle(); _photoSecStyle();
+  const url = cfg.imageUrl, dl = cfg.downloadUrl || cfg.imageUrl;
+  const wrap = el('div', { class: 'attach-sec' });
+  const head = el('div', { class: 'attach-head', attrs: { style: 'display:flex;align-items:center;gap:0.4rem' } });
+  head.appendChild(el('span', { text: '📷 Photos' + (images.length ? ' (' + images.length + ')' : ''), attrs: { style: 'flex:1' } }));
+  wrap.appendChild(head);
+  if (images.length) {
+    const grid = el('div', { class: 'mp-grid' });
+    images.forEach(name => {
+      const tw = el('div', { class: 'mp-thumb' });
+      const img = el('img', { attrs: { src: url(name), alt: '', loading: 'lazy' } });
+      img.addEventListener('click', () => {
+        if (typeof runImageViewer !== 'function') { window.open(url(name), '_blank', 'noopener'); return; }
+        runImageViewer({
+          images, startIndex: images.indexOf(name),   // visionneuse = TOUTES les images du mémo
+          imageUrl: url, downloadUrl: dl, exifUrl: cfg.exifUrl || null,
+          canDelete: !!cfg.canEdit,
+          onDelete: async (n) => { await cfg.onDelete(n); await cfg.onChange(); },
+        });
+      });
+      tw.appendChild(img);
+      if (cfg.canEdit) {
+        tw.appendChild(el('button', {
+          class: 'mp-del', text: '×', attrs: { type: 'button', title: 'Supprimer la photo' },
+          on: { click: async (e) => {
+            e.stopPropagation();
+            if (!(await confirmPopin('Supprimer cette photo ?'))) return;
+            await cfg.onDelete(name); await cfg.onChange();
+          } },
+        }));
+      }
+      grid.appendChild(tw);
+    });
+    wrap.appendChild(grid);
+  }
+  if (cfg.canEdit) {
+    const f = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg', multiple: 'true', style: 'display:none' } });
+    f.addEventListener('change', async () => {
+      if (f.files && f.files.length) { await cfg.onUpload([...f.files]); await cfg.onChange(); }
+      f.value = '';
+    });
+    wrap.appendChild(el('button', { class: 'prio-btn', text: '＋ Ajouter une photo', attrs: { type: 'button', style: 'margin-top:0.3rem' }, on: { click: () => f.click() } }));
+    wrap.appendChild(f);
+  }
   return wrap;
 }
 

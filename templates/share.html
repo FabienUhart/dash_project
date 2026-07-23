@@ -840,6 +840,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="q-wrap"><div id="q-editor"></div></div>
   <label class="me-label">Assigné·es</label>
   <div id="q-people" class="q-people"></div>
+  <div id="q-photos"></div>
   <div id="q-attachments"></div>
   <div class="dlg-actions">
     <button type="button" id="edit-cancel">Annuler</button>
@@ -1280,6 +1281,38 @@ function openShareMemoAttachments(memo) {
   });
 }
 
+// [MEMO-EDITOR-IMAGES] Section « 📷 Photos » de l'éditeur invité (scopée au partage, routes /share
+// existantes — AUCUNE route nouvelle, invariant 5). Rafraîchit la section + la card (render(),
+// pas de reload complet). Édition réservée à can_edit ; sans image + lecture seule → section masquée.
+function renderQPhotos(memo) {
+  const box = document.getElementById('q-photos');
+  if (!box) return;
+  box.innerHTML = '';
+  const sync = (imgs) => { memo.images = imgs; const m = (DATA.memos || []).find((x) => x.id === memo.id); if (m) m.images = imgs; };
+  const sec = renderMemoPhotos({
+    images: memo.images || [],
+    canEdit: canEditNow(),
+    imageUrl: (n) => API + '/image/' + n,
+    downloadUrl: (n) => API + '/image/' + n,
+    exifUrl: (n) => API + '/image-exif/' + n,
+    onDelete: async (n) => {
+      const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } });
+      if (r.ok) { const d = await r.json().catch(() => null); sync((d && d.images) ? d.images : (memo.images || []).filter((x) => x !== n)); }
+      else notify('Suppression impossible.', { error: true });
+    },
+    onUpload: async (files) => {
+      for (const file of files) {
+        const fd = new FormData(); fd.append('image', file);
+        const r = await fetch(API + '/memo/' + memo.id + '/images', { method: 'POST', headers: { 'X-Guest-Token': guestToken() }, body: fd });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); notify('Image refusée : ' + (e.error || r.statusText), { error: true }); }
+        else { const d = await r.json().catch(() => null); if (d && d.images) sync(d.images); }
+      }
+    },
+    onChange: async () => { renderQPhotos(memo); if (typeof render === 'function') render(); },
+  });
+  if (sec) box.appendChild(sec);
+}
+
 // [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur invité (scopée au partage).
 function renderQAttachments(memo) {
   const box = document.getElementById('q-attachments');
@@ -1320,6 +1353,7 @@ function openEditor(memo, contentEl, taskEl) {
   }
   editingId = memo.id;
   renderQContext(memo);
+  renderQPhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderQAttachments(memo);  // [ATTACHMENTS]
   const titleEl = document.getElementById('q-title');
   if (titleEl) titleEl.value = memo.title || '';
@@ -1529,7 +1563,7 @@ function openShareVoteManage(v) {
     const r = el('label', ''); r.style.cssText = 'display:flex;gap:0.4rem;align-items:center;font-size:0.85rem;cursor:pointer';
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = sel.has(m.id); cb.style.accentColor = 'var(--accent)';
     cb.addEventListener('change', () => { if (cb.checked) sel.add(m.id); else sel.delete(m.id); });
-    r.appendChild(cb); r.appendChild(el('span', '', (m.emoji ? m.emoji + ' ' : '') + (m.title || (m.content || '').replace(/<[^>]*>/g, '').slice(0, 50) || '(sans titre)'))); ow.appendChild(r);
+    r.appendChild(cb); r.appendChild(el('span', '', (m.emoji ? m.emoji + ' ' : '') + (m.title || (m.content || '').replace(/<[^>]*>/g, '').slice(0, 50) || MEMO_EMPTY_LABEL))); ow.appendChild(r);
   });
   body.appendChild(ow);
   const svPost = async (path, bodyObj) => fetch(API + '/votes/' + v.id + (path ? '/' + path : ''), { method: path ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify(bodyObj || {}) });
@@ -1663,7 +1697,7 @@ function moveProjIcon(p) {
 // Déplacer un mémo : cibles = projets DU PARTAGE uniquement (pas d'Inbox = hors scope, invariant 5).
 function openMoveShareMemo(memo) {
   runMoveDialog({
-    subtitle: memo.title || (isRich(memo.content) ? stripTags(memo.content) : (memo.content || '')).slice(0, 60) || '(sans titre)',
+    subtitle: memo.title || (isRich(memo.content) ? stripTags(memo.content) : (memo.content || '')).slice(0, 60) || MEMO_EMPTY_LABEL,
     projects: DATA.projects || [],
     topLabel: '',
     currentValue: memo.project_id || null,
@@ -1878,7 +1912,7 @@ function shareMapPoints() {
 function shareDatedPoints() {
   return scopedMemos().filter(m => m.due_date).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
-    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)'),
+    title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || MEMO_EMPTY_LABEL),
     due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: shareTripOf(m.project_id),
@@ -2217,7 +2251,7 @@ function renderShareTrash(list) {
     row.style.cssText = 'display:flex;align-items:center;gap:0.6rem';
     const main = el('div');
     main.style.cssText = 'flex:1;min-width:0';
-    const label = m.title || (m.content || '').replace(/<[^>]+>/g, ' ').trim().slice(0, 90) || '(mémo vide)';
+    const label = m.title || (m.content || '').replace(/<[^>]+>/g, ' ').trim().slice(0, 90) || MEMO_EMPTY_LABEL;
     main.appendChild(el('div', null, (m.emoji ? m.emoji + ' ' : '') + label));
     let when = '';
     if (m.deleted_at) {
@@ -2277,7 +2311,7 @@ function renderShareTreeView() {
     const prio = prios[m.priority];
     if (prio && prio.color) pip.style.background = prio.color; else pip.style.visibility = 'hidden';
     row.appendChild(pip);
-    const label = m.title || (isRich(m.content) ? stripTags(m.content) : (m.content || '')).slice(0, 60) || '(sans titre)';
+    const label = m.title || (isRich(m.content) ? stripTags(m.content) : (m.content || '')).slice(0, 60) || MEMO_EMPTY_LABEL;
     row.appendChild(el('span', 'tree-title' + (m.done ? ' done' : ''), label));
     const meta = el('div', 'tree-meta');
     let dueTxt = '', dueCls = '';
@@ -2355,7 +2389,7 @@ function agendaChipColor(m) {
 }
 
 function agendaMemoTitle(m) {
-  return (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || '(mémo)');
+  return (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || MEMO_EMPTY_LABEL);
 }
 
 function agendaOpen(m) {
@@ -2628,32 +2662,45 @@ function render() {
     row.appendChild(check);
 
     const content = el('div', 'task-content');
-    if (memo.title) {
-      const tl = el('div', '', '');
-      tl.style.cssText = 'font-weight:600;font-size:0.95rem;margin-bottom:0.15rem';
-      if (memo.emoji) {
-        const em = el('span', '', memo.emoji);
-        em.style.marginRight = '0.35rem';
-        tl.appendChild(em);
-      }
-      tl.appendChild(document.createTextNode(memo.title));
-      content.appendChild(tl);
-    } else if (memo.emoji) {
-      const em = el('span', '', memo.emoji);
-      em.style.marginRight = '0.35rem';
-      content.appendChild(em);
-    }
     // Extrait dans un wrapper clampable (3 lignes), sauf s'il contient une liste à
     // cocher : les invités doivent pouvoir cocher tous les items. [CARD-REDESIGN]
-    const exc = el('div', '');
-    if (isRich(memo.content)) exc.appendChild(sanitize(memo.content));
-    else exc.appendChild(linkifyText(memo.content));
-    exc.querySelectorAll('.mention[data-mention]').forEach(sp => {
-      if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
-    });
-    // [MAP-MEMO-ROUNDTRIP] la card ouverte depuis la carte est DÉCLAMPÉE (contenu complet visible).
-    if (shareOpenMemo !== memo.id && !exc.querySelector('li[data-list], table')) exc.classList.add('task-clamp'); // [MEMO-TABLES] un tableau reste lisible (lecture seule incluse)
-    content.appendChild(exc);
+    const buildExc = (html, plain) => {
+      const exc = el('div', '');
+      if (!plain && isRich(html)) exc.appendChild(sanitize(html));
+      else exc.appendChild(linkifyText(html || ''));
+      exc.querySelectorAll('.mention[data-mention]').forEach(sp => {
+        if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
+      });
+      // [MAP-MEMO-ROUNDTRIP] la card ouverte depuis la carte est DÉCLAMPÉE (contenu complet visible).
+      if (shareOpenMemo !== memo.id && !exc.querySelector('li[data-list], table')) exc.classList.add('task-clamp'); // [MEMO-TABLES] un tableau reste lisible
+      return exc;
+    };
+    const mkTitle = (muted) => {
+      const tl = el('div', '', '');
+      tl.style.cssText = 'font-weight:' + (muted ? '500' : '600') + ';font-size:0.95rem;margin-bottom:0.15rem' + (muted ? ';color:var(--muted);font-style:italic' : '');
+      return tl;
+    };
+    if (memo.title) {
+      const tl = mkTitle(false);
+      if (memo.emoji) { const em = el('span', '', memo.emoji); em.style.marginRight = '0.35rem'; tl.appendChild(em); }
+      tl.appendChild(document.createTextNode(memo.title));
+      content.appendChild(tl);
+      content.appendChild(buildExc(memo.content, false));
+    } else {
+      // [MEMO-TITLE-FALLBACK] Pas de titre : accroche du contenu en style titre (gras), sans doublon
+      // (1re ligne = titre, reste = extrait). Contenu vide/HTML sans texte → placeholder unique.
+      if (memo.emoji) { const em = el('span', '', memo.emoji); em.style.marginRight = '0.35rem'; content.appendChild(em); }
+      const stripped = stripTags(memo.content || '').trim();
+      if (!stripped) {
+        const tl = mkTitle(true); tl.appendChild(document.createTextNode(MEMO_EMPTY_LABEL)); content.appendChild(tl);
+      } else if (!isRich(memo.content)) {
+        const tl = mkTitle(false); tl.appendChild(document.createTextNode(memoLeadText(stripped))); content.appendChild(tl);
+        const rest = memoRestText(memo.content);
+        if (rest) content.appendChild(buildExc(rest, true));
+      } else {
+        content.appendChild(buildExc(memo.content, false));
+      }
+    }
     content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
       if (!canEditNow()) return;
       li.classList.add('cl-edit');
