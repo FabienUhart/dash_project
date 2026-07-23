@@ -951,13 +951,28 @@ function runMapDialog(cfg) {
       // point (dotColor), reflet passé par opacité comme les marqueurs classiques.
       const stepNo = tripOrder[pkey(p)];
       const _vopt = voteOpt(p);
-      const _vref = selVote && p.kind === 'memo' && !_vopt;  // [VOTE-MAP] mémo hors du scrutin sélectionné
+      // [VOTE-MAP] mémo hors du scrutin sélectionné = repère gris discret — MAIS seulement s'il
+      // n'est PAS mis en avant par le focus sous-projet/groupe. [MAP-SUBFOCUS-FIX] : un point que
+      // l'invité focus explicitement (chip sous-projet/groupe) redevient un vrai marqueur coloré
+      // et cliquable, même si un scrutin est sélectionné — sinon « focus met rien en avant » et
+      // les carrés-repères (12 px, z-index bas) sont quasi incliquables.
+      const _vref = selVote && p.kind === 'memo' && !_vopt && !focused;
       let marker;
       if (_vref) {
-        // [VOTE-MAP] point de référence : carré gris discret, toujours visible, jamais de pastille.
-        const icon = L.divIcon({ className: 'vote-ref', html: '<span style="display:block;width:10px;height:10px;background:#8a93a0;border:1px solid #5b6470;border-radius:2px;opacity:' + (focused ? 0.7 : 0.35) + '"></span>', iconSize: [12, 12], iconAnchor: [6, 6] });
+        // [VOTE-MAP] point de référence : carré gris discret. [MAP-VOTEREF-CLICK] Le carré reste
+        // petit (10 px) MAIS sa zone cliquable/survolable est portée à 20 px (boîte transparente
+        // centrée) — un repère « hors scrutin » est un mémo à part entière : on doit pouvoir
+        // ouvrir sa bulle et voir son info-bulle au survol, comme n'importe quel point.
+        const icon = L.divIcon({ className: 'vote-ref',
+          html: '<span style="display:flex;align-items:center;justify-content:center;width:20px;height:20px">'
+            + '<span style="width:10px;height:10px;background:#8a93a0;border:1px solid #5b6470;border-radius:2px;opacity:' + (focused ? 0.7 : 0.35) + '"></span></span>',
+          iconSize: [20, 20], iconAnchor: [10, 10] });
         marker = L.marker(ll, { icon, zIndexOffset: -300 }).addTo(markerLayer);
-        marker.bindTooltip('repère', { direction: 'top' });
+        // bulle + info-bulle liées EXPLICITEMENT ici (en plus des liens partagés plus bas) pour
+        // lever toute ambiguïté : un repère hors scrutin est cliquable ET survolable.
+        marker.bindPopup(buildMarkerPopup(p));
+        const _hov = [p.title, p.placeLabel].filter(Boolean).join(' · ');
+        if (_hov) marker.bindTooltip(_hov, { direction: 'top', offset: [0, -6], opacity: 0.95, className: 'map-hovertip' });
       } else if (stepNo) {
         const dim = strokeOp < 1 ? 'opacity:0.5;' : '';
         const inner = p.imgUrl
@@ -993,6 +1008,12 @@ function runMapDialog(cfg) {
         marker.setStyle({ opacity: 0.35, fillOpacity: 0.12 });
       }
       marker.bindPopup(buildMarkerPopup(p));  // [MAP-MEMO-ROUNDTRIP] + bouton « Ouvrir le mémo » (kind memo)
+      // [MAP-HOVER-TOOLTIP] Info-bulle au survol (nom + lieu) sur TOUT marqueur — sauf le gagnant
+      // de scrutin clos qui porte déjà une étiquette permanente. Remplace l'ancien « repère ».
+      if (!(_vopt && isWinnerOpt(p))) {
+        const hov = [p.title, p.placeLabel].filter(Boolean).join(' · ');
+        if (hov) marker.bindTooltip(hov, { direction: 'top', offset: [0, -6], opacity: 0.95, className: 'map-hovertip' });
+      }
       // [MAP-MARKER-DAY-SYNC] clic marqueur = sélectionner le jour du point via le MÊME
       // chemin que le chip « Jour N » (applyDay : filtre + zoom + surlignage de la frise) ;
       // point sans date → « 🌍 Tous » (applyDay(null)). La popup Leaflet s'ouvre toujours.
