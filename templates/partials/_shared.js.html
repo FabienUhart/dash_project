@@ -1933,7 +1933,17 @@ function promptReloadIfStale(embedded, server) {
   btn.textContent = 'Recharger';
   btn.className = 'prio-btn';
   btn.style.cssText = 'background:var(--accent);border-color:var(--accent);color:#10141a;padding:0.15rem 0.6rem';
-  btn.addEventListener('click', () => { try { location.reload(); } catch (e) { location.href = location.href; } });
+  btn.addEventListener('click', async () => {
+    // [OFFLINE] si un service worker est EN ATTENTE (nouvelle version prête), on l'active avant de
+    // recharger → la page repart sur le nouveau cache. No-op propre là où il n'y a pas de SW (share/hub).
+    try {
+      if ('serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg && reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+    } catch (e) {}
+    try { location.reload(); } catch (e) { location.href = location.href; }
+  });
   t.appendChild(label); t.appendChild(btn);
   document.body.appendChild(t);
 }

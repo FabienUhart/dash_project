@@ -92,6 +92,7 @@ BACKUP_KEEP_DAYS = int(os.environ.get("BACKUP_KEEP_DAYS", "7"))
 ALLOWED_IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
 SAFE_IMG_NAME = re.compile(r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp)$")
 DUE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")  # [OFFLINE] uid client
 
 # [IMAGE-THUMBS] Images dérivées (donnée DÉRIVÉE, re-calculable → jamais dans l'export). Deux
 # tailles JPEG q82, orientation EXIF appliquée. Stockées sous data/uploads/derived/ (préfixe
@@ -944,6 +945,24 @@ def _pwa_icons(base):
 def _manifest_response(data):
     resp = jsonify(data)
     resp.headers["Content-Type"] = "application/manifest+json; charset=utf-8"
+    return resp
+
+
+@app.route("/sw.js")
+def service_worker():
+    """[OFFLINE] Service worker owner servi à la RACINE (scope `/`), version injectée depuis
+    BUILD_VERSION (un déploiement = un nouveau cache purgé à l'activation). Derrière Authelia
+    comme le reste de l'owner. Jamais mis en cache par lui-même (no-store)."""
+    path = os.path.join(app.static_folder, "sw.js")
+    try:
+        with open(path, encoding="utf-8") as f:
+            js = f.read()
+    except OSError:
+        return "", 404
+    js = js.replace("__BUILD__", BUILD_VERSION)
+    resp = Response(js, mimetype="application/javascript")
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Service-Worker-Allowed"] = "/"
     return resp
 
 
@@ -3212,9 +3231,21 @@ def create_memo():
             return jsonify({"error": "récurrence et plage de dates sont exclusives"}), 400
     elif data.get("due_end") and not _dd:
         return jsonify({"error": "une date de fin exige une date de début"}), 400
+    # [OFFLINE] Idempotence du rejeu de la file hors ligne : le client peut fournir un `uid` (UUID
+    # généré à la note). Si un mémo NON supprimé porte déjà cet uid → on le renvoie tel quel (aucun
+    # doublon, rejeu sûr même après coupure en plein milieu). uid invalide/absent → généré serveur.
+    client_uid = str(data.get("uid") or "").strip()
+    if UUID_RE.match(client_uid):
+        dup = db.execute(
+            "SELECT * FROM memos WHERE uid = ? AND COALESCE(deleted_at,'') = ''", (client_uid,)
+        ).fetchone()
+        if dup:
+            return jsonify(_memo_dict(dup, _owner_name(get_db()))), 200
+        uid = client_uid
+    else:
+        uid = str(uuid.uuid4())
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
     now = datetime.now(timezone.utc).isoformat()
-    uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
         "done, due_date, due_time, end_time, due_end, priority, subtasks, project_id, recurrence, emoji, location, "

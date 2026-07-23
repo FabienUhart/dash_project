@@ -2288,6 +2288,7 @@ async function loadAll() {
   }
   try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; state.smtpEnabled = !!(s && s.smtp_enabled); if (s && Array.isArray(s.reaction_emojis)) REACTION_EMOJIS = s.reaction_emojis; } catch (e) {}
   try { const f = await api('/api/favorites'); state.favorites = (f && Array.isArray(f.favorites)) ? f.favorites : []; } catch (e) { state.favorites = []; }  // [FAVORITES]
+  try { localStorage.setItem('lastSyncAt', new Date().toISOString()); lastSyncAt = localStorage.getItem('lastSyncAt'); } catch (e) {}  // [OFFLINE] horodatage dernière synchro
   renderAll();
   if (state.view === 'links') loadStatus();
 }
@@ -7212,11 +7213,109 @@ memoQuick.addEventListener('keydown', async (e) => {
     e.preventDefault();
     const content = memoQuick.value.trim();
     if (!content) return;
-    await api('/api/memos', { method: 'POST', body: JSON.stringify({ content }) });
     memoQuick.value = '';
-    await loadAll();
+    // [OFFLINE] hors ligne → file locale + rejeu idempotent au retour réseau (Inbox uniquement).
+    if (isOffline) { enqueueNote(content); renderPendingNotes(); return; }
+    try {
+      await api('/api/memos', { method: 'POST', body: JSON.stringify({ content }) });
+      await loadAll();
+    } catch (_) {
+      enqueueNote(content); setOffline(true); renderPendingNotes();
+    }
   }
 });
+
+/* ------------------------------------------------ [OFFLINE] mode hors ligne (owner) */
+// SW network-first versionné (/sw.js) + bandeau + file de notes Inbox idempotente. Dégrade
+// proprement si Service Worker non supporté (le site reste 100 % utilisable en ligne).
+let isOffline = !navigator.onLine;
+let lastSyncAt = null;
+try { lastSyncAt = localStorage.getItem('lastSyncAt'); } catch (e) {}
+
+if ('serviceWorker' in navigator) {
+  let swRefreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Nouveau SW actif (après SKIP_WAITING) → recharge une seule fois pour repartir sur le neuf.
+    if (swRefreshing) return; swRefreshing = true; location.reload();
+  });
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+}
+
+function offlineBannerEl() {
+  let b = document.getElementById('offline-banner');
+  if (!b) {
+    b = el('div', { attrs: { id: 'offline-banner', role: 'status', style:
+      'position:fixed;left:50%;top:0;transform:translateX(-50%);z-index:4100;padding:0.3rem 0.9rem;'
+      + 'border-radius:0 0 10px 10px;font-size:0.8rem;box-shadow:0 4px 16px rgba(0,0,0,0.35);background:var(--panel)' } });
+    b.hidden = true;
+    document.body.appendChild(b);
+  }
+  return b;
+}
+function setOffline(off) {
+  isOffline = off;
+  document.body.classList.toggle('is-offline', off);  // CSS peut estomper/désactiver l'édition
+  const b = offlineBannerEl();
+  if (off) {
+    b.style.border = '1px solid var(--yellow)'; b.style.color = 'var(--yellow)';
+    b.textContent = '📴 Hors ligne' + (lastSyncAt ? ' — données du ' + new Date(lastSyncAt).toLocaleString('fr-FR') : '');
+    b.hidden = false;
+    renderPendingNotes();
+  } else {
+    b.style.border = '1px solid var(--green)'; b.style.color = 'var(--green)';
+    b.textContent = '✓ Reconnecté — synchronisation…';
+    b.hidden = false;
+    setTimeout(() => { if (!isOffline) b.hidden = true; }, 2600);
+    flushOfflineQueue();
+  }
+}
+window.addEventListener('offline', () => setOffline(true));
+window.addEventListener('online', () => setOffline(false));
+
+// — File de notes hors ligne (localStorage, bornée 100) —
+function offlineQueue() { try { return JSON.parse(localStorage.getItem('offlineQueue') || '[]'); } catch (e) { return []; } }
+function saveQueue(q) { try { localStorage.setItem('offlineQueue', JSON.stringify(q.slice(-100))); } catch (e) {} }
+function enqueueNote(text) {
+  const q = offlineQueue();
+  const uid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2));
+  q.push({ uid, content: text, created_at: new Date().toISOString() });
+  saveQueue(q);
+}
+let flushing = false;
+async function flushOfflineQueue() {
+  if (flushing) return; flushing = true;
+  try {
+    // Rejeu SÉQUENTIEL, idempotent (uid client → le serveur renvoie l'existant sans doublon).
+    while (offlineQueue().length) {
+      const n = offlineQueue()[0];
+      let r;
+      try { r = await fetch('/api/memos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: n.content, uid: n.uid }) }); }
+      catch (e) { break; }  // réseau coupé → on garde la file, retry au prochain retour en ligne
+      if (!r.ok) break;
+      const q = offlineQueue(); q.shift(); saveQueue(q);  // relire PUIS retirer la tête (sûr après coupure)
+    }
+  } finally { flushing = false; }
+  renderPendingNotes();
+  if (!offlineQueue().length && typeof loadAll === 'function') { try { await loadAll(); } catch (e) {} }
+}
+
+// — Notes en attente affichées (⏳, non éditables) au-dessus du panneau mémos —
+function renderPendingNotes() {
+  let box = document.getElementById('pending-notes');
+  const q = offlineQueue();
+  if (!q.length) { if (box) box.remove(); return; }
+  if (!box) {
+    box = el('div', { attrs: { id: 'pending-notes', style: 'margin:0.4rem 0;display:flex;flex-direction:column;gap:0.3rem' } });
+    const panel = document.getElementById('memo-panel') || document.body;
+    panel.insertBefore(box, panel.firstChild);
+  }
+  box.innerHTML = '';
+  box.appendChild(el('div', { text: '⏳ ' + q.length + ' note' + (q.length > 1 ? 's' : '') + ' en attente de synchro', attrs: { style: 'font-size:0.75rem;color:var(--yellow)' } }));
+  q.forEach(n => box.appendChild(el('div', { text: n.content.slice(0, 80), attrs: { style: 'font-size:0.82rem;color:var(--muted);background:var(--panel-2);border-left:3px solid var(--yellow);border-radius:6px;padding:0.3rem 0.5rem' } })));
+}
+
+// Au démarrage : refléter l'état réseau + tenter un flush si des notes attendent.
+if (isOffline) setOffline(true); else if (offlineQueue().length) flushOfflineQueue();
 
 /* ------------------------------------------------ search */
 
