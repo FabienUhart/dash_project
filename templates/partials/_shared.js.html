@@ -637,6 +637,69 @@ function runMapDialog(cfg) {
   const markersByKey = {};
   let routeLine = null;
   const ACCENT = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#4fc3f7').trim() || '#4fc3f7';
+  // ── [MAP-POPUP-HOVER] survol = bulle riche, clic = bulle épinglée + ligne de liste sélectionnée ──
+  // Remplace le tooltip texte de V23.10.107. Bulles en autoClose:false (une épinglée survit au
+  // survol d'un autre point). Tactile : pas de survol → seul le clic agit (bulle + sélection).
+  let pinnedKey = null;            // marqueur épinglé (clic) ; null = aucun
+  let rowsByKey = {};              // pkey -> ligne de la liste (reconstruit à chaque draw)
+  let hoverTimer = null, closeTimer = null;
+  function selectMapRow(key) {     // surlignage + scroll de la ligne (tokens existants, invariant 9)
+    Object.keys(rowsByKey).forEach(k => {
+      const r = rowsByKey[k], on = k === key;
+      r.style.background = on ? 'var(--panel-2)' : '';
+      r.style.borderLeft = on ? '3px solid ' + ACCENT : '3px solid transparent';
+      r.style.borderRadius = on ? '6px' : '';
+    });
+    if (key && rowsByKey[key]) rowsByKey[key].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function pinMarker(p, marker) {  // épingle la bulle de ce point + sélectionne sa ligne
+    clearTimeout(hoverTimer); clearTimeout(closeTimer);
+    const prev = pinnedKey;
+    pinnedKey = pkey(p);
+    if (prev && prev !== pinnedKey && markersByKey[prev]) markersByKey[prev].marker.closePopup();
+    marker.openPopup();
+    selectMapRow(pinnedKey);
+  }
+  function restorePin() {           // ré-ouvre la bulle épinglée (après fermeture d'une bulle de survol)
+    if (pinnedKey && markersByKey[pinnedKey]) markersByKey[pinnedKey].marker.openPopup();
+  }
+  function unpinAll() {             // clic ailleurs / fond de carte : désépingle + désélectionne
+    clearTimeout(hoverTimer); clearTimeout(closeTimer);
+    pinnedKey = null;
+    activeMap.closePopup();
+    selectMapRow(null);
+  }
+  // Bulles en autoClose (Leaflet, UNE à la fois) : le survol d'un autre point ferme la bulle épinglée
+  // le temps du survol, puis on la RESTAURE au mouseout → jamais 2 bulles, et l'épingle « persiste ».
+  function wireMarkerPopup(marker, p) {
+    // Les vecteurs Leaflet (circleMarker/Path) propagent leur clic au map par défaut
+    // (bubblingMouseEvents:true) → sans ça, cliquer un cercle déclencherait unpinAll et
+    // défairait l'épingle qu'on vient de poser. On coupe la propagation pour TOUT marqueur.
+    marker.options.bubblingMouseEvents = false;
+    marker.on('mouseover', () => {
+      clearTimeout(closeTimer); clearTimeout(hoverTimer);
+      if (pkey(p) === pinnedKey) return;           // déjà affichée (épinglée)
+      hoverTimer = setTimeout(() => marker.openPopup(), 150);  // anti-flicker
+    });
+    marker.on('mouseout', () => {
+      clearTimeout(hoverTimer);
+      if (pkey(p) === pinnedKey) return;
+      closeTimer = setTimeout(() => { marker.closePopup(); restorePin(); }, 300);
+    });
+    marker.on('popupopen', (e) => {
+      const pel = e.popup && e.popup.getElement();
+      if (!pel) return;
+      // rester ouverte tant que la souris est SUR la bulle (pour cliquer « Ouvrir le mémo »)
+      pel.addEventListener('mouseenter', () => clearTimeout(closeTimer));
+      pel.addEventListener('mouseleave', () => { if (pkey(p) !== pinnedKey) closeTimer = setTimeout(() => { marker.closePopup(); restorePin(); }, 250); });
+      // ✕ de la bulle : si c'était l'épingle → désépingle + désélectionne (fermeture volontaire).
+      const x = pel.querySelector('.leaflet-popup-close-button');
+      if (x) x.addEventListener('click', () => { if (pkey(p) === pinnedKey) { pinnedKey = null; selectMapRow(null); } });
+    });
+    marker.on('click', () => { pinMarker(p, marker); applyDay(p.due_date || null); });
+  }
+  // Fond de carte = désépingle (marqueur : Leaflet ne propage pas son clic au map → pas de faux unpin).
+  activeMap.on('click', unpinAll);
   const tlToday = agendaTodayIso();
   const tlCompare = (a, b) => (a.due_date || '').localeCompare(b.due_date || '') || agendaDayCompare(a, b);
   const datedAll = () => (cfg.datedPoints ? cfg.datedPoints() : []).slice().sort(tlCompare);
@@ -918,8 +981,12 @@ function runMapDialog(cfg) {
   }
 
   function draw(pts, fit) {
+    // [MAP-POPUP-HOVER] clearLayers ferme la bulle épinglée → son popupclose remet pinnedKey à null ;
+    // on mémorise la clé AVANT pour ré-affirmer l'épingle après reconstruction (voir fin de draw).
+    const keepPin = pinnedKey;
     markerLayer.clearLayers();
     Object.keys(markersByKey).forEach(k => delete markersByKey[k]); // [MAP-TIMELINE]
+    rowsByKey = {};  // [MAP-POPUP-HOVER] lignes reconstruites à chaque draw
     listEl.innerHTML = '';
     const latlngs = [];
 
@@ -961,18 +1028,13 @@ function runMapDialog(cfg) {
       if (_vref) {
         // [VOTE-MAP] point de référence : carré gris discret. [MAP-VOTEREF-CLICK] Le carré reste
         // petit (10 px) MAIS sa zone cliquable/survolable est portée à 20 px (boîte transparente
-        // centrée) — un repère « hors scrutin » est un mémo à part entière : on doit pouvoir
-        // ouvrir sa bulle et voir son info-bulle au survol, comme n'importe quel point.
+        // centrée) — un repère « hors scrutin » est un mémo à part entière : sa bulle riche s'ouvre
+        // au survol/clic comme n'importe quel point (liaison + survol posés dans la section commune).
         const icon = L.divIcon({ className: 'vote-ref',
           html: '<span style="display:flex;align-items:center;justify-content:center;width:20px;height:20px">'
             + '<span style="width:10px;height:10px;background:#8a93a0;border:1px solid #5b6470;border-radius:2px;opacity:' + (focused ? 0.7 : 0.35) + '"></span></span>',
           iconSize: [20, 20], iconAnchor: [10, 10] });
         marker = L.marker(ll, { icon, zIndexOffset: -300 }).addTo(markerLayer);
-        // bulle + info-bulle liées EXPLICITEMENT ici (en plus des liens partagés plus bas) pour
-        // lever toute ambiguïté : un repère hors scrutin est cliquable ET survolable.
-        marker.bindPopup(buildMarkerPopup(p));
-        const _hov = [p.title, p.placeLabel].filter(Boolean).join(' · ');
-        if (_hov) marker.bindTooltip(_hov, { direction: 'top', offset: [0, -6], opacity: 0.95, className: 'map-hovertip' });
       } else if (stepNo) {
         const dim = strokeOp < 1 ? 'opacity:0.5;' : '';
         const inner = p.imgUrl
@@ -1007,17 +1069,13 @@ function runMapDialog(cfg) {
       if (_vopt && selVote.state === 'closed' && !isWinnerOpt(p) && !votesOn && marker.setStyle) {
         marker.setStyle({ opacity: 0.35, fillOpacity: 0.12 });
       }
-      marker.bindPopup(buildMarkerPopup(p));  // [MAP-MEMO-ROUNDTRIP] + bouton « Ouvrir le mémo » (kind memo)
-      // [MAP-HOVER-TOOLTIP] Info-bulle au survol (nom + lieu) sur TOUT marqueur — sauf le gagnant
-      // de scrutin clos qui porte déjà une étiquette permanente. Remplace l'ancien « repère ».
-      if (!(_vopt && isWinnerOpt(p))) {
-        const hov = [p.title, p.placeLabel].filter(Boolean).join(' · ');
-        if (hov) marker.bindTooltip(hov, { direction: 'top', offset: [0, -6], opacity: 0.95, className: 'map-hovertip' });
-      }
-      // [MAP-MARKER-DAY-SYNC] clic marqueur = sélectionner le jour du point via le MÊME
-      // chemin que le chip « Jour N » (applyDay : filtre + zoom + surlignage de la frise) ;
-      // point sans date → « 🌍 Tous » (applyDay(null)). La popup Leaflet s'ouvre toujours.
-      marker.on('click', () => applyDay(p.due_date || null));
+      // [MAP-POPUP-HOVER] bulle riche (titre, lieu, bouton « Ouvrir le mémo ») au survol ET au clic
+      // (épingle). autoClose Leaflet = UNE bulle à la fois ; l'épingle est restaurée au mouseout
+      // (wireMarkerPopup). Remplace le tooltip texte de V23.10.107.
+      marker.bindPopup(buildMarkerPopup(p));
+      // [MAP-MARKER-DAY-SYNC] le clic garde applyDay (sync frise « Jour N ») ; wireMarkerPopup ajoute
+      // survol = ouvrir la bulle (délai 150 ms) et clic = épingler + sélectionner la ligne de liste.
+      wireMarkerPopup(marker, p);
       markersByKey[pkey(p)] = { marker, ll };
       // [VOTE-MAP] pastille compteur « n voix » + ✓ mes choix (coche Voix on) ; clic = voter/retirer.
       if (_vopt && votesOn) {
@@ -1051,7 +1109,8 @@ function runMapDialog(cfg) {
       }
       const txt = el('button', {
         attrs: { type: 'button', style: 'flex:1;min-width:0;overflow-wrap:anywhere;text-align:left;background:none;border:none;padding:0;color:inherit;font:inherit;cursor:pointer' },
-        on: { click: () => { activeMap.setView(ll, 16); marker.openPopup(); } },
+        // [MAP-POPUP-HOVER] clic sur la ligne = centrer + épingler la bulle + sélectionner (parité clic marqueur)
+        on: { click: () => { activeMap.setView(ll, 16); pinMarker(p, marker); } },
       });
       txt.appendChild(el('strong', { text: p.title || '' }));
       if (p.placeLabel) txt.appendChild(el('div', { text: p.placeLabel, attrs: { style: 'color:var(--muted);font-size:0.72rem' } }));
@@ -1077,6 +1136,8 @@ function runMapDialog(cfg) {
           on: { click: async () => { await cfg.saveColor(p, ''); current = recompute(); refresh(false); } },
         }));
       }
+      row.style.borderLeft = '3px solid transparent';  // [MAP-POPUP-HOVER] réserve le liseré de sélection
+      rowsByKey[pkey(p)] = row;
       listEl.appendChild(row);
     }
 
@@ -1108,6 +1169,10 @@ function runMapDialog(cfg) {
         else if (latlngs.length) activeMap.fitBounds(latlngs, { padding: [30, 30] });
       }, 60);
     }
+    // [MAP-POPUP-HOVER] après un re-dessin (ex. applyDay sur un point sans date), ré-affirme
+    // l'épingle : marqueurs recréés → ré-ouvre la bulle + re-surligne la ligne ; disparu → oublie.
+    if (keepPin && markersByKey[keepPin]) { pinnedKey = keepPin; markersByKey[keepPin].marker.openPopup(); selectMapRow(keepPin); }
+    else pinnedKey = null;
   }
 
   // ── [MAP-TIMELINE] frise chronologique (tout projet daté) + tracé voyage ──
