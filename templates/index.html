@@ -6397,6 +6397,19 @@ function commentInputEl(memo, parentId, onPosted) {
   const row = el('div', { attrs: { style: 'display:flex;gap:0.35rem;margin-top:0.35rem' } });
   row.appendChild(prioSel);
   row.appendChild(input);
+  // [VOICE-MESSAGES] Commentaire vocal : enregistre → PJ v22 du mémo → commentaire [audio:<fn>].
+  const vbtn = voiceCommentButton({
+    uploadUrl: `/api/memos/${memo.id}/attachments`,
+    postComment: async (body) => {
+      try { memo.attachments = await api(`/api/memos/${memo.id}/attachments`); } catch (e) {}
+      const b = { body: body, priority: parseInt(prioSel.value, 10) || 0 };
+      if (parentId) b.parent_id = parentId;
+      await api(`/api/memos/${memo.id}/comments`, { method: 'POST', body: JSON.stringify(b) });
+      memo.comment_count = (memo.comment_count || 0) + 1;
+      onPosted();
+    },
+  });
+  if (vbtn) row.appendChild(vbtn);
   return row;
 }
 
@@ -6418,7 +6431,11 @@ function commentsBlockEl(memo) {
       if (c.guest) a.style.color = 'var(--guest)';
       a.title = c.author;
       r.appendChild(a);
-      r.appendChild(el('span', { class: 'c-body', text: c.body }));
+      // [VOICE-MESSAGES] corps avec marqueur [audio:...] → bulle vocale ; sinon texte.
+      const cbody = el('span', { class: 'c-body' });
+      const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));
+      if (vf) cbody.appendChild(vf); else cbody.textContent = c.body;
+      r.appendChild(cbody);
       r.appendChild(el('span', { class: 'c-when', text: fmtWhen(c.created_at) }));
       const others = (c.seen || []).filter(v => v && v !== author && v !== (state.ownerName || 'Fabien'));
       if (others.length) r.appendChild(el('span', { class: 'c-seen', text: '👁 ' + others.join(', '), attrs: { title: 'Vu par ' + others.join(', ') } }));

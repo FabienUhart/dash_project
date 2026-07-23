@@ -2301,9 +2301,12 @@ function attachRow(a, cfg) {
   const meta = el('div', { class: 'attach-meta' });
   meta.appendChild(el('div', { class: 'attach-name', text: a.orig_name, attrs: { title: a.orig_name } }));
   meta.appendChild(el('div', { class: 'attach-size', text: fmtBytes(a.size) + (a.mime ? ' · ' + a.mime : '') }));
+  const isAudio = a.preview && (a.mime || '').indexOf('audio/') === 0;
+  // [VOICE-MESSAGES] PJ audio validée (preview=audio) → lecteur inline (bulle), pas de ⤢.
+  if (isAudio) { _voiceStyle(); meta.appendChild(el('audio', { attrs: { controls: '', preload: 'none', src: a.url, style: 'margin-top:0.3rem;height:32px;max-width:100%' } })); }
   row.appendChild(meta);
   const acts = el('div', { class: 'attach-acts' });
-  if (a.preview) acts.appendChild(el('button', { class: 'iv-btn', text: '⤢', attrs: { type: 'button', title: 'Aperçu' }, on: { click: () => attachPreview(a, cfg) } }));
+  if (a.preview && !isAudio) acts.appendChild(el('button', { class: 'iv-btn', text: '⤢', attrs: { type: 'button', title: 'Aperçu' }, on: { click: () => attachPreview(a, cfg) } }));
   acts.appendChild(el('a', { class: 'iv-btn', text: '⤓', attrs: { href: a.url + '?download=1', title: 'Télécharger', download: a.orig_name, rel: 'noopener' } }));
   if (cfg.canEdit) acts.appendChild(el('button', {
     class: 'iv-btn iv-del', text: '✕', attrs: { type: 'button', title: 'Supprimer' },
@@ -2342,6 +2345,153 @@ function attachUploader(cfg) {
   box.appendChild(btn); box.appendChild(el('span', { class: 'attach-hint', text: ' ou glisser-déposer (max 300 Mo)' }));
   box.appendChild(input); box.appendChild(prog);
   return box;
+}
+
+// ───────────────────── [VOICE-MESSAGES] enregistrement + bulles vocales ─────────────────────
+// Design (Fabien) : un vocal est TOUJOURS une pièce jointe v22 (fichier importé, signature audio,
+// purge cascade) ; un commentaire vocal = un commentaire dont le TEXTE porte le marqueur
+// [audio:<filename>]. Aucun champ nouveau → export v23 STRICTEMENT inchangé. MediaRecorder natif
+// (invariant 6, zéro lib) ; bulle aux tokens existants (invariant 9). Aucune route nouvelle.
+const VOICE_MARKER_RE = /\[audio:([0-9a-f]{32}(?:\.[a-z0-9]{1,12})?)\]/gi;
+const VOICE_MAX_MS = 5 * 60 * 1000;
+function _voiceStyle() {
+  if (document.getElementById('voice-style')) return;
+  const st = document.createElement('style'); st.id = 'voice-style';
+  st.textContent = '.voice-bubble{display:inline-flex;align-items:center;gap:0.4rem;background:var(--panel-2);border:1px solid var(--border);border-radius:14px;padding:0.2rem 0.5rem;max-width:100%;vertical-align:middle}'
+    + '.voice-bubble audio{height:32px;max-width:220px}'
+    + '.voice-bubble.voice-missing{color:var(--muted);font-size:0.8rem}'
+    // [VOICE-MESSAGES V23.9.104] enregistreur = <dialog> modal → top-layer (s'empile AU-DESSUS de la
+    // pop-in mémo, contrairement à un z-index) + compté par uiBusy(). Entrée CSS (invariant 8, pas de GSAP).
+    + 'dialog.voice-rec{border:1px solid var(--border);border-radius:12px;padding:1rem;width:min(90vw,20rem);background:var(--panel);color:var(--text);box-shadow:0 8px 30px rgba(0,0,0,0.4)}'
+    + 'dialog.voice-rec::backdrop{background:rgba(0,0,0,0.55)}'
+    + '@media (prefers-reduced-motion:no-preference){dialog.voice-rec[open]{animation:voice-in 0.15s ease}}'
+    + '@keyframes voice-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}'
+    + '.voice-rec-time{font-size:1.5rem;font-weight:700;text-align:center;font-variant-numeric:tabular-nums;margin:0.3rem 0 0.8rem}'
+    + '.voice-rec-dot{color:var(--red)}'
+    + '.voice-rec-row{display:flex;gap:0.5rem;justify-content:center;flex-wrap:wrap}';
+  document.head.appendChild(st);
+}
+function voiceExt(mime) { mime = mime || ''; if (mime.indexOf('webm') >= 0) return 'webm'; if (mime.indexOf('mp4') >= 0) return 'm4a'; if (mime.indexOf('ogg') >= 0) return 'ogg'; return 'webm'; }
+function voiceAvailable() { return typeof MediaRecorder !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+
+// Ouvre un enregistreur (<dialog> modal) ; résout { blob, filename } à l'Envoi, ou null (annulé / refusé).
+function recordVoice() {
+  return new Promise((resolve) => {
+    if (!voiceAvailable()) { notify('Enregistrement audio non disponible sur ce navigateur.'); resolve(null); return; }
+    _voiceStyle();
+    const cands = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+    const mime = cands.find(m => { try { return MediaRecorder.isTypeSupported(m); } catch (e) { return false; } }) || '';
+    let stream = null, rec = null, chunks = [], startAt = 0, tick = null, timer = null, blob = null, done = false;
+    // <dialog> modal : s'empile dans le top-layer AU-DESSUS de la pop-in mémo (le dernier showModal
+    // passe devant, insensible aux z-index) ; ouvert = uiBusy() true → le reload différé attend.
+    const dlg = document.createElement('dialog'); dlg.className = 'voice-rec';
+    const timeEl = el('div', { class: 'voice-rec-time' });
+    const rowEl = el('div', { class: 'voice-rec-row' });
+    const replayEl = el('div', { attrs: { style: 'margin:0.6rem 0 0;text-align:center' } });
+    dlg.appendChild(el('div', { attrs: { style: 'text-align:center;font-size:0.85rem;color:var(--muted)' }, text: '🎤 Message vocal' }));
+    dlg.appendChild(timeEl); dlg.appendChild(rowEl); dlg.appendChild(replayEl);
+    document.body.appendChild(dlg);
+    try { dlg.showModal(); } catch (e) { document.body.appendChild(dlg); }
+    const fmt = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    const cleanup = (res) => {
+      if (done) return; done = true;
+      try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {}
+      if (tick) clearInterval(tick); if (timer) clearTimeout(timer);
+      try { (stream ? stream.getTracks() : []).forEach(t => t.stop()); } catch (e) {}
+      try { if (dlg.open) dlg.close(); } catch (e) {}
+      dlg.remove();
+      resolve(res);
+    };
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); cleanup(null); });  // Échap = annuler proprement
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) cleanup(null); });   // clic backdrop = annuler
+    const stopRec = () => { if (rec && rec.state === 'recording') rec.stop(); if (tick) clearInterval(tick); };
+    const setStopped = () => {
+      timeEl.innerHTML = ''; timeEl.textContent = '■ ' + fmt(blob ? (startAt ? Date.now() - startAt : 0) : 0);
+      rowEl.innerHTML = '';
+      rowEl.appendChild(el('button', { class: 'prio-btn', text: '✕ Annuler', attrs: { type: 'button' }, on: { click: () => cleanup(null) } }));
+      rowEl.appendChild(el('button', { class: 'prio-btn primary', text: '✉️ Envoyer', attrs: { type: 'button' }, on: { click: () => cleanup({ blob: blob, filename: 'vocal-' + Date.now() + '.' + voiceExt(blob && blob.type || mime) }) } }));
+      replayEl.innerHTML = '';
+      try { replayEl.appendChild(el('audio', { attrs: { controls: '', src: URL.createObjectURL(blob), style: 'width:100%' } })); } catch (e) {}
+    };
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => {
+      if (done) { try { s.getTracks().forEach(t => t.stop()); } catch (e) {} return; }
+      stream = s;
+      try { rec = mime ? new MediaRecorder(s, { mimeType: mime }) : new MediaRecorder(s); } catch (e) { try { rec = new MediaRecorder(s); } catch (e2) { cleanup(null); return; } }
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = () => { blob = new Blob(chunks, { type: rec.mimeType || mime || 'audio/webm' }); setStopped(); };
+      chunks = []; startAt = Date.now(); rec.start();
+      tick = setInterval(() => { timeEl.innerHTML = '<span class="voice-rec-dot">●</span> ' + fmt(Date.now() - startAt); }, 250);
+      timer = setTimeout(stopRec, VOICE_MAX_MS);
+      rowEl.innerHTML = '';
+      rowEl.appendChild(el('button', { class: 'prio-btn', text: '✕ Annuler', attrs: { type: 'button' }, on: { click: () => cleanup(null) } }));
+      rowEl.appendChild(el('button', { class: 'prio-btn', text: '■ Stop', attrs: { type: 'button' }, on: { click: stopRec } }));
+    }).catch(() => { notify('Micro refusé ou indisponible.'); cleanup(null); });
+  });
+}
+
+// Corps de commentaire : si marqueur(s) [audio:...] → fragment (texte + bulle(s) vocale(s)) ;
+// sinon null (le renderer garde son rendu texte). urlFor(filename) → URL de lecture, ou null (PJ
+// absente → bulle « audio indisponible »).
+function renderVoiceBody(text, urlFor) {
+  VOICE_MARKER_RE.lastIndex = 0;
+  if (!VOICE_MARKER_RE.test(text || '')) return null;
+  _voiceStyle();
+  VOICE_MARKER_RE.lastIndex = 0;
+  const frag = document.createDocumentFragment();
+  let last = 0, m;
+  while ((m = VOICE_MARKER_RE.exec(text)) !== null) {
+    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    frag.appendChild(voiceBubble(m[1], urlFor));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+  return frag;
+}
+function voiceBubble(filename, urlFor) {
+  const url = urlFor ? urlFor(filename) : null;
+  const b = el('div', { class: 'voice-bubble' });
+  if (!url) { b.classList.add('voice-missing'); b.textContent = '🎤 audio indisponible'; return b; }
+  b.appendChild(el('span', { text: '🎤' }));
+  const a = el('audio', { attrs: { controls: '', preload: 'none', src: url } });
+  a.addEventListener('error', () => { b.classList.add('voice-missing'); b.innerHTML = ''; b.textContent = '🎤 audio indisponible'; });
+  b.appendChild(a);
+  return b;
+}
+// URL de lecture d'une PJ vocale à partir de son filename : cherche la PJ du mémo (a.name) → a.url.
+function voiceUrlFor(attachments) {
+  return (fn) => { const a = (attachments || []).find(x => x && x.name === fn); return a ? a.url : null; };
+}
+// Enregistre → upload PJ v22 (cfg.uploadUrl) → renvoie le filename SERVEUR (uuid) via orig_name, ou null.
+async function voiceUpload(cfg, res) {
+  const fd = new FormData(); fd.append('files', res.blob, res.filename);
+  let list = null;
+  try { const r = await fetch(cfg.uploadUrl, { method: 'POST', headers: cfg.headers || {}, body: fd }); if (!r.ok) throw 0; list = await r.json(); } catch (e) { notify('Envoi du vocal impossible.', { error: true }); return null; }
+  const arr = Array.isArray(list) ? list : (list && list.attachments) ? list.attachments : (list ? [list] : []);
+  const rec = arr.find(x => x && x.orig_name === res.filename) || arr[arr.length - 1];
+  return rec ? (rec.name || rec.filename || null) : null;
+}
+// Bouton 🎤 « Vocal » de la section Fichiers (owner + invité can_edit) : enregistre + upload + onChange.
+function voiceAttachButton(cfg) {
+  if (!voiceAvailable()) return null;
+  const btn = el('button', { class: 'prio-btn', text: '🎤 Vocal', attrs: { type: 'button', title: 'Enregistrer un message vocal', style: 'margin-top:0.4rem' } });
+  btn.addEventListener('click', async () => {
+    const res = await recordVoice(); if (!res) return;
+    const fn = await voiceUpload(cfg, res);
+    if (fn && cfg.onChange) cfg.onChange();
+  });
+  return btn;
+}
+// Bouton 🎤 du champ commentaire : enregistre → upload PJ → poste un commentaire [audio:<filename>].
+// cfg = { uploadUrl, headers?, postComment(body):Promise }.
+function voiceCommentButton(cfg) {
+  if (!voiceAvailable()) return null;
+  const btn = el('button', { class: 'prio-btn', text: '🎤', attrs: { type: 'button', title: 'Commentaire vocal' } });
+  btn.addEventListener('click', async () => {
+    const res = await recordVoice(); if (!res) return;
+    const fn = await voiceUpload(cfg, res); if (!fn) return;
+    try { await cfg.postComment('[audio:' + fn + ']'); } catch (e) { notify('Commentaire vocal impossible.', { error: true }); }
+  });
+  return btn;
 }
 // [PHOTO-BATCH-DOWNLOAD] Compte des fichiers téléchargeables d'un mémo pour un scope. Union des
 // deux stocks : `memo.images` (legacy = photos, comptent aux deux scopes) + `memo.attachments`
@@ -2428,6 +2578,7 @@ function renderAttachments(cfg) {
   wrap.appendChild(head);
   list.forEach(a => wrap.appendChild(attachRow(a, cfg)));
   if (cfg.canEdit) wrap.appendChild(attachUploader(cfg));
+  if (cfg.canEdit) { const vb = voiceAttachButton(cfg); if (vb) wrap.appendChild(vb); }  // [VOICE-MESSAGES]
   return wrap;
 }
 

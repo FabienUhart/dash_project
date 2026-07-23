@@ -229,8 +229,12 @@ def _attach_preview(head, ext):
         return ("audio/wav", True)
     if ext == "ogg" and head[:4] == b"OggS":
         return ("audio/ogg", True)
-    if ext in ("m4a", "aac") and head[4:8] == b"ftyp":
+    if ext in ("m4a", "aac", "mp4") and head[4:8] == b"ftyp":
+        # [VOICE-MESSAGES] Safari/iOS MediaRecorder produit audio/mp4 (conteneur ftyp).
         return ("audio/mp4", True)
+    # [VOICE-MESSAGES] webm/opus (Chrome/Firefox MediaRecorder) — signature EBML.
+    if ext == "webm" and head[:4] == b"\x1a\x45\xdf\xa3":
+        return ("audio/webm", True)
     if ext == "flac" and head[:4] == b"fLaC":
         return ("audio/flac", True)
     return (mimetypes.guess_type("x." + ext)[0] or "application/octet-stream", False)

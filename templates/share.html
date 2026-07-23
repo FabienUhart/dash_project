@@ -1165,6 +1165,21 @@ function shareCommentInput(memo, parentId) {
   });
   row.appendChild(prioSel);
   row.appendChild(ci);
+  // [VOICE-MESSAGES] Commentaire vocal invité (approuvé + can_edit, via les routes /share existantes,
+  // invariant 5). Upload PJ v22 sur le mémo → commentaire [audio:<fn>].
+  const vbtn = voiceCommentButton({
+    uploadUrl: API + '/memo/' + memo.id + '/attachments',
+    headers: { 'X-Guest-Token': guestToken() },
+    postComment: async (body) => {
+      const bd = { body: body, priority: parseInt(prioSel.value, 10) || 0 };
+      if (parentId) bd.parent_id = parentId;
+      const r = await fetch(API + '/memo/' + memo.id + '/comments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify(bd),
+      });
+      if (r.ok) await load(); else notify('Commentaire refusé.', { error: true });
+    },
+  });
+  if (vbtn) row.appendChild(vbtn);
   return row;
 }
 
@@ -2934,8 +2949,11 @@ function render() {
         a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:var(--guest)' : '');
         a.title = c.author;
         r.appendChild(a);
-        const b = el('span', 'c-body', c.body);
+        const b = el('span', 'c-body', '');
         b.style.cssText = 'flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere';
+        // [VOICE-MESSAGES] marqueur [audio:...] → bulle vocale (PJ du mémo) ; sinon texte.
+        const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));
+        if (vf) b.appendChild(vf); else b.textContent = c.body;
         r.appendChild(b);
         const w = el('span', '', new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }));
         w.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0';
