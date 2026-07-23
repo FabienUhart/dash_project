@@ -11,6 +11,7 @@ import ssl
 import tempfile
 import threading
 import time
+import urllib.request
 import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -4376,6 +4377,96 @@ def _map_marker_color(db):
     )
 
 
+# ───────────────────────── [FX-CONVERTER] taux de change ─────────────────────────
+# Widget convertisseur de devises (voyage Japon, JPY↔EUR). Taux BCE base EUR,
+# source Frankfurter (gratuit, sans clé). Cache technique dans app_state (clé
+# 'fx_cache'), 1 fetch/jour maximum (refresh paresseux, aucun cron/thread).
+# NON exporté (cache technique), NON dans _data_version (volatile — sinon faux reload).
+FX_SOURCE_URL = "https://api.frankfurter.app/latest?from=EUR"
+_FX_CCY_RE = re.compile(r"^[A-Z]{3}$")
+
+
+def _fx_today():
+    """Jour courant Europe/Paris (gate du refresh 1/jour)."""
+    return datetime.now(_APP_TZ).date().isoformat()
+
+
+def _fx_fetch_rates():
+    """Fetch live des taux base EUR (urllib stdlib, timeout court). None si échec/format douteux."""
+    try:
+        req = urllib.request.Request(
+            FX_SOURCE_URL, headers={"User-Agent": f"dash-perso/{APP_VERSION}"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        rates = data.get("rates")
+        if not isinstance(rates, dict) or not rates:
+            return None
+        clean = {}
+        for k, v in rates.items():
+            if isinstance(k, str) and _FX_CCY_RE.match(k) and isinstance(v, (int, float)):
+                clean[k] = float(v)
+        clean["EUR"] = 1.0  # base
+        if len(clean) < 2:
+            return None
+        return {"date": str(data.get("date") or _fx_today())[:10], "base": "EUR", "rates": clean}
+    except Exception:
+        return None
+
+
+def _fx_rates(db):
+    """Taux servis au widget. Refresh paresseux (gate = jour de fetch Europe/Paris, robuste
+    aux week-ends où la date BCE ne change pas). Échec réseau → dernier cache ; aucun cache
+    → {date:None, rates:None}. Jamais de crash/500."""
+    today = _fx_today()
+    cached = None
+    raw = _get_state(db, "fx_cache", "")
+    if raw:
+        try:
+            c = json.loads(raw)
+            if isinstance(c, dict):
+                cached = c
+        except Exception:
+            cached = None
+    cached_ok = bool(cached and isinstance(cached.get("rates"), dict) and cached.get("rates"))
+    if cached_ok and cached.get("fetched_day") == today:
+        return {"date": cached.get("date"), "base": cached.get("base", "EUR"), "rates": cached["rates"]}
+    fresh = _fx_fetch_rates()
+    if fresh:
+        fresh["fetched_day"] = today
+        fresh["fetched_at"] = datetime.now(timezone.utc).isoformat()
+        _set_state(db, "fx_cache", json.dumps(fresh, ensure_ascii=False))
+        db.commit()
+        return {"date": fresh["date"], "base": fresh["base"], "rates": fresh["rates"]}
+    if cached_ok:  # échec réseau : sert le dernier cache connu
+        return {"date": cached.get("date"), "base": cached.get("base", "EUR"), "rates": cached["rates"]}
+    return {"date": None, "base": "EUR", "rates": None}
+
+
+@app.route("/api/fx", methods=["GET"])
+def api_fx():
+    """Owner (derrière Authelia). Lecture seule, aucune donnée utilisateur."""
+    return jsonify(_fx_rates(get_db()))
+
+
+@app.route("/share/<token>/fx", methods=["GET"])
+def share_fx(token):
+    """Invité : token revalidé, PAS d'approbation ni can_edit (taux publics). Sous /share/* (bypass)."""
+    db = get_db()
+    if not _share_by_token(db, token):
+        return jsonify({"error": "invalid"}), 404
+    return jsonify(_fx_rates(db))
+
+
+@app.route("/share/hub/<hub_token>/fx", methods=["GET"])
+def hub_fx(hub_token):
+    """Hub : hub revalidé, même logique publique. Sous /share/hub/* (bypass Authelia)."""
+    db = get_db()
+    if not _hub_by_token(db, hub_token):
+        return jsonify({"error": "invalid"}), 404
+    return jsonify(_fx_rates(db))
+
+
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
     db = get_db()
@@ -4830,7 +4921,8 @@ def _data_version(db):
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM memo_history",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM attachments",  # [ATTACHMENTS]
         "SELECT kind, ref, position FROM favorites ORDER BY position, kind, ref",  # [FAVORITES]
-        "SELECT key, value FROM app_state WHERE key != 'activity_seen_at' ORDER BY key",
+        # [FX-CONVERTER] exclut fx_cache (volatile, refresh quotidien) comme activity_seen_at.
+        "SELECT key, value FROM app_state WHERE key NOT IN ('activity_seen_at', 'fx_cache') ORDER BY key",
     )
     for q in queries:
         for row in db.execute(q):

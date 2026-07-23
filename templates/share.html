@@ -884,6 +884,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 <script>
 const TOKEN = location.pathname.split('/')[2];
 const API = '/share/' + TOKEN;
+// [FX-CONVERTER] widget convertisseur de devises (invité → /share/<token>/fx, taux publics).
+if (typeof initFxWidget === 'function') initFxWidget({ fetchUrl: API + '/fx' });
 let DATA = null;
 let GUEST = { status: 'anonymous', email: '', name: '' };
 

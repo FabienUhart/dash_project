@@ -2849,4 +2849,253 @@ function initPomodoro() {
   applyVisibility();
 }
 initPomodoro();
+
+// ───────────────────────── [FX-CONVERTER] convertisseur de devises ─────────────────────────
+// Widget flottant calqué sur initPomodoro (lanceur + panneau déplaçables, afficher/masquer,
+// positions/masquage persistés localStorage). Taux BCE base EUR servis par le backend
+// (cfg.fetchUrl : owner /api/fx, share /share/<t>/fx, hub /share/hub/<t>/fx), 1 fetch/jour côté
+// serveur. Conversion croisée CÔTÉ CLIENT. Parité owner/share/hub. Aucune lib/CDN (invariant 6),
+// tokens/classes existants (invariant 9), pas de GSAP (invariant 8).
+function initFxWidget(cfg) {
+  cfg = cfg || {};
+  const FETCH_URL = cfg.fetchUrl || '/api/fx';
+  if (typeof document === 'undefined' || !document.body || document.getElementById('fx-launch')) return;
+  const TOP = ['JPY', 'EUR', 'USD', 'GBP', 'CHF'];   // devises en tête du sélecteur
+  let rates = null, rateDate = null;                  // table base EUR + date BCE servie
+  let pair = { from: 'JPY', to: 'EUR' };
+  try { const p = JSON.parse(localStorage.getItem('fxPair') || 'null'); if (p && p.from && p.to) pair = { from: String(p.from), to: String(p.to) }; } catch (e) {}
+  const savePair = () => { try { localStorage.setItem('fxPair', JSON.stringify(pair)); } catch (e) {} };
+  const decimals = (ccy) => (ccy === 'JPY' ? 0 : 2);
+  function convert(amount, from, to) {
+    if (!rates || !isFinite(amount)) return null;
+    const rf = from === 'EUR' ? 1 : rates[from], rt = to === 'EUR' ? 1 : rates[to];
+    if (!rf || !rt) return null;
+    return amount * (rt / rf);
+  }
+
+  // Injection CSS unique (tokens, monochrome, gabarit Pomodoro).
+  if (!document.getElementById('fx-style')) {
+    const st = document.createElement('style'); st.id = 'fx-style';
+    st.textContent = '#fx-launch{position:fixed;left:1rem;bottom:4rem;z-index:3500;width:2.6rem;height:2.6rem;border-radius:50%;'
+      + 'border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:0.9rem;font-weight:700;cursor:pointer;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;touch-action:none}'
+      + '#fx-panel{position:fixed;left:1rem;bottom:6.9rem;z-index:3500;width:15rem;max-width:calc(100vw - 2rem);'
+      + 'background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:0.8rem;color:var(--text);'
+      + 'box-shadow:0 8px 30px rgba(0,0,0,0.4);font-size:0.85rem}'
+      + '#fx-panel[hidden]{display:none}'
+      + '#fx-launch[hidden],#fx-reshow[hidden]{display:none}'
+      + '#fx-reshow{position:fixed;left:0;bottom:4.2rem;z-index:3500;width:1.5rem;height:1.9rem;'
+      + 'border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;background:var(--panel);'
+      + 'color:var(--muted);font-size:0.8rem;cursor:pointer;opacity:0.6;display:flex;align-items:center;justify-content:center}'
+      + '#fx-reshow:hover{opacity:1;color:var(--text)}'
+      + '.fx-head{display:flex;align-items:center;gap:0.4rem;margin:-0.2rem -0.2rem 0.5rem;padding:0.15rem 0.2rem;'
+      + 'cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}'
+      + '.fx-grip{flex:1;font-weight:600;font-size:0.8rem;color:var(--muted)}'
+      + '.fx-x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;line-height:1;padding:0.1rem 0.3rem;border-radius:5px}'
+      + '.fx-x:hover{color:var(--text);background:var(--panel-2)}'
+      + '.fx-row{display:flex;gap:0.4rem;align-items:center;margin-bottom:0.4rem}'
+      + '.fx-amount{flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);'
+      + 'font:inherit;font-size:1rem;padding:0.35rem 0.4rem;text-align:right;font-variant-numeric:tabular-nums}'
+      + '.fx-ccy{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.35rem 0.3rem;cursor:pointer}'
+      + '.fx-swap{display:flex;justify-content:center;margin:0.1rem 0}'
+      + '.fx-swap button{background:var(--panel-2);border:1px solid var(--border);color:var(--muted);border-radius:9px;'
+      + 'width:1.9rem;height:1.6rem;cursor:pointer;font-size:0.85rem;line-height:1}'
+      + '.fx-swap button:hover{color:var(--accent);border-color:var(--accent)}'
+      + '.fx-note{font-size:0.72rem;color:var(--muted);margin-top:0.5rem;text-align:center}'
+      + '.fx-note.stale{color:var(--yellow)}';
+    document.head.appendChild(st);
+  }
+
+  const launch = document.createElement('button');
+  launch.id = 'fx-launch'; launch.type = 'button'; launch.textContent = '¥€';
+  launch.title = 'Convertisseur de devises'; launch.setAttribute('aria-label', launch.title);
+  const panel = document.createElement('div');
+  panel.id = 'fx-panel'; panel.hidden = true; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Convertisseur de devises');
+  const reshow = document.createElement('button');
+  reshow.id = 'fx-reshow'; reshow.type = 'button'; reshow.textContent = '¥€';
+  reshow.title = 'Afficher le convertisseur'; reshow.setAttribute('aria-label', reshow.title);
+  document.body.appendChild(launch); document.body.appendChild(panel); document.body.appendChild(reshow);
+
+  // Préférence d'affichage (état local, chacun pour soi ; pilotable depuis Paramètres owner).
+  let hidden = false; try { hidden = localStorage.getItem('fxHidden') === '1'; } catch (e) {}
+  function applyVisibility() { launch.hidden = hidden; reshow.hidden = !hidden; if (hidden) panel.hidden = true; }
+  function setHidden(v) { hidden = !!v; try { localStorage.setItem('fxHidden', hidden ? '1' : '0'); } catch (e) {} applyVisibility(); }
+  reshow.addEventListener('click', () => setHidden(false));
+  window.fxSetHidden = setHidden;
+  window.fxIsHidden = () => hidden;
+
+  function clampPos(x, y, w, h) {
+    const maxX = Math.max(0, window.innerWidth - w), maxY = Math.max(0, window.innerHeight - h);
+    return [Math.min(Math.max(0, x), maxX), Math.min(Math.max(0, y), maxY)];
+  }
+  let fxPos = null; try { fxPos = JSON.parse(localStorage.getItem('fxPos') || 'null'); } catch (e) {}
+  let fxLaunchPos = null; try { fxLaunchPos = JSON.parse(localStorage.getItem('fxLaunchPos') || 'null'); } catch (e) {}
+  let launchSuppressClick = 0;
+  function applyLaunchPos() {
+    if (!fxLaunchPos) return;
+    const r = launch.getBoundingClientRect();
+    const [x, y] = clampPos(fxLaunchPos.x, fxLaunchPos.y, r.width || 42, r.height || 42);
+    launch.style.left = x + 'px'; launch.style.top = y + 'px'; launch.style.bottom = 'auto';
+  }
+  function positionPanelNearLaunch() {
+    const lr = launch.getBoundingClientRect(), pr = panel.getBoundingClientRect(), gap = 8;
+    const pw = pr.width || 240, ph = pr.height || 220;
+    let x = lr.left; if (x + pw > window.innerWidth) x = lr.right - pw;
+    let y = lr.top - ph - gap; if (y < 0) y = lr.bottom + gap;
+    const [cx, cy] = clampPos(x, y, pw, ph);
+    panel.style.left = cx + 'px'; panel.style.top = cy + 'px'; panel.style.bottom = 'auto';
+  }
+  function applyPanelPos() {
+    if (fxPos) {
+      const r = panel.getBoundingClientRect();
+      const [x, y] = clampPos(fxPos.x, fxPos.y, r.width || 240, r.height || 220);
+      panel.style.left = x + 'px'; panel.style.top = y + 'px'; panel.style.bottom = 'auto';
+    } else { positionPanelNearLaunch(); }
+  }
+  function makeDraggable(handle) {
+    let pid = null, sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      pid = e.pointerId; const r = panel.getBoundingClientRect(); ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY; dragging = true;
+      panel.style.bottom = 'auto';
+      try { handle.setPointerCapture(pid); } catch (_) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging || e.pointerId !== pid) return;
+      e.preventDefault();
+      const r = panel.getBoundingClientRect();
+      const [x, y] = clampPos(ox + (e.clientX - sx), oy + (e.clientY - sy), r.width, r.height);
+      panel.style.left = x + 'px'; panel.style.top = y + 'px';
+    });
+    const end = (e) => {
+      if (e.pointerId !== pid || !dragging) return;
+      dragging = false; const r = panel.getBoundingClientRect(); fxPos = { x: r.left, y: r.top };
+      try { localStorage.setItem('fxPos', JSON.stringify(fxPos)); } catch (_) {}
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  let topEl, botEl, topSel, botSel, noteEl, lastEdited = 'top';
+  function ccyOptions() {
+    if (!rates) return TOP.slice();
+    const all = Object.keys(rates);
+    const rest = all.filter(c => TOP.indexOf(c) < 0).sort();
+    return TOP.filter(c => all.indexOf(c) >= 0).concat(rest);
+  }
+  function fillSelect(sel, val) {
+    sel.innerHTML = '';
+    ccyOptions().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; if (c === val) o.selected = true; sel.appendChild(o); });
+    sel.value = val;
+  }
+  function fmt(v, ccy) { return (v == null || !isFinite(v)) ? '' : v.toFixed(decimals(ccy)); }
+  function recompute() {
+    if (!rates) return;
+    if (lastEdited === 'bot') {
+      const a = parseFloat(botEl.value);
+      const r = convert(a, pair.to, pair.from);
+      topEl.value = fmt(r, pair.from);
+    } else {
+      const a = parseFloat(topEl.value);
+      const r = convert(a, pair.from, pair.to);
+      botEl.value = fmt(r, pair.to);
+    }
+  }
+  function buildPanel() {
+    panel.innerHTML = '';
+    const head = el('div', { class: 'fx-head' });
+    head.appendChild(el('span', { class: 'fx-grip', text: '¥€ Convertisseur' }));
+    head.appendChild(el('button', { class: 'fx-x', text: '✕', attrs: { type: 'button', title: 'Masquer le convertisseur' }, on: { click: () => setHidden(true) } }));
+    panel.appendChild(head);
+    makeDraggable(head);
+
+    const rowT = el('div', { class: 'fx-row' });
+    topEl = el('input', { class: 'fx-amount', attrs: { type: 'number', inputmode: 'decimal', step: 'any', 'aria-label': 'Montant à convertir' } });
+    topSel = el('select', { class: 'fx-ccy', attrs: { 'aria-label': 'Devise source' } });
+    rowT.appendChild(topEl); rowT.appendChild(topSel); panel.appendChild(rowT);
+
+    const sw = el('div', { class: 'fx-swap' });
+    sw.appendChild(el('button', { text: '↔', attrs: { type: 'button', title: 'Inverser les devises' }, on: { click: () => {
+      pair = { from: pair.to, to: pair.from }; savePair();
+      fillSelect(topSel, pair.from); fillSelect(botSel, pair.to);
+      lastEdited = 'top'; recompute();
+    } } }));
+    panel.appendChild(sw);
+
+    const rowB = el('div', { class: 'fx-row' });
+    botEl = el('input', { class: 'fx-amount', attrs: { type: 'number', inputmode: 'decimal', step: 'any', 'aria-label': 'Montant converti' } });
+    botSel = el('select', { class: 'fx-ccy', attrs: { 'aria-label': 'Devise cible' } });
+    rowB.appendChild(botEl); rowB.appendChild(botSel); panel.appendChild(rowB);
+
+    noteEl = el('div', { class: 'fx-note' });
+    panel.appendChild(noteEl);
+
+    fillSelect(topSel, pair.from); fillSelect(botSel, pair.to);
+    topEl.addEventListener('input', () => { lastEdited = 'top'; recompute(); });
+    botEl.addEventListener('input', () => { lastEdited = 'bot'; recompute(); });
+    topSel.addEventListener('change', () => { pair.from = topSel.value; savePair(); lastEdited = (lastEdited === 'top') ? 'top' : 'bot'; recompute(); });
+    botSel.addEventListener('change', () => { pair.to = botSel.value; savePair(); lastEdited = (lastEdited === 'bot') ? 'bot' : 'top'; recompute(); });
+    applyNote();
+    if (topEl.value === '' && botEl.value === '') { topEl.value = '1'; lastEdited = 'top'; }
+    recompute();
+  }
+  function todayISO() { try { return new Date().toISOString().slice(0, 10); } catch (e) { return null; } }
+  function applyNote() {
+    if (!noteEl) return;
+    if (!rates) { noteEl.textContent = '⚠ Taux indisponibles'; noteEl.classList.add('stale'); return; }
+    noteEl.textContent = 'Taux BCE du ' + (rateDate || '?');
+    const t = todayISO();
+    noteEl.classList.toggle('stale', !!(t && rateDate && rateDate !== t));
+  }
+
+  async function loadRates() {
+    try {
+      const r = await fetch(FETCH_URL, { headers: { 'Accept': 'application/json' } });
+      const d = await r.json();
+      if (d && d.rates && typeof d.rates === 'object') { rates = d.rates; rateDate = d.date || null; }
+      else { rates = null; rateDate = null; }
+    } catch (e) { rates = null; rateDate = null; }
+    if (rates) { fillSelect(topSel, pair.from); fillSelect(botSel, pair.to); }
+    applyNote(); recompute();
+  }
+
+  // Lanceur déplaçable (souris + tactile), distinction clic/glisser (>4px = drag).
+  (function () {
+    let pid = null, sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    launch.addEventListener('pointerdown', (e) => {
+      pid = e.pointerId; const r = launch.getBoundingClientRect(); ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY; dragging = false;
+      try { launch.setPointerCapture(pid); } catch (_) {}
+    });
+    launch.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pid) return;
+      if (!dragging) { if (Math.abs(e.clientX - sx) > 4 || Math.abs(e.clientY - sy) > 4) { dragging = true; launch.style.bottom = 'auto'; } else return; }
+      e.preventDefault();
+      const r = launch.getBoundingClientRect();
+      const [x, y] = clampPos(ox + (e.clientX - sx), oy + (e.clientY - sy), r.width, r.height);
+      launch.style.left = x + 'px'; launch.style.top = y + 'px';
+    });
+    const end = (e) => {
+      if (e.pointerId !== pid) return;
+      if (dragging) {
+        const r = launch.getBoundingClientRect(); fxLaunchPos = { x: r.left, y: r.top };
+        try { localStorage.setItem('fxLaunchPos', JSON.stringify(fxLaunchPos)); } catch (_) {}
+        launchSuppressClick = Date.now() + 300;
+        if (!panel.hidden) applyPanelPos();
+      }
+      pid = null; dragging = false;
+    };
+    launch.addEventListener('pointerup', end);
+    launch.addEventListener('pointercancel', end);
+  })();
+  launch.addEventListener('click', () => {
+    if (Date.now() < launchSuppressClick) return;
+    const open = panel.hidden; panel.hidden = !open; if (open) { applyPanelPos(); }
+  });
+  window.addEventListener('resize', () => { applyLaunchPos(); if (!panel.hidden) applyPanelPos(); });
+  buildPanel();
+  applyLaunchPos();
+  applyVisibility();
+  loadRates();
+}
 </script>

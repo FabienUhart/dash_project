@@ -380,6 +380,8 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 // [HUB-ROUTE-PREFIX] URL = /share/hub/<token> → le token est le dernier segment.
 const HUB_TOKEN = location.pathname.split('/').filter(Boolean).pop();
 const HUB_BASE = '/share/hub/' + HUB_TOKEN;
+// [FX-CONVERTER] widget convertisseur de devises (hub → /share/hub/<token>/fx, taux publics).
+if (typeof initFxWidget === 'function') initFxWidget({ fetchUrl: HUB_BASE + '/fx' });
 let DATA = null, FOCUS = null, VIEW = 'board';
 let activeMap = null;  // [HUB-MAP-FIX] état carte attendu par runMapDialog (miroir index/share.html)
 const themeBtn = document.getElementById('theme-btn');

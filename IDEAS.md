@@ -33,8 +33,8 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 
 ## [FX-CONVERTER] — Widget convertisseur de devises (JPY↔EUR + sélecteur)
 
-**Statut :** À faire
-**Contexte :** Voyage Japon. Widget convertisseur calqué sur le Pomodoro (afficher/masquer, lanceur + panneau déplaçables, préférence par utilisateur), activable aussi par les invités depuis leur vue. Pas de changement de format d'export → APP_VERSION reste "22".
+**Statut :** ✅ Fait — [V23.2.90] (voir REALISATION.md). Livré : cache `app_state.fx_cache` (pas de table `fx_rates`), routes owner/share/**hub**, `initFxWidget(cfg)` dans `_shared.js.html`, export inchangé v23 (la cible « v22 » ci-dessous était obsolète).
+**Contexte :** Voyage Japon. Widget convertisseur calqué sur le Pomodoro (afficher/masquer, lanceur + panneau déplaçables, préférence par utilisateur), activable aussi par les invités depuis leur vue. Pas de changement de format d'export → APP_VERSION reste "23".
 
 **Taux — 1 fetch/jour, conservé toute la journée (serveur) :**
 - Source : Frankfurter `https://api.frankfurter.app/latest?from=EUR` (données BCE, gratuit, sans clé). Réponse = taux base EUR multi-devises (JPY, USD, GBP…).

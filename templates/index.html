@@ -1925,6 +1925,12 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
         Pomodoro / minuteur / chronomètre. Réglage propre à cet appareil ; on peut aussi le masquer via le ✕ du widget.
       </p>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;margin-top:0.7rem">
+        <input type="checkbox" id="fx-visible-cb"> Afficher le convertisseur ¥€ (bouton flottant)
+      </label>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        Convertisseur de devises (taux BCE, 1 rafraîchissement / jour). Réglage propre à cet appareil ; masquable via le ✕ du widget.
+      </p>
     </div>
   </div>
 
@@ -7216,12 +7222,21 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   // [POMODORO V1.1] reflète l'état d'affichage du widget minuteur (piloté dans le partial).
   const pvcb = document.getElementById('pomo-visible-cb');
   if (pvcb) pvcb.checked = !(window.pomoIsHidden && window.pomoIsHidden());
+  // [FX-CONVERTER] reflète l'état d'affichage du widget convertisseur ¥€ (piloté dans le partial).
+  const fvcb = document.getElementById('fx-visible-cb');
+  if (fvcb) fvcb.checked = !(window.fxIsHidden && window.fxIsHidden());
   setSettingsTab(localStorage.getItem('settingsTab') || 'identity');
   settingsDialog.showModal();
 });
 document.getElementById('pomo-visible-cb').addEventListener('change', (e) => {
   if (window.pomoSetHidden) window.pomoSetHidden(!e.target.checked);
 });
+const fxVisibleCb = document.getElementById('fx-visible-cb');
+if (fxVisibleCb) fxVisibleCb.addEventListener('change', (e) => {
+  if (window.fxSetHidden) window.fxSetHidden(!e.target.checked);
+});
+// [FX-CONVERTER] widget convertisseur de devises (owner → /api/fx).
+initFxWidget({ fetchUrl: '/api/fx' });
 
 // [SETTINGS-TABS] sauvegarde AUTO du nom (blur / Entrée) — plus de bouton Enregistrer.
 // Vide → on restaure la valeur précédente sans enregistrer.
