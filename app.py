@@ -64,7 +64,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "23"  # X = version du format d'export (invariant 1) — v23 = [FOLDER-ATTACHMENTS] pièces jointes de dossier ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "24"  # X = version du format d'export (invariant 1) — v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -607,6 +607,12 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN end_time TEXT DEFAULT ''")
     if "created_by" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN created_by TEXT DEFAULT ''")
+    # [MEMO-DATE-RANGE] Plage de dates : date de FIN optionnelle (hôtels multi-nuits, événements
+    # multi-jours). Date YYYY-MM-DD, valide seulement si due_date posée et due_end >= due_date.
+    # ⚠️ EXPORTÉE (donnée utilisateur réelle) → PREMIER BUMP depuis v23 : format d'export v24
+    # (invariant 1). Absente à l'import (v1→v23) = NULL = mémo mono-jour (compat totale, invariant 2).
+    if "due_end" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN due_end TEXT DEFAULT ''")
     # [VOTE-EXCLUDE] Mémo « hors vote » : visible/éditable mais PAS une option du vote.
     # Additif, non exporté (comme les voix — donnée d'atelier, pas de bump : export v20).
     if "vote_excluded" not in mcols:
@@ -3032,6 +3038,7 @@ def _memo_dict(row, owner_name=None):
     d["location"] = _parse_location(d.get("location"))
     d["done"] = bool(d.get("done"))
     d["vote_excluded"] = bool(d.get("vote_excluded"))  # [VOTE-EXCLUDE]
+    d["due_end"] = d.get("due_end") or ""  # [MEMO-DATE-RANGE] NULL → ''
     return d
 
 
@@ -3127,6 +3134,16 @@ def _clean_due_time(value):
     return v if DUE_TIME_RE.match(v) else ""
 
 
+DUE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _clean_due_end(value):
+    """[MEMO-DATE-RANGE] date de fin : YYYY-MM-DD strict sinon '' (jamais de HTML). La cohérence
+    (>= due_date, exige due_date, exclusive de la récurrence) est vérifiée par l'appelant → 400."""
+    v = str(value or "").strip()
+    return v if DUE_DATE_RE.match(v) else ""
+
+
 @app.route("/api/memos", methods=["GET"])
 def list_memos():
     db = get_db()
@@ -3184,14 +3201,25 @@ def create_memo():
     if not content and not title:
         return jsonify({"error": "content required"}), 400
     db = get_db()
+    _dd = (data.get("due_date") or "").strip()
+    _rec = _valid_recurrence(data.get("recurrence"))
+    # [MEMO-DATE-RANGE] date de fin (mêmes garde-fous que _perform_memo_update).
+    _de = _clean_due_end(data.get("due_end")) if _dd else ""
+    if _de:
+        if _de < _dd:
+            return jsonify({"error": "la date de fin doit être ≥ la date de début"}), 400
+        if _rec:
+            return jsonify({"error": "récurrence et plage de dates sont exclusives"}), 400
+    elif data.get("due_end") and not _dd:
+        return jsonify({"error": "une date de fin exige une date de début"}), 400
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
     now = datetime.now(timezone.utc).isoformat()
     uid = str(uuid.uuid4())
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-        "done, due_date, due_time, end_time, priority, subtasks, project_id, recurrence, emoji, location, "
+        "done, due_date, due_time, end_time, due_end, priority, subtasks, project_id, recurrence, emoji, location, "
         "title, assignees, marker_color, map_groups) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -3199,16 +3227,17 @@ def create_memo():
             uid,
             now,
             1 if data.get("done") else 0,
-            (data.get("due_date") or "").strip(),
-            _clean_due_time(data.get("due_time")) if (data.get("due_date") or "").strip() else "",
+            _dd,
+            _clean_due_time(data.get("due_time")) if _dd else "",
             # [FESTIVAL-VOTE] fin : dépend de la date ET de l'heure de début (une fin sans début n'existe pas)
             _clean_due_time(data.get("end_time"))
-            if ((data.get("due_date") or "").strip() and _clean_due_time(data.get("due_time")))
+            if (_dd and _clean_due_time(data.get("due_time")))
             else "",
+            _de,  # [MEMO-DATE-RANGE]
             _valid_priority(db, data.get("priority")),
             _subtasks_json(data.get("subtasks")),
             _valid_project_id(db, data.get("project_id")),
-            _valid_recurrence(data.get("recurrence")),
+            _rec,
             _clean_emoji(data.get("emoji")),
             _enrich_location(_clean_location(data.get("location"))),
             title,
@@ -3223,7 +3252,7 @@ def create_memo():
 
 
 def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
-                   title="", assignees_json="[]", due_time="", end_time=""):
+                   title="", assignees_json="[]", due_time="", end_time="", due_end=""):
     try:
         subs = json.loads(subtasks_json or "[]")
     except Exception:
@@ -3243,6 +3272,7 @@ def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
         "title": title or "",
         "assignees": assignees,
         "end_time": end_time or "",  # [FESTIVAL-VOTE]
+        "due_end": due_end or "",    # [MEMO-DATE-RANGE]
     }
 
 
@@ -3259,6 +3289,7 @@ def _log_revision(db, memo_row, after, editor, share_id=None):
         memo_row["priority"], memo_row["subtasks"], memo_row["recurrence"],
         _row_get(memo_row, "title"), _row_get(memo_row, "assignees", "[]"),
         _row_get(memo_row, "due_time"), _row_get(memo_row, "end_time"),  # [FESTIVAL-VOTE]
+        _row_get(memo_row, "due_end"),  # [MEMO-DATE-RANGE]
     )
     if before == after:
         return
@@ -3319,6 +3350,17 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
         if "end_time" in data
         else _row_get(existing, "end_time")
     )
+    # [MEMO-DATE-RANGE] date de fin (plage). 400 SEULEMENT si le client fournit EXPLICITEMENT une
+    # fin invalide (sans date, < début, ou avec récurrence). Une fin HÉRITÉE de l'existant quand on
+    # efface la date est simplement vidée (spec « effacer la date efface la fin »), pas un 400.
+    explicit_end = _clean_due_end(data.get("due_end")) if "due_end" in data else None
+    due_end = explicit_end if explicit_end is not None else _clean_due_end(_row_get(existing, "due_end"))
+    if explicit_end and not due_date:
+        return {"error": "une date de fin exige une date de début"}, 400
+    if due_end and due_date and due_end < due_date:
+        return {"error": "la date de fin doit être ≥ la date de début"}, 400
+    if due_end and recurrence:
+        return {"error": "récurrence et plage de dates sont exclusives"}, 400
 
     now = datetime.now(timezone.utc).isoformat()
     was_done = bool(existing["done"])
@@ -3346,10 +3388,11 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
 
     if not due_date:
         due_time = ""
+        due_end = ""  # [MEMO-DATE-RANGE] effacer la date efface la fin
     if not due_time:  # [FESTIVAL-VOTE] une fin sans début (ou sans date) n'existe pas
         end_time = ""
     after = _memo_snapshot(content, done, due_date, priority, subtasks, recurrence,
-                           title, assignees, due_time, end_time)
+                           title, assignees, due_time, end_time, due_end)
     _log_revision(db, existing, after, editor, share_id)
 
     emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
@@ -3369,7 +3412,7 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
         else (_row_get(existing, "map_groups", "[]") or "[]")
     )
     db.execute(
-        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, priority=?, subtasks=?, "
+        "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, due_end=?, priority=?, subtasks=?, "
         "project_id=?, recurrence=?, emoji=?, location=?, title=?, assignees=?, "
         "marker_color=?, map_groups=?, updated_at=? WHERE id=?",
         (
@@ -3378,6 +3421,7 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             due_date,
             due_time,
             end_time,  # [FESTIVAL-VOTE]
+            due_end,   # [MEMO-DATE-RANGE]
             priority,
             subtasks,
             project_id,
@@ -4565,6 +4609,7 @@ def _share_memo_dict(row):
         "done": d["done"],
         "due_date": d["due_date"],
         "due_time": d.get("due_time", "") or "",
+        "due_end": d.get("due_end", "") or "",  # [MEMO-DATE-RANGE] plage (exposée aux invités)
         "end_time": d.get("end_time", "") or "",  # [FESTIVAL-VOTE]
         "priority": d["priority"],
         "subtasks": d["subtasks"],
@@ -5349,8 +5394,8 @@ def _data_version(db):
     queries = (
         "SELECT id, position, category_id, updated_at FROM links ORDER BY id",
         "SELECT id, name, color, emoji, position FROM categories ORDER BY id",
-        "SELECT id, position, project_id, priority, done, due_date, due_time, "
-        "end_time, deleted_at, updated_at, perm_vote, perm_comment FROM memos ORDER BY id",  # [FESTIVAL-VOTE] end_time ; [GUEST-ROLES] perm_*
+        "SELECT id, position, project_id, priority, done, due_date, due_time, due_end, "
+        "end_time, deleted_at, updated_at, perm_vote, perm_comment FROM memos ORDER BY id",  # [FESTIVAL-VOTE] end_time ; [GUEST-ROLES] perm_* ; [MEMO-DATE-RANGE] due_end
         "SELECT * FROM projects ORDER BY id",
         "SELECT * FROM priorities ORDER BY id",
         "SELECT * FROM shares ORDER BY id",
@@ -6587,7 +6632,7 @@ def share_update_memo(token, memo_id):
     raw = request.get_json(silent=True) or {}
     data = {
         k: raw[k]
-        for k in ("content", "done", "subtasks", "due_date", "due_time", "end_time", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
+        for k in ("content", "done", "subtasks", "due_date", "due_time", "due_end", "end_time", "priority", "recurrence", "location", "title", "assignees", "marker_color", "map_groups")
         if k in raw
     }
     if "project_id" in raw and share["kind"] == "project":
@@ -6936,6 +6981,7 @@ def _share_memo_dict_from_payload(d):
         "done": d["done"],
         "due_date": d["due_date"],
         "due_time": d.get("due_time", "") or "",
+        "due_end": d.get("due_end", "") or "",  # [MEMO-DATE-RANGE] plage (exposée aux invités)
         "end_time": d.get("end_time", "") or "",  # [FESTIVAL-VOTE]
         "priority": d["priority"],
         "subtasks": d["subtasks"],
@@ -7712,7 +7758,7 @@ def _build_export(db, root_id=None):
         d["reactions"] = reacts_by_cid.get(cid, [])
         out_comments.append(d)
     result = {
-        "version": 23,
+        "version": int(APP_VERSION),  # [MEMO-DATE-RANGE] v24 (source unique = APP_VERSION)
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -8409,6 +8455,11 @@ def import_links():
             # [FESTIVAL-VOTE] end_time accepté EN ENTRÉE d'import (jamais réémis à l'export →
             # sortie toujours v23). Dépend de la date ET de l'heure de début.
             memo_end = _clean_due_time(memo.get("end_time")) if (due_date and memo_time) else ""
+            # [MEMO-DATE-RANGE] v24 : date de fin. Import TOLÉRANT (jamais de 400 — invariant 2) :
+            # une fin invalide (sans date, < début, ou avec récurrence) est simplement ignorée.
+            memo_due_end = _clean_due_end(memo.get("due_end")) if due_date else ""
+            if memo_due_end and (memo_due_end < due_date or recurrence):
+                memo_due_end = ""
             memo_created_by = str(memo.get("created_by") or "").strip()[:200]
         else:
             content = str(memo).strip()
@@ -8430,6 +8481,7 @@ def import_links():
             memo_groups = "[]"
             memo_time = ""
             memo_end = ""  # [FESTIVAL-VOTE]
+            memo_due_end = ""  # [MEMO-DATE-RANGE]
             memo_created_by = ""
         if not content and not title:
             continue
@@ -8448,23 +8500,28 @@ def import_links():
             merged_end = memo_end or _row_get(existing, "end_time")
             if not merged_time:
                 merged_end = ""
+            # [MEMO-DATE-RANGE] fin de plage : upsert non destructif (fin présente jamais écrasée
+            # par une absente) ; vidée si pas de date, < date, ou récurrence présente.
+            merged_due_end = memo_due_end or _clean_due_end(_row_get(existing, "due_end"))
+            if not due_date or (merged_due_end and merged_due_end < due_date) or recurrence:
+                merged_due_end = ""
             merged_created_by = memo_created_by or _row_get(existing, "created_by")
             if res == "overwrite":
                 # [IMPORT-PREVIEW] Écraser/Restaurer : force la mise à jour, restaure si en corbeille
                 # (deleted_at=''), rattache au projet visé par l'import (project_id résolu du fichier).
                 db.execute(
-                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, priority=?, "
+                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, due_end=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
                     "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, deleted_at='', updated_at=? WHERE id=?",
-                    (content, done, due_date, merged_time, merged_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, (updated or now), existing["id"]),
+                    (content, done, due_date, merged_time, merged_end, merged_due_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, (updated or now), existing["id"]),
                 )
                 updated_memos += 1
             elif updated and updated > (existing["updated_at"] or ""):
                 db.execute(
-                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, priority=?, "
+                    "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, due_end=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
                     "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, merged_time, merged_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, updated, existing["id"]),
+                    (content, done, due_date, merged_time, merged_end, merged_due_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -8484,10 +8541,10 @@ def import_links():
         new_uid = str(uuid.uuid4()) if res == "duplicate" else (uid or str(uuid.uuid4()))
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
-            "done, due_date, due_time, end_time, priority, subtasks, project_id, images, recurrence, emoji, location, "
+            "done, due_date, due_time, end_time, due_end, priority, subtasks, project_id, images, recurrence, emoji, location, "
             "title, assignees, marker_color, map_groups, created_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, memo_end, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups, memo_created_by),
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, memo_end, memo_due_end, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups, memo_created_by),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)

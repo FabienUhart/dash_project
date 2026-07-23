@@ -97,6 +97,49 @@ function fmtMemoRange(start, end) {
   return s + ' → ' + e + (isNightSlot(start, end) ? ' 🌙' : '');
 }
 
+// [MEMO-DATE-RANGE] Étiquette de plage « 3 → 6 nov » (hôtels multi-nuits, événements multi-jours).
+// `end` absent/invalide/= début → date seule (comportement mono-jour inchangé). Purs, 3 pages.
+function fmtDayShort(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  return new Date(iso + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+}
+function fmtDateRange(start, end) {
+  const s = fmtDayShort(start);
+  if (!s) return '';
+  if (!end || end <= start) return s;
+  // « 3 → 6 nov » : mois répété seulement si différent, pour rester compact.
+  const sMonth = new Date(start + 'T00:00').getMonth(), eMonth = new Date(end + 'T00:00').getMonth();
+  const sDay = new Date(start + 'T00:00').getDate();
+  const eShort = fmtDayShort(end);
+  return (sMonth === eMonth ? String(sDay) : s) + ' → ' + eShort;
+}
+// Fin effective pour le « en retard »/tri : `due_end` si plage valide, sinon `due_date`.
+function memoDueEndDay(m) {
+  const de = m && m.due_end;
+  return (de && m.due_date && de >= m.due_date) ? de : (m ? (m.due_date || '') : '');
+}
+// La plage [due_date..due_end] couvre-t-elle `dayIso` ? (mono-jour = due_date === dayIso).
+function memoCoversDay(m, dayIso) {
+  const s = m && m.due_date;
+  if (!s || !dayIso) return false;
+  const e = memoDueEndDay(m);
+  return s <= dayIso && dayIso <= e;
+}
+// Liste des jours ISO couverts par un mémo (frise/agenda) : [due_date..due_end] (garde-fou ~3 mois).
+function memoDays(m) {
+  const s = m && m.due_date;
+  if (!s) return [];
+  const e = memoDueEndDay(m);
+  if (!e || e <= s) return [s];
+  const out = []; let cur = s, g = 0;
+  while (cur <= e && g++ < 92) {
+    out.push(cur);
+    const d = new Date(cur + 'T00:00'); d.setDate(d.getDate() + 1);
+    cur = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  return out;
+}
+
 // [FESTIVAL-DATES] Un passage d'APRÈS-MINUIT (due_time < 12:00) AVEC une heure de fin est une
 // séance de NUIT : en BASE il porte sa VRAIE date (le lendemain), mais à l'AFFICHAGE il compte
 // avec la JOURNÉE DE FESTIVAL de la veille (comme le programme officiel). Gardé par la présence
@@ -1220,7 +1263,8 @@ function runMapDialog(cfg) {
       renderTimeline();
       const s = tlEl.querySelector('[data-day="' + tlActiveDay + '"]');
       if (s) s.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' });
-      fitTo(current.filter(p => isFocused(p) && p.kind === 'memo' && festivalDay(p) === tlActiveDay && p.lat != null && p.lng != null)
+      // [MEMO-DATE-RANGE] le jour sélectionné inclut les mémos dont la PLAGE couvre ce jour.
+      fitTo(current.filter(p => isFocused(p) && p.kind === 'memo' && (festivalDay(p) === tlActiveDay || memoCoversDay(p, tlActiveDay)) && p.lat != null && p.lng != null)
         .map(p => [p.lat, p.lng]));
     } else {
       refresh(true); // réaffiche points/segments/frise + fitBounds sur tout l'ensemble
@@ -1378,7 +1422,13 @@ function runMapDialog(cfg) {
     const strip = el('div', { class: 'map-frise-strip', attrs: { style: 'display:flex;gap:0.3rem;align-items:stretch;overflow-x:auto;padding:0 0.2rem 0.3rem;-webkit-overflow-scrolling:touch' } });
     // [MAP-TRIP-POLISH] chips « Jour 1… » cliquables (si plusieurs jours distincts) :
     // clic = faire défiler la frise jusqu'à la première étape du jour.
-    const days = [...new Set(dated.map(festivalDay))];  // [FESTIVAL-DATES] regroupé par journée de festival
+    // [FESTIVAL-DATES] journée de festival ; [MEMO-DATE-RANGE] un séjour couvre plusieurs jours →
+    // chaque jour de sa plage a son chip « Jour N » (l'hôtel Osaka apparaît Jours 1..4).
+    const days = (() => {
+      const set = new Set();
+      dated.forEach(p => ((p.due_end && p.due_date && p.due_end > p.due_date) ? memoDays(p) : [festivalDay(p)]).forEach(d => set.add(d)));
+      return [...set].sort();
+    })();
     const firstStepOfDay = {};
     if (tlActiveDay && !days.includes(tlActiveDay)) tlActiveDay = null; // jour disparu (focus)
     if (days.length > 1) {
@@ -2338,7 +2388,20 @@ function agendaDayCompare(a, b) {
 // par jour ISO, chaque liste triée par agendaDayCompare.
 function agendaGroupByDay(memos) {
   const map = {};
-  memos.forEach(m => { (map[m.due_date] = map[m.due_date] || []).push(m); });
+  const add = (d, m) => { (map[d] = map[d] || []).push(m); };
+  memos.forEach(m => {
+    const s = m.due_date;
+    if (!s) return;
+    // [MEMO-DATE-RANGE] un mémo à plage apparaît sur CHAQUE jour de [due_date..due_end].
+    const e = (m.due_end && m.due_end > s) ? m.due_end : s;
+    if (e === s) { add(s, m); return; }
+    let cur = s, guard = 0;
+    while (cur <= e && guard++ < 92) {  // garde-fou anti-boucle sur données aberrantes (~3 mois)
+      add(cur, m);
+      const d = new Date(cur + 'T00:00'); d.setDate(d.getDate() + 1);
+      cur = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+  });
   Object.keys(map).forEach(k => map[k].sort(agendaDayCompare));
   return map;
 }

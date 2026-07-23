@@ -4131,17 +4131,19 @@ function dateStr(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-function dueInfo(due) {
+function dueInfo(due, end) {
   if (!due) return null;
   const today = dateStr(new Date());
   const tomorrow = dateStr(new Date(Date.now() + 86400000));
-  if (due < today) return { cls: 'due-late', label: 'En retard' };
+  // [MEMO-DATE-RANGE] fin effective : en retard SEULEMENT après la fin ; séjour en cours = badge plage.
+  const hasRange = end && end > due;
+  const eff = hasRange ? end : due;
+  if (eff < today) return { cls: 'due-late', label: 'En retard' };
+  if (hasRange && due <= today && today <= end) return { cls: 'due-today', label: fmtDateRange(due, end) };
+  if (hasRange) return { cls: 'due-future', label: fmtDateRange(due, end) };  // plage à venir
   if (due === today) return { cls: 'due-today', label: "Aujourd'hui" };
   if (due === tomorrow) return { cls: 'due-future', label: 'Demain' };
-  return {
-    cls: 'due-future',
-    label: new Date(due + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
-  };
+  return { cls: 'due-future', label: fmtDayShort(due) };
 }
 
 function linkify(text) {
@@ -4604,7 +4606,7 @@ function renderTreeView() {
     row.appendChild(el('span', { class: 'tree-title' + (m.done ? ' done' : ''), text: label }));
     // Colonnes de métadonnées (masquées en mobile via CSS).
     const meta = el('div', { class: 'tree-meta' });
-    const di = dueInfo(m.due_date);
+    const di = dueInfo(m.due_date, m.due_end);
     const dt = fmtMemoTime(m.due_time);
     meta.appendChild(el('span', { class: 'tcol tcol-due ' + (di ? di.cls : ''), text: di ? '📅 ' + di.label + (dt ? ' · ' + dt : '') : '' }));
     const asg = m.assignees || [];
@@ -5590,6 +5592,14 @@ function renderMeMeta(memo) {
   dateIn.value = memo.due_date || '';
   dateIn.addEventListener('change', () => metaPatch(memo, { due_date: dateIn.value }));
   dateRow.appendChild(dateIn);
+  // [MEMO-DATE-RANGE] fin de plage (hôtel multi-nuits) — visible si date posée et pas de récurrence.
+  if (memo.due_date && !memo.recurrence) {
+    dateRow.appendChild(el('span', { text: '→', attrs: { title: 'Fin de la plage' } }));
+    const endDateIn = el('input', { attrs: { type: 'date', title: 'Date de fin (plage multi-jours, optionnelle)', min: memo.due_date, style: inStyle } });
+    endDateIn.value = memo.due_end || '';
+    endDateIn.addEventListener('change', () => metaPatch(memo, { due_end: endDateIn.value }));
+    dateRow.appendChild(endDateIn);
+  }
   if (memo.due_date) {
     const timeIn = el('input', { attrs: { type: 'time', title: 'Heure de début (optionnelle)', style: inStyle } });
     timeIn.value = memo.due_time || '';
@@ -6291,7 +6301,7 @@ function taskEl(memo) {
       attrs: { title: 'Priorité ' + (prio.name || ''), style: 'background:' + prio.color + ';color:' + textOn(prio.color) },
     }));
   }
-  const due = dueInfo(memo.due_date);
+  const due = dueInfo(memo.due_date, memo.due_end);
   if (due && !memo.done) {
     const t = fmtMemoRange(memo.due_time, memo.end_time);  // [FESTIVAL-VOTE] plage début → fin
     badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label + (t ? ' · ' + t : '') }));
@@ -6880,10 +6890,10 @@ function renderBoard() {
     }
   }
 
-  const counts = {
+  const counts = {  // [MEMO-DATE-RANGE] fin effective : séjour en cours = « aujourd'hui », pas en retard
     all: allMemos.filter(m => !m.done).length,
-    overdue: allMemos.filter(m => !m.done && m.due_date && m.due_date < todayD).length,
-    today: allMemos.filter(m => !m.done && m.due_date === todayD).length,
+    overdue: allMemos.filter(m => !m.done && m.due_date && memoDueEndDay(m) < todayD).length,
+    today: allMemos.filter(m => !m.done && memoCoversDay(m, todayD)).length,
     scheduled: allMemos.filter(m => !m.done && m.due_date && m.due_date > todayD).length,
     done: allMemos.filter(m => m.done).length,
     history: visibleHistory().length,
@@ -6991,9 +7001,11 @@ function renderBoard() {
   const done = memos.filter(m => m.done);
   const today = todayD;
 
+  // [MEMO-DATE-RANGE] sections basées sur la fin EFFECTIVE : un séjour en cours (début ≤ auj ≤ fin)
+  // est « Aujourd'hui » (pas « En retard ») ; « En retard » seulement après la fin.
   let sections = [
-    { key: 'sec-overdue', filter: 'overdue', title: 'EN RETARD', items: pending.filter(m => m.due_date && m.due_date < today) },
-    { key: 'sec-today', filter: 'today', title: "AUJOURD'HUI", items: pending.filter(m => m.due_date === today) },
+    { key: 'sec-overdue', filter: 'overdue', title: 'EN RETARD', items: pending.filter(m => m.due_date && memoDueEndDay(m) < today) },
+    { key: 'sec-today', filter: 'today', title: "AUJOURD'HUI", items: pending.filter(m => memoCoversDay(m, today)) },
     { key: 'sec-upcoming', filter: 'scheduled', title: 'À VENIR', items: pending.filter(m => m.due_date && m.due_date > today) },
     { key: 'sec-nodate', filter: null, title: 'SANS DATE', items: pending.filter(m => !m.due_date) },
   ];
@@ -7163,7 +7175,7 @@ function renderMemos() {
     if (prio && prio.color) note.style.borderLeftColor = prio.color;
     const plain = (memo.emoji ? memo.emoji + ' ' : '') + (memo.title ? memo.title + (memo.content ? ' — ' : '') : '') + stripHTML(memo.content);
     note.appendChild(el('span', { text: plain.length > 120 ? plain.slice(0, 118) + '…' : plain }));
-    const due = dueInfo(memo.due_date);
+    const due = dueInfo(memo.due_date, memo.due_end);
     const extras = [];
     if (due) extras.push('📅 ' + due.label);
     if ((memo.images || []).length) extras.push('📎 ' + memo.images.length);

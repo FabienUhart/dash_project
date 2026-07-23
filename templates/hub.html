@@ -335,7 +335,8 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <label class="me-label">Contenu</label>
   <div id="ed-qwrap"><div id="ed-qeditor"></div></div>
   <label class="me-label">Échéance</label>
-  <div style="display:flex;gap:0.4rem"><input id="ed-date" type="date"><input id="ed-time" type="time"></div>
+  <!-- [MEMO-DATE-RANGE] ed-dateend = fin de plage (affichée si date posée et pas de récurrence) -->
+  <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap"><input id="ed-date" type="date"><input id="ed-time" type="time"><span id="ed-dateend-sep" hidden>→</span><input id="ed-dateend" type="date" title="Date de fin (plage multi-jours)" hidden></div>
   <label class="me-label">Priorité</label>
   <div id="ed-prio" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
   <label class="me-label">Assigné·es</label>
@@ -643,8 +644,12 @@ function renderSidebar() {
 function dueInfo(m) {
   if (!m.due_date || m.done) return null;
   const t = todayStr();
-  let cls = '', lbl = new Date(m.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-  if (m.due_date < t) cls = 'due-late'; else if (m.due_date === t) cls = 'due-today';
+  // [MEMO-DATE-RANGE] plage : libellé « 3 → 6 nov » ; en retard SEULEMENT après la fin effective.
+  const hasRange = m.due_end && m.due_end > m.due_date;
+  const lbl = hasRange ? fmtDateRange(m.due_date, m.due_end) : fmtDayShort(m.due_date);
+  const eff = memoDueEndDay(m);
+  let cls = '';
+  if (eff < t) cls = 'due-late'; else if (memoCoversDay(m, t)) cls = 'due-today';
   const tm = fmtMemoTime(m.due_time);
   return { cls, label: '📅 ' + lbl + (tm ? ' · ' + tm : '') };
 }
@@ -1247,6 +1252,11 @@ function openEditor(m) {
   }
   const dIn = document.getElementById('ed-date'); dIn.value = m.due_date || ''; dIn.disabled = ro;
   const tIn = document.getElementById('ed-time'); tIn.value = m.due_time || ''; tIn.disabled = ro;
+  // [MEMO-DATE-RANGE] fin de plage : visible si date posée et pas de récurrence.
+  const deIn = document.getElementById('ed-dateend'), deSep = document.getElementById('ed-dateend-sep');
+  const showEnd = !!m.due_date && !m.recurrence;
+  deIn.hidden = deSep.hidden = !showEnd;
+  deIn.value = m.due_end || ''; deIn.disabled = ro; if (m.due_date) deIn.min = m.due_date;
   // priorités
   const pw = document.getElementById('ed-prio'); pw.innerHTML = '';
   const mk = (id, name, color) => { const b = el('button', { class: 'prio-btn', text: name });
@@ -1373,7 +1383,8 @@ document.getElementById('ed-cancel').addEventListener('click', () => edDialog.cl
 document.getElementById('ed-save').addEventListener('click', async () => {
   if (!edMemo || !edMemo.can_edit) return;
   const body = { title: document.getElementById('ed-title').value.trim(), due_date: document.getElementById('ed-date').value,
-    due_time: document.getElementById('ed-time').value, assignees: edAssignees };
+    due_time: document.getElementById('ed-time').value, assignees: edAssignees,
+    due_end: document.getElementById('ed-dateend').value };  // [MEMO-DATE-RANGE]
   if (edContentMode === 'quill' && hubQuill) {
     const text = hubQuill.getText().trim();
     body.content = text ? hubQuill.getSemanticHTML().replace(/&nbsp;| /g, ' ') : '';

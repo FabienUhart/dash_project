@@ -1370,6 +1370,14 @@ function renderQMeta(memo) {
   const dateIn = el('input', { attrs: { type: 'date', style: inStyle } }); dateIn.value = memo.due_date || '';
   dateIn.addEventListener('change', () => patch({ due_date: dateIn.value }));
   dateRow.appendChild(dateIn);
+  // [MEMO-DATE-RANGE] fin de plage — visible si date posée et pas de récurrence.
+  if (memo.due_date && !memo.recurrence) {
+    dateRow.appendChild(el('span', { text: '→', attrs: { title: 'Fin de la plage' } }));
+    const endDateIn = el('input', { attrs: { type: 'date', title: 'Date de fin (plage multi-jours, optionnelle)', min: memo.due_date, style: inStyle } });
+    endDateIn.value = memo.due_end || '';
+    endDateIn.addEventListener('change', () => patch({ due_end: endDateIn.value }));
+    dateRow.appendChild(endDateIn);
+  }
   if (memo.due_date) {
     const timeIn = el('input', { attrs: { type: 'time', title: 'Heure de début (optionnelle)', style: inStyle } }); timeIn.value = memo.due_time || '';
     timeIn.addEventListener('change', () => patch({ due_time: timeIn.value }));
@@ -2238,9 +2246,10 @@ function renderTiles() {
   const ms = scopedMemos();
   const defs = [
     ['all', 'En cours', '#4fc3f7', ms.filter(m => !m.done).length],
-    ['today', "Aujourd'hui", '#4caf50', ms.filter(m => !m.done && m.due_date === t).length],
+    // [MEMO-DATE-RANGE] séjour en cours = aujourd'hui ; en retard = après la fin effective
+    ['today', "Aujourd'hui", '#4caf50', ms.filter(m => !m.done && memoCoversDay(m, t)).length],
     ['sched', 'Planifiés', 'var(--guest)', ms.filter(m => !m.done && m.due_date > t).length],
-    ['late', 'En retard', 'var(--danger)', ms.filter(m => !m.done && m.due_date && m.due_date < t).length],
+    ['late', 'En retard', 'var(--danger)', ms.filter(m => !m.done && m.due_date && memoDueEndDay(m) < t).length],
     ['done', 'Terminés', 'var(--warn)', ms.filter(m => m.done).length],
   ];
   const tiles = document.getElementById('tiles');
@@ -2425,9 +2434,10 @@ function renderShareTreeView() {
     const meta = el('div', 'tree-meta');
     let dueTxt = '', dueCls = '';
     if (m.due_date) {
-      const dt = fmtMemoTime(m.due_time);
-      dueTxt = '📅 ' + new Date(m.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (dt ? ' · ' + dt : '');
-      if (m.due_date < today) dueCls = ' due-late'; else if (m.due_date === today) dueCls = ' due-today';
+      const dt = fmtMemoTime(m.due_time);  // [MEMO-DATE-RANGE] libellé plage + retard sur fin effective
+      const lbl = (m.due_end && m.due_end > m.due_date) ? fmtDateRange(m.due_date, m.due_end) : fmtDayShort(m.due_date);
+      dueTxt = '📅 ' + lbl + (dt ? ' · ' + dt : '');
+      if (memoDueEndDay(m) < today) dueCls = ' due-late'; else if (memoCoversDay(m, today)) dueCls = ' due-today';
     }
     meta.appendChild(el('span', 'tcol tcol-due' + dueCls, dueTxt));
     const asg = m.assignees || [];
@@ -2475,9 +2485,9 @@ function visibleShareMemos() {
   const t = todayStr();
   return scopedMemos().filter(m => {
     if (FILTER === 'all') return !m.done;
-    if (FILTER === 'today') return !m.done && m.due_date === t;
+    if (FILTER === 'today') return !m.done && memoCoversDay(m, t);  // [MEMO-DATE-RANGE]
     if (FILTER === 'sched') return !m.done && m.due_date > t;
-    if (FILTER === 'late') return !m.done && m.due_date && m.due_date < t;
+    if (FILTER === 'late') return !m.done && m.due_date && memoDueEndDay(m) < t;
     return m.done;
   });
 }
@@ -2886,8 +2896,10 @@ function render() {
     }
     if (memo.project) row.appendChild(el('span', 'badge', memo.project));
     if (memo.due_date) {
-      const dt = fmtMemoRange(memo.due_time, memo.end_time);  // [FESTIVAL-VOTE] plage début → fin
-      row.appendChild(el('span', 'badge', '📅 ' + new Date(memo.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (dt ? ' · ' + dt : '')));
+      const dt = fmtMemoRange(memo.due_time, memo.end_time);  // [FESTIVAL-VOTE] plage horaire début → fin
+      // [MEMO-DATE-RANGE] libellé « 3 → 6 nov » si plage de dates.
+      const dlbl = (memo.due_end && memo.due_end > memo.due_date) ? fmtDateRange(memo.due_date, memo.due_end) : fmtDayShort(memo.due_date);
+      row.appendChild(el('span', 'badge', '📅 ' + dlbl + (dt ? ' · ' + dt : '')));
     }
     // [FESTIVAL-VOTE] Chip ❤️ : invité APPROUVÉ peut poser (can_edit NON requis) ; anonyme = lecture.
     {
