@@ -651,7 +651,15 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   white-space: nowrap;
 }
 .tag-chip:hover { background: #2d3742; text-decoration: underline; }
-.link-tags { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.15rem; }
+.link-tags { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.15rem; align-items: center; }
+/* [TAG-NAV] Ajout rapide de tags sur la card : « + » discret + input inline + « × » de retrait. */
+.tag-chip.tag-add { color: var(--muted); font-weight: 700; }
+.tag-chip.tag-add:hover { color: var(--accent); background: var(--panel); }
+.tag-chip .tag-x { color: var(--red); cursor: pointer; font-weight: 700; margin-left: 0.15rem; }
+.tag-add-input { background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; color: var(--text); font: inherit; font-size: 0.78rem; padding: 0.05rem 0.35rem; width: 8rem; }
+/* [TAG-NAV] Vue dédiée par étiquette. */
+.tag-sec { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 1rem 0 0.4rem; }
+.tag-proj-list { display: flex; flex-direction: column; gap: 0.2rem; max-width: 34rem; }
 .url-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.2rem; }
 .url-link {
   display: inline-flex;
@@ -1633,6 +1641,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <div id="tree-board" hidden></div>
     <div id="agenda-board" hidden></div>
     <div id="favorites-board" hidden></div>
+    <div id="tag-board" hidden></div>
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
@@ -2109,6 +2118,7 @@ const state = {
   smtpEnabled: false,
   mapMarkerColor: '#e53935',
   favorites: [],  // [FAVORITES] ids de projets épinglés (ordre serveur)
+  tagFilter: null,  // [TAG-NAV] étiquette affichée dans la vue dédiée
 };
 
 function parseSearch() {
@@ -2236,6 +2246,7 @@ function renderAll() {
   document.getElementById('tree-board').hidden = v !== 'tree';
   document.getElementById('agenda-board').hidden = v !== 'agenda';
   document.getElementById('favorites-board').hidden = v !== 'favorites';  // [FAVORITES] vue mobile
+  document.getElementById('tag-board').hidden = v !== 'tag';  // [TAG-NAV] vue dédiée par étiquette
   document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
   // [LINK-ADD-RELOCATE] La barre « + Ajouter un lien » vit dans la vue Liens → visible seulement là.
   document.getElementById('links-actions').style.display = v === 'links' ? '' : 'none';
@@ -2248,6 +2259,7 @@ function renderAll() {
   else if (v === 'tree') renderTreeView();
   else if (v === 'agenda') renderAgendaView();
   else if (v === 'favorites') renderFavoritesView();
+  else if (v === 'tag') renderTagView();  // [TAG-NAV]
   else renderLinks();
   renderMemos();
   applyA11y();
@@ -2754,6 +2766,46 @@ function renderSidebar() {
     };
     const roots = state.projects.filter(p => !p.parent_id);
     roots.forEach(p => renderProjTree(p, nav));
+  }
+
+  // ===== Section ÉTIQUETTES [TAG-NAV] — owner-only. Sources : tags des liens (v7) + projets (v8).
+  // En-tête SANS ＋ (un tag naît en taguant, pas ici). Masquée en rail 64px et si aucun tag. =====
+  const tagList = tagCounts();
+  if (!rail && tagList.length) {
+    nav.appendChild(el('div', { class: 'sidebar-sep' }));
+    const tOpen = secOpen('Étiquettes');
+    const tHead = el('div', { class: 'sb-section-head', attrs: { title: tOpen ? 'Replier la section' : 'Déplier la section' } });
+    tHead.appendChild(el('span', { class: 'sb-chevron', text: tOpen ? '▾' : '▸' }));
+    tHead.appendChild(el('span', { class: 'sb-section-label', text: '🏷 Étiquettes' }));
+    tHead.addEventListener('click', () => { toggleSbSection('Étiquettes'); renderSidebar(); });
+    nav.appendChild(tHead);
+    if (tOpen) {
+      tagList.forEach(tc => {
+        const active = state.view === 'tag' && state.tagFilter === tc.tag;
+        const item = el('div', {
+          class: 'cat-item sub' + (active ? ' active' : ''),
+          attrs: { title: '#' + tc.tag + ' — ' + tc.total + ' élément' + (tc.total > 1 ? 's' : '') + ' (glisser un lien ici pour le taguer)' },
+          on: { click: () => goTag(tc.tag) },
+        });
+        item.appendChild(el('span', { class: 'sb-proj-chev' }));  // colonne chevron vide (alignement)
+        item.appendChild(el('span', { class: 'emoji', text: '🏷' }));
+        item.appendChild(el('span', { class: 'cat-label', text: '#' + tc.tag, attrs: { title: '#' + tc.tag } }));
+        item.appendChild(el('span', { class: 'count', text: String(tc.total) }));
+        // D&D lien → étiquette : ajoute le tag au lien (tag déjà présent = no-op silencieux).
+        item.addEventListener('dragover', (e) => { if (dragLinkId) { e.preventDefault(); item.classList.add('drop-target'); } });
+        item.addEventListener('dragleave', () => item.classList.remove('drop-target'));
+        item.addEventListener('drop', async (e) => {
+          e.preventDefault(); item.classList.remove('drop-target');
+          if (!dragLinkId) return;
+          const link = state.links.find(l => l.id === dragLinkId);
+          if (!link) return;
+          if ((link.tags || '').split(/\s+/).includes(tc.tag)) return;  // déjà porté = no-op
+          await api('/api/links/' + link.id, { method: 'PUT', body: JSON.stringify({ tags: ((link.tags || '') + ' ' + tc.tag).trim() }) });
+          await loadAll();
+        });
+        nav.appendChild(item);
+      });
+    }
   }
 }
 
@@ -3802,56 +3854,9 @@ function renderLinks() {
     ul.appendChild(li);
     return;
   }
-  const catById = Object.fromEntries(state.categories.map(c => [c.id, c]));
   links.forEach((link) => {
-    const card = el('li', { class: 'card', attrs: { 'data-id': link.id, draggable: 'true' } });
-
-    const titleRow = el('div', { class: 'title-row' });
-    titleRow.appendChild(faviconEl(link));
-    titleRow.appendChild(el('span', { class: 'name', text: link.name }));
-    if (state.filterCat === 'all' && link.category_id && catById[link.category_id]) {
-      const cat = catById[link.category_id];
-      const tag = el('span', { class: 'cat-tag', text: (cat.emoji ? cat.emoji + ' ' : '') + cat.name });
-      if (cat.color) tag.style.color = cat.color;
-      titleRow.appendChild(tag);
-    }
-    card.appendChild(titleRow);
-
-    if (link.descr) card.appendChild(el('div', { class: 'descr', text: link.descr }));
-    if (link.memo) card.appendChild(el('div', { class: 'memo', text: link.memo }));
-
-    const urls = el('div', { class: 'url-links' });
-    if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
-    if (link.url_local) urls.appendChild(urlLink(link.url_local, '🔒', 'local'));
-    card.appendChild(urls);
-
-    if ((link.tags || '').trim()) {
-      const tagsRow = el('div', { class: 'link-tags' });
-      link.tags.split(/\s+/).forEach(tag => {
-        const chip = el('span', {
-          class: 'tag-chip', text: '#' + tag,
-          attrs: { title: 'Voir les mémos portant #' + tag },
-          on: { click: () => goTag(tag) },
-        });
-        tagsRow.appendChild(chip);
-      });
-      card.appendChild(tagsRow);
-    }
-
-    const actions = el('div', { class: 'actions' });
-    actions.appendChild(el('button', { icon: 'pencil', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
-    actions.appendChild(el('button', { text: '×', attrs: { title: 'Supprimer' }, on: { click: () => deleteLink(link.id) } }));
-    card.appendChild(actions);
-
-    card.addEventListener('dragstart', (e) => {
-      dragLinkId = link.id;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => {
-      dragLinkId = null;
-      card.classList.remove('dragging');
-    });
+    const card = linkCardEl(link);
+    // Réordonnancement intra-liste (spécifique à #links, pas dans la vue tag).
     card.addEventListener('dragover', (e) => {
       if (!dragLinkId || dragLinkId === link.id) return;
       e.preventDefault();
@@ -3861,9 +3866,94 @@ function renderLinks() {
       const before = (e.clientY - rect.top) < rect.height / 2;
       ul.insertBefore(dragging, before ? card : card.nextSibling);
     });
-
     ul.appendChild(card);
   });
+}
+
+// [TAG-NAV] Card de lien réutilisable (vue Liens ET vue tag) : mêmes favicons/statuts/actions,
+// + rangée d'étiquettes avec ajout rapide (« + » / input datalist / « × »). D&D vers la sidebar
+// (catégorie ou étiquette) via dragstart posant dragLinkId.
+function linkCardEl(link) {
+  const catById = Object.fromEntries(state.categories.map(c => [c.id, c]));
+  const card = el('li', { class: 'card', attrs: { 'data-id': link.id, draggable: 'true' } });
+  const titleRow = el('div', { class: 'title-row' });
+  titleRow.appendChild(faviconEl(link));
+  titleRow.appendChild(el('span', { class: 'name', text: link.name }));
+  if (state.filterCat === 'all' && link.category_id && catById[link.category_id]) {
+    const cat = catById[link.category_id];
+    const t = el('span', { class: 'cat-tag', text: (cat.emoji ? cat.emoji + ' ' : '') + cat.name });
+    if (cat.color) t.style.color = cat.color;
+    titleRow.appendChild(t);
+  }
+  card.appendChild(titleRow);
+  if (link.descr) card.appendChild(el('div', { class: 'descr', text: link.descr }));
+  if (link.memo) card.appendChild(el('div', { class: 'memo', text: link.memo }));
+  const urls = el('div', { class: 'url-links' });
+  if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
+  if (link.url_local) urls.appendChild(urlLink(link.url_local, '🔒', 'local'));
+  card.appendChild(urls);
+  card.appendChild(linkTagsRow(link));  // [TAG-NAV] toujours présent (porte le « + » même sans tag)
+  const actions = el('div', { class: 'actions' });
+  actions.appendChild(el('button', { icon: 'pencil', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
+  actions.appendChild(el('button', { text: '×', attrs: { title: 'Supprimer' }, on: { click: () => deleteLink(link.id) } }));
+  card.appendChild(actions);
+  card.addEventListener('dragstart', (e) => { dragLinkId = link.id; card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+  card.addEventListener('dragend', () => { dragLinkId = null; card.classList.remove('dragging'); });
+  return card;
+}
+
+// [TAG-NAV] Rangée d'étiquettes d'un lien. Passive en consultation (clic chip → vue tag).
+// Le « + » ouvre un input inline (datalist des tags existants, saisie libre) ; pendant l'édition,
+// chaque chip montre un « × » pour retirer. Tout passe par PUT /api/links (champ `tags` v7,
+// normalisé serveur) — aucune route nouvelle. loadAll() rafraîchit chips + compteurs sidebar.
+function linkTagsRow(link) {
+  const row = el('div', { class: 'link-tags' });
+  let editing = false;
+  const save = async (tagsStr) => {
+    await api('/api/links/' + link.id, { method: 'PUT', body: JSON.stringify({ tags: tagsStr }) });
+    await loadAll();  // re-render : chips de la card + compteurs de la section Étiquettes
+  };
+  const rebuild = () => {
+    row.innerHTML = '';
+    const tags = (link.tags || '').split(/\s+/).filter(Boolean);
+    tags.forEach(tag => {
+      const chip = el('span', { class: 'tag-chip', text: '#' + tag, attrs: { title: editing ? '' : 'Voir tout ce qui porte #' + tag } });
+      if (editing) {
+        chip.appendChild(el('span', {
+          class: 'tag-x', text: '×', attrs: { title: 'Retirer #' + tag },
+          on: { click: (e) => { e.stopPropagation(); save(tags.filter(t => t !== tag).join(' ')); } },
+        }));
+      } else {
+        chip.addEventListener('click', (e) => { e.stopPropagation(); goTag(tag); });
+      }
+      row.appendChild(chip);
+    });
+    if (!editing) {
+      const plus = el('span', { class: 'tag-chip tag-add', text: '+', attrs: { title: 'Ajouter une étiquette' } });
+      plus.addEventListener('click', (e) => { e.stopPropagation(); editing = true; rebuild(); });
+      row.appendChild(plus);
+    } else {
+      const input = el('input', { class: 'tag-add-input', attrs: { type: 'text', list: 'link-tags-datalist', placeholder: '#étiquette (Entrée)', autocomplete: 'off' } });
+      let dl = document.getElementById('link-tags-datalist');
+      if (!dl) { dl = el('datalist', { attrs: { id: 'link-tags-datalist' } }); document.body.appendChild(dl); }
+      dl.innerHTML = '';
+      tagCounts().forEach(tc => dl.appendChild(el('option', { attrs: { value: tc.tag } })));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); editing = false; rebuild(); return; }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const v = input.value.trim();
+          if (!v) { editing = false; rebuild(); return; }
+          save(((link.tags || '') + ' ' + v).trim());  // serveur normalise + dédup
+        }
+      });
+      input.addEventListener('blur', () => { setTimeout(() => { if (editing) { editing = false; rebuild(); } }, 150); });
+      row.appendChild(input);
+      setTimeout(() => input.focus(), 0);
+    }
+  };
+  rebuild();
+  return row;
 }
 
 document.getElementById('links').addEventListener('drop', onLinksDrop);
@@ -4086,7 +4176,15 @@ function sanitizeHTML(html) {
 
 const TAG_RE = /#[A-Za-z0-9_À-ÿ-]+/g;
 
+// [TAG-NAV] Cliquer une étiquette (sidebar, chip de card, mention inline) ouvre la VUE DÉDIÉE
+// (liens + projets portant le tag), pas un simple remplissage de recherche. Le bouton
+// « 🔍 Rechercher #tag » de la vue rappelle l'ancien comportement (mix global liens/mémos/projets).
 function goTag(tag) {
+  state.tagFilter = tag;
+  state.view = 'tag';
+  renderAll();
+}
+function searchTag(tag) {
   state.search = '#' + tag;
   searchInput.value = '#' + tag;
   state.searchScope = 'all';
@@ -4094,6 +4192,67 @@ function goTag(tag) {
   document.getElementById('search-scope').classList.remove('scoped');
   state.view = 'memos';
   renderAll();
+}
+
+// [TAG-NAV] Agrégation des étiquettes (liens v7 + projets v8), côté front, tri usage puis alpha.
+function tagCounts() {
+  const map = new Map();
+  const add = (tagsStr, kind) => {
+    (tagsStr || '').split(/\s+/).filter(Boolean).forEach(t => {
+      const e = map.get(t) || { link: 0, proj: 0 };
+      e[kind]++; map.set(t, e);
+    });
+  };
+  state.links.forEach(l => add(l.tags, 'link'));
+  state.projects.forEach(p => add(p.tags, 'proj'));
+  return [...map.entries()]
+    .map(([tag, e]) => ({ tag, link: e.link, proj: e.proj, total: e.link + e.proj }))
+    .sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag));
+}
+
+// [TAG-NAV] Vue dédiée d'une étiquette : liens (cards réutilisées) + projets (lignes cliquables).
+function renderTagView() {
+  const board = document.getElementById('tag-board');
+  board.innerHTML = '';
+  const tag = state.tagFilter;
+  const has = (s) => (s || '').split(/\s+/).includes(tag);
+  const links = state.links.filter(l => has(l.tags));
+  const projects = state.projects.filter(p => has(p.tags));
+  if (!tag || (!links.length && !projects.length)) {  // tag orphelin → retour Liens sans erreur
+    state.view = 'links'; state.tagFilter = null; renderAll();
+    return;
+  }
+  const title = el('div', { attrs: { id: 'board-title' } });
+  title.appendChild(el('span', { text: '🏷 #' + tag }));
+  title.appendChild(el('span', { class: 'badge', text: String(links.length + projects.length) }));
+  title.appendChild(el('button', {
+    class: 'prio-btn', text: '🔍 Rechercher #' + tag,
+    attrs: { title: 'Recherche globale (liens + mémos + projets)' },
+    on: { click: () => searchTag(tag) },
+  }));
+  board.appendChild(title);
+  if (links.length) {
+    board.appendChild(el('h3', { class: 'tag-sec', text: '🔗 Liens (' + links.length + ')' }));
+    const ul = el('ul', { class: 'cards' });
+    links.forEach(l => ul.appendChild(linkCardEl(l)));
+    board.appendChild(ul);
+  }
+  if (projects.length) {
+    board.appendChild(el('h3', { class: 'tag-sec', text: '📁 Projets (' + projects.length + ')' }));
+    const list = el('div', { class: 'tag-proj-list' });
+    projects.forEach(p => {
+      const row = el('div', {
+        class: 'cat-item',
+        attrs: { title: p.name },
+        on: { click: () => { state.view = 'memos'; state.memoProject = p.id; state.tagFilter = null; renderAll(); } },
+      });
+      row.appendChild(comboIcon(p.emoji, usableProjColor(p.color), '📁'));
+      row.appendChild(el('span', { class: 'cat-label', text: p.name, attrs: { title: p.name } }));
+      row.appendChild(el('span', { class: 'count', text: String(p.memo_count || 0) }));
+      list.appendChild(row);
+    });
+    board.appendChild(list);
+  }
 }
 
 function applyTags(root) {
@@ -7132,6 +7291,7 @@ function goHome() {
   state.view = 'links';
   state.filterCat = 'all';
   state.memoProject = 'all';
+  state.tagFilter = null;  // [TAG-NAV]
   state.search = '';
   state.searchScope = 'all';
   const s = document.getElementById('search'); if (s) s.value = '';
