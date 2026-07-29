@@ -148,9 +148,28 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .ag-chip { display: flex; align-items: center; gap: 0.3rem; min-width: 0; font-size: 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.05rem 0.4rem; }
 .ag-chip .ag-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
-.ag-more { font-size: 0.68rem; color: var(--muted); padding-left: 0.2rem; }
+.ag-more { font-size: 0.68rem; color: var(--muted); padding: 0.05rem 0.2rem; background: none; border: none; text-align: left; cursor: pointer; border-radius: 4px; }
+.ag-more:hover { color: var(--text); background: var(--panel-2); }
 .ag-day-panel { margin-top: 0.9rem; }
 .ag-day-panel h3 { margin: 0 0 0.4rem; font-size: 0.9rem; text-transform: capitalize; }
+/* [AGENDA-DAY-POPIN] pop-in « jour » (dialog natif — hérite du style dialog + entrée dlg-in). */
+#agenda-day-dialog { padding: 1rem; }  /* [DIALOG-SIZE] largeur = base hub (620) */
+.agd-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.agd-title { flex: 1; min-width: 0; text-align: center; }
+.agd-day { font-size: 1rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agd-count { font-size: 0.75rem; color: var(--muted); }
+.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.agd-nav:hover, .agd-x:hover { border-color: var(--muted); color: var(--accent); }
+.agd-body { display: flex; flex-direction: column; gap: 0.3rem; max-height: 60vh; overflow-y: auto; }
+.agd-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.4rem 0.5rem; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; }
+.agd-row:hover, .agd-row:focus-visible { border-color: var(--accent); outline: none; }
+.agd-dot { flex: 0 0 auto; width: 0.7rem; height: 0.7rem; border-radius: 50%; }
+.agd-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agd-time { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.1rem 0.4rem; }
+.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; }
+.agd-empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0.5rem; text-align: center; }
+.agd-foot { margin-top: 0.7rem; }
+.agd-add { width: 100%; }
 .ag-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border-radius: 8px; cursor: pointer; min-width: 0; }
 .ag-row:hover { background: var(--panel-2); }
 .ag-time { width: 54px; flex-shrink: 0; font-size: 0.75rem; color: var(--muted); }
@@ -158,7 +177,13 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .ag-empty { color: var(--muted); font-size: 0.82rem; font-style: italic; padding: 0.3rem 0.5rem; }
 
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 1.2rem; width: min(620px, 94vw); }
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 1.2rem; width: min(clamp(560px, 38vw, 760px), 94vw); }
+/* [DIALOG-SIZE] largeurs par usage, RELATIVES bornées (profitent des grands écrans). #ed =
+   éditeur de mémo (Quill) → wide comme l'owner. Carte/aperçu image inchangés. */
+.dlg-wide { width: min(clamp(680px, 52vw, 980px), 94vw); }
+.dlg-compact { width: min(420px, 92vw); }
+#hub-vote-dialog, #agenda-day-dialog, #ed { width: min(clamp(680px, 52vw, 980px), 94vw); }
+#confirm-dialog, #notify-dialog { width: min(420px, 92vw); }
 dialog::backdrop { background: rgba(6,9,12,0.62); }
 /* [MAP-CLOSE-UX] En-tête carte : titre + ✕ collés en haut (sticky), fond opaque. */
 .map-head { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.55rem;
@@ -168,7 +193,25 @@ dialog::backdrop { background: rgba(6,9,12,0.62); }
   border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
   color: var(--muted); font-size: 1rem; line-height: 1; }
 .map-x:hover { background: var(--panel); color: var(--text); border-color: var(--muted); }
-.dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.9rem; }
+/* [DIALOG-STICKY-ACTIONS-DESKTOP] pied collant à TOUTES les largeurs (dialogs longs scrollent en
+   interne, cf. max-height plus bas). Exception carte (#map-dialog). */
+.dlg-actions {
+  display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.9rem;
+  position: sticky; bottom: 0; z-index: 20;
+  background: var(--panel); border-top: 1px solid var(--border); padding: 0.6rem 0 0.2rem;
+}
+#map-dialog .dlg-actions { position: static; background: none; border-top: none; padding: 0; }
+/* Gestion de vote (non-éditeur) : simple cap + scroll interne, pied sticky générique. */
+#hub-vote-dialog { max-height: 92vh; overflow-y: auto; }
+/* [DIALOG-STICKY-ACTIONS V25.2.125] Éditeur mémo invité en SCROLL-BODY : colonne flex, contenu
+   scrollable, pied d'actions STATIC = dernier enfant (toujours visible, zéro liseré). */
+#ed { flex-direction: column; max-height: 92vh; overflow: hidden; padding: 0; }
+#ed[open] { display: flex; }  /* [open] : sinon écrase dialog:not([open]){display:none} */
+#ed .dlg-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.2rem; }
+#ed .dlg-actions {
+  position: static; flex: 0 0 auto; margin: 0; padding: 0.7rem 1.2rem;
+  border-top: 1px solid var(--border); background: var(--panel); border-radius: 0 0 var(--radius) var(--radius);
+}
 .me-label { display: block; font-size: 0.78rem; color: var(--muted); font-weight: 600; margin: 0.7rem 0 0.2rem; }
 #ed input[type=text], #ed textarea, #ed input[type=date], #ed input[type=time] {
   width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
@@ -187,7 +230,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 #ed-context { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.5rem; }
 /* [HUB-INLINE-EDIT] éditeur Quill inline */
 #ed-qwrap .ql-toolbar { border-color: var(--border); border-top-left-radius: 6px; border-top-right-radius: 6px; }
-#ed-qwrap .ql-container { border-color: var(--border); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; min-height: 7rem; font: inherit; font-size: 0.92rem; }
+#ed-qwrap .ql-container { border-color: var(--border); border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; min-height: 7rem; max-height: 60vh; overflow-y: auto; resize: vertical; font: inherit; font-size: 0.92rem; }  /* [EDITOR-RESIZE] poignée native ; hauteur mémorisée (editorContentH) */
 #ed-qwrap .ql-editor { min-height: 7rem; }
 #ed-qwrap .ql-editor.ql-blank::before { color: var(--muted); font-style: normal; }
 #ed-qwrap.ro .ql-toolbar { display: none; }
@@ -330,6 +373,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 
 <!-- éditeur mémo -->
 <dialog id="ed">
+  <div class="dlg-scroll">
   <div id="ed-context"></div>
   <label class="me-label">Titre</label>
   <input id="ed-title" type="text" maxlength="200" placeholder="Titre (optionnel)">
@@ -347,6 +391,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <div id="ed-attachments"></div>
   <label class="me-label">Commentaires</label>
   <div id="ed-comments"></div>
+  </div><!-- /.dlg-scroll -->
   <div class="dlg-actions">
     <button class="btn danger" id="ed-del" style="margin-right:auto">🗑 Corbeille</button>
     <button class="btn" id="ed-cancel">Fermer</button>
@@ -1114,6 +1159,44 @@ let agendaYM = null, agendaSelDay = null, agendaDragMemo = null;
 // [AGENDA-PROJECT] filtre dossier + descendants (indépendant de FOCUS, non persisté).
 // null = agenda GLOBAL (union de tous les dossiers de l'invité).
 let hubAgendaFilter = null;
+let agendaDropGuard = 0;  // [AGENDA-DAY-POPIN] anti clic-fantôme après un drop (D7)
+
+// Périmètre courant de l'agenda hub (source unique grille + pop-in jour ; inclut la recherche).
+function hubAgendaSrc() {
+  let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
+  const q = (document.getElementById('search').value || '').trim().toLowerCase();
+  if (q) src = src.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
+  if (hubAgendaFilter != null) {
+    const fp = projById(hubAgendaFilter);
+    if (fp) { const set = new Set([hubAgendaFilter, ...projDescendants(hubAgendaFilter)]); src = src.filter(m => set.has(m.project_id)); }
+  }
+  return src;
+}
+
+// [AGENDA-DAY-POPIN] config pop-in jour (hub). createForDay = création EXISTANTE sur un dossier
+// éditable (FOCUS si éditable, sinon le 1er) puis pose de la date via l'éditeur, gatée par le rôle.
+function hubAgendaCfg() {
+  return {
+    memosForDay: (iso) => agendaGroupByDay(hubAgendaSrc())[iso] || [],
+    chipColor: agendaChipColor,
+    memoTitle: agendaMemoTitle,
+    openMemo: (m) => openEditor(m),
+    canCreate: () => editableProjects().length > 0,
+    createForDay: async (iso) => {
+      const eps = editableProjects();
+      if (!eps.length) return;
+      const target = (FOCUS != null && eps.find(p => p.id === FOCUS)) || eps[0];
+      const r = await api(target.share_token, '/memos', { method: 'POST', body: JSON.stringify({ title: 'Nouveau mémo', project_id: target.id }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true }); return; }
+      const m = await r.json();
+      await api(target.share_token, '/memo/' + m.id, { method: 'PUT', body: JSON.stringify({ due_date: iso }) });
+      await reload();
+      const fresh = (DATA.memos || []).find(x => x.id === m.id);
+      if (fresh) openEditor(fresh);
+    },
+    onNav: (iso) => { const [y, mo] = iso.split('-').map(Number); if (!agendaYM || agendaYM.y !== y || agendaYM.m !== mo - 1) { agendaYM = { y, m: mo - 1 }; renderAgendaHub(); } },
+  };
+}
 
 function agendaChipColor(m) {
   const p = prioOf(m.priority);
@@ -1140,9 +1223,10 @@ function agendaRow(m) {
 function renderAgendaHub() {
   const board = document.getElementById('board');
   board.innerHTML = '';
+  agendaDayRefresh();  // [AGENDA-DAY-POPIN] pop-in jour ouverte (drill-down) → re-render frais
   const today = agendaTodayIso();
   if (!agendaYM) { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; }
-  if (!agendaSelDay) agendaSelDay = today;
+  // [AGENDA-DAY-POPIN] plus d'agendaSelDay : la pop-in jour remplace le panneau.
   // [AGENDA-PROJECT] base = UNION des dossiers (pas FOCUS) + recherche ; le filtre
   // dossier explicite (bouton 📆 du board) restreint à dossier + descendants.
   let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
@@ -1186,7 +1270,11 @@ function renderAgendaHub() {
     if (!days.length) { board.appendChild(el('div', { class: 'ag-empty', text: 'Aucun mémo daté ce mois-ci.' })); return; }
     days.forEach(iso => {
       const sec = el('div', { class: 'ag-day-panel' });
-      sec.appendChild(el('h3', { text: agendaShortDayLabel(iso) + ' — ' + byDay[iso].length + ' mémo' + (byDay[iso].length > 1 ? 's' : '') }));
+      const h = el('h3', { text: agendaShortDayLabel(iso) + ' — ' + byDay[iso].length + ' mémo' + (byDay[iso].length > 1 ? 's' : ''), attrs: { role: 'button', tabindex: '0', title: 'Ouvrir ce jour' } });
+      h.style.cursor = 'pointer';
+      h.addEventListener('click', () => openAgendaDay(hubAgendaCfg(), iso));  // [AGENDA-DAY-POPIN] en-tête tappable
+      h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAgendaDay(hubAgendaCfg(), iso); } });
+      sec.appendChild(h);
       byDay[iso].forEach(m => sec.appendChild(agendaRow(m)));
       board.appendChild(sec);
     });
@@ -1197,7 +1285,7 @@ function renderAgendaHub() {
   AGENDA_DOW.forEach(d => grid.appendChild(el('div', { class: 'ag-dow', text: d })));
   agendaMonthMatrix(agendaYM.y, agendaYM.m).forEach(week => week.forEach(c => {
     const cell = el('div', {
-      class: 'ag-cell' + (c.inMonth ? '' : ' out') + (c.iso === today ? ' today' : '') + (c.iso === agendaSelDay && c.inMonth ? ' sel' : ''),
+      class: 'ag-cell' + (c.inMonth ? '' : ' out') + (c.iso === today ? ' today' : ''),
     });
     cell.appendChild(el('span', { class: 'ag-num', text: String(c.day) }));
     const list = byDay[c.iso] || [];
@@ -1212,12 +1300,13 @@ function renderAgendaHub() {
         chip.addEventListener('dragstart', (e) => { e.stopPropagation(); agendaDragMemo = m; e.dataTransfer.effectAllowed = 'move'; });
         chip.addEventListener('dragend', () => { agendaDragMemo = null; });
       }
-      chip.addEventListener('click', (e) => { e.stopPropagation(); openEditor(m); });
+      chip.addEventListener('click', (e) => { e.stopPropagation(); openEditor(m); });  // chip → éditeur (conservé)
       cell.appendChild(chip);
     });
-    if (list.length > 3) cell.appendChild(el('span', { class: 'ag-more', text: '+' + (list.length - 3) }));
+    // [AGENDA-DAY-POPIN] « +N » = vrai bouton → pop-in du jour.
+    if (list.length > 3) cell.appendChild(el('button', { class: 'ag-more', text: '+' + (list.length - 3), attrs: { type: 'button', title: 'Voir les ' + list.length + ' mémos du jour' }, on: { click: (e) => { e.stopPropagation(); openAgendaDay(hubAgendaCfg(), c.iso); } } }));
     if (c.inMonth) {
-      cell.addEventListener('click', () => { agendaSelDay = c.iso; renderAgendaHub(); });
+      cell.addEventListener('click', () => { if (agendaDragMemo || Date.now() < agendaDropGuard) return; openAgendaDay(hubAgendaCfg(), c.iso); });
       cell.addEventListener('dragover', (e) => { if (!agendaDragMemo) return; e.preventDefault(); cell.classList.add('droptarget'); });
       cell.addEventListener('dragleave', () => cell.classList.remove('droptarget'));
       cell.addEventListener('drop', async (e) => {
@@ -1226,23 +1315,19 @@ function renderAgendaHub() {
         if (!agendaDragMemo) return;
         const m = agendaDragMemo;
         agendaDragMemo = null;
+        agendaDropGuard = Date.now() + 400;  // anti clic fantôme post-drop
         await putMemo(m, { due_date: c.iso }); // reload() → re-render (VIEW conservé)
       });
     }
     grid.appendChild(cell);
   }));
   board.appendChild(grid);
-
-  const panel = el('div', { class: 'ag-day-panel' });
-  const dayList = byDay[agendaSelDay] || [];
-  panel.appendChild(el('h3', { text: agendaDayLabel(agendaSelDay) + ' — ' + dayList.length + ' mémo' + (dayList.length > 1 ? 's' : '') }));
-  if (!dayList.length) panel.appendChild(el('div', { class: 'ag-empty', text: 'Rien ce jour-là.' }));
-  dayList.forEach(m => panel.appendChild(agendaRow(m)));
-  board.appendChild(panel);
+  // [AGENDA-DAY-POPIN] plus de panneau du jour sous la grille (la pop-in le remplace — D1).
 }
 
 // ── éditeur mémo (routé sur m.share_token) ──
 const edDialog = document.getElementById('ed');
+edDialog.addEventListener('close', () => saveEditorHeight(document.querySelector('#ed-qwrap .ql-container')));  // [EDITOR-RESIZE]
 let edMemo = null, edAssignees = [];
 // [HUB-INLINE-EDIT] Éditeur Quill inline (singleton), mêmes modules que share.html.
 let hubQuill = null, edContentMode = 'quill';
@@ -1320,6 +1405,7 @@ function openEditor(m) {
   document.getElementById('ed-save').style.display = ro ? 'none' : '';
   document.getElementById('ed-del').style.display = ro ? 'none' : '';
   edDialog.showModal();
+  applyEditorHeight(document.querySelector('#ed-qwrap .ql-container'));  // [EDITOR-RESIZE]
   if (hubQuill && edContentMode === 'quill') setTimeout(() => hubQuill.focus(), 30);
 }
 function renderEdPeople(ro) {

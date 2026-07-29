@@ -320,9 +320,28 @@ button.icon { padding: 0.45rem 0.6rem; }
 .ag-chip { display: flex; align-items: center; gap: 0.3rem; min-width: 0; font-size: 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.05rem 0.4rem; }
 .ag-chip .ag-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
-.ag-more { font-size: 0.68rem; color: var(--muted); padding-left: 0.2rem; }
+.ag-more { font-size: 0.68rem; color: var(--muted); padding: 0.05rem 0.2rem; background: none; border: none; text-align: left; cursor: pointer; border-radius: 4px; }
+.ag-more:hover { color: var(--text); background: var(--panel-2); }
 .ag-day-panel { margin-top: 0.9rem; }
 .ag-day-panel h3 { margin: 0 0 0.4rem; font-size: 0.9rem; text-transform: capitalize; }
+/* [AGENDA-DAY-POPIN] pop-in « jour » (dialog natif — hérite du style dialog + entrée dlg-in). */
+#agenda-day-dialog { padding: 1rem; }  /* [DIALOG-SIZE] largeur = base (560) */
+.agd-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.agd-title { flex: 1; min-width: 0; text-align: center; }
+.agd-day { font-size: 1rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agd-count { font-size: 0.75rem; color: var(--muted); }
+.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.agd-nav:hover, .agd-x:hover { border-color: var(--muted); color: var(--accent); }
+.agd-body { display: flex; flex-direction: column; gap: 0.3rem; max-height: 60vh; overflow-y: auto; }
+.agd-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.4rem 0.5rem; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; }
+.agd-row:hover, .agd-row:focus-visible { border-color: var(--accent); outline: none; }
+.agd-dot { flex: 0 0 auto; width: 0.7rem; height: 0.7rem; border-radius: 50%; }
+.agd-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agd-time { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.1rem 0.4rem; }
+.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; }
+.agd-empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0.5rem; text-align: center; }
+.agd-foot { margin-top: 0.7rem; }
+.agd-add { width: 100%; }
 .ag-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border-radius: 8px; cursor: pointer; min-width: 0; }
 .ag-row:hover { background: var(--panel-2); }
 .ag-time { width: 54px; flex-shrink: 0; font-size: 0.75rem; color: var(--muted); }
@@ -1230,7 +1249,7 @@ aside#memo-panel {
 .task-content li[data-list="checked"] { text-decoration: line-through; color: var(--muted); }
 
 /* ---------- éditeur Quill (thème sombre) ---------- */
-#memo-edit-dialog { width: min(640px, 94vw); }
+/* [DIALOG-SIZE] #memo-edit-dialog rejoint .dlg-wide (clamp relatif) — voir la règle plus bas. */
 #quill-wrap .ql-toolbar {
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -1245,8 +1264,9 @@ aside#memo-panel {
   font-family: inherit;
   font-size: 0.95rem;
   min-height: 200px;
-  max-height: 55vh;
+  max-height: 60vh;
   overflow-y: auto;
+  resize: vertical;  /* [EDITOR-RESIZE] poignée native ; hauteur mémorisée (editorContentH) */
 }
 #quill-wrap .ql-editor { min-height: 200px; }
 #quill-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
@@ -1275,9 +1295,15 @@ dialog {
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 1.5rem;
-  width: min(450px, 90vw);
+  width: min(clamp(560px, 38vw, 760px), 94vw);  /* [DIALOG-SIZE] relatif borné + garde-fou 94vw (≤900px inchangé) */
   box-shadow: var(--shadow-lg);
 }
+/* [DIALOG-SIZE] largeurs par usage, RELATIVES bornées (profitent des grands écrans) : pop-ins
+   riches / confirmations. Carte + aperçu image dimensionnés à part (inchangés). */
+.dlg-wide { width: min(clamp(680px, 52vw, 980px), 94vw); }
+.dlg-compact { width: min(420px, 92vw); }
+#create-dialog, #import-preview-dialog, #vote-manage-dialog, #agenda-day-dialog, #memo-edit-dialog { width: min(clamp(680px, 52vw, 980px), 94vw); }
+#confirm-dialog, #notify-dialog { width: min(420px, 92vw); }
 dialog::backdrop { background: rgba(6,9,12,0.62); backdrop-filter: blur(3px); }
 /* [MAP-CLOSE-UX] En-tête carte : titre + ✕ collés en haut du dialog (sticky), fond
    opaque pour masquer le contenu qui défile dessous. Desktop : ✕ visible aussi. */
@@ -1311,7 +1337,31 @@ dialog input, dialog textarea, dialog select {
   font: inherit;
   resize: vertical;
 }
-dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem; }
+/* [DIALOG-STICKY-ACTIONS-DESKTOP] pied collant à TOUTES les largeurs (les dialogs longs scrollent
+   en interne, cf. max-height plus bas) — les boutons restent visibles sans scroll. Exception carte
+   (#map-dialog garde son ✕ en haut, pied en fin de flux) ; confirmations courtes = sans effet. */
+dialog .actions {
+  display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.75rem;
+  position: sticky; bottom: 0; z-index: 20;
+  background: var(--panel); border-top: 1px solid var(--border); padding: 0.6rem 0 0.2rem;
+}
+#map-dialog .actions { position: static; background: none; border-top: none; padding: 0; }
+/* Dialogs longs NON-éditeurs : simple cap + scroll interne (le pied sticky générique suffit). */
+#import-preview-dialog, #vote-manage-dialog { max-height: 92vh; overflow-y: auto; }
+/* [DIALOG-STICKY-ACTIONS V25.2.125] Éditeur mémo + pop-in projet en SCROLL-BODY (patron
+   #map-dialog) : dialog en colonne flex, contenu scrollable (flex:1), pied d'actions STATIC =
+   dernier enfant hors zone de scroll → toujours visible, collé au bord bas, zéro liseré, et le
+   scroll s'arrête AU-DESSUS de la barre (Commentaires atteignables). Le padding migre sur .dlg-scroll. */
+#memo-edit-dialog, #create-dialog { flex-direction: column; max-height: 92vh; overflow: hidden; padding: 0; }
+#memo-edit-dialog[open], #create-dialog[open] { display: flex; }  /* [open] : sinon on écrase le dialog:not([open]){display:none} du navigateur */
+#memo-edit-dialog .dlg-scroll, #create-dialog .dlg-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.25rem 1.5rem; }
+#create-dialog .dlg-scroll { display: flex; flex-direction: column; gap: 0.75rem; }  /* remplace le gap de `dialog form` */
+#create-dialog #create-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0; gap: 0; }
+#create-dialog .me-head { flex: 0 0 auto; padding: 1.25rem 1.5rem 0; }
+#memo-edit-dialog .actions, #create-dialog .actions {
+  position: static; flex: 0 0 auto; margin: 0; padding: 0.7rem 1.5rem;
+  border-top: 1px solid var(--border); background: var(--panel); border-radius: 0 0 14px 14px;
+}
 .me-head { display: flex; align-items: center; gap: 0.5rem; position: relative; margin-bottom: 1rem; }
 .me-head h3 { flex: 1; }
 .me-context { margin-bottom: 0.75rem; padding: 0.5rem 0.6rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 0.3rem; }
@@ -1855,6 +1905,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     </div>
   </div>
   <form id="create-form">
+    <div class="dlg-scroll">
     <label>Nom<input type="text" name="name" required autocomplete="off"></label>
     <label id="create-emoji-label">Emoji
       <input type="text" name="emoji" maxlength="4" autocomplete="off" placeholder="ex. 🛒 — tape ou choisis ci-dessous">
@@ -1862,7 +1913,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     </label>
     <label>Couleur<input type="color" name="color" value="#4fc3f7" style="height:2.4rem;padding:0.2rem;cursor:pointer"></label>
     <label id="create-tags-label"># Tags<input type="text" name="tags" autocomplete="off" placeholder="#docker #infra — retrouvables via la recherche p#"></label>
-    <label id="create-desc-label">Description<textarea name="description" rows="2" placeholder="Quelques mots sur le projet — affichés en tête de la vue" style="resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.4rem 0.5rem"></textarea></label>
+    <label id="create-desc-label">Description<textarea name="description" rows="3" placeholder="Quelques mots sur le projet — affichés en tête de la vue" style="resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.4rem 0.5rem;height:4.5rem;max-height:11rem"></textarea></label>
     <label id="create-loc-label">📍 Position
       <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
         <button type="button" id="create-loc-set" style="padding:0.35rem 0.7rem;font-size:0.82rem">📍 Ma position</button>
@@ -1916,6 +1967,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       <div id="create-votecreate-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
       <span style="font-size:0.72rem;color:var(--muted)">Qui peut créer des votes nommés ici. « Hérité » suit le dossier parent (défaut racine : invités aussi).</span>
     </label>
+    </div><!-- /.dlg-scroll -->
     <div class="actions">
       <button type="button" id="create-cancel">Annuler</button>
       <button type="submit" class="primary" id="create-submit">Créer</button>
@@ -1944,6 +1996,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
 </dialog>
 
 <dialog id="memo-edit-dialog">
+  <div class="dlg-scroll">
   <div class="me-head">
     <h3 style="margin:0">Éditer le mémo</h3>
     <button type="button" id="memo-menu-btn" class="icon-btn" title="Actions" aria-label="Actions">⋯</button>
@@ -1978,6 +2031,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
     <summary id="me-comments-sum">💬 Commentaires</summary>
     <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
   </details>
+  </div><!-- /.dlg-scroll -->
   <div class="actions">
     <button type="button" id="memo-edit-versions" class="me-versions">📜 Voir les versions</button>
     <button type="button" id="memo-edit-cancel">Annuler</button>
@@ -2915,6 +2969,42 @@ let agendaSelDay = null;  // jour du panneau
 let agendaDragId = null;  // mémo en cours de glissement
 // [AGENDA-PROJECT] filtre projet courant + descendants (non persisté, comme le mois).
 let agendaFilterProj = null;
+// [AGENDA-DAY-POPIN] garde anti clic-fantôme après un drop de replanification (D7).
+let agendaDropGuard = 0;
+
+// Périmètre courant de l'agenda (mémos datés, filtrés par projet le cas échéant) — source unique
+// pour la grille ET la pop-in jour.
+function agendaSource() {
+  let src = state.memos.filter(m => !m.done && m.due_date);
+  if (agendaFilterProj != null) {
+    const fp = state.projects.find(p => p.id === agendaFilterProj);
+    if (fp) { const set = new Set([agendaFilterProj, ...projectDescendants(agendaFilterProj)]); src = src.filter(m => set.has(m.project_id)); }
+  }
+  return src;
+}
+
+// [AGENDA-DAY-POPIN] config de la pop-in jour (owner). openMemo = éditeur existant ; createForDay
+// = flux de création EXISTANT (add-bar de la vue Mémos) avec date préremplie ; onNav garde le mois
+// affiché derrière synchro (D4).
+function agendaDayCfg() {
+  return {
+    memosForDay: (iso) => agendaGroupByDay(agendaSource())[iso] || [],
+    chipColor: agendaChipColor,
+    memoTitle: agendaMemoTitle,
+    openMemo: (m) => openMemoEditor(m),
+    canCreate: () => true,
+    // [AGENDA-DAY-POPIN] création → éditeur (la route owner /api/memos honore due_date) puis retour
+    // à la pop-in jour à la fermeture (drill-down, y compris « annulé »). Titre placeholder éditable.
+    createForDay: async (iso) => {
+      try {
+        const m = await api('/api/memos', { method: 'POST', body: JSON.stringify({ title: 'Nouveau mémo', due_date: iso, project_id: (agendaFilterProj != null ? agendaFilterProj : null) }) });
+        await loadAll();
+        openMemoEditor(state.memos.find(x => x.id === m.id) || m);
+      } catch (_) { notify('Création impossible', { error: true }); }
+    },
+    onNav: (iso) => { const [y, mo] = iso.split('-').map(Number); if (!agendaYM || agendaYM.y !== y || agendaYM.m !== mo - 1) { agendaYM = { y, m: mo - 1 }; renderAgendaView(); } },
+  };
+}
 
 function agendaChipColor(m) {
   const p = prioOf(m.priority);
@@ -2940,9 +3030,10 @@ function agendaRow(m) {
 function renderAgendaView() {
   const board = document.getElementById('agenda-board');
   board.innerHTML = '';
+  agendaDayRefresh();  // [AGENDA-DAY-POPIN] pop-in jour ouverte (drill-down) → re-render depuis les données fraîches
   const today = agendaTodayIso();
   if (!agendaYM) { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; }
-  if (!agendaSelDay) agendaSelDay = today;
+  // [AGENDA-DAY-POPIN] plus d'état agendaSelDay : la pop-in jour REMPLACE le panneau sous la grille.
   // Terminés masqués, sans date absents ; state.memos exclut déjà la corbeille.
   let src = state.memos.filter(m => !m.done && m.due_date);
   // [AGENDA-PROJECT] mode filtré : projet courant + descendants récursifs (même
@@ -2985,7 +3076,12 @@ function renderAgendaView() {
     if (!days.length) { board.appendChild(el('div', { class: 'ag-empty', text: 'Aucun mémo daté ce mois-ci.' })); return; }
     days.forEach(iso => {
       const sec = el('div', { class: 'ag-day-panel' });
-      sec.appendChild(el('h3', { text: agendaShortDayLabel(iso) + ' — ' + byDay[iso].length + ' mémo' + (byDay[iso].length > 1 ? 's' : '') }));
+      // [AGENDA-DAY-POPIN] en-tête de jour tappable → même pop-in qu'au clic d'une cellule.
+      const h = el('h3', { text: agendaShortDayLabel(iso) + ' — ' + byDay[iso].length + ' mémo' + (byDay[iso].length > 1 ? 's' : ''), attrs: { role: 'button', tabindex: '0', title: 'Ouvrir ce jour' } });
+      h.style.cursor = 'pointer';
+      h.addEventListener('click', () => openAgendaDay(agendaDayCfg(), iso));
+      h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAgendaDay(agendaDayCfg(), iso); } });
+      sec.appendChild(h);
       byDay[iso].forEach(m => sec.appendChild(agendaRow(m)));
       board.appendChild(sec);
     });
@@ -2996,7 +3092,7 @@ function renderAgendaView() {
   AGENDA_DOW.forEach(d => grid.appendChild(el('div', { class: 'ag-dow', text: d })));
   agendaMonthMatrix(agendaYM.y, agendaYM.m).forEach(week => week.forEach(c => {
     const cell = el('div', {
-      class: 'ag-cell' + (c.inMonth ? '' : ' out') + (c.iso === today ? ' today' : '') + (c.iso === agendaSelDay && c.inMonth ? ' sel' : ''),
+      class: 'ag-cell' + (c.inMonth ? '' : ' out') + (c.iso === today ? ' today' : ''),
     });
     cell.appendChild(el('span', { class: 'ag-num', text: String(c.day) }));
     const list = byDay[c.iso] || [];
@@ -3009,12 +3105,14 @@ function renderAgendaView() {
       chip.setAttribute('draggable', 'true');
       chip.addEventListener('dragstart', (e) => { e.stopPropagation(); agendaDragId = m.id; e.dataTransfer.effectAllowed = 'move'; });
       chip.addEventListener('dragend', () => { agendaDragId = null; });
-      chip.addEventListener('click', (e) => { e.stopPropagation(); openMemoEditor(m); });
+      chip.addEventListener('click', (e) => { e.stopPropagation(); openMemoEditor(m); });  // chip → éditeur (conservé)
       cell.appendChild(chip);
     });
-    if (list.length > 3) cell.appendChild(el('span', { class: 'ag-more', text: '+' + (list.length - 3) }));
+    // [AGENDA-DAY-POPIN] « +N » = vrai bouton → ouvre la pop-in du jour (même action que la cellule).
+    if (list.length > 3) cell.appendChild(el('button', { class: 'ag-more', text: '+' + (list.length - 3), attrs: { type: 'button', title: 'Voir les ' + list.length + ' mémos du jour' }, on: { click: (e) => { e.stopPropagation(); openAgendaDay(agendaDayCfg(), c.iso); } } }));
     if (c.inMonth) {
-      cell.addEventListener('click', () => { agendaSelDay = c.iso; renderAgendaView(); });
+      // Clic/tap cellule → pop-in jour. Garde D7 : un drop ne doit PAS ouvrir la pop-in (clic fantôme).
+      cell.addEventListener('click', () => { if (agendaDragId != null || Date.now() < agendaDropGuard) return; openAgendaDay(agendaDayCfg(), c.iso); });
       cell.addEventListener('dragover', (e) => { if (agendaDragId == null) return; e.preventDefault(); cell.classList.add('drop-target'); });
       cell.addEventListener('dragleave', () => cell.classList.remove('drop-target'));
       cell.addEventListener('drop', async (e) => {
@@ -3023,6 +3121,7 @@ function renderAgendaView() {
         if (agendaDragId == null) return;
         const id = agendaDragId;
         agendaDragId = null;
+        agendaDropGuard = Date.now() + 400;  // neutralise le clic fantôme post-drop
         await api('/api/memos/' + id, { method: 'PUT', body: JSON.stringify({ due_date: c.iso }) });
         await loadAll();
         renderAgendaView();
@@ -3031,14 +3130,7 @@ function renderAgendaView() {
     grid.appendChild(cell);
   }));
   board.appendChild(grid);
-
-  // Panneau du jour sélectionné (tri sans-heure-d'abord déjà fait par agendaGroupByDay).
-  const panel = el('div', { class: 'ag-day-panel' });
-  const dayList = byDay[agendaSelDay] || [];
-  panel.appendChild(el('h3', { text: agendaDayLabel(agendaSelDay) + ' — ' + dayList.length + ' mémo' + (dayList.length > 1 ? 's' : '') }));
-  if (!dayList.length) panel.appendChild(el('div', { class: 'ag-empty', text: 'Rien ce jour-là.' }));
-  dayList.forEach(m => panel.appendChild(agendaRow(m)));
-  board.appendChild(panel);
+  // [AGENDA-DAY-POPIN] plus de panneau du jour sous la grille (la pop-in le remplace — D1).
 }
 
 const PROJ_COLORS = ['#4fc3f7', '#81c784', 'var(--warn)', '#e57373', '#ba68c8', '#4db6ac', '#f06292', '#a1887f'];
@@ -5764,12 +5856,13 @@ function openMemoEditor(memo) {
   }
   document.getElementById('memo-menu').hidden = true;
   memoEditDialog.showModal();
+  applyEditorHeight(document.querySelector('#quill-wrap .ql-container'));  // [EDITOR-RESIZE]
   q.focus();
   return true;
 }
 
 document.getElementById('memo-edit-cancel').addEventListener('click', () => memoEditDialog.close());
-memoEditDialog.addEventListener('close', () => { editingMemo = null; });
+memoEditDialog.addEventListener('close', () => { editingMemo = null; saveEditorHeight(document.querySelector('#quill-wrap .ql-container')); });  // [EDITOR-RESIZE]
 document.getElementById('memo-edit-versions').addEventListener('click', () => {
   if (!editingMemo) return;
   openRevisions(editingMemo);

@@ -2432,6 +2432,121 @@ function agendaTodayIso() {
 }
 const AGENDA_DOW = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
 
+// [EDITOR-RESIZE] hauteur de la zone Quill mémorisée (globale, une clé) → réappliquée à l'ouverture
+// de l'éditeur (owner/share/hub), sauvée à la fermeture (style.height posé par le resize natif).
+const EDITOR_H_KEY = 'editorContentH';
+function applyEditorHeight(elm) {
+  if (!elm) return;
+  try { const h = localStorage.getItem(EDITOR_H_KEY); if (h) elm.style.height = h; } catch (e) {}
+}
+function saveEditorHeight(elm) {
+  if (!elm) return;
+  const h = elm.style.height;  // posé par la poignée native uniquement si l'utilisateur a redimensionné
+  if (h) { try { localStorage.setItem(EDITOR_H_KEY, h); } catch (e) {} }
+}
+
+// [AGENDA-DAY-POPIN] décale un ISO 'YYYY-MM-DD' de n jours (local, sûr aux mois/années).
+function isoShift(iso, n) {
+  const p = String(iso || '').split('-').map(Number);
+  if (p.length !== 3 || p.some(isNaN)) return iso;
+  const d = new Date(p[0], p[1] - 1, p[2] + n);
+  const pad = (x) => String(x).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+// [AGENDA-DAY-POPIN] pop-in « jour » de l'Agenda (remplace le panneau sous la grille + l'état
+// agendaSelDay). <dialog> natif (entrée CSS dlg-in, JAMAIS de GSAP — invariant 8 ; uiBusy() couvre
+// le poll pop-in ouverte). Créée UNE fois par page, re-rendue à l'ouverture/navigation.
+// cfg = { memosForDay(iso)->[m], chipColor(m), memoTitle(m), timeLabel?(m), openMemo(m),
+//         canCreate?()->bool, createForDay?(iso), createReturns?:bool, onNav?(iso) }.
+// État module (agdCfg/agdIso) : permet agendaDayRefresh() = re-render en place quand la page
+// recharge les données (mémo re-daté/supprimé disparaît, jour devenu vide reste navigable).
+// DRILL-DOWN [AMENDEMENT] : ouvrir un mémo (ou « ＋ Mémo ce jour ») ferme la pop-in, ouvre
+// l'éditeur, et ARME sa réouverture sur le MÊME jour à la fermeture de l'éditeur (save/annuler/Échap).
+let agdCfg = null, agdIso = null;
+function _agdEditorArm(dayDlg, cfg, iso, async_) {
+  // Accroche un 'close' one-shot sur l'éditeur (dialog) qui vient de s'ouvrir → rouvre le jour.
+  // Row path : l'éditeur s'ouvre SYNCHRONE (showModal) → trouvé tout de suite. Rien d'ouvert
+  // (mémo lecture seule) → on rouvre le jour immédiatement (on ne perd pas la pop-in).
+  // Create path : l'éditeur s'ouvre APRÈS des await → on sonde brièvement (~3 s).
+  const hook = (ed) => { const oc = () => { ed.removeEventListener('close', oc); openAgendaDay(cfg, iso); }; ed.addEventListener('close', oc); };
+  if (!async_) {
+    const ed = document.querySelector('dialog[open]');
+    if (ed && ed !== dayDlg) hook(ed); else openAgendaDay(cfg, iso);
+    return;
+  }
+  let tries = 0;
+  const wait = () => {
+    const ed = document.querySelector('dialog[open]');
+    if (ed && ed !== dayDlg) { hook(ed); return; }
+    if (++tries > 60) return;  // ~3 s : rien ne s'est ouvert → pas de réouverture fantôme
+    setTimeout(wait, 50);
+  };
+  setTimeout(wait, 0);
+}
+function _agdRender() {
+  const dlg = document.getElementById('agenda-day-dialog');
+  if (!dlg || !agdCfg) return;
+  const cfg = agdCfg, cur = agdIso, list = (cfg.memosForDay(cur) || []);
+  const nav = (delta) => { agdIso = isoShift(agdIso, delta); if (cfg.onNav) cfg.onNav(agdIso); _agdRender(); };
+  dlg.innerHTML = '';
+  const head = el('div', { class: 'agd-head' });
+  head.appendChild(el('button', { class: 'agd-nav', text: '‹', attrs: { type: 'button', title: 'Jour précédent', 'aria-label': 'Jour précédent' }, on: { click: () => nav(-1) } }));
+  const ttl = el('div', { class: 'agd-title' });
+  ttl.appendChild(el('div', { class: 'agd-day', text: agendaDayLabel(cur) }));
+  ttl.appendChild(el('div', { class: 'agd-count', text: list.length + ' mémo' + (list.length > 1 ? 's' : '') }));
+  head.appendChild(ttl);
+  head.appendChild(el('button', { class: 'agd-nav', text: '›', attrs: { type: 'button', title: 'Jour suivant', 'aria-label': 'Jour suivant' }, on: { click: () => nav(1) } }));
+  head.appendChild(el('button', { class: 'agd-x', text: '✕', attrs: { type: 'button', title: 'Fermer', 'aria-label': 'Fermer' }, on: { click: () => dlg.close() } }));
+  dlg.appendChild(head);
+
+  const body = el('div', { class: 'agd-body' });
+  if (!list.length) body.appendChild(el('div', { class: 'agd-empty', text: 'Rien ce jour-là.' }));
+  list.forEach((m) => {
+    const row = el('div', { class: 'agd-row', attrs: { role: 'button', tabindex: '0' } });
+    const dot = el('span', { class: 'agd-dot' }); dot.style.background = cfg.chipColor(m);
+    row.appendChild(dot);
+    row.appendChild(el('span', { class: 'agd-t', text: cfg.memoTitle(m) }));
+    const tl = cfg.timeLabel ? cfg.timeLabel(m) : (m.due_time ? fmtMemoTime(m.due_time) : '');
+    if (tl) row.appendChild(el('span', { class: 'agd-time', text: tl }));
+    row.appendChild(el('span', { class: 'agd-chev', text: '›' }));
+    const go = () => { const iso = agdIso; dlg.close(); cfg.openMemo(m); _agdEditorArm(dlg, cfg, iso, false); };  // drill-down
+    row.addEventListener('click', go);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    body.appendChild(row);
+  });
+  dlg.appendChild(body);
+
+  if (cfg.canCreate && cfg.canCreate()) {
+    const foot = el('div', { class: 'agd-foot' });
+    foot.appendChild(el('button', { class: 'prio-btn agd-add', text: '＋ Mémo ce jour', attrs: { type: 'button' }, on: { click: () => {
+      const iso = agdIso; dlg.close();
+      if (cfg.createForDay) { cfg.createForDay(iso); if (cfg.createReturns !== false) _agdEditorArm(dlg, cfg, iso, true); }
+    } } }));
+    dlg.appendChild(foot);
+  }
+}
+function openAgendaDay(cfg, iso) {
+  let dlg = document.getElementById('agenda-day-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'agenda-day-dialog';
+    dlg.className = 'agd-dialog';
+    document.body.appendChild(dlg);
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });  // clic hors = fermer
+    dlg.addEventListener('close', () => { agdCfg = null; });  // Échap/✕/hors → oublie le contexte
+  }
+  agdCfg = cfg; agdIso = iso;
+  _agdRender();
+  if (!dlg.open) dlg.showModal();
+}
+// Re-render en place si la pop-in est ouverte — appelé par les rendus agenda après un reload de
+// données (drill-down : l'éditeur se ferme AVANT que loadAll ait fini ; ce refresh remet à jour).
+function agendaDayRefresh() {
+  const dlg = document.getElementById('agenda-day-dialog');
+  if (dlg && dlg.open && agdCfg) _agdRender();
+}
+
 // [AGENDA-SMART-MONTH] Mois d'atterrissage à l'OUVERTURE de l'agenda FILTRÉ (un
 // projet à échéances lointaines ne doit pas ouvrir sur un mois vide). Règle :
 // 1. mois courant s'il contient ≥1 mémo du périmètre ; 2. sinon mois du prochain

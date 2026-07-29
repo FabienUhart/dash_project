@@ -189,9 +189,30 @@ button.icon:active { transform: scale(0.94); }
 .ag-chip { display: flex; align-items: center; gap: 0.3rem; min-width: 0; font-size: 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.05rem 0.4rem; }
 .ag-chip .ag-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex-shrink: 0; }
-.ag-more { font-size: 0.68rem; color: var(--muted); padding-left: 0.2rem; }
+.ag-more { font-size: 0.68rem; color: var(--muted); padding: 0.05rem 0.2rem; background: none; border: none; text-align: left; cursor: pointer; border-radius: 4px; }
+.ag-more:hover { color: var(--text); background: var(--panel-2); }
 .ag-day-panel { margin-top: 0.9rem; }
 .ag-day-panel h3 { margin: 0 0 0.4rem; font-size: 0.9rem; text-transform: capitalize; }
+/* [AGENDA-DAY-POPIN] pop-in « jour » (dialog natif — hérite du style dialog + entrée dlg-in). */
+/* [DIALOG-SIZE] le dialog de base share est TRANSPARENT (wrapper) → la pop-in jour doit poser sa
+   propre carte (fond/bordure/rayon) + largeur. */
+#agenda-day-dialog { width: min(clamp(680px, 52vw, 980px), 94vw); padding: 1rem; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); }
+.agd-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.agd-title { flex: 1; min-width: 0; text-align: center; }
+.agd-day { font-size: 1rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agd-count { font-size: 0.75rem; color: var(--muted); }
+.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.agd-nav:hover, .agd-x:hover { border-color: var(--muted); color: var(--accent); }
+.agd-body { display: flex; flex-direction: column; gap: 0.3rem; max-height: 60vh; overflow-y: auto; }
+.agd-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.4rem 0.5rem; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; }
+.agd-row:hover, .agd-row:focus-visible { border-color: var(--accent); outline: none; }
+.agd-dot { flex: 0 0 auto; width: 0.7rem; height: 0.7rem; border-radius: 50%; }
+.agd-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agd-time { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.1rem 0.4rem; }
+.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; }
+.agd-empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0.5rem; text-align: center; }
+.agd-foot { margin-top: 0.7rem; }
+.agd-add { width: 100%; }
 .ag-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border-radius: 8px; cursor: pointer; min-width: 0; }
 .ag-row:hover { background: var(--panel-2); }
 .ag-time { width: 54px; flex-shrink: 0; font-size: 0.75rem; color: var(--muted); }
@@ -606,7 +627,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 1.25rem;
-  width: min(620px, 94vw);
+  width: min(clamp(680px, 52vw, 980px), 94vw);  /* [DIALOG-SIZE] éditeur invité (Quill) = wide relatif */
   color: var(--text);
 }
 #edit-dialog h3 { margin: 0 0 0.8rem; font-size: 1rem; }
@@ -614,7 +635,26 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 #confirm-dialog h3 { margin: 0 0 0.6rem; font-size: 1rem; }
 .dlg-actions button.confirm-danger { background: #f44336; color: #fff; border-color: #f44336; }
 .dlg-actions button.confirm-danger:hover { background: #d32f2f; border-color: #d32f2f; }
-.dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.8rem; }
+/* [DIALOG-STICKY-ACTIONS-DESKTOP] pied collant à TOUTES les largeurs (dialogs longs scrollent en
+   interne, cf. overflow des cartes). Exception carte (#map-dialog). */
+.dlg-actions {
+  display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.8rem;
+  position: sticky; bottom: 0; z-index: 20;
+  background: var(--panel); border-top: 1px solid var(--border); padding: 0.6rem 0 0.2rem;
+}
+#map-dialog .dlg-actions { position: static; background: none; border-top: none; padding: 0; }
+/* [DIALOG-STICKY-ACTIONS V25.2.125] Éditeur mémo + pop-in projet invités en SCROLL-BODY : colonne
+   flex, contenu scrollable, pied d'actions STATIC = dernier enfant (toujours visible, zéro liseré,
+   Commentaires atteignables). Le padding migre sur .dlg-scroll. */
+#edit-dialog, #proj-dialog { flex-direction: column; max-height: 92vh; overflow: hidden; padding: 0; }
+#edit-dialog[open], #proj-dialog[open] { display: flex; }  /* [open] : sinon écrase dialog:not([open]){display:none} */
+#edit-dialog .dlg-scroll, #proj-dialog .dlg-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.25rem; }
+#edit-dialog .dlg-actions, #proj-dialog .dlg-actions {
+  position: static; flex: 0 0 auto; margin: 0; padding: 0.7rem 1.25rem;
+  border-top: 1px solid var(--border); background: var(--panel);
+}
+#edit-dialog .dlg-actions { border-radius: 0 0 14px 14px; }
+#proj-dialog .dlg-actions { border-radius: 0 0 8px 8px; }
 .dlg-actions button {
   border-radius: var(--radius-sm); padding: 0.45rem 0.9rem; font: inherit; cursor: pointer; font-weight: 500;
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
@@ -628,7 +668,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 #q-wrap .ql-container {
   border: 1px solid var(--border); border-top: none; border-radius: 0 0 6px 6px;
   background: var(--bg); color: var(--text); font-family: inherit; font-size: 0.95rem;
-  min-height: 180px; max-height: 50vh; overflow-y: auto;
+  min-height: 180px; max-height: 60vh; overflow-y: auto;
+  resize: vertical;  /* [EDITOR-RESIZE] poignée native ; hauteur mémorisée (editorContentH) */
 }
 #q-wrap .ql-editor { min-height: 180px; }
 #q-wrap .ql-editor.ql-blank::before { color: var(--muted); font-style: italic; }
@@ -817,7 +858,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="photo-body"></div>
 </dialog>
 
-<dialog id="proj-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:1.25rem;width:min(380px,94vw);color:var(--text)">
+<dialog id="proj-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0;width:min(380px,94vw);color:var(--text);flex-direction:column;max-height:92vh;overflow:hidden">
+  <div class="dlg-scroll">
   <h3 style="margin:0 0 0.8rem;font-size:1rem">📁 Modifier le projet</h3>
   <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem">Nom
     <input id="pd-name" type="text" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit">
@@ -831,8 +873,9 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
     </label>
   </div>
   <label style="display:flex;flex-direction:column;gap:0.25rem;font-size:0.85rem;color:var(--muted);margin-bottom:0.6rem">Description
-    <textarea id="pd-desc" rows="2" placeholder="Quelques mots sur le projet…" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit;resize:vertical"></textarea>
+    <textarea id="pd-desc" rows="3" placeholder="Quelques mots sur le projet…" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font:inherit;resize:vertical;height:4.5rem;max-height:11rem"></textarea>
   </label>
+  </div><!-- /.dlg-scroll -->
   <div class="dlg-actions">
     <button type="button" id="pd-move" style="margin-right:auto">↗ Déplacer vers…</button>
     <button type="button" id="pd-cancel">Annuler</button>
@@ -841,6 +884,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 </dialog>
 
 <dialog id="edit-dialog">
+  <div class="dlg-scroll">
   <h3><svg class="ic" style="margin-right:0.35em"><use href="#ic-pencil"/></svg>Modifier le mémo</h3>
   <div id="q-context" class="me-context"></div>
   <label class="me-label" for="q-title">Titre <span style="font-weight:400">(optionnel)</span></label>
@@ -854,6 +898,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="q-meta"></div>
   <div id="q-photos"></div>
   <div id="q-attachments"></div>
+  </div><!-- /.dlg-scroll -->
   <div class="dlg-actions">
     <button type="button" id="edit-cancel">Annuler</button>
     <button type="button" id="edit-save" class="primary">Enregistrer</button>
@@ -1126,6 +1171,7 @@ let sQuill = null;
 let editingId = null;
 let editAssignees = [];
 const editDialog = document.getElementById('edit-dialog');
+editDialog.addEventListener('close', () => saveEditorHeight(document.querySelector('#q-wrap .ql-container')));  // [EDITOR-RESIZE]
 
 // Suggestions = membres du partage + noms déjà utilisés sur les mémos.
 function shareSuggestions() {
@@ -1481,6 +1527,7 @@ function openEditor(memo, contentEl, taskEl) {
   if (isRich(memo.content)) q.clipboard.dangerouslyPasteHTML(0, memo.content);
   else q.setText(memo.content);
   editDialog.showModal();
+  applyEditorHeight(document.querySelector('#q-wrap .ql-container'));  // [EDITOR-RESIZE]
   q.focus();
 }
 
@@ -2500,6 +2547,41 @@ function visibleShareMemos() {
 let agendaYM = null, agendaSelDay = null, agendaDragId = null;
 // [AGENDA-PROJECT] filtre dossier courant + descendants (non persisté, comme le mois).
 let shareAgendaFilter = null;
+let agendaDropGuard = 0;  // [AGENDA-DAY-POPIN] anti clic-fantôme après un drop (D7)
+
+// Périmètre courant de l'agenda (source unique grille + pop-in jour).
+function shareAgendaSrc() {
+  let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
+  if (shareAgendaFilter != null) {
+    const fp = (DATA.projects || []).find(p => p.id === shareAgendaFilter);
+    if (fp) { const set = new Set([shareAgendaFilter, ...projDescendants(shareAgendaFilter)]); src = src.filter(m => set.has(m.project_id)); }
+  }
+  return src;
+}
+
+// [AGENDA-DAY-POPIN] config pop-in jour (invité). createForDay = création EXISTANTE puis pose de la
+// date via l'éditeur (la route /memos ignore due_date côté serveur), gatée par le rôle (canAddNow).
+function shareAgendaCfg() {
+  return {
+    memosForDay: (iso) => agendaGroupByDay(shareAgendaSrc())[iso] || [],
+    chipColor: agendaChipColor,
+    memoTitle: agendaMemoTitle,
+    openMemo: (m) => agendaOpen(m),
+    canCreate: () => canAddNow(),
+    createForDay: async (iso) => {
+      const pid = (shareAgendaFilter != null) ? shareAgendaFilter : ((PFILTER !== 'all') ? PFILTER : DATA.root_id);
+      const H = { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() };
+      const r = await fetch(API + '/memos', { method: 'POST', headers: H, body: JSON.stringify({ title: 'Nouveau mémo', project_id: pid }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true }); return; }
+      const m = await r.json();
+      await fetch(API + '/memo/' + m.id, { method: 'PUT', headers: H, body: JSON.stringify({ due_date: iso }) });
+      await load();
+      const fresh = (DATA.memos || []).find(x => x.id === m.id) || m;
+      agendaOpen(fresh);
+    },
+    onNav: (iso) => { const [y, mo] = iso.split('-').map(Number); if (!agendaYM || agendaYM.y !== y || agendaYM.m !== mo - 1) { agendaYM = { y, m: mo - 1 }; renderShareAgenda(); } },
+  };
+}
 
 function agendaChipColor(m) {
   const p = (DATA.priorities || []).find(x => x.id === m.priority);
@@ -2534,9 +2616,10 @@ function agendaRow(m) {
 function renderShareAgenda() {
   const board = document.getElementById('agenda-board');
   board.innerHTML = '';
+  agendaDayRefresh();  // [AGENDA-DAY-POPIN] pop-in jour ouverte (drill-down) → re-render frais
   const today = agendaTodayIso();
   if (!agendaYM) { const d = new Date(); agendaYM = { y: d.getFullYear(), m: d.getMonth() }; }
-  if (!agendaSelDay) agendaSelDay = today;
+  // [AGENDA-DAY-POPIN] plus d'agendaSelDay : la pop-in jour remplace le panneau.
   let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
   // [AGENDA-PROJECT] mode filtré : dossier courant + descendants (le scope partage
   // s'applique déjà côté serveur — on ne fait que restreindre l'affichage).
@@ -2576,7 +2659,11 @@ function renderShareAgenda() {
     if (!days.length) { board.appendChild(el('div', 'ag-empty', 'Aucun mémo daté ce mois-ci.')); return; }
     days.forEach(iso => {
       const sec = el('div', 'ag-day-panel');
-      sec.appendChild(el('h3', '', agendaShortDayLabel(iso) + ' — ' + byDay[iso].length + ' mémo' + (byDay[iso].length > 1 ? 's' : '')));
+      const h = el('h3', '', agendaShortDayLabel(iso) + ' — ' + byDay[iso].length + ' mémo' + (byDay[iso].length > 1 ? 's' : ''));
+      h.setAttribute('role', 'button'); h.setAttribute('tabindex', '0'); h.title = 'Ouvrir ce jour'; h.style.cursor = 'pointer';
+      h.addEventListener('click', () => openAgendaDay(shareAgendaCfg(), iso));  // [AGENDA-DAY-POPIN] en-tête tappable
+      h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAgendaDay(shareAgendaCfg(), iso); } });
+      sec.appendChild(h);
       byDay[iso].forEach(m => sec.appendChild(agendaRow(m)));
       board.appendChild(sec);
     });
@@ -2586,7 +2673,7 @@ function renderShareAgenda() {
   const grid = el('div', 'ag-grid');
   AGENDA_DOW.forEach(d => grid.appendChild(el('div', 'ag-dow', d)));
   agendaMonthMatrix(agendaYM.y, agendaYM.m).forEach(week => week.forEach(c => {
-    const cell = el('div', 'ag-cell' + (c.inMonth ? '' : ' out') + (c.iso === today ? ' today' : '') + (c.iso === agendaSelDay && c.inMonth ? ' sel' : ''));
+    const cell = el('div', 'ag-cell' + (c.inMonth ? '' : ' out') + (c.iso === today ? ' today' : ''));
     cell.appendChild(el('span', 'ag-num', String(c.day)));
     const list = byDay[c.iso] || [];
     list.slice(0, 3).forEach(m => {
@@ -2602,12 +2689,13 @@ function renderShareAgenda() {
         chip.addEventListener('dragstart', (e) => { e.stopPropagation(); agendaDragId = m.id; e.dataTransfer.effectAllowed = 'move'; });
         chip.addEventListener('dragend', () => { agendaDragId = null; });
       }
-      chip.addEventListener('click', (e) => { e.stopPropagation(); agendaOpen(m); });
+      chip.addEventListener('click', (e) => { e.stopPropagation(); agendaOpen(m); });  // chip → éditeur (conservé)
       cell.appendChild(chip);
     });
-    if (list.length > 3) cell.appendChild(el('span', 'ag-more', '+' + (list.length - 3)));
+    // [AGENDA-DAY-POPIN] « +N » = vrai bouton → pop-in du jour.
+    if (list.length > 3) { const more = el('button', 'ag-more', '+' + (list.length - 3)); more.type = 'button'; more.title = 'Voir les ' + list.length + ' mémos du jour'; more.addEventListener('click', (e) => { e.stopPropagation(); openAgendaDay(shareAgendaCfg(), c.iso); }); cell.appendChild(more); }
     if (c.inMonth) {
-      cell.addEventListener('click', () => { agendaSelDay = c.iso; renderShareAgenda(); });
+      cell.addEventListener('click', () => { if (agendaDragId != null || Date.now() < agendaDropGuard) return; openAgendaDay(shareAgendaCfg(), c.iso); });
       cell.addEventListener('dragover', (e) => { if (agendaDragId == null) return; e.preventDefault(); cell.classList.add('droptarget'); });
       cell.addEventListener('dragleave', () => cell.classList.remove('droptarget'));
       cell.addEventListener('drop', async (e) => {
@@ -2616,19 +2704,14 @@ function renderShareAgenda() {
         if (agendaDragId == null) return;
         const id = agendaDragId;
         agendaDragId = null;
+        agendaDropGuard = Date.now() + 400;  // anti clic fantôme post-drop
         await guestPut(API + '/memo/' + id, { due_date: c.iso }); // recharge + re-render
       });
     }
     grid.appendChild(cell);
   }));
   board.appendChild(grid);
-
-  const panel = el('div', 'ag-day-panel');
-  const dayList = byDay[agendaSelDay] || [];
-  panel.appendChild(el('h3', '', agendaDayLabel(agendaSelDay) + ' — ' + dayList.length + ' mémo' + (dayList.length > 1 ? 's' : '')));
-  if (!dayList.length) panel.appendChild(el('div', 'ag-empty', 'Rien ce jour-là.'));
-  dayList.forEach(m => panel.appendChild(agendaRow(m)));
-  board.appendChild(panel);
+  // [AGENDA-DAY-POPIN] plus de panneau du jour sous la grille (la pop-in le remplace — D1).
 }
 
 function render() {

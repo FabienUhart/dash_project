@@ -72,7 +72,7 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 
 ## [AGENDA-DAY-POPIN] — Pop-in « jour » tactile dans l'Agenda (idée Fabien, 29 juil. 2026)
 
-**Statut :** **cadré + maquette validée par Fabien (29 juil.)** → cible **V24.x** (frontend pur, **export v24 inchangé**, zéro route/schéma). File : après [PROJECT-NAME-PER-FOLDER] et [QUICK-MEMO]. Brief CC à rédiger au lancement du lot.
+**Statut : ✅ CODÉ [V25.2.118] + amendement drill-down [V25.2.119]** (frontend pur 3 pages + partial, export v25 inchangé, zéro route/schéma, app.py intact) : helper partagé `openAgendaDay(cfg,iso)` — `<dialog>` natif (dlg-in, jamais de GSAP), lignes ≥ 44 px (pastille + titre + heure badge + chevron) → éditeur ; nav ‹ jour ›  franchissant les mois ; « ＋ Mémo ce jour » (création existante, date préremplie owner / share+hub via /memos + PUT date) ; « +N » vrai bouton ; en-têtes de jour tappables en mobile ; D&D intact + garde anti clic-fantôme ; agendaSelDay + panneau sous grille supprimés. Détail `REALISATION.md`. _Validation Cowork puis feu vert._
 
 **Problème constaté (iPad, pire sur portable) :** plusieurs mémos le même jour = pas de vue « jour » facilement cliquable. Causes dans `renderAgendaView()` : (a) iPad paysage > 900 px → grille desktop : chips 0.7rem, « +N » = span **non cliquable**, panneau du jour rendu **sous la grille** (hors champ, il faut scroller), interactions pensées souris/D&D ; (b) ≤ 900 px → liste de tout le mois, aucune navigation par jour.
 
@@ -89,6 +89,9 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 **Acceptation :** iPad paysage ET portable — depuis la grille/liste du mois, 2 taps max pour ouvrir n'importe quel mémo d'un jour chargé ; « +N » cliquable ; créer un mémo pré-daté depuis la pop-in ; owner + invité (share/hub) ; `node --check` + `py_compile`.
 
 ## Quick wins
+
+- ✅ **[DIALOG-SIZE]** — **LIVRÉ [V25.2.120]** (frontend pur, export v25 inchangé) : base owner 450→560/92vw, classes `.dlg-wide` (680) / `.dlg-compact` (420), riches (create/projet/import-preview/votes) en 680, confirmations en 420 ; hub base 620 gardée + classes ; share = wrapper transparent (bump non applicable) + fix carte de la pop-in jour. `REALISATION.md`. _Idée d'origine ci-dessous._
+- **[DIALOG-SIZE] Pop-ins trop petites sur iPad/desktop** (constat Fabien 29 juil.) : la base `dialog { width: min(450px, 90vw) }` s'applique à presque toutes les pop-ins (seul `#memo-edit-dialog` est à 640px). Passe de tailles : base → `min(560px, 92vw)` ; classe `.dlg-wide` `min(680px, 94vw)` pour les pop-ins riches (édition/création projet, import-preview, votes, pop-in jour Agenda) ; classe `.dlg-compact` (~420px) pour les confirmations ; carte (`#map-dialog`) et aperçu image inchangés (dimensionnés à part). Parité 3 pages (le style dialog vit aussi dans share/hub). Frontend pur, invariant 9, export inchangé. **À lancer juste APRÈS le handoff [AGENDA-DAY-POPIN]** (mêmes fichiers — pas en parallèle).
 
 - ✅ **[MEMO-QUICK-STICKY]** — **LIVRÉ [V25.1.114]** (avec [QUICK-MEMO]) : `#memo-quick` enveloppé dans `#memo-quick-wrap` sticky bas (fond opaque panel + z-index), « ＋ » d'en-tête MÉMOS révélé desktop. `REALISATION.md`. _Idée d'origine ci-dessous._
 - ✅ **[MEMO-JUMP-BOTTOM]** — **LIVRÉ [V25.1.116]** (série capture rapide, frontend pur `index.html`, export v25 inchangé) : bouton ⤓ « Aller en bas » dans l'en-tête MÉMOS (bascule ⤒ « Remonter » quand on est en bas, détection au scroll), scroll fluide de la colonne mémos ; en-tête MÉMOS rendu sticky-haut (miroir de la note sticky-bas) pour garder le bouton visible. Desktop/tablette. `REALISATION.md`.
