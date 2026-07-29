@@ -1086,8 +1086,10 @@ span.prio-btn { background: var(--panel-2); color: var(--text); border: 1px soli
 }
 .iv-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 .iv-btn.iv-accent { color: var(--accent); border-color: var(--accent); }
-.iv-del { background: var(--red); color: #fff; border-color: var(--red); }
-.iv-del:hover { background: #d32f2f; }
+/* [UI-POLISH-BOARD] danger aligné sur le gabarit iv-btn (fond sombre) : glyphe/bordure
+   var(--red), remplissage rouge au survol seulement. Même taille que les autres boutons. */
+.iv-del { color: var(--red); border-color: var(--red); }
+.iv-del:hover { background: var(--red); color: #fff; border-color: var(--red); }
 @media (max-width: 900px) {
   /* [PHOTO-VIEWER-MOBILE] Barre photo : boutons CARRÉS homogènes. La règle tactile
      (button{min-height:44px}) les étirait en ovale → on fige width=height + min-height:0
@@ -1932,11 +1934,8 @@ dialog .actions {
       <div id="create-floor-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
       <span style="font-size:0.72rem;color:var(--muted)">Dans ce dossier et ses sous-dossiers, tous les invités du lien ont AU MOINS ce rôle (jamais moins). « Hérité » suit le parent.</span>
     </label>
-    <!-- [GUEST-ROLES passe 2] dossier « Espace invités » : un sous-dossier perso par invité -->
-    <label id="create-space-label">🏠 Espace invités (dossiers persos)
-      <div id="create-space-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
-      <span style="font-size:0.72rem;color:var(--muted)">Chaque invité approuvé reçoit, à son 1er accès, un sous-dossier à son nom où il est éditeur plein. Chez les autres, il garde le rôle du lien.</span>
-    </label>
+    <!-- [GUEST-HOME] l'espace perso d'un invité (« 👥 Invités » › « 🏠 Prénom ») est créé
+         AUTOMATIQUEMENT à son approbation — plus de flag « zone espace invités » ici. -->
     <!-- [VOTE-DECISION] mode vote (projets seulement) : les mémos directs deviennent les options. -->
     <label id="create-vote-label">🗳 Vote « choisir un »
       <div id="create-vote-chips" style="display:flex;gap:0.35rem;flex-wrap:wrap"></div>
@@ -3175,9 +3174,7 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-trip-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-vote-label').style.display = kind === 'project' ? '' : 'none';
-  ['create-floor-label', 'create-space-label'].forEach(id => {  // [GUEST-ROLES passe 2]
-    document.getElementById(id).style.display = kind === 'project' ? '' : 'none';
-  });
+  document.getElementById('create-floor-label').style.display = kind === 'project' ? '' : 'none';  // [GUEST-ROLES passe 2]
   document.getElementById('create-votecreate-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-emoji-label').style.display = kind === 'priority' ? 'none' : '';
   document.getElementById('create-menu-btn').style.display = item ? '' : 'none';
@@ -3216,13 +3213,13 @@ function openCreateDialog(kind, item = null) {
   document.getElementById('create-vote-reopen-row').style.display = closed ? '' : 'none';
   createVoteCreate = item ? (item.vote_create || '') : '';  // [VOTE-GROUPS] permission héritable
   if (kind === 'project') { renderVoteChips(); renderVoteModeChips(); renderVoteCreateChips(); }
-  // [GUEST-ROLES passe 2] zone invités (role_floor) + espace invités (guest_space)
+  // [GUEST-ROLES passe 2] zone invités (role_floor). [GUEST-HOME] espace perso = automatique (plus de flag).
   createFloor = item ? (item.role_floor || '') : '';
-  createGuestSpace = (item && item.guest_space) ? 1 : 0;
-  ['create-floor-label', 'create-space-label'].forEach(id => {
-    const elm = document.getElementById(id); if (elm) elm.style.display = (kind === 'project') ? '' : 'none';
-  });
-  if (kind === 'project') { renderFloorChips(); renderGuestSpaceChips(); }
+  {
+    const elm = document.getElementById('create-floor-label');
+    if (elm) elm.style.display = (kind === 'project') ? '' : 'none';
+  }
+  if (kind === 'project') { renderFloorChips(); }
   if (item) {
     createForm.elements.name.value = item.name;
     createForm.elements.color.value = item.color || '#4fc3f7';
@@ -3273,9 +3270,8 @@ function renderTripChips() {
   });
 }
 
-// [GUEST-ROLES passe 2] chips zone invités (role_floor héritable) + espace invités (guest_space).
+// [GUEST-ROLES passe 2] chips zone invités (role_floor héritable). [GUEST-HOME] espace perso = automatique.
 let createFloor = '';       // '' hérite / commenter / contributor / editor
-let createGuestSpace = 0;
 const FLOOR_LABELS = { '': 'Hérité', commenter: '💬 Commentateur', contributor: '➕ Contributeur', editor: '✏️ Éditeur' };
 function renderFloorChips() {
   const wrap = document.getElementById('create-floor-chips');
@@ -3299,18 +3295,6 @@ function renderFloorChips() {
       on: { click: () => { createFloor = v; renderFloorChips(); } } }));
   });
 }
-function renderGuestSpaceChips() {
-  const wrap = document.getElementById('create-space-chips');
-  if (!wrap) return;
-  wrap.innerHTML = '';
-  [[0, 'Désactivé'], [1, '🏠 Activé']].forEach(([v, label]) => {
-    const on = createGuestSpace === v;
-    wrap.appendChild(el('button', { class: 'prio-btn', text: label,
-      attrs: { type: 'button', style: on ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' },
-      on: { click: () => { createGuestSpace = v; renderGuestSpaceChips(); } } }));
-  });
-}
-
 // [VOTE-DECISION] chips Activé/Désactivé du vote + révélation de la config.
 let createVoteEnabled = false;
 function renderVoteChips() {
@@ -3603,7 +3587,6 @@ createForm.addEventListener('submit', async (e) => {
     payload.vote_deadline = createVoteEnabled ? (document.getElementById('create-vote-deadline').value || '') : '';
     payload.vote_create = createVoteCreate;  // [VOTE-GROUPS] permission héritable
     payload.role_floor = createFloor;        // [GUEST-ROLES passe 2] zone invités (élévation)
-    payload.guest_space = createGuestSpace;   // [GUEST-ROLES passe 2] espace invités (dossiers persos)
   }
   // [VOTE-MULTI] bascule multi→single : avertit (danger) — le serveur purge les voix surnuméraires.
   if (createKind === 'project' && editingItem && editingItem.vote_mode === 'multi' && createVoteMode === 'single') {
@@ -6169,7 +6152,8 @@ function voteChipsEl(proj) {
 
 function voteMenuEl(proj) {
   const wrap = el('div', { class: 'task-more', attrs: { style: 'display:inline-block' } });
-  const btn = el('button', { class: 'prio-btn', text: '🗳 Votes ▾', attrs: { title: 'Créer et gérer des votes nommés' } });
+  // [UI-POLISH-BOARD] nowrap : « 🗳 Votes ▾ » ne wrappe plus sur 2 lignes → même hauteur que les voisins du header.
+  const btn = el('button', { class: 'prio-btn', text: '🗳 Votes ▾', attrs: { title: 'Créer et gérer des votes nommés', style: 'white-space:nowrap' } });
   const menu = el('div', { class: 'card-menu', attrs: { hidden: '' } });
   menu.appendChild(el('button', { text: '➕ Créer un vote', on: { click: (e) => { e.stopPropagation(); menu.hidden = true; startVoteCreate(proj); } } }));
   (proj.votes || []).forEach(v => {
@@ -6938,6 +6922,9 @@ function renderBoard() {
     if (chips) board.appendChild(chips);
   }
 
+  // [UI-POLISH-BOARD] drop-zone fichiers + 🎤 Vocal du dossier : capturés ici, appendés plus bas
+  // (juste au-dessus du 1er en-tête de section / état vide, collés à la liste — pas près du titre).
+  let pendingFolderAttach = null;
   if (state.memoProject !== 'all' && state.memoProject !== 'inbox') {
     const proj = state.projects.find(p => p.id === state.memoProject);
     if (proj) {
@@ -6971,14 +6958,15 @@ function renderBoard() {
         });
       });
       board.appendChild(desc);
-      // [FOLDER-ATTACHMENTS] Fichiers rattachés au dossier lui-même (près de la description).
-      board.appendChild(renderAttachments({
+      // [FOLDER-ATTACHMENTS] Fichiers rattachés au dossier lui-même. [UI-POLISH-BOARD] appendé
+      // plus bas (au-dessus de la 1re section), pas ici sous la description.
+      pendingFolderAttach = renderAttachments({
         attachments: proj.attachments || [],
         canEdit: true,
         uploadUrl: `/api/projects/${proj.id}/attachments`,
         onChange: async () => { await loadAll(); },
         openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
-      }));
+      });
     }
     const recap = guestRecapEl('project', state.memoProject);
     if (recap) board.appendChild(recap);
@@ -7067,6 +7055,7 @@ function renderBoard() {
   board.appendChild(filters);
 
   if (state.memoFilter === 'history') {
+    if (pendingFolderAttach) board.appendChild(pendingFolderAttach);  // [UI-POLISH-BOARD]
     renderHistory(board);
     return;
   }
@@ -7147,6 +7136,9 @@ function renderBoard() {
     onChange: renderBoard,
   });
   if (subHide.bar) board.appendChild(subHide.bar);
+
+  // [UI-POLISH-BOARD] drop-zone + 🎤 Vocal du dossier : juste au-dessus de la 1re section / état vide.
+  if (pendingFolderAttach) board.appendChild(pendingFolderAttach);
 
   const memos = allMemos.filter(m => !subHide.isHidden(m));
   const pending = memos.filter(m => !m.done);

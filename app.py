@@ -64,7 +64,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "25"  # X = version du format d'export (invariant 1) — v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "26"  # X = version du format d'export (invariant 1) — v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -877,13 +877,14 @@ def init_db():
     if "perm_comment" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN perm_comment TEXT DEFAULT ''")
     # [GUEST-ROLES passe 2] Zone invités : role_floor héritable (élévation SEULE du rôle dans un
-    # sous-arbre) ; guest_space = dossier « Espace invités » auto-provisionné ; created_by attribue
-    # un sous-dossier perso à un invité (par e-mail, pattern created_by v19). TOUTES additives,
-    # owner-only, NON exportées (précédent perm_*/voix). Absentes = comportement passe 1 identique.
+    # sous-arbre) ; created_by attribue un dossier perso à un invité (par e-mail, pattern created_by v19).
+    # [GUEST-HOME] V26 : `created_by` est désormais EXPORTÉ (v26) ; `guest_space` est MORT (l'ancien
+    # provisioning `_provision_guest_spaces` a été retiré), la colonne reste en base sans migration
+    # destructive (invariant 1). `role_floor` et `_owns_guest_space_folder` sont CONSERVÉS.
     if "role_floor" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN role_floor TEXT DEFAULT ''")
     if "guest_space" not in pcols:
-        conn.execute("ALTER TABLE projects ADD COLUMN guest_space INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE projects ADD COLUMN guest_space INTEGER DEFAULT 0")  # [GUEST-HOME] colonne morte, gardée (compat)
     if "created_by" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN created_by TEXT DEFAULT ''")
     # [PROJECT-NAME-PER-FOLDER] v25 : unicité des noms de dossiers PAR DOSSIER PARENT (plus
@@ -1534,7 +1535,7 @@ def list_projects():
     db = get_db()
     sql = (
         "SELECT p.id, p.name, p.color, p.position, p.tags, p.emoji, p.parent_id, p.location, p.description, p.marker_color, p.is_trip, "
-        "p.vote_enabled, p.vote_mode, p.vote_deadline, p.vote_closed, p.vote_winner_id, p.vote_winner_ids, p.vote_create, p.perm_vote, p.perm_comment, p.role_floor, p.guest_space, "
+        "p.vote_enabled, p.vote_mode, p.vote_deadline, p.vote_closed, p.vote_winner_id, p.vote_winner_ids, p.vote_create, p.perm_vote, p.perm_comment, p.role_floor, "
         "COUNT(CASE WHEN m.done = 0 AND COALESCE(m.deleted_at, '') = '' THEN m.id END) AS memo_count "
         "FROM projects p LEFT JOIN memos m ON m.project_id = p.id "
         "GROUP BY p.id ORDER BY p.position, p.id"
@@ -1693,7 +1694,7 @@ def update_project(project_id):
         else (_row_get(existing, "perm_comment", "") or "")
     )
     # [GUEST-ROLES passe 2] zone invités : role_floor héritable (élévation seule ; viewer interdit
-    # comme plancher) et guest_space (dossier perso auto-provisionné). Owner-only, non exportés.
+    # comme plancher). Owner-only, non exporté. [GUEST-HOME] `guest_space` retiré (colonne morte).
     def _clean_floor(v):
         v = (str(v or "")).strip().lower()
         return v if v in ("commenter", "contributor", "editor") else ""
@@ -1702,20 +1703,15 @@ def update_project(project_id):
         if "role_floor" in data
         else (_row_get(existing, "role_floor", "") or "")
     )
-    guest_space = (
-        (1 if data.get("guest_space") else 0)
-        if "guest_space" in data
-        else _row_get(existing, "guest_space", 0)
-    )
     # [PROJECT-NAME-PER-FOLDER] v25 : garde d'unicité PAR PARENT (couvre rename ET déplacement D4
     # en une fois — combinaison (nouveau nom, nouveau parent)). Remplace l'IntegrityError 500 latent.
     if _sibling_name_taken(db, name, parent_id, exclude_id=project_id):
         return jsonify({"error": PROJECT_NAME_TAKEN_MSG}), 409
     db.execute(
         "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ?, is_trip = ?, "
-        "vote_enabled = ?, vote_mode = ?, vote_deadline = ?, vote_create = ?, perm_vote = ?, perm_comment = ?, role_floor = ?, guest_space = ? WHERE id = ?",
+        "vote_enabled = ?, vote_mode = ?, vote_deadline = ?, vote_create = ?, perm_vote = ?, perm_comment = ?, role_floor = ? WHERE id = ?",
         (name, color, tags, emoji, parent_id, location, description, marker_color, is_trip,
-         vote_enabled, vote_mode, vote_deadline, vote_create, perm_vote, perm_comment, role_floor, guest_space, project_id),
+         vote_enabled, vote_mode, vote_deadline, vote_create, perm_vote, perm_comment, role_floor, project_id),
     )
     # [VOTE-MULTI] bascule multi→single : purge des voix surnuméraires (garde la + récente
     # par votant). Le front prévient (confirm danger) ; le serveur applique la règle.
@@ -1723,7 +1719,7 @@ def update_project(project_id):
         _collapse_votes_to_single(db, project_id)
     db.commit()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-    out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip, "perm_vote": perm_vote, "perm_comment": perm_comment, "role_floor": role_floor, "guest_space": guest_space}
+    out = {"id": project_id, "name": name, "color": color, "tags": tags, "emoji": emoji, "parent_id": parent_id, "location": _parse_location(location), "description": description, "marker_color": marker_color, "is_trip": is_trip, "perm_vote": perm_vote, "perm_comment": perm_comment, "role_floor": role_floor}
     out.update(_vote_project_payload(db, row, owner=True))
     out["vote_create"] = vote_create
     out["vote_create_resolved"] = _resolve_vote_create(db, project_id)
@@ -4427,51 +4423,113 @@ def _role_allows(db, share, action, guest=None, memo_row=None, project_id=None):
     return rank >= _ROLE_RANK[_min_role_for(db, action, memo_row)]
 
 
-def _provision_guest_spaces(db, guest_email, guest_name, scope_pids):
-    """[GUEST-ROLES passe 2] Provision PARESSEUSE et IDEMPOTENTE du dossier perso d'un invité.
-    Au premier accès (déclenché par share_data / hub_data d'un invité APPROUVÉ), pour chaque dossier
-    `guest_space` du périmètre, crée s'il n'existe pas un sous-dossier au prénom de l'invité,
-    attribué par e-mail (`projects.created_by`). Rejouable sans doublon (dédup par (parent, e-mail)).
-    Renvoie True si au moins un dossier a été créé (→ commit + relire le scope)."""
-    ge = (guest_email or "").strip().lower()
-    if not ge or "@" not in ge or not scope_pids:
-        return False
-    ph = ",".join("?" * len(scope_pids))
-    spaces = db.execute(
-        f"SELECT id FROM projects WHERE guest_space = 1 AND id IN ({ph})", list(scope_pids)
-    ).fetchall()
-    if not spaces:
-        return False
-    created_by = f"{(guest_name or '').strip() or ge} <{ge}>"
-    base = (guest_name or "").strip() or ge.split("@")[0]
-    created = False
-    for sp in spaces:
-        # Déjà provisionné pour cet e-mail sous CE dossier (idempotent) ?
-        existing = db.execute(
-            "SELECT id FROM projects WHERE parent_id = ? AND lower(created_by) LIKE ?",
-            (sp["id"], "%<" + ge + ">"),
-        ).fetchone()
-        if existing:
-            continue
-        # [PROJECT-NAME-PER-FOLDER] v25 : nom = prénom, suffixe discret si déjà pris DANS CE DOSSIER
-        # (collision re-scopée au parent sp["id"] — un même prénom dans un autre dossier ne suffixe plus).
-        name = base
-        if _sibling_name_taken(db, name, sp["id"]):
-            name = base + " · " + ge.split("@")[0]
-            n = 2
-            while _sibling_name_taken(db, name, sp["id"]):
-                name = base + " · " + ge.split("@")[0] + " " + str(n)
-                n += 1
-        max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
+# ───────────────────────── [GUEST-HOME] espace personnel de l'invité ─────────────────────────
+# À l'APPROBATION (register PIN, ré-approbation, approbation manuelle owner, hub_approve), l'invité
+# reçoit — UNE seule fois par e-mail — SON espace, HORS de tout dossier partagé : un sous-dossier
+# « 🏠 Prénom » (created_by = « Nom <email> ») sous un dossier racine « 👥 Invités » (owner), plus un
+# partage dédié role=editor + share_guest auto-approuvé → l'espace apparaît dans son hub sans PIN.
+# Le moteur de droits reste `_owns_guest_space_folder` (created_by) : éditeur plein dans SON sous-arbre.
+
+GUEST_HOME_ROOT_NAME = "Invités"   # dossier racine owner « 👥 Invités » (created_by='')
+GUEST_HOME_ROOT_EMOJI = "👥"
+
+
+def _find_guest_home(db, email):
+    """Dossier perso existant d'un e-mail (dédup GLOBALE par created_by, robuste au renommage).
+    Renvoie l'id ou None. Match par `_voter_email` (partie e-mail de « Nom <email> »)."""
+    ge = (email or "").strip().lower()
+    if not ge:
+        return None
+    for r in db.execute(
+        "SELECT id, created_by FROM projects WHERE COALESCE(created_by, '') != ''"
+    ).fetchall():
+        if _voter_email(r["created_by"]) == ge:
+            return r["id"]
+    return None
+
+
+def _ensure_home_access(db, home_id, email, name):
+    """Partage dédié (kind=project, role=editor) + share_guest auto-approuvé pour l'e-mail sur
+    SON dossier perso. Idempotent (réutilise un partage editor existant, n'ajoute pas de doublon
+    de guest). Garantit aussi le hub. Aucun PIN à saisir : l'invité est déjà approuvé (invariant 5 :
+    scope = son dossier ; les écritures repassent par la matrice / `_owns_guest_space_folder`)."""
+    ge = (email or "").strip().lower()
+    now = datetime.now(timezone.utc).isoformat()
+    share = db.execute(
+        "SELECT * FROM shares WHERE kind = 'project' AND target_id = ? "
+        "AND COALESCE(NULLIF(role, ''), CASE WHEN can_edit = 1 THEN 'editor' ELSE 'commenter' END) = 'editor' "
+        "ORDER BY id LIMIT 1",
+        (home_id,),
+    ).fetchone()
+    if share:
+        share_id = share["id"]
+    else:
+        share_id = db.execute(
+            "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin) "
+            "VALUES (?, 'project', ?, 1, 'editor', ?, ?)",
+            (secrets.token_urlsafe(24), home_id, now, f"{secrets.randbelow(10000):04d}"),
+        ).lastrowid
+    existing = db.execute(
+        "SELECT * FROM share_guests WHERE share_id = ? AND lower(email) = ?", (share_id, ge)
+    ).fetchone()
+    if existing:
+        if existing["status"] != "approved":
+            db.execute(
+                "UPDATE share_guests SET status = 'approved', approved_at = ? WHERE id = ?",
+                (now, existing["id"]),
+            )
+    else:
         db.execute(
+            "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at) "
+            "VALUES (?, ?, ?, ?, 'approved', ?, ?)",
+            (share_id, ge, (name or "").strip()[:60], secrets.token_urlsafe(24), now, now),
+        )
+    db.commit()
+    _ensure_hub(db, ge, name)  # [ONE-LINK-MULTI] l'espace apparaît dans le hub de l'e-mail
+
+
+def _ensure_guest_home(db, email, name):
+    """[GUEST-HOME] Garantit l'espace personnel d'un invité (idempotent, dédup GLOBALE par e-mail).
+    Créé à l'approbation, UNE seule fois. Renvoie l'id du dossier « 🏠 Prénom » (ou None si e-mail
+    invalide). Si l'espace existe déjà (created_by match) → aucun dossier créé, on (re)garantit juste
+    l'accès (partage editor + guest approuvé) — c'est la ré-approbation qui « raccroche » l'espace."""
+    ge = (email or "").strip().lower()
+    if not ge or "@" not in ge or len(ge) > 120:
+        return None
+    home_id = _find_guest_home(db, ge)
+    if home_id is None:
+        # 1) dossier racine « 👥 Invités » (owner, created_by='') — créé au 1er besoin.
+        root = db.execute(
+            "SELECT id FROM projects WHERE name = ? AND parent_id IS NULL", (GUEST_HOME_ROOT_NAME,)
+        ).fetchone()
+        if root:
+            root_id = root["id"]
+        else:
+            max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
+            root_id = db.execute(
+                "INSERT INTO projects (name, color, position, tags, emoji, parent_id, created_by, uid) "
+                "VALUES (?, '', ?, '', ?, NULL, '', ?)",
+                (GUEST_HOME_ROOT_NAME, max_pos + 1, GUEST_HOME_ROOT_EMOJI, str(uuid.uuid4())),
+            ).lastrowid
+        # 2) dossier « 🏠 Prénom » de l'invité (prénom = 1er mot du nom, repli partie locale e-mail).
+        base = ((name or "").strip().split() or [""])[0] or ge.split("@")[0]
+        nm = base
+        if _sibling_name_taken(db, nm, root_id):
+            nm = base + " · " + ge.split("@")[0]
+            n = 2
+            while _sibling_name_taken(db, nm, root_id):
+                nm = base + " · " + ge.split("@")[0] + " " + str(n)
+                n += 1
+        created_by = f"{(name or '').strip() or ge} <{ge}>"
+        max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
+        home_id = db.execute(
             "INSERT INTO projects (name, color, position, tags, emoji, parent_id, created_by, uid) "
             "VALUES (?, '', ?, '', '🏠', ?, ?, ?)",
-            (name, max_pos + 1, sp["id"], created_by, str(uuid.uuid4())),
-        )
-        created = True
-    if created:
+            (nm, max_pos + 1, root_id, created_by, str(uuid.uuid4())),
+        ).lastrowid
         db.commit()
-    return created
+    _ensure_home_access(db, home_id, ge, name)
+    return home_id
 
 
 def _role_gate(db, share, action, memo_row=None, project_id=None, require_approved=True):
@@ -4825,6 +4883,7 @@ def grant_guest_project():
         )
     db.commit()
     hub = _ensure_hub(db, email, name)  # [ONE-LINK-MULTI] garantit le hub de l'e-mail
+    _ensure_guest_home(db, email, name)  # [GUEST-HOME] octroi owner = invité approuvé → espace perso
     return jsonify({
         "share_id": share_id, "token": token, "pin": pin, "can_edit": bool(can_edit), "role": role,
         "project": proj["name"], "reused": reused, "url": f"/share/{token}",
@@ -5243,7 +5302,10 @@ def update_guest(guest_id):
     if status not in ("approved", "rejected", "pending"):
         return jsonify({"error": "status invalide"}), 400
     db = get_db()
-    if not db.execute("SELECT 1 FROM share_guests WHERE id = ?", (guest_id,)).fetchone():
+    row = db.execute(
+        "SELECT email, name FROM share_guests WHERE id = ?", (guest_id,)
+    ).fetchone()
+    if not row:
         return jsonify({"error": "not found"}), 404
     db.execute(
         "UPDATE share_guests SET status = ?, approved_at = ? WHERE id = ?",
@@ -5254,6 +5316,8 @@ def update_guest(guest_id):
         ),
     )
     db.commit()
+    if status == "approved":  # [GUEST-HOME] approbation manuelle owner → espace perso (idempotent)
+        _ensure_guest_home(db, row["email"], row["name"])
     return jsonify({"id": guest_id, "status": status})
 
 
@@ -6105,6 +6169,7 @@ def hub_approve(hub_token):
         )
     db.commit()
     _touch_guest_seen(db, hub["email"])  # [GUEST-EDIT] bon PIN = identité prouvée
+    _ensure_guest_home(db, hub["email"], hub["name"])  # [GUEST-HOME] approbation par PIN → espace perso
     resp = jsonify({"name": hub["name"] or "", "folders": _hub_folders(db, hub["email"])})
     _set_hub_session_cookie(resp, hub_token, session_token)
     return resp
@@ -6181,16 +6246,10 @@ def hub_data(hub_token):
     if not _hub_proof(db, hub):
         return jsonify({"error": "code requis"}), 403
     _touch_guest_seen(db, hub["email"])  # [GUEST-EDIT] preuve valide (cookie ou header)
-    # [GUEST-ROLES passe 2] provision paresseuse du dossier perso (idempotent) AVANT le calcul du
-    # scope → le nouveau dossier apparaît immédiatement dans l'arbre du hub.
-    _prov_scope = set()
-    for _r in db.execute(
-        "SELECT DISTINCT s.target_id FROM shares s JOIN share_guests g ON g.share_id = s.id "
-        "WHERE lower(g.email) = ? AND g.status = 'approved' AND s.kind = 'project'",
-        ((hub["email"] or "").strip().lower(),),
-    ).fetchall():
-        _prov_scope |= set(_project_descendants(db, _r["target_id"]))
-    _provision_guest_spaces(db, hub["email"], hub["name"], _prov_scope)
+    # [GUEST-HOME 2bis] provision PARESSEUSE : les invités APPROUVÉS AVANT le lot n'ont jamais
+    # (ré)déclenché « à l'approbation ». Preuve OK = e-mail approuvé → on garantit l'espace au 1er
+    # chargement du hub. Idempotent (dédup GLOBALE par e-mail) : 1 SELECT/req, aucun doublon.
+    _ensure_guest_home(db, hub["email"], hub["name"])
     shares = _hub_approved_shares(db, hub["email"])
     proj_shares = [s for s in shares if s["kind"] == "project"]
     memo_shares = [s for s in shares if s["kind"] == "memo"]
@@ -6473,9 +6532,10 @@ def share_data(token):
             _touch_guest_seen(db, g["email"])
             me = f"{g['name'] or g['email']} <{g['email']}>"
             my_email = g["email"] or ""
-            # [GUEST-ROLES passe 2] provision paresseuse du dossier perso (idempotent, avant le scope).
-            if share["kind"] == "project":
-                _provision_guest_spaces(db, my_email, g["name"], _share_scope_project_ids(db, share))
+            # [GUEST-HOME 2bis] provision PARESSEUSE : couvre les invités approuvés AVANT le lot qui
+            # n'ouvrent jamais leur hub (lien direct). Guest APPROUVÉ (filtré par le SELECT) uniquement,
+            # jamais anonyme/pending. Idempotent (dédup par e-mail), 1 SELECT/req.
+            _ensure_guest_home(db, my_email, g["name"])
     my_role = _share_role(share)  # [GUEST-ROLES] rôle du lien
     rows = _share_scope_memos(db, share)
     memos = []
@@ -6672,6 +6732,7 @@ def share_register(token):
             )
             db.commit()
         _ensure_hub(db, email, name)  # [ONE-LINK-MULTI]
+        _ensure_guest_home(db, email, name)  # [GUEST-HOME] espace perso (idempotent, ré-approbation raccroche)
         return jsonify(
             {"guest_token": existing["guest_token"], "status": "approved", "email": email}
         )
@@ -6687,6 +6748,7 @@ def share_register(token):
     )
     db.commit()
     _ensure_hub(db, email, name)  # [ONE-LINK-MULTI]
+    _ensure_guest_home(db, email, name)  # [GUEST-HOME] espace perso du nouvel invité approuvé
     return jsonify({"guest_token": gtoken, "status": "approved", "email": email}), 201
 
 
@@ -7755,7 +7817,7 @@ def _build_export(db, root_id=None):
         "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
     all_projects = db.execute(
-        "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color, is_trip, uid FROM projects ORDER BY position, id"
+        "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color, is_trip, uid, created_by FROM projects ORDER BY position, id"
     ).fetchall()
     # proj_names = TOUS les projets (pour résoudre le nom du parent, y compris le parent du
     # dossier racine qui est HORS du sous-arbre → à l'import il raccroche si ce nom existe,
@@ -7832,6 +7894,10 @@ def _build_export(db, root_id=None):
             "marker_color": _row_get(r, "marker_color"),
             # [MAP-TIMELINE] v20 : valeur BRUTE non résolue (null = hérite).
             "is_trip": _row_get(r, "is_trip", None),
+            # [GUEST-HOME] v26 : created_by du projet (dossier perso d'un invité = « Nom <email> »,
+            # owner = ''). Sans lui, la dédup D1 et l'élévation par propriété seraient perdues après
+            # restauration (re-approbation → espace dupliqué). Compat v1→v25 : absent → ''.
+            "created_by": _row_get(r, "created_by", "") or "",
             "attachments": proj_att_by_id.get(r["id"], []),  # [FOLDER-ATTACHMENTS] v23
         }
         for r in projects
@@ -8297,6 +8363,11 @@ def import_links():
         it = _clean_is_trip(e.get("is_trip"))
         if it is not None and _row_get(row, "is_trip", None) is None:
             db.execute("UPDATE projects SET is_trip = ? WHERE id = ?", (it, pid))
+        # [GUEST-HOME] v26 : created_by enrichi seulement si VIDE (non destructif). Restaure la
+        # propriété d'un dossier perso après import sur base neuve → la ré-approbation raccroche.
+        cby = (e.get("created_by") or "").strip()
+        if cby and not (_row_get(row, "created_by", "") or "").strip():
+            db.execute("UPDATE projects SET created_by = ? WHERE id = ?", (cby, pid))
 
     def _ensure_project_entry(e, parent_local):
         """Résout/crée UN projet du fichier, son parent DÉJÀ résolu (parent_local, None = racine).
@@ -8329,11 +8400,12 @@ def import_links():
         new_uid = uid or str(uuid.uuid4())
         max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
         cur = db.execute(
-            "INSERT INTO projects (name, color, position, tags, emoji, location, description, marker_color, is_trip, parent_id, uid) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO projects (name, color, position, tags, emoji, location, description, marker_color, is_trip, parent_id, uid, created_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (name, (e.get("color") or "").strip(), max_pos + 1, _normalize_tags(e.get("tags") or ""),
              _clean_emoji(e.get("emoji")), _clean_location(e.get("location")), _clean_description(e.get("description") or ""),
-             _clean_hex_color(e.get("marker_color") or "", ""), _clean_is_trip(e.get("is_trip")), parent_local, new_uid),
+             _clean_hex_color(e.get("marker_color") or "", ""), _clean_is_trip(e.get("is_trip")), parent_local, new_uid,
+             (e.get("created_by") or "").strip()),  # [GUEST-HOME] v26 (absent v1→v25 → '')
         )
         local = cur.lastrowid
         proj_by_uid[new_uid] = local

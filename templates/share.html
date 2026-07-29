@@ -611,8 +611,10 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 }
 .iv-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 .iv-btn.iv-accent { color: var(--accent); border-color: var(--accent); }
-.iv-del { background: #f44336; color: #fff; border-color: #f44336; }
-.iv-del:hover { background: #d32f2f; }
+/* [UI-POLISH-BOARD] danger aligné sur le gabarit iv-btn (fond sombre) : glyphe/bordure danger,
+   remplissage rouge au survol seulement. Même taille que les autres boutons de la barre. */
+.iv-del { color: var(--danger); border-color: var(--danger); }
+.iv-del:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
 @media (max-width: 900px) {
   /* [PHOTO-VIEWER-MOBILE] Barre photo : boutons CARRÉS homogènes. La règle tactile
      (button{min-height:44px}) les étirait en ovale → on fige width=height + min-height:0
