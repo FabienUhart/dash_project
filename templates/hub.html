@@ -267,7 +267,10 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
 .iv-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 .iv-btn.iv-accent { color: var(--accent); border-color: var(--accent); }
-.iv-del { background: var(--danger); color: #fff; border-color: var(--danger); }
+/* [UI-POLISH-BOARD] danger aligné sur le gabarit iv-btn (fond sombre) : glyphe/bordure danger,
+   remplissage rouge au survol seulement. Même taille que les autres boutons de la barre. */
+.iv-del { color: var(--danger); border-color: var(--danger); }
+.iv-del:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
 
 @media (max-width: 900px) {
   /* Boutons photo carrés homogènes (cf. index.html/share.html). */
