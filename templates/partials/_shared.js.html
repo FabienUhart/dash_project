@@ -3985,4 +3985,151 @@ function initQuickMemo(cfg) {
   applyLaunchPos();
   applyVisibility();
 }
+
+// ───────────────────── [HEADER-TOOLBAR] barre d'actions du board unifiée ─────────────────────
+// Gabarit UNIQUE des boutons du header de board (owner/share/hub) : étendu 76×56 (icône trait
+// au-dessus, libellé dessous, nowrap) / compact 44×44 (icône seule, libellé en title). Cadre bordé,
+// bascule ‹ › (préférence GLOBALE localStorage 'hdrToolbarCompact'), pastilles de compteur.
+// Icônes = SVG outline Tabler (MIT) INLINE (invariant 6, zéro CDN), stroke currentColor → thème suivi.
+// SEUL le header de board change ; le reste de l'app garde ses emojis. Tokens/classes existants (inv. 9).
+const HDR_ICONS = {
+  pencil: ['M4 20h4l10.5 -10.5a1.5 1.5 0 0 0 -4 -4l-10.5 10.5v4', 'M13.5 6.5l4 4'],
+  share: ['M6 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M18 6m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M18 18m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M8.7 10.7l6.6 -3.4', 'M8.7 13.3l6.6 3.4'],
+  camera: ['M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2', 'M12 13m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0'],
+  folder: ['M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2'],
+  download: ['M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2', 'M7 11l5 5l5 -5', 'M12 4v12'],
+  calendar: ['M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12z', 'M16 3v4', 'M8 3v4', 'M4 11h16', 'M11 15h1', 'M12 15v3'],
+  trophy: ['M8 21l8 0', 'M12 17l0 4', 'M7 4l10 0', 'M17 4v8a5 5 0 0 1 -10 0v-8', 'M7 4h-2a1 1 0 0 0 -1 1v2a3 3 0 0 0 3 3', 'M17 4h2a1 1 0 0 1 1 1v2a3 3 0 0 1 -3 3'],
+  archive: ['M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z', 'M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-10', 'M10 12h4'],
+  map: ['M3 7v13l6 -2l6 2l6 -2v-13l-6 2l-6 -2z', 'M9 5v13', 'M15 7v13'],
+  heart: ['M19.5 12.6l-7.5 7.4l-7.5 -7.4a5 5 0 1 1 7.5 -6.6a5 5 0 1 1 7.5 6.6'],
+};
+function hdrIcon(name) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'hdr-ic');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  (HDR_ICONS[name] || []).forEach(d => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  });
+  return svg;
+}
+function _hdrToolbarStyle() {
+  if (document.getElementById('hdr-toolbar-style')) return;
+  const st = document.createElement('style'); st.id = 'hdr-toolbar-style';
+  st.textContent =
+    // [HEADER-TOOLBAR v3] rangée pleine largeur bordée, NE REPLIE JAMAIS (nowrap) — overflow-x discret si
+    // la place manque en étendu ; le compact règle le cas réel. Aucun accent au repos (survol/focus seul).
+    '.hdr-toolbar{display:inline-flex;align-items:stretch;gap:0.2rem;border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:0.3rem;vertical-align:middle;width:fit-content;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}'
+    + '.hdr-toolbar::-webkit-scrollbar{height:6px}'
+    + '.hdr-toolbar::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}'
+    + '.hdr-btn{position:relative;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:0.15rem;width:76px;height:56px;flex:0 0 auto;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text);cursor:pointer;font:inherit;padding:0;line-height:1;outline:none}'
+    + '.hdr-btn:hover,.hdr-btn:focus-visible{background:var(--panel-2);border-color:var(--border);color:var(--accent)}'
+    + '.hdr-btn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}'
+    + '.hdr-btn:disabled{opacity:0.5;cursor:default}'
+    + '.hdr-btn .hdr-ic{width:22px;height:22px;flex:0 0 auto}'
+    + '.hdr-btn .hdr-lbl{font-size:0.68rem;font-weight:500;white-space:nowrap;color:var(--muted);max-width:70px;overflow:hidden;text-overflow:ellipsis}'
+    + '.hdr-btn:hover .hdr-lbl,.hdr-btn:focus-visible .hdr-lbl{color:var(--accent)}'
+    // pastille coin HAUT-droit = DONNÉE (compteur)
+    + '.hdr-count{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:var(--accent);color:#10141a;font-size:0.62rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--panel);pointer-events:none}'
+    // vignette coin BAS-droit = MENU (variante B) : carré ~16px, chevron minuscule
+    + '.hdr-menu{position:absolute;bottom:-4px;right:-4px;width:16px;height:16px;border-radius:5px;background:var(--panel);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.62rem;line-height:1;pointer-events:none;box-shadow:0 0 0 2px var(--panel)}'
+    + '.hdr-btn:hover .hdr-menu,.hdr-btn:focus-visible .hdr-menu{color:var(--accent);border-color:var(--accent)}'
+    // séparateur vertical fin entre groupes d'actions
+    + '.hdr-sep{width:1px;align-self:center;height:60%;background:var(--border);margin:0 0.2rem;flex:0 0 auto}'
+    + '.hdr-toolbar.compact .hdr-btn{width:44px;height:44px}'
+    + '.hdr-toolbar.compact .hdr-lbl{display:none}'
+    // [HEADER-TOOLBAR fix] mode « nu » (< 2 boutons) : ni cadre ni fond ni padding, et surtout
+    // `overflow:visible` — sinon l'overflow-x:auto du repos (a) affiche une scrollbar grise résiduelle
+    // sous le bouton et (b) rogne la pastille (débord -4/+3) qui semble alors décrochée. Visible → la
+    // pastille s'incruste au coin du BOUTON (position:relative déjà sur .hdr-btn) et zéro scrollbar.
+    + '.hdr-toolbar.bare{border:none;background:none;padding:0;overflow:visible}'
+    // flèche de repli : hauteur = mode courant (align-self:stretch), pas de liseré permanent (:focus-visible seul)
+    + '.hdr-toggle{display:inline-flex;align-items:center;justify-content:center;width:24px;flex:0 0 auto;align-self:stretch;border:none;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;font-size:1.05rem;line-height:1;outline:none}'
+    + '.hdr-toggle:hover{color:var(--text);background:var(--panel-2)}'
+    + '.hdr-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}'
+    // [HEADER-TOOLBAR v3] rangée d'infos MONOCHROME bordée (même langage que la barre)
+    + '.hdr-inforow{display:inline-flex;align-items:center;flex-wrap:wrap;gap:0.5rem;border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:0.3rem 0.6rem;width:fit-content;max-width:100%;margin:0.2rem 0 0.8rem;color:var(--muted);font-size:0.75rem}'
+    + '.hdr-inforow .hdr-info{display:inline-flex;align-items:center;gap:0.3rem;color:var(--muted)}'
+    + '.hdr-inforow .hdr-info + .hdr-info{border-left:1px solid var(--border);padding-left:0.5rem}'
+    + '.hdr-inforow .hdr-info svg,.hdr-inforow .hdr-info .ic{width:14px;height:14px}'
+    // [VOTES-FRAME] encart « Votes » (consultation) : cadre légendé (pattern fieldset), légende à
+    // cheval sur la bordure haute. Bordure forte, monochrome au repos. Rendu conditionnel côté JS.
+    + '.vote-frame{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem;border:1px solid var(--border-strong,var(--border));border-radius:10px;padding:0.75rem 0.6rem 0.55rem;margin:0.1rem 0 0.9rem;width:fit-content;max-width:100%}'
+    + '.vote-frame-legend{position:absolute;top:-0.62rem;left:0.7rem;background:var(--bg);padding:0 0.4rem;font-size:0.72rem;font-weight:600;color:var(--muted);display:inline-flex;align-items:center;gap:0.3rem}';
+  document.head.appendChild(st);
+}
+// [VOTES-FRAME] cadre légendé « 🗳 Votes ». Le caller y appende les chips de scrutins + vote-dossier.
+function voteFrame() {
+  _hdrToolbarStyle();
+  const frame = el('div', { class: 'vote-frame' });
+  const lg = el('span', { class: 'vote-frame-legend' });
+  lg.appendChild(el('span', { text: '🗳', attrs: { 'aria-hidden': 'true' } }));
+  lg.appendChild(el('span', { text: 'Votes' }));
+  frame.appendChild(lg);
+  return frame;
+}
+// [VOTES-FRAME] nb de voix total d'un vote nommé = somme des voix de ses options (front, sans route).
+function voteNamedCount(v) { return (((v && v.options) || []).reduce((s, o) => s + (Number(o && o.vote_count) || 0), 0)); }
+// Un bouton du header : {icon, label, title, onClick, count, menu, disabled}. count>0 → pastille (DONNÉE,
+// coin haut-droit) ; menu:true → vignette chevron (MENU, coin bas-droit, variante B). Pas d'accent au repos.
+function hdrBtn(cfg) {
+  const b = el('button', { class: 'hdr-btn', attrs: { type: 'button', title: cfg.title || cfg.label || '' } });
+  b.appendChild(hdrIcon(cfg.icon));
+  b.appendChild(el('span', { class: 'hdr-lbl', text: cfg.label || '' }));
+  const n = Number(cfg.count);
+  if (cfg.count != null && cfg.count !== '' && !isNaN(n) && n > 0)
+    b.appendChild(el('span', { class: 'hdr-count', text: n > 99 ? '99+' : String(n) }));
+  if (cfg.menu) b.appendChild(el('span', { class: 'hdr-menu', text: '⌄', attrs: { 'aria-hidden': 'true' } }));
+  if (cfg.disabled) b.disabled = true;
+  if (cfg.onClick) b.addEventListener('click', cfg.onClick);
+  return b;
+}
+// Conteneur bordé + bascule compact/étendu (préférence GLOBALE). Usage :
+//   const tb = hdrToolbar(); tb.add({...}); tb.add({...}); tb.end(); parent.appendChild(tb.bar);
+function hdrToolbarCompactPref() { try { return localStorage.getItem('hdrToolbarCompact') === '1'; } catch (e) { return false; } }
+function hdrToolbar() {
+  _hdrToolbarStyle();
+  const bar = el('div', { class: 'hdr-toolbar' + (hdrToolbarCompactPref() ? ' compact' : '') });
+  const toggle = el('button', { class: 'hdr-toggle', attrs: { type: 'button' } });
+  const sync = () => {
+    const c = bar.classList.contains('compact');
+    toggle.textContent = c ? '»' : '«';
+    toggle.title = c ? 'Étendre la barre (icônes + libellés)' : 'Réduire la barre (icônes seules)';
+    toggle.setAttribute('aria-label', toggle.title);
+  };
+  toggle.addEventListener('click', () => {
+    const c = bar.classList.toggle('compact');
+    try { localStorage.setItem('hdrToolbarCompact', c ? '1' : '0'); } catch (e) {}
+    sync();
+  });
+  sync();
+  let btnCount = 0;  // nb de BOUTONS d'action (add + addEl) — les séparateurs ne comptent pas
+  return {
+    bar,
+    add(cfg) { const b = hdrBtn(cfg); bar.appendChild(b); btnCount++; return b; },
+    addEl(node) { if (node) { bar.appendChild(node); btnCount++; } return node; },
+    sep() { bar.appendChild(el('div', { class: 'hdr-sep' })); },  // séparateur vertical entre groupes
+    // [HEADER-TOOLBAR fix] < 2 boutons → cadre + bascule sans objet : mode « nu » (pas de bordure/fond,
+    // pas de toggle, séparateurs retirés) ; le(s) bouton(s) gardent le gabarit du mode courant (compact
+    // conservé sur `bar`) + leur pastille. ≥ 2 → cadre + bascule normaux. (0 bouton : le caller n'appende pas.)
+    end() {
+      if (btnCount < 2) {
+        bar.classList.add('bare');
+        bar.querySelectorAll('.hdr-sep').forEach(s => s.remove());
+      } else {
+        bar.appendChild(toggle);
+      }
+      return bar;
+    },
+  };
+}
 </script>

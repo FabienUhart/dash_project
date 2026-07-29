@@ -48,6 +48,7 @@
   --guest: #b39ddb;      /* violet : invités, planifié */
   --assignee: #80cbc4;   /* teal : assignés / mentions */
   --border: #283340;
+  --border-strong: #3a4655;
   --border-soft: #1f2832;
   --memo-bg: #2e2a1f;
   --bg-elev: #1c2530;
@@ -64,7 +65,7 @@
   --accent: #0288d1; --accent-2: #0277bd;
   --green: #2e7d32; --red: #d32f2f; --orange: #ef6c00; --yellow: #f9a825;
   --danger: #e53935; --warn: #ef6c00; --guest: #6a3fb5; --assignee: #00897b;
-  --border: #d3dce5; --border-soft: #e6ecf2; --memo-bg: #fff8e1; --bg-elev: #f4f7fa;
+  --border: #d3dce5; --border-strong: #b3c0cf; --border-soft: #e6ecf2; --memo-bg: #fff8e1; --bg-elev: #f4f7fa;
   --ring: 0 0 0 3px rgba(2,136,209,0.28);
   --shadow: 0 1px 2px rgba(16,30,50,0.08), 0 2px 8px rgba(16,30,50,0.06);
   --shadow-lg: 0 10px 30px rgba(16,30,50,0.18);
@@ -781,7 +782,16 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .mfilter.active.f-scheduled { border-color: var(--guest); background: #221f2e; }
 .mfilter.active.f-overdue { border-color: var(--danger); background: #2e1a1a; }
 .mfilter.active.f-done { border-color: var(--orange); background: #2c2113; }
-#memo-add-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+/* [ADD-BAR-V2] barre d'ajout variante A : rangée 1 (titre + Détails + Ajouter) + rangée 2 repliable. */
+#memo-add-bar { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem; }
+.mab-row1 { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.mab-details-btn { white-space: nowrap; }
+.mab-row2 { display: flex; gap: 1rem 1.2rem; flex-wrap: wrap; align-items: center;
+  padding: 0.6rem 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
+.mab-group { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.mab-lbl { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.mab-arrow { color: var(--muted); }
+.mab-prios { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 /* [MEMO-JUMP-VIEW] barre fine « Aller en bas / Remonter » de la vue Mémos (bouton .prio-btn
    discret, aligné à droite, pas d'accent), affichée seulement si la liste est assez longue. */
 .memo-jump-bar { display: flex; justify-content: flex-end; margin: -0.4rem 0 1rem; }
@@ -797,7 +807,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   outline: none;
 }
 #memo-add-bar input[type="text"]:focus { border-color: var(--yellow); }
-#memo-add-bar input[type="date"], #memo-add-bar select {
+#memo-add-bar input[type="date"], #memo-add-bar input[type="time"], #memo-add-bar select {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1518,6 +1528,12 @@ dialog .actions {
      en flex nowrap → débordait le viewport ≤900px (bouton Carte clippé) et rendait la page
      scrollable horizontalement. On autorise le retour à la ligne. Desktop inchangé. */
   #board-title { flex-wrap: wrap; row-gap: 0.4rem; }
+  /* [ADD-BAR-V2] rangée 2 dépliée en pile verticale ; tap-targets ≥ 40 px. */
+  .mab-row2 { flex-direction: column; align-items: stretch; gap: 0.7rem; }
+  .mab-group { flex-wrap: wrap; }
+  #memo-add-bar input[type="date"], #memo-add-bar input[type="time"], #memo-add-bar select { min-height: 40px; flex: 1 1 auto; }
+  .mab-prios .prio-btn { min-height: 40px; }
+  .mab-details-btn, #memo-add-bar .primary { min-height: 40px; }
   /* [HEADER-ADD-CONTEXT] Mobile ≤900px : la barre 2 boutons #links-actions disparaît (masquée
      ci-dessous), remplacée par l'en-tête de bloc « 🔗 Liens + » ; « + » du bloc Mémos révélé.
      `:not([hidden])` bat le base `#links-blockhead{display:none}` (renderAll toggle [hidden] par vue). */
@@ -4016,20 +4032,24 @@ function comboIcon(emoji, color, fallback) {
 function guestRecapEl(kind, targetId) {
   const shares = (state.shares || []).filter(s => s.kind === kind && s.target_id === targetId);
   if (!shares.length) return null;
-  const wrap = el('div', { class: 'guest-recap' });
-  wrap.appendChild(el('span', { class: 'guest-chip', icon: 'link', text: shares.length + ' lien' + (shares.length > 1 ? 's' : '') }));
+  // [HEADER-TOOLBAR v3] rangée d'infos MONOCHROME bordée (même langage que la barre) : icônes trait,
+  // texte var(--muted), aucun accent au repos. Sépare les infos par un fin trait vertical (CSS).
+  const wrap = el('div', { class: 'hdr-inforow' });
+  const linkChip = el('span', { class: 'hdr-info' });
+  linkChip.appendChild(icon('link'));
+  linkChip.appendChild(el('span', { text: shares.length + ' lien' + (shares.length > 1 ? 's' : '') }));
+  wrap.appendChild(linkChip);
   let any = false;
   shares.forEach(s => {
     (s.guests || []).filter(g => g.status === 'approved').forEach(g => {
       any = true;
-      wrap.appendChild(el('span', {
-        class: 'guest-chip ' + (s.can_edit ? 'rw' : 'ro'),
-        text: (s.can_edit ? '✏️ ' : '👁 ') + (g.name || g.email) + (s.can_edit ? ' en modification' : ' en lecture'),
-        attrs: { title: g.email + (s.can_edit ? ' — lien modifiable' : ' — lien lecture seule') },
-      }));
+      const c = el('span', { class: 'hdr-info', attrs: { title: g.email + (s.can_edit ? ' — lien modifiable' : ' — lien lecture seule') } });
+      c.appendChild(s.can_edit ? hdrIcon('pencil') : icon('eye'));
+      c.appendChild(el('span', { text: (g.name || g.email) + (s.can_edit ? ' en modification' : ' en lecture') }));
+      wrap.appendChild(c);
     });
   });
-  if (!any) wrap.appendChild(el('span', { class: 'guest-chip', text: 'aucun invité connecté' }));
+  if (!any) wrap.appendChild(el('span', { class: 'hdr-info', text: 'aucun invité connecté' }));
   return wrap;
 }
 
@@ -6144,16 +6164,29 @@ function voteChipsEl(proj) {
     wrap.appendChild(mkChip('🗳 (dossier)', selectedVoteId === null, () => { selectedVoteId = null; renderBoard(); }, 'Vote du dossier'));
   }
   votes.forEach(v => {
-    const st = v.vote_state === 'closed' ? ' · clos' : (v.vote_deadline ? ' · clôt' : '');
-    wrap.appendChild(mkChip('🗳 ' + v.name + st, selectedVoteId === v.id, () => { selectedVoteId = v.id; renderBoard(); }, voteDeadlineTitle(v)));
+    // [VOTES-FRAME] chip = nom + nb de voix (somme des voix des options) + statut si clos.
+    const n = voteNamedCount(v);
+    const st = v.vote_state === 'closed' ? ' · clos' : '';
+    const active = selectedVoteId === v.id;
+    // [VOTES-FRAME fix] TOGGLE : re-cliquer le scrutin actif désélectionne (retour vue normale).
+    const chip = mkChip('🗳 ' + v.name + ' · ' + n + ' voix' + st, active,
+      () => { selectedVoteId = active ? null : v.id; renderBoard(); },
+      active ? 'Désélectionner' : voteDeadlineTitle(v));
+    // ✕ discret en bout de chip active (même action que le clic) → sortie ÉVIDENTE.
+    if (active) chip.appendChild(el('span', { text: '✕', attrs: { title: 'Désélectionner', style: 'margin-left:0.4rem;font-weight:700;opacity:0.8' } }));
+    wrap.appendChild(chip);
   });
   return wrap;
 }
 
 function voteMenuEl(proj) {
-  const wrap = el('div', { class: 'task-more', attrs: { style: 'display:inline-block' } });
-  // [UI-POLISH-BOARD] nowrap : « 🗳 Votes ▾ » ne wrappe plus sur 2 lignes → même hauteur que les voisins du header.
-  const btn = el('button', { class: 'prio-btn', text: '🗳 Votes ▾', attrs: { title: 'Créer et gérer des votes nommés', style: 'white-space:nowrap' } });
+  const wrap = el('div', { class: 'task-more', attrs: { style: 'display:inline-flex' } });
+  // [HEADER-TOOLBAR] gabarit hdr-btn (icône archive + libellé « Votes »), pastille = scrutins actifs
+  // (vote-dossier ouvert + votes nommés ouverts). Le menu déroulant (.card-menu) reste inchangé.
+  const openN = (proj.votes || []).filter(v => v.vote_state === 'open').length
+    + ((proj.vote_enabled && proj.vote_state === 'open') ? 1 : 0);
+  // [HEADER-TOOLBAR v3] variante B : vignette-menu (chevron coin bas-droit) au lieu du « ▾ » dans le libellé.
+  const btn = hdrBtn({ icon: 'archive', label: 'Votes', count: openN, menu: true, title: 'Créer et gérer des votes nommés' });
   const menu = el('div', { class: 'card-menu', attrs: { hidden: '' } });
   menu.appendChild(el('button', { text: '➕ Créer un vote', on: { click: (e) => { e.stopPropagation(); menu.hidden = true; startVoteCreate(proj); } } }));
   (proj.votes || []).forEach(v => {
@@ -6161,8 +6194,20 @@ function voteMenuEl(proj) {
     menu.appendChild(voteManageEntry(v));
   });
   (proj.votes || []).forEach(v => { if (!v.mine) menu.appendChild(voteManageEntry(v)); });  // owner gère aussi les votes invités
-  btn.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
-  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) menu.hidden = true; });
+  // [HEADER-TOOLBAR v3 fix] la barre a overflow → le menu absolu était CLIPPÉ (semblait ne pas s'ouvrir).
+  // On le positionne en `fixed` sous le bouton à l'ouverture (aucun ancêtre transformé → pas de clip).
+  const placeMenu = () => {
+    const r = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.right = Math.max(4, window.innerWidth - r.right) + 'px';
+    menu.style.left = 'auto';
+  };
+  // Clic n'importe où sur le bouton (icône/libellé/vignette inclus) = ouvrir/fermer (contains, pas ===).
+  btn.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; if (!menu.hidden) placeMenu(); });
+  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && !btn.contains(e.target)) menu.hidden = true; });
+  window.addEventListener('scroll', () => { if (!menu.hidden) menu.hidden = true; }, true);
+  window.addEventListener('resize', () => { if (!menu.hidden) menu.hidden = true; });
   wrap.appendChild(btn); wrap.appendChild(menu);
   return wrap;
 }
@@ -6802,6 +6847,10 @@ function renderBoard() {
   const todayD = dateStr(new Date());
 
   const title = el('div', { attrs: { id: 'board-title' } });
+  // [HEADER-TOOLBAR] barre d'actions unifiée (gabarit hdr-btn, icônes trait, pastilles, bascule ‹ ›).
+  const tb = hdrToolbar();
+  let tbCount = 0;
+  const voteExtras = el('div', { attrs: { style: 'display:inline-flex;gap:0.35rem;align-items:center;flex-wrap:wrap' } });
   if (state.memoProject === 'all') {
     title.appendChild(el('span', { text: '📝 Tous les mémos' }));
   } else if (state.memoProject === 'inbox') {
@@ -6813,44 +6862,33 @@ function renderBoard() {
       title.appendChild(el('span', { text: proj.name }));
       const pLoc = parseLoc(proj.location);
       if (pLoc) title.appendChild(locBadgeEl(pLoc));
-      title.appendChild(el('button', {
-        class: 'prio-btn', icon: 'pencil', text: 'Modifier',
-        attrs: { title: 'Modifier ce projet (nom, emoji, couleur, description…)' },
-        on: { click: () => openCreateDialog('project', proj) },
-      }));
-      title.appendChild(el('button', {
-        class: 'prio-btn', icon: 'link', text: 'Partager',
-        attrs: { title: 'Partager ce projet par lien (sans compte)' },
-        on: { click: () => openShareDialog('project', proj.id, proj.name) },
-      }));
+      tb.add({ icon: 'pencil', label: 'Modifier',
+        title: 'Modifier ce projet (nom, emoji, couleur, description…)',
+        onClick: () => openCreateDialog('project', proj) }); tbCount++;
+      tb.add({ icon: 'share', label: 'Partager',
+        title: 'Partager ce projet par lien (sans compte)',
+        onClick: () => openShareDialog('project', proj.id, proj.name) }); tbCount++;
       // [PHOTO-TEMPLATE-MEMO] Vue « Photos » du projet (carrousel + frise), à côté de Carte.
-      title.appendChild(el('button', {
-        class: 'prio-btn', text: '📷 Photos',
-        attrs: { title: 'Parcourir les photos du projet (lieux, dates EXIF)' },
-        on: { click: openPhotoView },
-      }));
+      tb.add({ icon: 'camera', label: 'Photos',
+        title: 'Parcourir les photos du projet (lieux, dates EXIF)',
+        onClick: openPhotoView }); tbCount++;
       // [FILES-VIEW] Vue « Fichiers » du dossier (agrégation sous-arbre, source cliquable).
-      title.appendChild(el('button', {
-        class: 'prio-btn', text: '📁 Fichiers',
-        attrs: { title: 'Retrouver tous les fichiers du dossier et de ses sous-dossiers' },
-        on: { click: () => openProjectFiles(proj) },
-      }));
+      tb.add({ icon: 'folder', label: 'Fichiers',
+        title: 'Retrouver tous les fichiers du dossier et de ses sous-dossiers',
+        onClick: () => openProjectFiles(proj) }); tbCount++;
       // [PHOTO-BATCH-DOWNLOAD] Télécharger en .zip les fichiers du dossier (+ sous-dossiers).
       if (projectZipCount(proj.id, 'all', true) > 0) {
-        title.appendChild(el('button', {
-          class: 'prio-btn', text: '⤓ Télécharger',
-          attrs: { title: 'Télécharger les fichiers du dossier en .zip' },
-          on: { click: () => openProjectZip(proj) },
-        }));
+        tb.add({ icon: 'download', label: 'Télécharger',
+          title: 'Télécharger les fichiers du dossier en .zip',
+          onClick: () => openProjectZip(proj) }); tbCount++;
       }
       // [AGENDA-PROJECT] Agenda pré-filtré sur ce projet + ses sous-projets (même
       // périmètre que la carte). L'item sidebar « 📆 Agenda » reste l'agenda global.
       // [AGENDA-SMART-MONTH] chaque clic ré-évalue le mois d'atterrissage (un projet
       // à échéances lointaines n'ouvre pas sur un mois vide).
-      title.appendChild(el('button', {
-        class: 'prio-btn', text: '📆 Agenda',
-        attrs: { title: 'Agenda de ce projet et de ses sous-projets' },
-        on: { click: () => {
+      tb.add({ icon: 'calendar', label: 'Agenda',
+        title: 'Agenda de ce projet et de ses sous-projets',
+        onClick: () => {
           agendaFilterProj = proj.id;
           const set = new Set([proj.id, ...projectDescendants(proj.id)]);
           const start = agendaStartMonth(
@@ -6861,32 +6899,25 @@ function renderBoard() {
           agendaSelDay = start.day;
           state.view = 'agenda';
           renderAll();
-        } },
-      }));
-      // [FESTIVAL-VOTE] Écran Résultats — générique : visible dès qu'un mémo-passage
-      // (due_date + due_time) existe dans le dossier ou ses descendants.
-      {
-        const fset = new Set([proj.id, ...projectDescendants(proj.id)]);
-        if (state.memos.some(m => fset.has(m.project_id) && m.due_date && m.due_time)) {
-          title.appendChild(el('button', {
-            class: 'prio-btn', text: '🏆 Résultats',
-            attrs: { title: 'Coups de cœur ❤️ et envies — podium, par ami, par jour' },
-            on: { click: () => openFestivalResults(proj.id) },
-          }));
-        }
-      }
-      // [VOTE-DECISION] indicateur + clôture du vote (owner). Config/réouverture = pop-in projet.
+        } }); tbCount++;
+      // [HEADER-TOOLBAR v3] séparateur : actions communes (Modifier→Agenda) | groupe vote/carte.
+      tb.sep();
+      // [VOTES-FRAME] « Résultats » QUITTE la barre → relocalisé dans l'encart Votes (les résultats
+      // vivent avec les votes). Le menu « Votes » (création/gestion) reste ici (V131 intact).
+      // [VOTE-GROUPS] menu « Votes » (archive + vignette-menu) — nb de scrutins actifs en pastille.
+      tb.addEl(voteMenuEl(proj)); tbCount++;
+      // [VOTE-DECISION] indicateur + clôture du vote-dossier (owner) — conservés à côté de la barre
+      // (contrôles conditionnels rares, style .prio-btn inchangé). Config/réouverture = pop-in projet.
       if (proj.vote_enabled) {
-        title.appendChild(el('span', {
-          class: 'prio-btn', text: voteStatusLabel(proj),  // même gabarit que les boutons voisins, jamais tronqué
+        voteExtras.appendChild(el('span', {
+          class: 'prio-btn', text: voteStatusLabel(proj),
           attrs: { title: voteDeadlineTitle(proj), style: 'cursor:default' },
         }));
         if (proj.vote_state === 'open') {
-          title.appendChild(el('button', {
+          voteExtras.appendChild(el('button', {
             class: 'prio-btn', text: '🗳 Clore le vote',
             attrs: { title: 'Clore le vote maintenant (fige le gagnant)', style: 'background:var(--accent);border-color:var(--accent);color:#10141a' },
             on: { click: async () => {
-              // Action NON destructive → titre/bouton dédiés, style accent (pas le rouge « Supprimer »).
               if (!(await confirmPopin('Le gagnant sera figé.', { title: 'Clore le vote ?', okLabel: 'Clore', danger: false }))) return;
               await api(`/api/projects/${proj.id}/vote/close`, { method: 'POST', body: '{}' });
               await loadAll();
@@ -6894,33 +6925,22 @@ function renderBoard() {
           }));
         }
       }
-      // [VOTE-GROUPS] menu « 🗳 Votes ▾ » (créer / gérer les votes nommés du dossier).
-      title.appendChild(voteMenuEl(proj));
     }
   }
   const mapPoints = boardMapPoints();
   if (mapPoints.length) {
-    // Nom de la vue SEULEMENT (pas le textContent du conteneur, qui embarque les
-    // libellés des boutons Modifier/Partager/Photos/Agenda/Carte). [V20.6.34]
+    // Nom de la vue SEULEMENT (pas le textContent du conteneur). [V20.6.34]
     const mapName = state.memoProject === 'all' ? 'Tous les mémos'
       : state.memoProject === 'inbox' ? 'Inbox'
       : ((state.projects.find(p => p.id === state.memoProject) || {}).name || 'Carte');
-    title.appendChild(el('button', {
-      class: 'prio-btn', icon: 'map', text: 'Carte (' + mapPoints.length + ')',
-      attrs: { title: 'Voir tous les points géolocalisés de cette vue sur une carte' },
-      on: { click: () => openMapDialog(mapName, boardMapPoints(), boardMapPoints) },
-    }));
+    tb.add({ icon: 'map', label: 'Carte', count: mapPoints.length,
+      title: 'Voir tous les points géolocalisés de cette vue sur une carte',
+      onClick: () => openMapDialog(mapName, boardMapPoints(), boardMapPoints) }); tbCount++;
   }
+  // [HEADER-TOOLBAR v3] ordre du header : titre SEUL (plus rien à droite) → description → rangée
+  // d'infos → barre d'actions. La barre + les contrôles de vote-dossier sont appendés APRÈS le bloc
+  // description/infos (plus bas). `title` ne contient que l'emoji + le nom + les badges de lieu.
   board.appendChild(title);
-
-  // [VOTE-GROUPS] barre de création OU chips de scrutin (au-dessus des sections du board).
-  const _bp = boardProject();
-  if (_bp) {
-    const bar = voteCreateBarEl();
-    if (bar) board.appendChild(bar);
-    const chips = voteChipsEl(_bp);
-    if (chips) board.appendChild(chips);
-  }
 
   // [UI-POLISH-BOARD] drop-zone fichiers + 🎤 Vocal du dossier : capturés ici, appendés plus bas
   // (juste au-dessus du 1er en-tête de section / état vide, collés à la liste — pas près du titre).
@@ -6970,6 +6990,44 @@ function renderBoard() {
     }
     const recap = guestRecapEl('project', state.memoProject);
     if (recap) board.appendChild(recap);
+  }
+
+  // [HEADER-TOOLBAR v3] la barre d'actions vit ICI : sous le titre + description + rangée d'infos,
+  // en pleine largeur dans son cadre (jamais à droite du titre).
+  if (tbCount) {
+    tb.end();
+    const row = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin:0 0 0.8rem' } });
+    row.appendChild(tb.bar);
+    board.appendChild(row);
+  }
+
+  // [VOTES-FRAME] encart « Votes » (consultation) sous la barre d'actions : chips de scrutins nommés
+  // (nom + nb voix) + chip vote-dossier (statut + « Clore ») + « Résultats » (relocalisé). Rendu SEULEMENT
+  // si ≥ 1 scrutin nommé OU vote-dossier activé (OU festival, pour ne pas perdre l'accès aux Résultats).
+  {
+    const _bp = boardProject();
+    if (_bp) {
+      const vbar = voteCreateBarEl();
+      if (vbar) board.appendChild(vbar);  // barre de création en cours (inchangée)
+      const hasNamed = (_bp.votes || []).length > 0;
+      const hasDossier = !!_bp.vote_enabled;
+      const fset = new Set([_bp.id, ...projectDescendants(_bp.id)]);
+      const hasFestival = state.memos.some(m => fset.has(m.project_id) && m.due_date && m.due_time);
+      if (!voteCreate && (hasNamed || hasDossier || hasFestival)) {
+        const frame = voteFrame();
+        const chips = voteChipsEl(_bp);
+        if (chips) { chips.style.margin = '0'; frame.appendChild(chips); }
+        if (voteExtras.childNodes.length) frame.appendChild(voteExtras);
+        if (hasFestival) {
+          frame.appendChild(el('button', {
+            class: 'prio-btn', text: '🏆 Résultats',
+            attrs: { title: 'Coups de cœur ❤️ et envies — podium, par ami, par jour' },
+            on: { click: () => openFestivalResults(_bp.id) },
+          }));
+        }
+        board.appendChild(frame);
+      }
+    }
   }
 
   const { scope: sScope, q: sQ } = parseSearch();
@@ -7060,30 +7118,53 @@ function renderBoard() {
     return;
   }
 
+  // [ADD-BAR-V2] variante A rétractable : rangée 1 (titre + Détails + Ajouter) toujours visible ;
+  // rangée 2 repliable (Quand = plage due_date→due_end + heure, Priorité en boutons, Récurrence,
+  // Dossier), état mémorisé localStorage. POST /api/memos existant (due_end/due_time déjà gérés).
   const addBar = el('div', { attrs: { id: 'memo-add-bar' } });
-  const txt = el('input', { attrs: { type: 'text', placeholder: '+ Titre du nouveau mémo… (Entrée)' } });
-  const dateIn = el('input', { attrs: { type: 'date', title: 'Échéance (optionnelle)' } });
+  // — rangée 1 —
+  const row1 = el('div', { class: 'mab-row1' });
+  const txt = el('input', { attrs: { type: 'text', placeholder: '+ Titre du nouveau mémo…' } });
+  const detailsBtn = el('button', { class: 'prio-btn mab-details-btn', attrs: { type: 'button', title: 'Afficher/masquer date, priorité, récurrence, dossier' } });
+  const addBtn = el('button', { class: 'primary', text: 'Ajouter' });
+  row1.append(txt, detailsBtn, addBtn);
+  // — rangée 2 (repliable) —
+  const details = el('div', { class: 'mab-row2', attrs: { id: 'memo-add-details' } });
+  // Quand : plage début → fin + heure
+  const whenGroup = el('div', { class: 'mab-group' });
+  whenGroup.appendChild(el('span', { class: 'mab-lbl', text: 'Quand' }));
+  const dateIn = el('input', { attrs: { type: 'date', title: 'Date de début (optionnelle)' } });
+  const endIn = el('input', { attrs: { type: 'date', title: 'Date de fin (plage, optionnelle)' } });
+  const timeIn = el('input', { attrs: { type: 'time', title: 'Heure (optionnelle)' } });
+  whenGroup.append(dateIn, el('span', { class: 'mab-arrow', text: '→' }), endIn, timeIn);
+  // Priorité : boutons VISIBLES Aucune / P1..Pn (couleurs conservées)
+  const prioGroup = el('div', { class: 'mab-group' });
+  prioGroup.appendChild(el('span', { class: 'mab-lbl', text: 'Priorité' }));
+  const prioWrap = el('div', { class: 'mab-prios' });
   let addPrio = 0;
-  const prioBtn = el('button', { attrs: { type: 'button', title: 'Priorité — cliquer pour changer' } });
-  const refreshPrioBtn = () => {
-    const p = prioOf(addPrio);
-    prioBtn.textContent = ''; prioBtn.append(icon('flag'), ' ' + (p ? p.name : 'Priorité'));
-    if (p && p.color) {
-      prioBtn.style.background = p.color;
-      prioBtn.style.borderColor = p.color;
-      prioBtn.style.color = textOn(p.color);
-    } else {
-      prioBtn.style.background = '';
-      prioBtn.style.borderColor = '';
-      prioBtn.style.color = '';
-    }
+  const renderPrios = () => {
+    prioWrap.innerHTML = '';
+    const mk = (id, label, color) => {
+      const on = addPrio === id;
+      const style = on ? (color ? `background:${color};border-color:${color};color:${textOn(color)}` : 'background:var(--accent);border-color:var(--accent);color:#10141a') : '';
+      const b = el('button', { class: 'prio-btn', text: label, attrs: { type: 'button', style } });
+      b.addEventListener('click', () => { addPrio = id; renderPrios(); });
+      return b;
+    };
+    prioWrap.appendChild(mk(0, 'Aucune', null));
+    state.priorities.forEach(p => prioWrap.appendChild(mk(p.id, p.name, p.color)));
   };
-  refreshPrioBtn();
-  prioBtn.addEventListener('click', () => {
-    const ids = [0, ...state.priorities.map(p => p.id)];
-    addPrio = ids[(ids.indexOf(addPrio) + 1) % ids.length];
-    refreshPrioBtn();
-  });
+  renderPrios();
+  prioGroup.appendChild(prioWrap);
+  // Récurrence
+  const recurGroup = el('div', { class: 'mab-group' });
+  recurGroup.appendChild(el('span', { class: 'mab-lbl', text: 'Récurrence' }));
+  const recurSel = el('select', { attrs: { title: 'Récurrence (replanifié automatiquement quand coché)' } });
+  RECUR_OPTIONS.forEach(([v, label]) => recurSel.appendChild(el('option', { attrs: { value: v }, text: label })));
+  recurGroup.appendChild(recurSel);
+  // Dossier (pré-sélection du dossier courant conservée)
+  const projGroup = el('div', { class: 'mab-group' });
+  projGroup.appendChild(el('span', { class: 'mab-lbl', text: 'Dossier' }));
   const projSel = el('select', { attrs: { title: 'Projet' } });
   projSel.appendChild(el('option', { attrs: { value: '' }, text: '📥 Inbox' }));
   state.projects.forEach(p => {
@@ -7091,33 +7172,40 @@ function renderBoard() {
     if (state.memoProject === p.id) opt.selected = true;
     projSel.appendChild(opt);
   });
-  const recurSel = el('select', { attrs: { title: 'Récurrence (replanifié automatiquement quand coché)' } });
-  RECUR_OPTIONS.forEach(([v, label]) => recurSel.appendChild(el('option', { attrs: { value: v }, text: label })));
-  const addBtn = el('button', { class: 'primary', text: 'Ajouter' });
+  projGroup.appendChild(projSel);
+  details.append(whenGroup, prioGroup, recurGroup, projGroup);
+  // dépendance de plage : effacer la date de début efface fin + heure (miroir de la garde serveur v24/v18).
+  dateIn.addEventListener('change', () => { if (!dateIn.value) { endIn.value = ''; timeIn.value = ''; } });
+  // repli mémorisé (l'état déplié/replié survit à la création — rafales).
+  const DET_KEY = 'memoAddDetailsOpen';
+  let detOpen = false;
+  try { detOpen = localStorage.getItem(DET_KEY) === '1'; } catch (e) {}
+  const syncDetails = () => { details.style.display = detOpen ? '' : 'none'; detailsBtn.textContent = 'Détails ' + (detOpen ? '⌃' : '⌄'); };
+  syncDetails();
+  detailsBtn.addEventListener('click', () => { detOpen = !detOpen; try { localStorage.setItem(DET_KEY, detOpen ? '1' : '0'); } catch (e) {} syncDetails(); });
   const submit = async () => {
     const title = txt.value.trim();
     if (!title) return;
-    await api('/api/memos', {
-      method: 'POST',
-      body: JSON.stringify({
-        title,
-        due_date: dateIn.value,
-        priority: addPrio,
-        project_id: projSel.value ? Number(projSel.value) : null,
-        recurrence: recurSel.value,
-      }),
-    });
-    txt.value = ''; dateIn.value = ''; addPrio = 0; refreshPrioBtn(); recurSel.value = '';
-    await loadAll();
+    const body = {
+      title,
+      due_date: dateIn.value,
+      priority: addPrio,
+      project_id: projSel.value ? Number(projSel.value) : null,
+      recurrence: recurSel.value,
+    };
+    // [MEMO-DATE-RANGE] due_end exige due_date ET exclusif de la récurrence (garde serveur v24) ;
+    // due_time exige due_date. On n'émet que le valide → jamais de 400 côté écriture.
+    if (dateIn.value) {
+      if (endIn.value && !recurSel.value) body.due_end = endIn.value;
+      if (timeIn.value) body.due_time = timeIn.value;
+    }
+    await api('/api/memos', { method: 'POST', body: JSON.stringify(body) });
+    txt.value = ''; dateIn.value = ''; endIn.value = ''; timeIn.value = ''; addPrio = 0; renderPrios(); recurSel.value = '';
+    await loadAll();  // état déplié/replié inchangé (rafales)
   };
   txt.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
   addBtn.addEventListener('click', submit);
-  addBar.appendChild(txt);
-  addBar.appendChild(dateIn);
-  addBar.appendChild(prioBtn);
-  addBar.appendChild(projSel);
-  addBar.appendChild(recurSel);
-  addBar.appendChild(addBtn);
+  addBar.append(row1, details);
   board.appendChild(addBar);
 
   // [MEMO-JUMP-VIEW] barre « Aller en bas » juste sous la barre d'ajout, au-dessus des sections.
