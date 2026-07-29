@@ -1560,7 +1560,7 @@ function hubDatedPoints() {
   return focusedMemos().filter(m => m.due_date).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
     title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || MEMO_EMPTY_LABEL),
-    due_date: m.due_date, due_time: m.due_time || '',
+    due_date: m.due_date, due_end: m.due_end || '', due_time: m.due_time || '',  // [MEMO-DATE-RANGE]
     lat: (m.location && typeof m.location.lat === 'number') ? m.location.lat : null,
     lng: (m.location && typeof m.location.lat === 'number') ? m.location.lng : null,
     trip: hubTripOf(m.project_id),

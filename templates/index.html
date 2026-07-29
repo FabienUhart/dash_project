@@ -1379,6 +1379,12 @@ dialog .actions {
 .me-context { margin-bottom: 0.75rem; padding: 0.5rem 0.6rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 0.3rem; }
 .me-context:empty { display: none; }
 .me-crumb { display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem; font-size: 0.82rem; color: var(--text); min-width: 0; }
+/* [MEMO-CARD-CLICK] bouton discret « 📍 Voir dans la liste » (gabarit .prio-btn, plus petit). */
+.me-see-list { font-size: 0.72rem; padding: 0.2rem 0.45rem; white-space: nowrap; }
+/* [MEMO-CARD-CLICK] flash de surbrillance ~1 s après auto-scroll (anneau accent qui s'estompe). */
+@keyframes memoFlash { 0% { box-shadow: 0 0 0 2px var(--accent); background: var(--panel-2); } 100% { box-shadow: 0 0 0 2px transparent; } }
+.task.memo-flash { animation: memoFlash 1s ease-out; }
+@media (prefers-reduced-motion: reduce) { .task.memo-flash { animation-duration: 0.01s; box-shadow: 0 0 0 2px var(--accent); } }
 .me-crumb .me-sep { color: var(--muted); }
 .me-crumb .me-crumb-node { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me-meta { font-size: 0.78rem; color: var(--muted); }
@@ -3990,7 +3996,7 @@ function boardDatedPoints() {
   }).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
     title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || MEMO_EMPTY_LABEL),
-    due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
+    due_date: m.due_date, due_end: m.due_end || '', due_time: m.due_time || '', end_time: m.end_time || '',  // [MEMO-DATE-RANGE]/[FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: resolveTripLocal(projById, m.project_id),
     imgUrl: imgSize((m.images && m.images.length) ? '/uploads/' + m.images[0] : '', 't'), // [MAP-TRIP-POLISH]
@@ -5620,6 +5626,12 @@ function renderMeContext(memo) {
       crumb.appendChild(node);
     });
   }
+  // [MEMO-CARD-CLICK] « 📍 Voir dans la liste » : ferme l'éditeur, navigue vers la vue Mémos du dossier
+  // du mémo (globale si Inbox) puis auto-scroll + flash (drill-down inverse, à la demande).
+  const seeBtn = el('button', { class: 'prio-btn me-see-list', text: '📍 Voir dans la liste',
+    attrs: { type: 'button', title: 'Aller à ce mémo dans la liste', style: 'margin-left:auto' } });
+  seeBtn.addEventListener('click', () => memoSeeInList(memo));
+  crumb.appendChild(seeBtn);
   box.appendChild(crumb);
   // Ligne méta « 🕒 Créé par @… le … à hh:mm » (masquée si pas de date de création)
   if (memo.created_at) {
@@ -5631,6 +5643,42 @@ function renderMeContext(memo) {
       box.appendChild(el('div', { class: 'me-meta', text: `🕒 Créé par @${who} le ${date} à ${time}` }));
     }
   }
+}
+
+// [MEMO-CARD-CLICK] helper RÉUTILISABLE (recherche/notifs à venir) : trouve la card du mémo dans la
+// liste rendue, déplie une section repliée (Terminés/Historique dans un <details>), scroll doux
+// centré + flash de surbrillance ~1 s (CSS `.memo-flash`, pas de GSAP). Renvoie true si trouvée.
+function scrollToMemo(id) {
+  const board = document.getElementById('memo-board');
+  if (!board) return false;
+  const card = board.querySelector('.task[data-memo-id="' + id + '"]');
+  if (!card) return false;
+  let det = card.closest('details');
+  while (det) { det.open = true; det = det.parentElement ? det.parentElement.closest('details') : null; }
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.remove('memo-flash');
+  void card.offsetWidth;               // reflow → relance l'animation même en rafale
+  card.classList.add('memo-flash');
+  setTimeout(() => card.classList.remove('memo-flash'), 1100);
+  return true;
+}
+
+// [MEMO-CARD-CLICK] « Voir dans la liste » : ferme l'éditeur, navigue vers le board du dossier du mémo
+// (globale si Inbox/sans dossier), filtre « all » pour garantir la présence, puis scroll+flash.
+function memoSeeInList(memo) {
+  memoEditDialog.close();
+  const m = state.memos.find(x => x.id === memo.id) || memo;
+  state.view = 'memos';
+  state.memoProject = m.project_id || 'all';
+  state.memoFilter = 'all';
+  renderAll();
+  setTimeout(() => {
+    if (!scrollToMemo(m.id)) {  // filet : mémo masqué par un sous-projet caché → vue globale
+      state.memoProject = 'all';
+      renderAll();
+      setTimeout(() => scrollToMemo(m.id), 80);
+    }
+  }, 80);
 }
 
 // [ATTACHMENTS-QUICKVIEW] Pop-in de consultation des fichiers depuis la card (owner).
@@ -7412,7 +7460,7 @@ function renderMemos() {
   pending.forEach((memo) => {
     const note = el('div', {
       class: 'memo-note',
-      attrs: { 'data-memo-id': memo.id, title: 'Ouvrir dans la vue Mémos' },
+      attrs: { 'data-memo-id': memo.id, title: 'Ouvrir le mémo' },
     });
     const prio = prioOf(memo.priority);
     if (prio && prio.color) note.style.borderLeftColor = prio.color;
@@ -7426,10 +7474,10 @@ function renderMemos() {
     if ((memo.assignees || []).length) extras.push('@' + memo.assignees.map(a => a.replace(/@.*$/, '')).join(' @'));
     if (memo.guest_editor) extras.push('👤 ' + memo.guest_editor.replace(/\s*<[^>]*>/, ''));
     if (extras.length) note.appendChild(el('span', { class: 'mini-due ' + (due ? due.cls : 'due-future'), text: extras.join('  ') }));
+    // [MEMO-CARD-CLICK] clic = ouvrir DIRECTEMENT l'éditeur, sans changer de vue (fermer = revenir
+    // où on était). Repli sur l'ancien comportement si l'éditeur Quill n'est pas prêt.
     note.addEventListener('click', () => {
-      state.view = 'memos';
-      expandedMemos.add(memo.id);
-      renderAll();
+      if (openMemoEditor(memo) === false) { state.view = 'memos'; expandedMemos.add(memo.id); renderAll(); }
     });
     wrap.appendChild(note);
   });
