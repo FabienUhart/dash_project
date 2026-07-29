@@ -30,7 +30,7 @@
 <style>
 :root {
   --bg: #0e1217; --panel: #161d25; --panel-2: #212b35; --text: #e8eef5;
-  --muted: #9aa7b4; --accent: #4fc3f7; --accent-2: #38aee0; --green: #4caf50; --border: #283340;
+  --muted: #9aa7b4; --accent: #4fc3f7; --accent-2: #38aee0; --green: #4caf50; --border: #283340; --border-strong: #3a4655;
   --danger: #ff8a80; --warn: #ffb74d; --guest: #b39ddb; --assignee: #80cbc4;
   --bg-elev: #1c2530; --radius: 10px; --radius-sm: 6px;
   --shadow: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
@@ -40,7 +40,7 @@
 }
 :root[data-theme="light"] {
   --bg: #eef1f5; --panel: #ffffff; --panel-2: #eef2f7; --text: #1b2531;
-  --muted: #5c6b7a; --accent: #0288d1; --accent-2: #0277bd; --green: #2e7d32; --border: #d3dce5;
+  --muted: #5c6b7a; --accent: #0288d1; --accent-2: #0277bd; --green: #2e7d32; --border: #d3dce5; --border-strong: #b3c0cf;
   --danger: #e53935; --warn: #ef6c00; --guest: #6a3fb5; --assignee: #00897b;
   --bg-elev: #f4f7fa;
   --shadow: 0 1px 2px rgba(16,30,50,0.08), 0 2px 8px rgba(16,30,50,0.06);
@@ -1667,16 +1667,26 @@ function renderShareVotesBar() {
   if (!proj) return;
   const votes = proj.votes || [];
   if (shareVoteCreate) { host.appendChild(shareVoteCreateBar(proj)); return; }
-  if (!proj.vote_enabled && !votes.length && !proj.can_create_vote) return;
-  const wrap = el('div', ''); wrap.style.cssText = 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0 0 0.7rem;overflow-x:auto';
-  if (proj.vote_enabled) wrap.appendChild(shareChip('🗳 (dossier)', shareSelectedVoteId === null, () => { shareSelectedVoteId = null; render(); }));
+  // [VOTES-FRAME] festival « Résultats » relocalisé dans l'encart (a quitté la barre d'actions).
+  const _fest = (DATA.kind === 'project') && shareScopeMemos(proj.id).some(m => m.due_date && m.due_time);
+  if (!proj.vote_enabled && !votes.length && !proj.can_create_vote && !_fest) return;
+  // [VOTES-FRAME] encart légendé « 🗳 Votes » : chips de scrutins (nom + nb voix), vote-dossier, création
+  // (soumise à can_create_vote, inchangé), Résultats. Monochrome au repos (chips .prio-btn), accent = sélection.
+  const frame = voteFrame();
+  if (proj.vote_enabled) frame.appendChild(shareChip('🗳 (dossier)', shareSelectedVoteId === null, () => { shareSelectedVoteId = null; render(); }));
   votes.forEach(v => {
-    const st = v.vote_state === 'closed' ? ' · clos' : (v.vote_deadline ? ' · clôt' : '');
-    wrap.appendChild(shareChip('🗳 ' + v.name + st, shareSelectedVoteId === v.id, () => { shareSelectedVoteId = v.id; render(); }));
-    if (v.mine) { const g = el('button', 'prio-btn', '⚙'); g.type = 'button'; g.title = 'Gérer ce vote'; g.addEventListener('click', () => openShareVoteManage(v)); wrap.appendChild(g); }
+    const n = voteNamedCount(v);
+    const st = v.vote_state === 'closed' ? ' · clos' : '';
+    const active = shareSelectedVoteId === v.id;
+    // [VOTES-FRAME fix] TOGGLE + ✕ : re-cliquer le scrutin actif désélectionne (retour vue normale).
+    const c = shareChip('🗳 ' + v.name + ' · ' + n + ' voix' + st, active, () => { shareSelectedVoteId = active ? null : v.id; render(); });
+    if (active) { const x = el('span', '', '✕'); x.title = 'Désélectionner'; x.style.cssText = 'margin-left:0.4rem;font-weight:700;opacity:0.8'; c.appendChild(x); }
+    frame.appendChild(c);
+    if (v.mine) { const g = el('button', 'prio-btn', '⚙'); g.type = 'button'; g.title = 'Gérer ce vote'; g.addEventListener('click', () => openShareVoteManage(v)); frame.appendChild(g); }
   });
-  if (proj.can_create_vote) wrap.appendChild(shareChip('➕ Créer un vote', false, () => { shareVoteCreate = { name: '', mode: 'single', deadline: '', eventDate: '', sel: new Set(), projectId: proj.id }; shareSelectedVoteId = null; render(); }));
-  host.appendChild(wrap);
+  if (proj.can_create_vote) frame.appendChild(shareChip('➕ Créer un vote', false, () => { shareVoteCreate = { name: '', mode: 'single', deadline: '', eventDate: '', sel: new Set(), projectId: proj.id }; shareSelectedVoteId = null; render(); }));
+  if (_fest) { const r = el('button', 'prio-btn', '🏆 Résultats'); r.type = 'button'; r.title = 'Coups de cœur ❤️ et envies — podium, par ami, par jour'; r.addEventListener('click', openShareFestivalResults); frame.appendChild(r); }
+  host.appendChild(frame);
 }
 function shareVoteCreateBar(proj) {
   const bar = el('div', ''); bar.style.cssText = 'display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin:0 0 0.7rem;padding:0.5rem 0.6rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px';
@@ -2314,90 +2324,76 @@ function renderTiles() {
     tile.addEventListener('click', () => { FILTER = key; render(); });
     tiles.appendChild(tile);
   });
-  const located = ms.filter(m => m.location).length
-    + (DATA.projects || []).filter(p => p.location).length;
-  if (located > 0) {
-    const tile = el('div', 'tile');
-    tile.appendChild(el('span', 'tn', String(located)));
-    const l = el('span', 'tl'); l.append(shareIcon('map'), ' Carte');
-    l.style.color = '#4db6ac';
-    tile.appendChild(l);
-    tile.addEventListener('click', () => openShareMap());
-    tiles.appendChild(tile);
-  }
-  // [FESTIVAL-VOTE] Tuile « 🏆 Résultats » — générique : dès qu'un mémo-passage existe.
-  if (DATA.kind === 'project' && ms.some(m => m.due_date && m.due_time)) {
-    const tile = el('div', 'tile');
-    const l = el('span', 'tl', '🏆 Résultats'); l.style.color = '#e5a00d';
-    tile.appendChild(l);
-    tile.title = 'Coups de cœur ❤️ et envies — podium, par ami, par jour';
-    tile.addEventListener('click', openShareFestivalResults);
-    tiles.appendChild(tile);
-  }
-  // [PHOTO-TEMPLATE-MEMO] Tuile « 📷 Photos » pour un partage de projet (charge à l'ouverture).
+  // [HEADER-TOOLBAR] les tuiles d'ACTION (Carte/Résultats/Photos/Fichiers/Télécharger/Agenda)
+  // passent dans une barre unifiée bordée (gabarit hdr-btn, icônes trait, pastilles, bascule ‹ ›),
+  // insérée AU-DESSUS des tuiles de filtre. Les tuiles de FILTRE (stats + Corbeille) restent #tiles.
+  const prevAct = document.getElementById('board-actions'); if (prevAct) prevAct.remove();
+  const tb = hdrToolbar();
+  let tbN = 0;
+  // [PHOTO-TEMPLATE-MEMO] « Photos » pour un partage de projet (charge à l'ouverture).
   if ((DATA.projects || []).length) {
-    const tile = el('div', 'tile');
-    const l = el('span', 'tl', '📷 Photos');
-    l.style.color = '#b08968';
-    tile.appendChild(l);
-    tile.addEventListener('click', openSharePhotos);
-    tiles.appendChild(tile);
+    tb.add({ icon: 'camera', label: 'Photos',
+      title: 'Parcourir les photos du projet (lieux, dates EXIF)', onClick: openSharePhotos }); tbN++;
   }
-  // [FILES-VIEW] Tuile « 📁 Fichiers » : retrouver tous les fichiers du dossier partagé.
+  // [FILES-VIEW] « Fichiers » : retrouver tous les fichiers du dossier partagé.
   if (DATA.kind === 'project') {
     const fpid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
     if (fpid) {
-      const tile = el('div', 'tile');
-      const l = el('span', 'tl', '📁 Fichiers'); l.style.color = '#7986cb';
-      tile.appendChild(l);
-      tile.title = 'Retrouver tous les fichiers du dossier et de ses sous-dossiers';
-      tile.addEventListener('click', () => openShareFiles(fpid));
-      tiles.appendChild(tile);
+      tb.add({ icon: 'folder', label: 'Fichiers',
+        title: 'Retrouver tous les fichiers du dossier et de ses sous-dossiers',
+        onClick: () => openShareFiles(fpid) }); tbN++;
     }
   }
-  // [PHOTO-BATCH-DOWNLOAD] Tuile « ⤓ Télécharger » : zip des fichiers du dossier partagé.
+  // [PHOTO-BATCH-DOWNLOAD] « Télécharger » : zip des fichiers du dossier partagé.
   if (DATA.kind === 'project') {
     const zpid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
     if (zpid && shareProjectZipCount(zpid, 'all', true) > 0) {
-      const tile = el('div', 'tile');
-      const l = el('span', 'tl', '⤓ Télécharger'); l.style.color = '#b08968';
-      tile.appendChild(l);
-      tile.title = 'Télécharger les fichiers du dossier en .zip';
-      tile.addEventListener('click', () => downloadZipDialog({
-        title: 'Télécharger les fichiers',
-        hasSubprojects: true,
-        count: (scope, subs) => shareProjectZipCount(zpid, scope, subs),
-        buildUrl: (scope, subs) => API + '/project/' + zpid + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0),
-      }));
-      tiles.appendChild(tile);
+      tb.add({ icon: 'download', label: 'Télécharger',
+        title: 'Télécharger les fichiers du dossier en .zip',
+        onClick: () => downloadZipDialog({
+          title: 'Télécharger les fichiers',
+          hasSubprojects: true,
+          count: (scope, subs) => shareProjectZipCount(zpid, scope, subs),
+          buildUrl: (scope, subs) => API + '/project/' + zpid + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0),
+        }) }); tbN++;
     }
   }
-  // [AGENDA-PROJECT] Tuile « 📆 Agenda » : agenda pré-filtré sur le dossier courant
-  // (PFILTER) + descendants ; sur « Tous » = agenda global du partage (comme la sidebar).
+  // [AGENDA-PROJECT] « Agenda » : pré-filtré sur le dossier courant (PFILTER) + descendants ;
+  // sur « Tous » = agenda global du partage (comme la sidebar).
   if (DATA.kind === 'project') {
-    const tile = el('div', 'tile');
-    const l = el('span', 'tl', '📆 Agenda');
-    l.style.color = '#7986cb';
-    tile.appendChild(l);
-    tile.title = PFILTER !== 'all' ? 'Agenda de ce dossier et de ses sous-dossiers' : 'Agenda du partage';
-    tile.addEventListener('click', () => {
-      shareAgendaFilter = PFILTER !== 'all' ? PFILTER : null;
-      if (shareAgendaFilter != null) {
-        // [AGENDA-SMART-MONTH] atterrir sur un mois utile du dossier filtré.
-        const set = new Set([shareAgendaFilter, ...projDescendants(shareAgendaFilter)]);
-        const start = agendaStartMonth(
-          (DATA.memos || []).filter(m => !m.done && m.due_date && set.has(m.project_id)),
-          agendaTodayIso()
-        );
-        agendaYM = { y: start.y, m: start.m };
-        agendaSelDay = start.day;
-      } else {
-        agendaYM = null; agendaSelDay = null; // global = mois courant
-      }
-      GVIEW = 'agenda';
-      render();
-    });
-    tiles.appendChild(tile);
+    tb.add({ icon: 'calendar', label: 'Agenda',
+      title: PFILTER !== 'all' ? 'Agenda de ce dossier et de ses sous-dossiers' : 'Agenda du partage',
+      onClick: () => {
+        shareAgendaFilter = PFILTER !== 'all' ? PFILTER : null;
+        if (shareAgendaFilter != null) {
+          const set = new Set([shareAgendaFilter, ...projDescendants(shareAgendaFilter)]);
+          const start = agendaStartMonth(
+            (DATA.memos || []).filter(m => !m.done && m.due_date && set.has(m.project_id)),
+            agendaTodayIso()
+          );
+          agendaYM = { y: start.y, m: start.m };
+          agendaSelDay = start.day;
+        } else {
+          agendaYM = null; agendaSelDay = null; // global = mois courant
+        }
+        GVIEW = 'agenda';
+        render();
+      } }); tbN++;
+  }
+  // [HEADER-TOOLBAR v3] séparateur | groupe carte. [VOTES-FRAME] « Résultats » a quitté la barre →
+  // relocalisé dans l'encart Votes (renderShareVotesBar).
+  const _located = ms.filter(m => m.location).length
+    + (DATA.projects || []).filter(p => p.location).length;
+  if (tbN && _located > 0) tb.sep();
+  if (_located > 0) {
+    tb.add({ icon: 'map', label: 'Carte', count: _located,
+      title: 'Voir les points géolocalisés sur une carte', onClick: () => openShareMap() }); tbN++;
+  }
+  if (tbN) {
+    tb.end();
+    const actions = el('div', { attrs: { id: 'board-actions', style: 'margin:0 0 0.6rem' } });
+    actions.appendChild(tb.bar);
+    tiles.parentNode.insertBefore(actions, tiles);
   }
   const tn = (DATA.trash || []).length;
   if (DATA.can_edit && tn > 0) {

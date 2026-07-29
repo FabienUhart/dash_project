@@ -34,14 +34,14 @@
 <style>
 :root {
   --bg: #0e1217; --panel: #161d25; --panel-2: #212b35; --text: #e8eef5;
-  --muted: #9aa7b4; --accent: #4fc3f7; --green: #4caf50; --border: #283340;
+  --muted: #9aa7b4; --accent: #4fc3f7; --green: #4caf50; --border: #283340; --border-strong: #3a4655;
   --danger: #ff8a80; --warn: #ffb74d; --assignee: #80cbc4; --gray: #6b7785;
   --radius: 10px; --shadow: 0 1px 2px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.18);
   --shadow-lg: 0 8px 28px rgba(0,0,0,0.4);
 }
 :root[data-theme="light"] {
   --bg: #eef1f5; --panel: #ffffff; --panel-2: #eef2f7; --text: #1b2531;
-  --muted: #5c6b7a; --accent: #0288d1; --green: #2e7d32; --border: #d3dce5; --danger: #e53935;
+  --muted: #5c6b7a; --accent: #0288d1; --green: #2e7d32; --border: #d3dce5; --border-strong: #b3c0cf; --danger: #e53935;
   --warn: #ef6c00; --assignee: #00897b; --gray: #97a4b2;
   --shadow: 0 1px 2px rgba(16,30,50,0.08), 0 2px 8px rgba(16,30,50,0.06);
   --shadow-lg: 0 10px 30px rgba(16,30,50,0.18);
@@ -890,15 +890,22 @@ function hubVotesBar() {
   if (hubVoteCreate) return hubVoteCreateBar(proj);
   if (!proj.vote_enabled && !votes.length && !proj.can_create_vote) return null;
   const chip = (label, active, on) => { const b = el('button', { class: 'prio-btn', text: label, attrs: { type: 'button', style: active ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' } }); b.addEventListener('click', on); return b; };
-  const wrap = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin:0.4rem 0 0.6rem;overflow-x:auto' } });
-  if (proj.vote_enabled) wrap.appendChild(chip('🗳 (dossier)', hubSelectedVoteId === null, () => { hubSelectedVoteId = null; render(); }));
+  // [VOTES-FRAME] encart légendé « 🗳 Votes » : chips de scrutins (nom + nb voix) + vote-dossier + création
+  // (soumise à can_create_vote, inchangé). Hub n'a pas de « Résultats » festival à relocaliser.
+  const frame = voteFrame();
+  if (proj.vote_enabled) frame.appendChild(chip('🗳 (dossier)', hubSelectedVoteId === null, () => { hubSelectedVoteId = null; render(); }));
   votes.forEach(v => {
-    const st = v.vote_state === 'closed' ? ' · clos' : (v.vote_deadline ? ' · clôt' : '');
-    wrap.appendChild(chip('🗳 ' + v.name + st, hubSelectedVoteId === v.id, () => { hubSelectedVoteId = v.id; render(); }));
-    if (v.mine) { const g = el('button', { class: 'prio-btn', text: '⚙', attrs: { type: 'button', title: 'Gérer ce vote' } }); g.addEventListener('click', () => openHubVoteManage(v)); wrap.appendChild(g); }
+    const n = voteNamedCount(v);
+    const st = v.vote_state === 'closed' ? ' · clos' : '';
+    const active = hubSelectedVoteId === v.id;
+    // [VOTES-FRAME fix] TOGGLE + ✕ : re-cliquer le scrutin actif désélectionne (retour vue normale).
+    const c = chip('🗳 ' + v.name + ' · ' + n + ' voix' + st, active, () => { hubSelectedVoteId = active ? null : v.id; render(); });
+    if (active) c.appendChild(el('span', { text: '✕', attrs: { title: 'Désélectionner', style: 'margin-left:0.4rem;font-weight:700;opacity:0.8' } }));
+    frame.appendChild(c);
+    if (v.mine) { const g = el('button', { class: 'prio-btn', text: '⚙', attrs: { type: 'button', title: 'Gérer ce vote' } }); g.addEventListener('click', () => openHubVoteManage(v)); frame.appendChild(g); }
   });
-  if (proj.can_create_vote) wrap.appendChild(chip('➕ Créer un vote', false, () => { hubVoteCreate = { name: '', mode: 'single', deadline: '', eventDate: '', sel: new Set(), projectId: proj.id, token: proj.share_token }; hubSelectedVoteId = null; render(); }));
-  return wrap;
+  if (proj.can_create_vote) frame.appendChild(chip('➕ Créer un vote', false, () => { hubVoteCreate = { name: '', mode: 'single', deadline: '', eventDate: '', sel: new Set(), projectId: proj.id, token: proj.share_token }; hubSelectedVoteId = null; render(); }));
+  return frame;
 }
 function hubVoteCreateBar(proj) {
   const bar = el('div', { attrs: { style: 'display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin:0.4rem 0 0.6rem;padding:0.5rem 0.6rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px' } });
@@ -1006,10 +1013,13 @@ function renderBoard() {
         class: 'prio-btn', text: voteStatusLabel(fp),
         attrs: { title: voteDeadlineTitle(fp), style: 'cursor:default' },
       }));
-      hd.appendChild(el('button', {
-        class: 'btn', text: '📆 Agenda',
-        attrs: { title: 'Agenda de ce dossier et de ses sous-dossiers', style: 'margin-left:auto' },
-        on: { click: () => {
+      // [HEADER-TOOLBAR] actions du dossier dans une barre unifiée (gabarit hdr-btn, icônes trait,
+      // bascule ‹ ›). La carte reste sur la barre globale (#btn-map). Poussée à droite (margin-left:auto).
+      const tb = hdrToolbar();
+      tb.bar.style.marginLeft = 'auto';
+      tb.add({ icon: 'calendar', label: 'Agenda',
+        title: 'Agenda de ce dossier et de ses sous-dossiers',
+        onClick: () => {
           hubAgendaFilter = FOCUS;
           // [AGENDA-SMART-MONTH] atterrir sur un mois utile du dossier filtré.
           const set = new Set([FOCUS, ...projDescendants(FOCUS)]);
@@ -1022,29 +1032,26 @@ function renderBoard() {
           VIEW = 'agenda';
           syncViewBtns();
           render();
-        } },
-      }));
+        } });
       // [FILES-VIEW] Vue « Fichiers » du dossier (agrégation sous-arbre, source cliquable).
       if (fp.share_token) {
-        hd.appendChild(el('button', {
-          class: 'btn', text: '📁 Fichiers',
-          attrs: { title: 'Retrouver tous les fichiers du dossier et de ses sous-dossiers' },
-          on: { click: () => openHubFiles(fp) },
-        }));
+        tb.add({ icon: 'folder', label: 'Fichiers',
+          title: 'Retrouver tous les fichiers du dossier et de ses sous-dossiers',
+          onClick: () => openHubFiles(fp) });
       }
       // [PHOTO-BATCH-DOWNLOAD] zip des fichiers du dossier (+ sous-dossiers), scopé au token.
       if (fp.share_token && hubProjectZipCount(FOCUS, 'all', true) > 0) {
-        hd.appendChild(el('button', {
-          class: 'btn', text: '⤓ Télécharger',
-          attrs: { title: 'Télécharger les fichiers du dossier en .zip' },
-          on: { click: () => downloadZipDialog({
+        tb.add({ icon: 'download', label: 'Télécharger',
+          title: 'Télécharger les fichiers du dossier en .zip',
+          onClick: () => downloadZipDialog({
             title: 'Télécharger les fichiers',
             hasSubprojects: true,
             count: (scope, subs) => hubProjectZipCount(FOCUS, scope, subs),
             buildUrl: (scope, subs) => '/share/' + fp.share_token + '/project/' + FOCUS + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0),
-          }) },
-        }));
+          }) });
       }
+      tb.end();
+      hd.appendChild(tb.bar);
       board.appendChild(hd);
       // [FOLDER-ATTACHMENTS] fichiers rattachés au dossier courant (sous l'en-tête).
       if ((fp.attachments || []).length || fp.can_add) {  // [GUEST-ROLES] PJ dossier = contributeur
