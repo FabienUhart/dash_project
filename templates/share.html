@@ -2090,7 +2090,7 @@ function shareDatedPoints() {
   return scopedMemos().filter(m => m.due_date).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
     title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripTags(m.content).slice(0, 40) || MEMO_EMPTY_LABEL),
-    due_date: m.due_date, due_time: m.due_time || '', end_time: m.end_time || '',  // [FESTIVAL-VOTE nuit]
+    due_date: m.due_date, due_end: m.due_end || '', due_time: m.due_time || '', end_time: m.end_time || '',  // [MEMO-DATE-RANGE]/[FESTIVAL-VOTE nuit]
     lat: m.location ? m.location.lat : null, lng: m.location ? m.location.lng : null,
     trip: shareTripOf(m.project_id),
     imgUrl: imgSize((m.images && m.images.length) ? API + '/image/' + m.images[0] : '', 't'), // [MAP-TRIP-POLISH]

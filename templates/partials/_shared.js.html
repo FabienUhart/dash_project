@@ -140,6 +140,40 @@ function memoDays(m) {
   return out;
 }
 
+// [TIMELINE-CALENDAR-DAYS] « Jour N » CALENDAIRES d'un voyage — une seule source de vérité (D5),
+// consommée par les 3 pages. Compte en UTC (diff de dates ISO), jamais d'objet Date local à minuit
+// (piège DST). Plage = min(due_date) → max(due_end||due_date) des mémos datés du périmètre (D1/D7).
+function isoDayDiff(a, b) {  // nb de jours calendaires de a à b (b>=a), via Date.UTC (anti-DST)
+  const pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000);
+}
+function tripRange(memos) {  // {start, end} ISO, ou null si aucun mémo daté
+  let start = null, end = null;
+  (memos || []).forEach(m => {
+    if (!m || !m.due_date) return;
+    if (start === null || m.due_date < start) start = m.due_date;
+    const e = memoDueEndDay(m);
+    if (end === null || e > end) end = e;
+  });
+  return start ? { start, end: (end && end > start) ? end : start } : null;
+}
+function tripDayDate(n, range) {  // date ISO du Jour N (1-based)
+  if (!range || n < 1) return null;
+  const p = range.start.split('-').map(Number);
+  const d = new Date(Date.UTC(p[0], p[1] - 1, p[2])); d.setUTCDate(d.getUTCDate() + (n - 1));
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+}
+function tripDayIndex(iso, range) {  // Jour N (1-based) d'une date ; null hors plage
+  if (!range || !iso || iso < range.start || iso > range.end) return null;
+  return isoDayDiff(range.start, iso) + 1;
+}
+function tripDays(range) {  // liste CONTINUE des jours de la plage (garde-fou 400 j)
+  if (!range) return [];
+  const n = Math.min(isoDayDiff(range.start, range.end) + 1, 400);
+  const out = []; for (let i = 1; i <= n; i++) out.push(tripDayDate(i, range));
+  return out;
+}
+
 // [FESTIVAL-DATES] Un passage d'APRÈS-MINUIT (due_time < 12:00) AVEC une heure de fin est une
 // séance de NUIT : en BASE il porte sa VRAIE date (le lendemain), mais à l'AFFICHAGE il compte
 // avec la JOURNÉE DE FESTIVAL de la veille (comme le programme officiel). Gardé par la présence
@@ -1424,17 +1458,22 @@ function runMapDialog(cfg) {
     // clic = faire défiler la frise jusqu'à la première étape du jour.
     // [FESTIVAL-DATES] journée de festival ; [MEMO-DATE-RANGE] un séjour couvre plusieurs jours →
     // chaque jour de sa plage a son chip « Jour N » (l'hôtel Osaka apparaît Jours 1..4).
-    const days = (() => {
-      const set = new Set();
-      dated.forEach(p => ((p.due_end && p.due_date && p.due_end > p.due_date) ? memoDays(p) : [festivalDay(p)]).forEach(d => set.add(d)));
-      return [...set].sort();
-    })();
+    // [TIMELINE-CALENDAR-DAYS] Deux modes de numérotation des jours de la frise :
+    //  • VOYAGE (dossier is_trip, tous les points datés `trip`) → « Jour N » CALENDAIRE : plage
+    //    continue min(due_date)→max(due_end) (D1), les jours SANS mémo existent en chips grisées (D2),
+    //    ≥ 3 jours vides consécutifs condensés en « Jours X–Y · rien » (D3). Recalcul immédiat (D4).
+    //  • autres (festival…) → comportement historique : « Jour N » = N-ième DATE DISTINCTE portant un mémo.
+    // Un mémo à plage couvre chacun de ses jours ([MEMO-DATE-RANGE], memoDays) → l'hôtel 3→6 est aux Jours 1-4.
+    const memoDaySet = new Set();
+    dated.forEach(p => ((p.due_end && p.due_date && p.due_end > p.due_date) ? memoDays(p) : [festivalDay(p)]).forEach(d => memoDaySet.add(d)));
+    const tripMode = dated.length > 0 && dated.every(p => p.trip);
+    const range = tripMode ? tripRange(dated) : null;
+    const days = (tripMode && range) ? tripDays(range) : [...memoDaySet].sort();
     const firstStepOfDay = {};
-    if (tlActiveDay && !days.includes(tlActiveDay)) tlActiveDay = null; // jour disparu (focus)
+    if (tlActiveDay && !days.includes(tlActiveDay)) tlActiveDay = null; // jour disparu (focus/renumérotation)
     if (days.length > 1) {
       const chipsRow = el('div', { attrs: { style: 'display:flex;gap:0.25rem;flex-wrap:wrap;margin:0 0.2rem 0.3rem' } });
-      // [MAP-DAYCHIP-ALL] chip « 🌍 Tous » en tête : actif quand aucun jour choisi
-      // (état par défaut à l'ouverture) ; clic = réaffiche tout + recadre sur l'ensemble.
+      // [MAP-DAYCHIP-ALL] chip « 🌍 Tous » en tête : actif quand aucun jour choisi ; clic = réaffiche tout.
       const allActive = !tlActiveDay;
       const allStyle = allActive ? ';background:' + ACCENT + ';border-color:' + ACCENT + ';color:#10141a;font-weight:700' : '';
       chipsRow.appendChild(el('button', {
@@ -1442,43 +1481,77 @@ function runMapDialog(cfg) {
         attrs: { type: 'button', title: allActive ? 'Tous les jours affichés' : 'Réafficher tous les jours et recadrer la carte sur l\'ensemble', style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + allStyle },
         on: { click: () => applyDay(null) },
       }));
-      days.forEach((d, i) => {
+      // chip « Jour N » (n = index calendaire 1-based ; en mode voyage = tripDayIndex, gratuit car `days` continu).
+      const dayChip = (d, n, hasMemo) => {
         const lbl = new Date(d + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-        // [MAP-DAYCHIP-ACTIVE] chip ACTIF = fond accent (façon .prio-btn sélectionné) ;
-        // le chip du jour courant garde son accent discret, l'actif prime.
         const isActive = tlActiveDay === d;
-        const chipStyle = isActive
-          ? ';background:' + ACCENT + ';border-color:' + ACCENT + ';color:#10141a;font-weight:700'
-          : (d === tlToday ? ';border-color:' + ACCENT + ';color:' + ACCENT : '');
-        chipsRow.appendChild(el('button', {
-          class: 'prio-btn', text: (isActive ? '✓ ' : '') + 'Jour ' + (i + 1),
-          attrs: { type: 'button', title: lbl + (isActive ? ' — cliquer pour désélectionner' : ' — mettre ce jour en avant dans la frise'), style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + chipStyle },
-          // [MAP-DAYCHIP-ALL] chemin unique : re-clic sur le jour actif = applyDay(null)
-          // → même recadrage global que « 🌍 Tous » (cohérence des deux chemins).
+        let style = 'padding:0.05rem 0.4rem;font-size:0.66rem';
+        if (isActive) style += ';background:' + ACCENT + ';border-color:' + ACCENT + ';color:#10141a;font-weight:700';
+        else if (!hasMemo) style += ';opacity:0.5;color:var(--muted);border-style:dashed';   // [D2] jour vide discret
+        else if (d === tlToday) style += ';border-color:' + ACCENT + ';color:' + ACCENT;
+        return el('button', {
+          class: 'prio-btn', text: (isActive ? '✓ ' : '') + 'Jour ' + n,
+          attrs: { type: 'button', title: lbl + (hasMemo ? '' : ' — aucun mémo') + (isActive ? ' — cliquer pour désélectionner' : ' — mettre ce jour en avant'), style },
           on: { click: () => applyDay(isActive ? null : d) },
-        }));
-      });
+        });
+      };
+      if (tripMode) {
+        let i = 0;
+        while (i < days.length) {
+          if (memoDaySet.has(days[i])) { chipsRow.appendChild(dayChip(days[i], i + 1, true)); i++; continue; }
+          let j = i; while (j < days.length && !memoDaySet.has(days[j])) j++;   // run de jours vides [i, j[
+          if (j - i >= 3) {
+            // [D3] condensation : une seule chip « Jours X–Y · rien » (non-action V1, cursor default).
+            chipsRow.appendChild(el('span', {
+              class: 'prio-btn', text: 'Jours ' + (i + 1) + '–' + j + ' · rien',
+              attrs: { title: 'Aucun mémo du Jour ' + (i + 1) + ' au Jour ' + j, style: 'padding:0.05rem 0.4rem;font-size:0.66rem;opacity:0.5;color:var(--muted);border-style:dashed;cursor:default' },
+            }));
+          } else {
+            for (let k = i; k < j; k++) chipsRow.appendChild(dayChip(days[k], k + 1, false));  // [D2] 1-2 jours vides = chips grises
+          }
+          i = j;
+        }
+      } else {
+        days.forEach((d, i) => chipsRow.appendChild(dayChip(d, i + 1, true)));
+      }
       tlEl.appendChild(chipsRow);
     }
     let cursorPlaced = false;
     const cursor = () => el('div', {
       attrs: { title: 'Aujourd\'hui', style: 'flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:0.6rem;color:' + ACCENT + ';font-weight:700' },
     }, el('span', { attrs: { style: 'width:2px;flex:1;background:' + ACCENT + ';border-radius:1px' } }), el('span', { text: 'auj.' }));
+    // [TIMELINE-CALENDAR-DAYS/nuits] Dans la frise VOYAGE, un mémo à plage émet une tuile par NUIT :
+    // de due_date à la VEILLE de due_end (Kyoto 6→8 = tuiles les 6 et 7 = 2 nuits). Le jour du due_end
+    // (check-out) n'a pas de tuile dédiée mais reste COUVERT (memoDaySet inclusif → pas une chip « rien »,
+    // clic sur ce jour montre l'étape via memoCoversDay). Hors voyage / sans plage : 1 tuile (inchangé).
+    // `filterDay` = jour de rattachement pour le filtre chip (nuit en voyage ; festivalDay sinon).
+    const tiles = [];
     dated.forEach(p => {
-      if (!cursorPlaced && p.due_date >= tlToday) { strip.appendChild(cursor()); cursorPlaced = true; }
-      const isPast = p.due_date < tlToday;
-      const isToday = p.due_date === tlToday;
+      const isRange = p.due_end && p.due_date && p.due_end > p.due_date;
+      if (tripMode && isRange) {
+        const nights = memoDays(p).slice(0, -1);   // [due_date..veille(due_end)] — retire le check-out
+        (nights.length ? nights : [p.due_date]).forEach(d => tiles.push({ p, day: d, filterDay: d }));
+      } else {
+        tiles.push({ p, day: p.due_date, filterDay: festivalDay(p) });
+      }
+    });
+    tiles.sort((a, b) => a.day.localeCompare(b.day) || agendaDayCompare(a.p, b.p));
+    tiles.forEach(({ p, day, filterDay }) => {
+      if (!cursorPlaced && day >= tlToday) { strip.appendChild(cursor()); cursorPlaced = true; }
+      const isPast = day < tlToday;
+      const isToday = day === tlToday;
       const hasGps = p.lat != null && p.lng != null;
-      const d = new Date(p.due_date + 'T00:00');
-      const dayLbl = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + (p.due_time ? ' ' + fmtMemoTime(p.due_time) : '');
+      const d = new Date(day + 'T00:00');
+      // Heure = check-in → sur la 1re nuit seulement (jour === due_date), pas sur chaque nuit.
+      const dayLbl = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ((p.due_time && day === p.due_date) ? ' ' + fmtMemoTime(p.due_time) : '');
       // [MAP-DAYCHIP-ACTIVE] jour actif : ses étapes ressortent (anneau accent),
       // les autres jours s'estompent ; sans jour actif, comportement classique.
-      const isActiveDay = tlActiveDay === festivalDay(p);  // [FESTIVAL-DATES]
+      const isActiveDay = tlActiveDay === filterDay;
       const dimOtherDay = tlActiveDay && !isActiveDay;
       const step = el('button', {
         attrs: {
           type: 'button',
-          'data-day': festivalDay(p),  // [FESTIVAL-DATES] chip filtré par journée de festival
+          'data-day': filterDay,  // [FESTIVAL-DATES] journée de festival ; [TIMELINE-CALENDAR-DAYS] nuit en voyage
           'data-memo-id': p.id,  // [FESTIVAL-FRISE-FOCUS] re-trouver le chip après un re-render (bascule de jour)
           // [FESTIVAL-FRISE-FOCUS] un passage sans point PROPRE reste cliquable si un projet
           // porteur géolocalisé existe (cfg.passageInfo fourni) → pin de la scène.
@@ -1506,7 +1579,7 @@ function runMapDialog(cfg) {
       } else {
         step.appendChild(col);
       }
-      if (!firstStepOfDay[p.due_date]) firstStepOfDay[p.due_date] = step;
+      if (!firstStepOfDay[filterDay]) firstStepOfDay[filterDay] = step;
       if (hasGps) {
         step.addEventListener('click', () => {
           // [FESTIVAL-FRISE-FOCUS] chip d'un autre jour que le filtre actif → basculer le filtre d'abord.
