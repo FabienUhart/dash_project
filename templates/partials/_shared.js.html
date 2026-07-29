@@ -3650,4 +3650,224 @@ function initFxWidget(cfg) {
   applyVisibility();
   loadRates();
 }
+
+// [QUICK-MEMO] Options de dossier indentées (arbre, tokens) pour le sélecteur du widget. Chaque
+// projet = {id, name, emoji, parent_id, position}. Renvoie [{value, label}] SANS l'Inbox (ajoutée
+// en tête par le widget). Les projets dont le parent est hors de la liste (périmètre invité filtré)
+// sont traités comme racine. Anti-cycle par `seen`.
+function qmFolderOptions(projects) {
+  const list = Array.isArray(projects) ? projects.slice() : [];
+  const byParent = {};
+  list.forEach(p => { const k = p.parent_id || 0; (byParent[k] = byParent[k] || []).push(p); });
+  Object.keys(byParent).forEach(k => byParent[k].sort((x, y) => (x.position || 0) - (y.position || 0) || (x.id - y.id)));
+  const out = [], seen = new Set();
+  const label = (p, depth) => (depth > 0 ? '  '.repeat(depth) + '↳ ' : '')
+    + ((p.emoji || '').trim() ? (p.emoji || '').trim() + ' ' : '') + (p.name || '(sans nom)');
+  const walk = (pid, depth) => {
+    (byParent[pid] || []).forEach(p => {
+      if (seen.has(p.id)) return; seen.add(p.id);
+      out.push({ value: String(p.id), label: label(p, depth) });
+      walk(p.id, depth + 1);
+    });
+  };
+  walk(0, 0);
+  list.forEach(p => { if (!seen.has(p.id)) { seen.add(p.id); out.push({ value: String(p.id), label: label(p, 0) }); } });
+  return out;
+}
+
+// [QUICK-MEMO] Widget flottant de capture rapide de mémo (gabarit Pomodoro/FX, invariant 9).
+// cfg = { canUse():bool, folders():[{value,label}], defaultFolder():value, submit({title,content,folder})->bool }.
+// Le widget vit HORS des zones re-rendues (comme Pomodoro/FX) → la saisie survit au poll 15 s.
+function initQuickMemo(cfg) {
+  cfg = cfg || {};
+  if (typeof document === 'undefined' || !document.body || document.getElementById('qm-launch')) return;
+  if (cfg.canUse && !cfg.canUse()) return;  // invité sans droit de création → pas de widget
+
+  if (!document.getElementById('qm-style')) {
+    const st = document.createElement('style'); st.id = 'qm-style';
+    st.textContent = '#qm-launch{position:fixed;left:1rem;bottom:7rem;z-index:3500;width:2.6rem;height:2.6rem;border-radius:50%;'
+      + 'border:1px solid var(--border);background:var(--panel);color:var(--text);font-size:1.1rem;cursor:pointer;'
+      + 'box-shadow:0 4px 16px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;touch-action:none}'
+      + '#qm-panel{position:fixed;left:1rem;bottom:9.9rem;z-index:3500;width:17rem;max-width:calc(100vw - 2rem);'
+      + 'background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:0.8rem;color:var(--text);'
+      + 'box-shadow:0 8px 30px rgba(0,0,0,0.4);font-size:0.85rem}'
+      + '#qm-panel[hidden]{display:none}'
+      + '#qm-launch[hidden],#qm-reshow[hidden]{display:none}'
+      + '#qm-reshow{position:fixed;left:0;bottom:7.2rem;z-index:3500;width:1.5rem;height:1.9rem;'
+      + 'border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;background:var(--panel);'
+      + 'color:var(--muted);font-size:0.9rem;cursor:pointer;opacity:0.6;display:flex;align-items:center;justify-content:center}'
+      + '#qm-reshow:hover{opacity:1;color:var(--text)}'
+      + '.qm-head{display:flex;align-items:center;gap:0.4rem;margin:-0.2rem -0.2rem 0.5rem;padding:0.15rem 0.2rem;'
+      + 'cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}'
+      + '.qm-grip{flex:1;font-weight:600;font-size:0.8rem;color:var(--muted)}'
+      + '.qm-x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;line-height:1;padding:0.1rem 0.3rem;border-radius:5px}'
+      + '.qm-x:hover{color:var(--text);background:var(--panel-2)}'
+      + '.qm-title,.qm-text,.qm-folder{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;'
+      + 'color:var(--text);font:inherit;font-size:0.85rem;padding:0.4rem 0.5rem;margin-bottom:0.45rem}'
+      + '.qm-text{resize:vertical;min-height:3.4rem}'
+      + '.qm-title:focus,.qm-text:focus,.qm-folder:focus{outline:none;border-color:var(--accent)}'
+      + '.qm-go{width:100%;min-height:2.4rem;background:var(--accent);color:#10141a;border:none;border-radius:8px;'
+      + 'font:inherit;font-weight:700;cursor:pointer}'
+      + '.qm-go:disabled{opacity:0.5;cursor:default}'
+      + '.qm-go:hover:not(:disabled){filter:brightness(1.05)}';
+    document.head.appendChild(st);
+  }
+
+  const launch = document.createElement('button');
+  launch.id = 'qm-launch'; launch.type = 'button'; launch.textContent = '✏️';
+  launch.title = 'Note rapide'; launch.setAttribute('aria-label', launch.title);
+  const panel = document.createElement('div');
+  panel.id = 'qm-panel'; panel.hidden = true; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Note rapide');
+  const reshow = document.createElement('button');
+  reshow.id = 'qm-reshow'; reshow.type = 'button'; reshow.textContent = '✏️';
+  reshow.title = 'Afficher la note rapide'; reshow.setAttribute('aria-label', reshow.title);
+  document.body.appendChild(launch); document.body.appendChild(panel); document.body.appendChild(reshow);
+
+  let hidden = false; try { hidden = localStorage.getItem('qmHidden') === '1'; } catch (e) {}
+  function applyVisibility() { launch.hidden = hidden; reshow.hidden = !hidden; if (hidden) panel.hidden = true; }
+  function setHidden(v) { hidden = !!v; try { localStorage.setItem('qmHidden', hidden ? '1' : '0'); } catch (e) {} applyVisibility(); }
+  reshow.addEventListener('click', () => setHidden(false));
+  window.qmSetHidden = setHidden;
+  window.qmIsHidden = () => hidden;
+
+  function clampPos(x, y, w, h) {
+    const maxX = Math.max(0, window.innerWidth - w), maxY = Math.max(0, window.innerHeight - h);
+    return [Math.min(Math.max(0, x), maxX), Math.min(Math.max(0, y), maxY)];
+  }
+  let qmPos = null; try { qmPos = JSON.parse(localStorage.getItem('qmPos') || 'null'); } catch (e) {}
+  let qmLaunchPos = null; try { qmLaunchPos = JSON.parse(localStorage.getItem('qmLaunchPos') || 'null'); } catch (e) {}
+  let launchSuppressClick = 0;
+  function applyLaunchPos() {
+    if (!qmLaunchPos) return;
+    const r = launch.getBoundingClientRect();
+    const [x, y] = clampPos(qmLaunchPos.x, qmLaunchPos.y, r.width || 42, r.height || 42);
+    launch.style.left = x + 'px'; launch.style.top = y + 'px'; launch.style.bottom = 'auto';
+  }
+  function positionPanelNearLaunch() {
+    const lr = launch.getBoundingClientRect(), pr = panel.getBoundingClientRect(), gap = 8;
+    const pw = pr.width || 272, ph = pr.height || 250;
+    let x = lr.left; if (x + pw > window.innerWidth) x = lr.right - pw;
+    let y = lr.top - ph - gap; if (y < 0) y = lr.bottom + gap;
+    const [cx, cy] = clampPos(x, y, pw, ph);
+    panel.style.left = cx + 'px'; panel.style.top = cy + 'px'; panel.style.bottom = 'auto';
+  }
+  function applyPanelPos() {
+    if (qmPos) {
+      const r = panel.getBoundingClientRect();
+      const [x, y] = clampPos(qmPos.x, qmPos.y, r.width || 272, r.height || 250);
+      panel.style.left = x + 'px'; panel.style.top = y + 'px'; panel.style.bottom = 'auto';
+    } else { positionPanelNearLaunch(); }
+  }
+  function makeDraggable(handle) {
+    let pid = null, sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      pid = e.pointerId; const r = panel.getBoundingClientRect(); ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY; dragging = true;
+      panel.style.bottom = 'auto';
+      try { handle.setPointerCapture(pid); } catch (_) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!dragging || e.pointerId !== pid) return;
+      e.preventDefault();
+      const r = panel.getBoundingClientRect();
+      const [x, y] = clampPos(ox + (e.clientX - sx), oy + (e.clientY - sy), r.width, r.height);
+      panel.style.left = x + 'px'; panel.style.top = y + 'px';
+    });
+    const end = (e) => {
+      if (e.pointerId !== pid || !dragging) return;
+      dragging = false; const r = panel.getBoundingClientRect(); qmPos = { x: r.left, y: r.top };
+      try { localStorage.setItem('qmPos', JSON.stringify(qmPos)); } catch (_) {}
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  let titleEl, textEl, folderEl, goEl;
+  function fillFolders() {
+    if (!folderEl) return;
+    const cur = folderEl.value;
+    folderEl.innerHTML = '';
+    // cfg.inbox === false → pas d'option Inbox générique ([QUICK-MEMO-HUB] : chaque partage a sa racine).
+    if (cfg.inbox !== false) {
+      const inbox = document.createElement('option'); inbox.value = ''; inbox.textContent = '📥 Inbox'; folderEl.appendChild(inbox);
+    }
+    const addOpt = (parent, o) => { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; parent.appendChild(opt); };
+    // cfg.folders() renvoie soit une liste plate [{value,label}], soit des groupes [{group, options:[…]}].
+    (cfg.folders ? (cfg.folders() || []) : []).forEach(it => {
+      if (it && it.options) {
+        const g = document.createElement('optgroup'); g.label = it.group || '';
+        it.options.forEach(o => addOpt(g, o));
+        folderEl.appendChild(g);
+      } else { addOpt(folderEl, it); }
+    });
+    const want = cur || (cfg.defaultFolder ? String(cfg.defaultFolder() || '') : '');
+    const has = [].some.call(folderEl.options, o => o.value === want);
+    folderEl.value = has ? want : (folderEl.options[0] ? folderEl.options[0].value : '');
+  }
+  async function submit() {
+    const title = (titleEl.value || '').trim();
+    const content = (textEl.value || '').trim();
+    if (!title && !content) { titleEl.focus(); return; }
+    goEl.disabled = true;
+    let ok = false;
+    try { ok = await cfg.submit({ title, content, folder: folderEl ? folderEl.value : '' }); } catch (_) { ok = false; }
+    goEl.disabled = false;
+    if (typeof flashSaved === 'function') flashSaved(!!ok);
+    if (ok) { titleEl.value = ''; textEl.value = ''; fillFolders(); titleEl.focus(); }  // rafale : panneau reste ouvert
+  }
+  function buildPanel() {
+    panel.innerHTML = '';
+    const head = el('div', { class: 'qm-head' });
+    head.appendChild(el('span', { class: 'qm-grip', text: '✏️ Note rapide' }));
+    head.appendChild(el('button', { class: 'qm-x', text: '✕', attrs: { type: 'button', title: 'Masquer la note rapide' }, on: { click: () => setHidden(true) } }));
+    panel.appendChild(head);
+    makeDraggable(head);
+    titleEl = el('input', { class: 'qm-title', attrs: { type: 'text', placeholder: 'Titre (optionnel)', 'aria-label': 'Titre' } });
+    textEl = el('textarea', { class: 'qm-text', attrs: { rows: '3', placeholder: 'Note…', 'aria-label': 'Contenu' } });
+    folderEl = el('select', { class: 'qm-folder', attrs: { 'aria-label': 'Dossier de destination' } });
+    goEl = el('button', { class: 'qm-go', text: 'Créer', attrs: { type: 'button' } });
+    panel.appendChild(titleEl); panel.appendChild(textEl); panel.appendChild(folderEl); panel.appendChild(goEl);
+    fillFolders();
+    // Entrée dans le titre = créer ; Échap = replier (pas de raccourci global clavier — [CMD-K] réservé).
+    titleEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } else if (e.key === 'Escape') { panel.hidden = true; } });
+    textEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
+    folderEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
+    goEl.addEventListener('click', submit);
+  }
+
+  (function () {  // lanceur déplaçable (souris + tactile), distinction clic/glisser (>4px = drag)
+    let pid = null, sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+    launch.addEventListener('pointerdown', (e) => { pid = e.pointerId; const r = launch.getBoundingClientRect(); ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY; dragging = false; try { launch.setPointerCapture(pid); } catch (_) {} });
+    launch.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pid) return;
+      if (!dragging) { if (Math.abs(e.clientX - sx) > 4 || Math.abs(e.clientY - sy) > 4) { dragging = true; launch.style.bottom = 'auto'; } else return; }
+      e.preventDefault();
+      const r = launch.getBoundingClientRect();
+      const [x, y] = clampPos(ox + (e.clientX - sx), oy + (e.clientY - sy), r.width, r.height);
+      launch.style.left = x + 'px'; launch.style.top = y + 'px';
+    });
+    const end = (e) => {
+      if (e.pointerId !== pid) return;
+      if (dragging) {
+        const r = launch.getBoundingClientRect(); qmLaunchPos = { x: r.left, y: r.top };
+        try { localStorage.setItem('qmLaunchPos', JSON.stringify(qmLaunchPos)); } catch (_) {}
+        launchSuppressClick = Date.now() + 300;
+        if (!panel.hidden) applyPanelPos();
+      }
+      pid = null; dragging = false;
+    };
+    launch.addEventListener('pointerup', end);
+    launch.addEventListener('pointercancel', end);
+  })();
+  launch.addEventListener('click', () => {
+    if (Date.now() < launchSuppressClick) return;
+    const open = panel.hidden; panel.hidden = !open;
+    if (open) { fillFolders(); applyPanelPos(); if (titleEl) titleEl.focus(); }
+  });
+  window.addEventListener('resize', () => { applyLaunchPos(); if (!panel.hidden) applyPanelPos(); });
+  buildPanel();
+  applyLaunchPos();
+  applyVisibility();
+}
 </script>

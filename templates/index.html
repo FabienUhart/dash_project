@@ -763,6 +763,9 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .mfilter.active.f-overdue { border-color: var(--danger); background: #2e1a1a; }
 .mfilter.active.f-done { border-color: var(--orange); background: #2c2113; }
 #memo-add-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+/* [MEMO-JUMP-VIEW] barre fine « Aller en bas / Remonter » de la vue Mémos (bouton .prio-btn
+   discret, aligné à droite, pas d'accent), affichée seulement si la liste est assez longue. */
+.memo-jump-bar { display: flex; justify-content: flex-end; margin: -0.4rem 0 1rem; }
 #memo-add-bar input[type="text"] {
   flex: 1;
   min-width: 180px;
@@ -1139,6 +1142,26 @@ aside#memo-panel {
   outline: none;
 }
 #memo-quick:focus { border-color: var(--yellow); border-style: solid; }
+/* [MEMO-QUICK-STICKY] la note rapide reste collée en bas de la colonne mémos, quel que soit le
+   scroll (fond opaque panel + z-index pour que les cards ne transparaissent pas dessous). */
+#memo-quick-wrap {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  background: var(--panel);
+  padding-top: 0.5rem;
+  margin-top: 0.2rem;
+}
+/* [MEMO-JUMP-BOTTOM] en-tête MÉMOS collant en HAUT (sous le header, --header-h) : le bouton ⤓/⤒
+   « Aller en bas / Remonter » reste visible pendant qu'on parcourt la colonne (miroir du
+   #memo-quick-wrap collant en bas). Desktop/tablette ; remis en statique en mobile (≤900). */
+#memo-details summary {
+  position: sticky;
+  top: var(--header-h, 57px);
+  z-index: 6;
+  background: var(--panel);
+  padding-bottom: 0.4rem;
+}
 
 /* ---------- contenu riche ---------- */
 .task-content p { margin: 0 0 0.15rem; }
@@ -1314,7 +1337,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
    révélé dans le bloc « Overrides mémos mobile »). Bouton rond secondaire (PAS accent) au gabarit
    `.task .task-actions button` (invariant 9), tokens uniquement. */
 #links-blockhead { display: none; }              /* desktop : jamais (barre #links-actions visible) */
-#memo-add-btn { display: none; }                 /* desktop : jamais (le summary suffit) */
+#memo-add-btn { display: inline-flex; }          /* [MEMO-QUICK-STICKY] révélé desktop aussi (ouvre/scroll/focus) */
 .block-head { align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
 .block-head-label { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .block-head-add { position: relative; margin-left: auto; }
@@ -1432,6 +1455,7 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   }
   #memo-details summary::before { content: "▸ "; }
   #memo-details[open] summary::before { content: "▾ "; }
+  #memo-details summary { position: static; }  /* [MEMO-JUMP-BOTTOM] pas de sticky en mobile */
   #clock-date { display: none; }
   main { padding: 0.75rem; }
   /* === Overrides mémos mobile (placés APRÈS les règles de base pour gagner la cascade :
@@ -1657,9 +1681,9 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
-      <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span><button type="button" id="memo-add-btn" class="mini-add-btn" title="Ajouter un mémo" aria-label="Ajouter un mémo">＋</button></summary>
+      <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span><button type="button" id="memo-jump-btn" class="mini-add-btn" title="Aller en bas" aria-label="Aller en bas de la colonne mémos">⤓</button><button type="button" id="memo-add-btn" class="mini-add-btn" title="Ajouter un mémo" aria-label="Ajouter un mémo">＋</button></summary>
       <div id="memos"></div>
-      <textarea id="memo-quick" rows="2" placeholder="+ Note rapide… (Entrée pour ajouter)"></textarea>
+      <div id="memo-quick-wrap"><textarea id="memo-quick" rows="2" placeholder="+ Note rapide… (Entrée pour ajouter)"></textarea></div>
     </details>
   </aside>
 </div>
@@ -2014,6 +2038,12 @@ dialog .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-
       </label>
       <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
         Convertisseur de devises (taux BCE, 1 rafraîchissement / jour). Réglage propre à cet appareil ; masquable via le ✕ du widget.
+      </p>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text);cursor:pointer;margin-top:0.7rem">
+        <input type="checkbox" id="qm-visible-cb"> Afficher la note rapide ✏️ (bouton flottant)
+      </label>
+      <p style="font-size:0.78rem;color:var(--muted);margin:0.5rem 0 0">
+        Capture rapide de mémo depuis n'importe quelle vue. Réglage propre à cet appareil ; masquable via le ✕ du widget.
       </p>
     </div>
   </div>
@@ -6662,6 +6692,20 @@ function editTaskInline(container, contentDiv, memo) {
   });
 }
 
+// [MEMO-JUMP-VIEW] barre de saut de la vue Mémos (haut/bas). Même mécanique que le bouton de la
+// colonne (window scrolle) ; recréée par renderBoard, sans état.
+function memoJumpBar(dir) {
+  const down = dir === 'down';
+  const bar = el('div', { class: 'memo-jump-bar' });
+  bar.appendChild(el('button', {
+    class: 'prio-btn',
+    text: down ? '⤓ Aller en bas' : '⤒ Remonter',
+    attrs: { type: 'button', title: down ? 'Aller en bas de la liste' : 'Remonter en haut de la liste' },
+    on: { click: () => { const sc = document.scrollingElement || document.documentElement; window.scrollTo({ top: down ? sc.scrollHeight : 0, behavior: 'smooth' }); } },
+  }));
+  return bar;
+}
+
 function renderBoard() {
   const board = document.getElementById('memo-board');
   board.innerHTML = '';
@@ -6994,6 +7038,12 @@ function renderBoard() {
   addBar.appendChild(addBtn);
   board.appendChild(addBar);
 
+  // [MEMO-JUMP-VIEW] barre « Aller en bas » juste sous la barre d'ajout, au-dessus des sections.
+  // Masquée par défaut ; révélée en fin de rendu si la liste est assez longue (> 8 mémos).
+  const jumpTop = memoJumpBar('down');
+  jumpTop.style.display = 'none';
+  board.appendChild(jumpTop);
+
   // [BOARD-SUBHIDE] chips masquer/afficher par sous-projet (sous les tuiles + barre d'ajout,
   // au-dessus des sections). Affichage seul : tuiles/compteurs/carte gardent le périmètre complet.
   const subHide = subHideBar({
@@ -7047,6 +7097,7 @@ function renderBoard() {
     if (!done.length) wrap.appendChild(el('div', { class: 'empty', text: 'Aucun mémo terminé.' }));
     done.forEach(m => wrap.appendChild(taskEl(m)));
     board.appendChild(wrap);
+    if (done.length > 8) { jumpTop.style.display = ''; board.appendChild(memoJumpBar('up')); }  // [MEMO-JUMP-VIEW]
     return;
   }
 
@@ -7095,6 +7146,13 @@ function renderBoard() {
     details.addEventListener('toggle', () => { doneOpen = details.open; });
     board.appendChild(details);
   }
+
+  // [MEMO-JUMP-VIEW] seuil simple : la liste est-elle assez longue pour scroller ? (> 8 mémos)
+  // → révèle la barre du haut et ajoute la barre jumelle « Remonter » après la dernière section.
+  if (board.querySelectorAll('.task').length > 8) {
+    jumpTop.style.display = '';
+    board.appendChild(memoJumpBar('up'));
+  }
 }
 
 document.getElementById('memo-board').addEventListener('drop', async (e) => {
@@ -7126,6 +7184,8 @@ function renderHistory(board) {
     board.appendChild(el('div', { class: 'empty', text: 'Aucune tâche effectuée pour le moment. Coche un mémo et il apparaîtra ici.' }));
     return;
   }
+  const longHist = entries.length > 8;  // [MEMO-JUMP-VIEW] barres de saut si l'historique est long
+  if (longHist) board.appendChild(memoJumpBar('down'));
   const today = dateStr(new Date());
   const yesterday = dateStr(new Date(Date.now() - 86400000));
   const groups = new Map();
@@ -7165,6 +7225,7 @@ function renderHistory(board) {
     });
     board.appendChild(wrap);
   });
+  if (longHist) board.appendChild(memoJumpBar('up'));  // [MEMO-JUMP-VIEW]
 }
 
 /* ------------------------------------------------ mémos : colonne résumé */
@@ -7549,6 +7610,28 @@ document.getElementById('add-cat-page').addEventListener('click', () => addCateg
     q.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     q.focus();
   });
+
+  // [MEMO-JUMP-BOTTOM] ⤓ « Aller en bas » ↔ ⤒ « Remonter » de la colonne mémos (la fenêtre
+  // scrolle ; l'aside n'existe qu'en vue Liens). Dans un <summary> → preventDefault + stopPropagation
+  // pour ne pas (dé)plier le <details> (même précaution que #memo-add-btn / #memo-open).
+  const memoJumpBtn = document.getElementById('memo-jump-btn');
+  if (memoJumpBtn) {
+    const scroller = document.scrollingElement || document.documentElement;
+    const atBottom = () => (window.innerHeight + window.scrollY) >= (scroller.scrollHeight - 4);
+    const syncJump = () => {
+      const bottom = atBottom();
+      memoJumpBtn.textContent = bottom ? '⤒' : '⤓';
+      const lbl = bottom ? 'Remonter' : 'Aller en bas';
+      memoJumpBtn.title = lbl;
+      memoJumpBtn.setAttribute('aria-label', lbl + ' de la colonne mémos');
+    };
+    memoJumpBtn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      window.scrollTo({ top: atBottom() ? 0 : scroller.scrollHeight, behavior: 'smooth' });
+    });
+    window.addEventListener('scroll', syncJump, { passive: true });
+    syncJump();
+  }
 })();
 
 // [HOME-RESET] Clic sur le titre « Dashboard » → accueil : vue Liens par défaut, projet/vue
@@ -7748,6 +7831,9 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   // [FX-CONVERTER] reflète l'état d'affichage du widget convertisseur ¥€ (piloté dans le partial).
   const fvcb = document.getElementById('fx-visible-cb');
   if (fvcb) fvcb.checked = !(window.fxIsHidden && window.fxIsHidden());
+  // [QUICK-MEMO] reflète l'état d'affichage du widget de capture rapide.
+  const qvcb = document.getElementById('qm-visible-cb');
+  if (qvcb) qvcb.checked = !(window.qmIsHidden && window.qmIsHidden());
   setSettingsTab(localStorage.getItem('settingsTab') || 'identity');
   settingsDialog.showModal();
 });
@@ -7758,8 +7844,39 @@ const fxVisibleCb = document.getElementById('fx-visible-cb');
 if (fxVisibleCb) fxVisibleCb.addEventListener('change', (e) => {
   if (window.fxSetHidden) window.fxSetHidden(!e.target.checked);
 });
+const qmVisibleCb = document.getElementById('qm-visible-cb');
+if (qmVisibleCb) qmVisibleCb.addEventListener('change', (e) => {
+  if (window.qmSetHidden) window.qmSetHidden(!e.target.checked);
+});
 // [FX-CONVERTER] widget convertisseur de devises (owner → /api/fx).
 initFxWidget({ fetchUrl: '/api/fx' });
+// [QUICK-MEMO] widget de capture rapide (owner). Dossier par défaut = board projet courant sinon Inbox.
+// Hors ligne : même file Inbox idempotente que #memo-quick ([OFFLINE], D5) — titre fusionné au contenu.
+if (typeof initQuickMemo === 'function') initQuickMemo({
+  canUse: () => true,
+  folders: () => qmFolderOptions(state.projects || []),
+  defaultFolder: () => (Number.isInteger(state.memoProject) ? String(state.memoProject) : ''),
+  submit: async ({ title, content, folder }) => {
+    if (isOffline) {
+      enqueueNote([title, content].filter(Boolean).join('\n'));
+      renderPendingNotes();
+      return true;
+    }
+    const body = {};
+    if (title) body.title = title;
+    if (content) body.content = content;
+    if (folder) body.project_id = Number(folder);
+    try {
+      await api('/api/memos', { method: 'POST', body: JSON.stringify(body) });
+      await loadAll();
+      return true;
+    } catch (_) {
+      enqueueNote([title, content].filter(Boolean).join('\n'));
+      setOffline(true); renderPendingNotes();
+      return true;  // mis en file (Inbox), rejeu au retour réseau
+    }
+  },
+});
 
 // [SETTINGS-TABS] sauvegarde AUTO du nom (blur / Entrée) — plus de bouton Enregistrer.
 // Vide → on restaure la valeur précédente sans enregistrer.

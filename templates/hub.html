@@ -570,11 +570,59 @@ function projById(id) { return (DATA.projects || []).find(p => p.id === id) || n
 
 // ── rendu ──
 function render() {
+  maybeInitQuickMemo();  // [QUICK-MEMO-HUB] widget de capture rapide multi-partages (idempotent)
   renderSidebar();
   if (VIEW === 'plan') renderPlan();
   else if (VIEW === 'agenda') renderAgendaHub();
   else renderBoard();
   syncMapBtn();
+}
+
+// [QUICK-MEMO-HUB] V1.1 : le hub embarque le widget (les invités réels passent par le hub, pas
+// par /share direct — D4 révisée). Créé une seule fois (idempotent) dès qu'un dossier est éditable.
+// Sélecteur multi-partages : optgroup par partage, chaque option porte (share_token, project_id).
+// Submit = POST /share/<token>/memos EXISTANT avec le X-Guest-Token du partage choisi (invariant 5,
+// zéro route). Hub 100 % lecture (aucun dossier can_add) = pas de widget. Pas d'offline (D5, owner-only).
+function maybeInitQuickMemo() {
+  if (typeof initQuickMemo !== 'function') return;
+  initQuickMemo({
+    inbox: false,
+    canUse: () => editableProjects().length > 0,
+    folders: () => {
+      const eps = editableProjects();
+      if (!eps.length) return [];
+      const tokLabel = {};
+      (DATA.folders || []).forEach(f => { if (f.token) tokLabel[f.token] = (f.emoji ? f.emoji.trim() + ' ' : '') + (f.label || 'Partage'); });
+      const groups = [], byTok = {};
+      eps.forEach(p => {
+        const tk = p.share_token || '';
+        if (!byTok[tk]) { byTok[tk] = { group: tokLabel[tk] || 'Partage', token: tk, projs: [] }; groups.push(byTok[tk]); }
+        byTok[tk].projs.push(p);
+      });
+      const mk = (g) => qmFolderOptions(g.projs).map(o => ({ value: g.token + '|' + o.value, label: o.label }));
+      return groups.length === 1 ? mk(groups[0]) : groups.map(g => ({ group: g.group, options: mk(g) }));
+    },
+    defaultFolder: () => {
+      const eps = editableProjects();
+      if (!eps.length) return '';
+      const cur = (FOCUS != null) ? eps.find(p => p.id === FOCUS) : null;
+      const pick = cur || eps[0];
+      return pick.share_token + '|' + pick.id;
+    },
+    submit: async ({ title, content, folder }) => {
+      const sep = (folder || '').indexOf('|');
+      if (sep < 0) { notify('Choisis un dossier.', { error: true }); return false; }
+      const token = folder.slice(0, sep), pid = Number(folder.slice(sep + 1));
+      const body = {};
+      if (title) body.title = title;
+      if (content) body.content = content;
+      if (pid) body.project_id = pid;
+      const r = await api(token, '/memos', { method: 'POST', body: JSON.stringify(body) });
+      if (r.ok) { await reload(); return true; }
+      const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true });
+      return false;
+    },
+  });
 }
 
 // [MAP-BTN-COUNT] parité owner (index.html renderBoard) : le bouton Carte porte le

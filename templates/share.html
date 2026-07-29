@@ -2632,6 +2632,28 @@ function renderShareAgenda() {
 }
 
 function render() {
+  // [QUICK-MEMO] widget de capture rapide invité — créé une seule fois (idempotent) dès que le
+  // rôle permet la création (canAddNow). Destination via POST /share/<token>/memos EXISTANT
+  // (X-Guest-Token, scope revalidé serveur — invariant 5, zéro route nouvelle). Pas d'offline (owner-only, D5).
+  if (typeof initQuickMemo === 'function') initQuickMemo({
+    canUse: () => canAddNow(),
+    folders: () => qmFolderOptions((DATA.projects || []).filter(p => p.can_add)),
+    defaultFolder: () => String((PFILTER !== 'all') ? PFILTER : (DATA.root_id || '')),
+    submit: async ({ title, content, folder }) => {
+      const body = {};
+      if (title) body.title = title;
+      if (content) body.content = content;
+      if (folder) body.project_id = Number(folder);
+      const r = await fetch(API + '/memos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) { await load(); }
+      else { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true }); }
+      return r.ok;
+    },
+  });
   document.getElementById('title').innerHTML = '';
   const h = document.getElementById('title');
   if (DATA.color) {
