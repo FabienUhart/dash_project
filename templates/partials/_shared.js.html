@@ -708,6 +708,9 @@ function runMapDialog(cfg) {
   // [MAP-DAYCHIP-ACTIVE] jour actif de la frise (un seul, re-clic = désélection,
   // non persisté — remis à zéro à chaque ouverture de la carte).
   let tlActiveDay = null;
+  // [TIMELINE-TODAY] positionnement auto sur aujourd'hui : une seule fois à l'ouverture (le 1er
+  // rendu de la frise), jamais aux re-rendus suivants (sinon on combattrait le scroll de l'utilisateur).
+  let tlFirstRender = true;
   // [FESTIVAL-FRISE-FOCUS] chip de frise sélectionné (mémo) + popup ouvert sur le pin du projet
   // porteur, pour un passage SANS point propre. Non persisté ; re-clic/clic ailleurs = ferme.
   let tlSelId = null, tlSelEl = null, passagePopup = null;
@@ -1471,29 +1474,62 @@ function runMapDialog(cfg) {
     const days = (tripMode && range) ? tripDays(range) : [...memoDaySet].sort();
     const firstStepOfDay = {};
     if (tlActiveDay && !days.includes(tlActiveDay)) tlActiveDay = null; // jour disparu (focus/renumérotation)
+    // [TIMELINE-TODAY] aujourd'hui dans la plage du voyage ? (avant → début, passé → début : inchangé)
+    const todayInRange = tripMode && range && tlToday >= range.start && tlToday <= range.end;
+    let chipsBand = null;  // bande des jours (référencée par le scroll-vers-aujourd'hui)
+    // [TIMELINE-TODAY] positionne la bande des jours sur la chip du jour courant ET la frise sur sa
+    // 1re tuile (à la 1re nuit d'aujourd'hui, sinon le curseur « auj. »). NE FILTRE PAS (pas d'applyDay).
+    // Requête sur le DOM VIVANT (`#map-timeline`) : renderTimeline peut re-rendre à l'ouverture → les
+    // refs de closure seraient détachées ; le DOM courant, lui, porte toujours la frise affichée.
+    // Centre horizontalement `child` dans `box`. NB : le scroll SMOOTH (scrollIntoView comme scrollTo)
+    // est ignoré dans le top-layer <dialog> sous Chromium → positionnement INSTANTANÉ (scrollLeft), fiable.
+    const centerH = (box, child) => {
+      if (!box || !child) return;
+      box.scrollLeft = Math.max(0, Math.min(child.offsetLeft - (box.clientWidth - child.offsetWidth) / 2, box.scrollWidth - box.clientWidth));
+    };
+    const scrollToToday = () => {
+      if (!todayInRange) return;
+      const tlx = document.getElementById('map-timeline'); if (!tlx) return;
+      const bandx = tlx.querySelector('.map-days-band');
+      if (bandx) centerH(bandx, bandx.querySelector('[data-day-iso="' + tlToday + '"]'));
+      const stripx = tlx.querySelector('.map-frise-strip');
+      if (stripx) centerH(stripx, stripx.querySelector('[data-day="' + tlToday + '"]') || [...stripx.children].find(x => x.getAttribute && x.getAttribute('title') === 'Aujourd\'hui'));
+    };
     if (days.length > 1) {
-      const chipsRow = el('div', { attrs: { style: 'display:flex;gap:0.25rem;flex-wrap:wrap;margin:0 0.2rem 0.3rem' } });
+      // [TIMELINE-TODAY] bande des jours SCROLLABLE (nowrap + overflow-x) → peut se centrer sur aujourd'hui.
+      chipsBand = el('div', { class: 'map-days-band', attrs: { style: 'display:flex;gap:0.25rem;flex-wrap:nowrap;overflow-x:auto;margin:0 0.2rem 0.3rem;padding-bottom:0.1rem;-webkit-overflow-scrolling:touch' } });
+      const chipsRow = chipsBand;
       // [MAP-DAYCHIP-ALL] chip « 🌍 Tous » en tête : actif quand aucun jour choisi ; clic = réaffiche tout.
       const allActive = !tlActiveDay;
       const allStyle = allActive ? ';background:' + ACCENT + ';border-color:' + ACCENT + ';color:#10141a;font-weight:700' : '';
       chipsRow.appendChild(el('button', {
         class: 'prio-btn', text: (allActive ? '✓ ' : '') + '🌍 Tous',
-        attrs: { type: 'button', title: allActive ? 'Tous les jours affichés' : 'Réafficher tous les jours et recadrer la carte sur l\'ensemble', style: 'padding:0.05rem 0.4rem;font-size:0.66rem' + allStyle },
+        attrs: { type: 'button', title: allActive ? 'Tous les jours affichés' : 'Réafficher tous les jours et recadrer la carte sur l\'ensemble', style: 'flex:0 0 auto;padding:0.05rem 0.4rem;font-size:0.66rem' + allStyle },
         on: { click: () => applyDay(null) },
       }));
+      // [TIMELINE-TODAY] bouton « Aujourd'hui » (esprit Agenda), visible seulement si aujourd'hui ∈ plage ;
+      // re-scroll vers le jour courant SANS filtrer.
+      if (todayInRange) {
+        chipsRow.appendChild(el('button', {
+          class: 'prio-btn', text: '📍 Aujourd\'hui',
+          attrs: { type: 'button', title: 'Revenir au jour courant dans la frise', style: 'flex:0 0 auto;padding:0.05rem 0.4rem;font-size:0.66rem;border-color:' + ACCENT + ';color:' + ACCENT },
+          on: { click: () => scrollToToday() },
+        }));
+      }
       // chip « Jour N » (n = index calendaire 1-based ; en mode voyage = tripDayIndex, gratuit car `days` continu).
       const dayChip = (d, n, hasMemo) => {
         const lbl = new Date(d + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
         const isActive = tlActiveDay === d;
-        let style = 'padding:0.05rem 0.4rem;font-size:0.66rem';
+        let style = 'flex:0 0 auto;padding:0.05rem 0.4rem;font-size:0.66rem';
         if (isActive) style += ';background:' + ACCENT + ';border-color:' + ACCENT + ';color:#10141a;font-weight:700';
         else if (!hasMemo) style += ';opacity:0.5;color:var(--muted);border-style:dashed';   // [D2] jour vide discret
         else if (d === tlToday) style += ';border-color:' + ACCENT + ';color:' + ACCENT;
-        return el('button', {
+        const b = el('button', {
           class: 'prio-btn', text: (isActive ? '✓ ' : '') + 'Jour ' + n,
-          attrs: { type: 'button', title: lbl + (hasMemo ? '' : ' — aucun mémo') + (isActive ? ' — cliquer pour désélectionner' : ' — mettre ce jour en avant'), style },
+          attrs: { type: 'button', 'data-day-iso': d, title: lbl + (hasMemo ? '' : ' — aucun mémo') + (isActive ? ' — cliquer pour désélectionner' : ' — mettre ce jour en avant'), style },
           on: { click: () => applyDay(isActive ? null : d) },
         });
+        return b;
       };
       if (tripMode) {
         let i = 0;
@@ -1504,7 +1540,7 @@ function runMapDialog(cfg) {
             // [D3] condensation : une seule chip « Jours X–Y · rien » (non-action V1, cursor default).
             chipsRow.appendChild(el('span', {
               class: 'prio-btn', text: 'Jours ' + (i + 1) + '–' + j + ' · rien',
-              attrs: { title: 'Aucun mémo du Jour ' + (i + 1) + ' au Jour ' + j, style: 'padding:0.05rem 0.4rem;font-size:0.66rem;opacity:0.5;color:var(--muted);border-style:dashed;cursor:default' },
+              attrs: { title: 'Aucun mémo du Jour ' + (i + 1) + ' au Jour ' + j, style: 'flex:0 0 auto;padding:0.05rem 0.4rem;font-size:0.66rem;opacity:0.5;color:var(--muted);border-style:dashed;cursor:default' },
             }));
           } else {
             for (let k = i; k < j; k++) chipsRow.appendChild(dayChip(days[k], k + 1, false));  // [D2] 1-2 jours vides = chips grises
@@ -1597,6 +1633,12 @@ function runMapDialog(cfg) {
     });
     if (!cursorPlaced) strip.appendChild(cursor()); // tout est passé → curseur en fin
     tlEl.appendChild(strip);
+    // [TIMELINE-TODAY] à l'OUVERTURE seulement (1er rendu), si aujourd'hui ∈ plage ET aucun scroll de
+    // frise mémorisé à restaurer → centrer la bande des jours + la frise sur aujourd'hui (sans filtrer).
+    if (tlFirstRender) {
+      tlFirstRender = false;
+      if (todayInRange && !(cfg.restore && cfg.restore.friseScroll)) setTimeout(scrollToToday, 180);
+    }
   }
 
   // [PHOTO-MAP] Calque photo optionnel + frise « où on était ». Activé seulement si
