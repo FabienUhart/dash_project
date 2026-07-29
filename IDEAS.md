@@ -15,6 +15,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 - ⏸️ **[VOTE-MATCH]** V3 « vote live » — **non planifié**, brouillon `docs/specs/VOTE-MATCH-v3-draft.md` (RGPD/identité tranchés, bloquants restants). À re-cadrer plus tard.
 - ✅ **[VOTE-MAP-SUBPROJECT]** — **CORRIGÉ [V21.1.66]** : les builders de vote carte agrègent désormais courant + descendants (owner/invité/hub en miroir via `voteScrutinsForProject`) → le vote d'un sous-projet apparaît sur la carte du parent. `REALISATION.md`.
 - ✅ **[SAVE-INDICATOR]** + **[UNDO-DELETE]** + **[EMPTY-STATES]** — **LIVRÉS [V21.1.63→65]** (confort/UX) : ✓ « enregistré » à chaque patch mémo ; toast « Annuler » après suppression ; états vides soignés (icône + action). `REALISATION.md`.
+- ✅ **[PROJECT-NAME-PER-FOLDER]** — **CODÉ [V25.0.113] (⚠️ BUMP EXPORT v24 → v25, à valider Cowork)** : unicité des noms de dossiers **PAR DOSSIER PARENT** (plus globale — « restaurants » sous 2 voyages devient légal) + **`uid` stable sur les projets** (rebuild `projects` sans UNIQUE global + `ux_projects_name_parent` + backfill). Résolution export/import **uid-d'abord** puis (nom, parent), création topologique, garde `_sibling_name_taken` sur toutes les routes (owner + invité, D4 déplacement → 409, fin du 500 latent), upsert non destructif. Tests 33/33 (copie). Spec `docs/specs/PROJECT-NAME-PER-FOLDER-duplicate-names.md`, détail `REALISATION.md`. _Ni commit ni push sans feu vert._
 - ✅ **[FOLDER-ATTACHMENTS]** + **[FILES-VIEW]** — **CODÉ [V23.0.74] (BUMP EXPORT v23, à valider Cowork)** : (A) pièce jointe rattachable à un **dossier** (colonne additive `attachments.project_id`, routes owner+invité, export niché par projet, purge cascade) ; (B) vues « Fichiers » (agrégation `_collect_files` avec **fil d'Ariane cliquable**) — bouton 📁 Fichiers par dossier (3 pages) + entrée « Fichiers » globale sidebar owner + endpoints lecture owner/global/invité scopé. `REALISATION.md` [V23.0.74].
 
 _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import de dossier, prévisualisation d'import, réactions : **tout livré et en prod** — voir `REALISATION.md`._
@@ -55,7 +56,41 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 
 **Contraintes :** additif (inv. 1), pas de CDN runtime navigateur (inv. 6, seul appel externe = fetch serveur), aucun commit/tag/push sans feu vert. Journaliser IDEAS→REALISATION une fois codé + build OK. Validation Chrome owner + invité par Cowork.
 
+## [QUICK-MEMO] — Widget flottant de création rapide de mémo (idée Fabien, 29 juil. 2026)
+
+**Statut :** à cadrer → cible **V24.x** (frontend pur pressenti, **export v24 inchangé**, zéro route/schéma nouveau). À glisser après [PROJECT-NAME-PER-FOLDER] (livré [V25.0.113]) — petit lot type quick win.
+
+**Idée :** capturer une note depuis N'IMPORTE quelle vue (Liens, Agenda, board, carte…) sans naviguer vers la vue Mémos — un widget flottant **calqué sur le Pomodoro/FX-CONVERTER** (mêmes patterns, invariant 9) : lanceur ✏️ + panneau **déplaçables** (Pointer Events, `clampPos`, positions persistées `qmPos`/`qmLaunchPos`), ✕ masquer + pastille re-show + préférence `qmHidden` (case dans Paramètres owner à côté de Pomodoro/FX).
+
+**Cadrage proposé :**
+- **Helper partagé `initQuickMemo(cfg)`** dans `_shared.js.html`, parité 3 pages : owner → `POST /api/memos` (route existante) ; invité/hub → `POST /share/<token>/memos` (existante, approuvé + rôle, scope revalidé — invariant 5, rien de nouveau). `cfg` = endpoints + liste de dossiers par page.
+- **Panneau minimal** : champ titre + textarea texte simple (PAS de Quill dans le widget — trop lourd ; on rouvre le mémo pour enrichir) + **sélecteur de dossier** (défaut = 📥 Inbox ; pré-sélection du dossier courant si on est sur un board) + bouton Créer. `flashSaved()` en retour ([SAVE-INDICATOR]).
+- **Synergie [OFFLINE]** (owner) : brancher le widget sur la **file de notes Inbox idempotente** existante du SW → une note posée hors ligne part en ⏳ et se resynchronise. C'est LE cas d'usage voyage (noter un resto dans le métro de Tokyo).
+- Invariants 6 (zéro lib), 8 (pas de GSAP sur un dialog — le panneau est un div flottant comme Pomodoro), 9 (tokens/classes existants, `.addbar`/`.prio-btn`).
+
+**Hors périmètre V1 :** Quill/photos/date dans le widget (le mémo créé s'édite ensuite normalement), raccourci clavier global (candidat V2 avec [CMD-K]).
+
+## [AGENDA-DAY-POPIN] — Pop-in « jour » tactile dans l'Agenda (idée Fabien, 29 juil. 2026)
+
+**Statut :** **cadré + maquette validée par Fabien (29 juil.)** → cible **V24.x** (frontend pur, **export v24 inchangé**, zéro route/schéma). File : après [PROJECT-NAME-PER-FOLDER] et [QUICK-MEMO]. Brief CC à rédiger au lancement du lot.
+
+**Problème constaté (iPad, pire sur portable) :** plusieurs mémos le même jour = pas de vue « jour » facilement cliquable. Causes dans `renderAgendaView()` : (a) iPad paysage > 900 px → grille desktop : chips 0.7rem, « +N » = span **non cliquable**, panneau du jour rendu **sous la grille** (hors champ, il faut scroller), interactions pensées souris/D&D ; (b) ≤ 900 px → liste de tout le mois, aucune navigation par jour.
+
+**Cadrage proposé :**
+- **Pop-in « jour »** : `<dialog>` natif (entrée CSS `dlg-in`, JAMAIS de GSAP sur le dialog — invariant 8) — titre = jour (`agendaDayLabel`), lignes du jour en **gros tap-targets ≥ 44 px** (pastille couleur + titre + heure + badges projet/@), tap = `openMemoEditor` ; navigation **‹ jour précédent / jour suivant ›** dans l'en-tête (change le contenu sans fermer) ; bouton **« + Mémo ce jour »** qui préremplit `due_date` (gros gain de saisie).
+- **Déclencheurs** : au tap d'une cellule de la grille (tactile — `pointer:coarse` — et/ou systématiquement : la pop-in remplace avantageusement le panneau bas) ; « +N » devient un **vrai bouton** partout ; en mobile, l'en-tête de chaque jour de la liste mensuelle ouvre la même pop-in.
+- **DÉCISION FABIEN (29 juil., maquette validée)** : **pop-in PARTOUT** — souris comme tactile, elle **remplace le panneau sous la grille** (un seul comportement à maintenir ; le clic cellule n'a plus de sélection `agendaSelDay` à gérer, la pop-in EST la vue jour). Maquette de référence : grille + pop-in (lignes ≥ 44 px, heure en badge à droite, pastille couleur priorité/projet, plage v24 répétée chaque jour, ‹ › jour, « + Mémo ce jour », « +N » bouton).
+- **Plages v24** : réutilise `agendaGroupByDay` (un mémo à plage couvre chaque jour — [MEMO-DATE-RANGE]) → la pop-in du 4 nov montre l'hôtel du 3→6.
+- **Parité 3 pages** : l'agenda existe aussi dans `share.html` et `hub.html` → helper partagé dans `_shared.js.html` (cfg par page : source mémos, openMemoEditor/openEditor, création selon rôle [GUEST-ROLES], invariant 5 — rien de nouveau côté réseau).
+- Invariants 6/8/9 (aucune lib, tokens existants, `.task`/`.prio-btn`).
+
+**Hors périmètre V1 :** vue semaine, swipe gestuel entre jours (candidat V2), D&D tactile de replanification (le D&D souris existant reste).
+
+**Acceptation :** iPad paysage ET portable — depuis la grille/liste du mois, 2 taps max pour ouvrir n'importe quel mémo d'un jour chargé ; « +N » cliquable ; créer un mémo pré-daté depuis la pop-in ; owner + invité (share/hub) ; `node --check` + `py_compile`.
+
 ## Quick wins
+
+- **[MEMO-QUICK-STICKY] Zone « + Note rapide » toujours visible dans la colonne mémos** (constat Fabien 29 juil., capture : 195 post-its à scroller pour atteindre `#memo-quick` en bas de `aside#memo-panel`) : rendre le textarea **sticky bas** (`position: sticky; bottom: 0` + fond opaque `var(--panel)` + léger padding/z-index pour que les cards ne transparaissent pas en dessous) → saisie accessible sans scroller, zéro JS, comportement Entrée inchangé. En complément : révéler le « ＋ » de l'en-tête MÉMOS (`#memo-add-btn`, aujourd'hui mobile-only [HEADER-ADD-CONTEXT]) aussi sur desktop — il ouvre/focus la zone. Frontend pur `index.html`, export inchangé, invariant 9. **À livrer avec [QUICK-MEMO]** (même thème capture rapide) ou seul si l'occasion se présente.
 
 - **Raccourcis clavier 1-9** : ouvrir directement les 9 premiers liens de la catégorie active.
 - **Compteur de clics** : colonne `clicks` sur `links`, tri optionnel "par usage" — les services les plus utilisés remontent tout seuls.

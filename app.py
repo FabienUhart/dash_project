@@ -64,7 +64,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "24"  # X = version du format d'export (invariant 1) — v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "25"  # X = version du format d'export (invariant 1) — v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -886,6 +886,41 @@ def init_db():
         conn.execute("ALTER TABLE projects ADD COLUMN guest_space INTEGER DEFAULT 0")
     if "created_by" not in pcols:
         conn.execute("ALTER TABLE projects ADD COLUMN created_by TEXT DEFAULT ''")
+    # [PROJECT-NAME-PER-FOLDER] v25 : unicité des noms de dossiers PAR DOSSIER PARENT (plus
+    # globale). SQLite ne sait pas RETIRER une contrainte UNIQUE → rebuild de la table projects
+    # (pattern [FAVORITES V1.1] : rename → create SANS UNIQUE(name) → port en préservant les id
+    # (référencés par memos.project_id/shares/attachments/favorites/votes) → drop). Guard
+    # idempotent : ne rebuild que tant que l'index par parent n'existe pas ; sûr multi-workers.
+    _pidx = {r[1] for r in conn.execute("PRAGMA index_list(projects)").fetchall()}
+    if "ux_projects_name_parent" not in _pidx:
+        _info = conn.execute("PRAGMA table_info(projects)").fetchall()
+        _coldefs, _colnames = [], []
+        for _cid, _cn, _ct, _nn, _df, _pk in _info:  # (cid, name, type, notnull, dflt, pk)
+            _colnames.append(_cn)
+            if _pk:  # id INTEGER PRIMARY KEY AUTOINCREMENT — jamais d'UNIQUE reconstruit
+                _coldefs.append(f"{_cn} {_ct or 'INTEGER'} PRIMARY KEY AUTOINCREMENT")
+                continue
+            _d = f"{_cn} {_ct or 'TEXT'}"
+            if _nn:
+                _d += " NOT NULL"
+            if _df is not None:
+                _d += f" DEFAULT {_df}"  # dflt renvoyé par PRAGMA = littéral SQL ('', 0, NULL…)
+            _coldefs.append(_d)
+        _cols_csv = ", ".join(_colnames)
+        conn.execute("ALTER TABLE projects RENAME TO projects_v24")
+        conn.execute("CREATE TABLE projects (\n  " + ",\n  ".join(_coldefs) + "\n)")
+        conn.execute(f"INSERT INTO projects ({_cols_csv}) SELECT {_cols_csv} FROM projects_v24")
+        conn.execute("DROP TABLE projects_v24")
+        # ⚠️ COALESCE(parent_id, 0) OBLIGATOIRE : dans un UNIQUE SQLite les NULL sont DISTINCTS →
+        # sans COALESCE, plusieurs homonymes à la racine (parent NULL) resteraient possibles.
+        # Les id commencent à 1 → 0 est une valeur de « parent racine » libre et sûre.
+        conn.execute(
+            "CREATE UNIQUE INDEX ux_projects_name_parent ON projects(COALESCE(parent_id, 0), name)"
+        )
+    # uid stable sur les projets (invariant 3, pattern memos.uid) : le nom n'est plus une clef
+    # fiable dès qu'un homonyme existe → c'est l'uid qui porte le match export/import (v25).
+    if "uid" not in {r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()}:
+        conn.execute("ALTER TABLE projects ADD COLUMN uid TEXT DEFAULT ''")
     # [HUB-SESSION] jeton de session par hub (transporté en cookie HttpOnly) ; '' = aucune session.
     hcols = {r[1] for r in conn.execute("PRAGMA table_info(guest_hubs)").fetchall()}
     if "session_token" not in hcols:
@@ -911,6 +946,9 @@ def init_db():
             "UPDATE memos SET uid = ?, updated_at = ? WHERE id = ?",
             (str(uuid.uuid4()), row[1] or now, row[0]),
         )
+    # [PROJECT-NAME-PER-FOLDER] v25 : backfill uid des projets (jamais régénéré ensuite — invariant 3).
+    for row in conn.execute("SELECT id FROM projects WHERE uid = '' OR uid IS NULL").fetchall():
+        conn.execute("UPDATE projects SET uid = ? WHERE id = ?", (str(uuid.uuid4()), row[0]))
     conn.commit()
     conn.close()
 
@@ -1526,6 +1564,21 @@ def list_projects():
     return jsonify(out)
 
 
+# [PROJECT-NAME-PER-FOLDER] v25 : message unique + garde d'unicité PAR DOSSIER PARENT.
+PROJECT_NAME_TAKEN_MSG = "un dossier de ce nom existe déjà à cet endroit"
+
+
+def _sibling_name_taken(db, name, parent_id, exclude_id=None):
+    """Un dossier FRÈRE (même parent, racine incluse) porte-t-il déjà ce nom ? Comparaison
+    sensible à la casse, inchangée (D1). parent_id None = racine (COALESCE → 0, les id ≥ 1)."""
+    q = "SELECT 1 FROM projects WHERE name = ? AND COALESCE(parent_id, 0) = COALESCE(?, 0)"
+    args = [name, parent_id]
+    if exclude_id is not None:
+        q += " AND id != ?"
+        args.append(exclude_id)
+    return db.execute(q, args).fetchone() is not None
+
+
 @app.route("/api/projects", methods=["POST"])
 def create_project():
     data = request.get_json(silent=True) or {}
@@ -1533,8 +1586,10 @@ def create_project():
     if not name:
         return jsonify({"error": "name required"}), 400
     db = get_db()
-    if db.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
-        return jsonify({"error": "project already exists"}), 409
+    # POST crée à la RACINE (le front fait un PUT ensuite pour déplacer) → garde à la racine ;
+    # le PUT (update_project) revalide au déplacement (D4).
+    if _sibling_name_taken(db, name, None):
+        return jsonify({"error": PROJECT_NAME_TAKEN_MSG}), 409
     max_pos = db.execute(
         "SELECT COALESCE(MAX(position), -1) FROM projects"
     ).fetchone()[0]
@@ -1545,8 +1600,8 @@ def create_project():
     marker_color = _clean_hex_color(data.get("marker_color"), "")
     is_trip = _clean_is_trip(data.get("is_trip"))  # [MAP-TIMELINE]
     cur = db.execute(
-        "INSERT INTO projects (name, color, position, tags, emoji, description, marker_color, is_trip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (name, color, max_pos + 1, tags, emoji, description, marker_color, is_trip),
+        "INSERT INTO projects (name, color, position, tags, emoji, description, marker_color, is_trip, uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, color, max_pos + 1, tags, emoji, description, marker_color, is_trip, str(uuid.uuid4())),
     )
     db.commit()
     return (
@@ -1652,6 +1707,10 @@ def update_project(project_id):
         if "guest_space" in data
         else _row_get(existing, "guest_space", 0)
     )
+    # [PROJECT-NAME-PER-FOLDER] v25 : garde d'unicité PAR PARENT (couvre rename ET déplacement D4
+    # en une fois — combinaison (nouveau nom, nouveau parent)). Remplace l'IntegrityError 500 latent.
+    if _sibling_name_taken(db, name, parent_id, exclude_id=project_id):
+        return jsonify({"error": PROJECT_NAME_TAKEN_MSG}), 409
     db.execute(
         "UPDATE projects SET name = ?, color = ?, tags = ?, emoji = ?, parent_id = ?, location = ?, description = ?, marker_color = ?, is_trip = ?, "
         "vote_enabled = ?, vote_mode = ?, vote_deadline = ?, vote_create = ?, perm_vote = ?, perm_comment = ?, role_floor = ?, guest_space = ? WHERE id = ?",
@@ -4394,19 +4453,20 @@ def _provision_guest_spaces(db, guest_email, guest_name, scope_pids):
         ).fetchone()
         if existing:
             continue
-        # Nom = prénom, suffixe discret si déjà pris (noms de projets globalement uniques).
+        # [PROJECT-NAME-PER-FOLDER] v25 : nom = prénom, suffixe discret si déjà pris DANS CE DOSSIER
+        # (collision re-scopée au parent sp["id"] — un même prénom dans un autre dossier ne suffixe plus).
         name = base
-        if db.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
+        if _sibling_name_taken(db, name, sp["id"]):
             name = base + " · " + ge.split("@")[0]
             n = 2
-            while db.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
+            while _sibling_name_taken(db, name, sp["id"]):
                 name = base + " · " + ge.split("@")[0] + " " + str(n)
                 n += 1
         max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
         db.execute(
-            "INSERT INTO projects (name, color, position, tags, emoji, parent_id, created_by) "
-            "VALUES (?, '', ?, '', '🏠', ?, ?)",
-            (name, max_pos + 1, sp["id"], created_by),
+            "INSERT INTO projects (name, color, position, tags, emoji, parent_id, created_by, uid) "
+            "VALUES (?, '', ?, '', '🏠', ?, ?, ?)",
+            (name, max_pos + 1, sp["id"], created_by, str(uuid.uuid4())),
         )
         created = True
     if created:
@@ -7101,8 +7161,6 @@ def share_add_project(token):
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name required"}), 400
-    if db.execute("SELECT 1 FROM projects WHERE name = ?", (name,)).fetchone():
-        return jsonify({"error": "un projet porte déjà ce nom"}), 409
     parent_id = share["target_id"]
     if data.get("parent_id"):
         try:
@@ -7111,6 +7169,9 @@ def share_add_project(token):
             wanted = None
         if wanted in _project_descendants(db, share["target_id"]):
             parent_id = wanted
+    # [PROJECT-NAME-PER-FOLDER] v25 : garde d'unicité scopée au parent VISÉ (D1).
+    if _sibling_name_taken(db, name, parent_id):
+        return jsonify({"error": PROJECT_NAME_TAKEN_MSG}), 409
     # [GUEST-ROLES] créer un sous-projet = contributeur sur le dossier PARENT (zone/perso inclus).
     if not _role_allows(db, share, "create", guest=guest, project_id=parent_id):
         return jsonify({"error": "non autorisé"}), 403
@@ -7118,9 +7179,9 @@ def share_add_project(token):
         "SELECT COALESCE(MAX(position), -1) FROM projects"
     ).fetchone()[0]
     cur = db.execute(
-        "INSERT INTO projects (name, color, position, tags, emoji, parent_id) "
-        "VALUES (?, '', ?, '', ?, ?)",
-        (name, max_pos + 1, _clean_emoji(data.get("emoji")), parent_id),
+        "INSERT INTO projects (name, color, position, tags, emoji, parent_id, uid) "
+        "VALUES (?, '', ?, '', ?, ?, ?)",
+        (name, max_pos + 1, _clean_emoji(data.get("emoji")), parent_id, str(uuid.uuid4())),
     )
     editor = guest["name"] or guest["email"]
     parent_name = db.execute(
@@ -7195,10 +7256,6 @@ def share_update_project(token, proj_id):
         if not name:
             return jsonify({"error": "name required"}), 400
         if name != existing["name"]:
-            if db.execute(
-                "SELECT 1 FROM projects WHERE name = ? AND id != ?", (name, proj_id)
-            ).fetchone():
-                return jsonify({"error": "un projet porte déjà ce nom"}), 409
             renamed_from = existing["name"]
             updates["name"] = name
     if "emoji" in data:
@@ -7214,6 +7271,15 @@ def share_update_project(token, proj_id):
 
     if not updates:
         return jsonify({"error": "rien à modifier"}), 400
+    # [PROJECT-NAME-PER-FOLDER] v25 : garde d'unicité PAR PARENT sur le résultat final (couvre
+    # rename ET déplacement D4 — le nom peut entrer en collision au nouveau parent). Scope invité
+    # inchangé (invariant 5 : proj_id/parent déjà revalidés dans le périmètre du partage).
+    final_name = updates.get("name", existing["name"])
+    final_parent = updates.get("parent_id", existing["parent_id"])
+    if ("name" in updates or "parent_id" in updates) and _sibling_name_taken(
+        db, final_name, final_parent, exclude_id=proj_id
+    ):
+        return jsonify({"error": PROJECT_NAME_TAKEN_MSG}), 409
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     db.execute(
         f"UPDATE projects SET {set_clause} WHERE id = ?",
@@ -7689,12 +7755,16 @@ def _build_export(db, root_id=None):
         "SELECT name, position, color, emoji FROM categories ORDER BY position, id"
     ).fetchall()
     all_projects = db.execute(
-        "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color, is_trip FROM projects ORDER BY position, id"
+        "SELECT id, name, position, color, tags, emoji, parent_id, location, description, marker_color, is_trip, uid FROM projects ORDER BY position, id"
     ).fetchall()
     # proj_names = TOUS les projets (pour résoudre le nom du parent, y compris le parent du
     # dossier racine qui est HORS du sous-arbre → à l'import il raccroche si ce nom existe,
     # sinon le dossier atterrit à la racine). Export = seulement les projets du sous-arbre.
     proj_names = {r["id"]: r["name"] for r in all_projects}
+    # [PROJECT-NAME-PER-FOLDER] v25 : proj_uids doublé de proj_names → l'import résout uid-d'abord
+    # (le nom n'est plus une clef fiable dès qu'un homonyme existe). Le parent hors sous-arbre
+    # ([EXPORT-SUBTREE]) est émis en parent_uid + parent (nom) comme aujourd'hui.
+    proj_uids = {r["id"]: (_row_get(r, "uid", "") or "") for r in all_projects}
     projects = all_projects if subtree is None else [r for r in all_projects if r["id"] in subtree]
     # uids des mémos du périmètre → filtre commentaires + historique (par memo_uid).
     memo_uids = {m["uid"] for m in memos if m["uid"]} if subtree is not None else None
@@ -7725,7 +7795,9 @@ def _build_export(db, root_id=None):
         d.pop("end_time", None)  # [FESTIVAL-VOTE] non exporté (export reste v23, comme les voix)
         d.pop("perm_vote", None)  # [GUEST-ROLES] override d'atelier, jamais exporté (comme les voix)
         d.pop("perm_comment", None)
-        d["project"] = proj_names.get(d.pop("project_id", None), "")
+        _pid = d.pop("project_id", None)
+        d["project"] = proj_names.get(_pid, "")
+        d["project_uid"] = proj_uids.get(_pid, "")  # [PROJECT-NAME-PER-FOLDER] v25 (résolution uid-d'abord)
         d["attachments"] = att_by_id.get(mid, [])  # [ATTACHMENTS] v22
         out_memos.append(d)
     # [FOLDER-ATTACHMENTS] v23 : pièces jointes de dossier nichées par projet (noms de fichiers
@@ -7750,6 +7822,10 @@ def _build_export(db, root_id=None):
             "color": r["color"],
             "tags": r["tags"],
             "emoji": r["emoji"],
+            # [PROJECT-NAME-PER-FOLDER] v25 : uid (identité stable) + parent_uid (résolution par uid) ;
+            # name/parent (nom) RESTENT émis (lisibilité + compat v1→v24, import tolérant).
+            "uid": proj_uids.get(r["id"], ""),
+            "parent_uid": proj_uids.get(r["parent_id"], "") if r["parent_id"] else "",
             "parent": proj_names.get(r["parent_id"], ""),
             "location": _parse_location(r["location"]),
             "description": _row_get(r, "description"),
@@ -8026,7 +8102,10 @@ def _import_dry_run(db, data):
     """[IMPORT-PREVIEW] Analyse LECTURE PURE d'un fichier d'import (aucune écriture, aucun
     bump _data_version) → rapport {projects (arbre), memos, bilan}. Statuts D2 :
     project new/merge (par nom) ; mémo new/skip/conflict(active|trashed) (par uid + signature)."""
+    # [PROJECT-NAME-PER-FOLDER] v25 : merge/new résolu uid-d'abord (un projet renommé mais réimporté
+    # par le même uid = merge, pas « new ») ; repli par nom (compat v1→v24, noms globalement uniques).
     existing_proj = {(r["name"] or "").strip().lower() for r in db.execute("SELECT name FROM projects").fetchall()}
+    existing_uids = {(r["uid"] or "").strip() for r in db.execute("SELECT uid FROM projects WHERE COALESCE(uid,'') != ''").fetchall()}
     by_name = {}
     for p in (data.get("projects") or []):
         if not isinstance(p, dict):
@@ -8034,8 +8113,10 @@ def _import_dry_run(db, data):
         nm = (p.get("name") or "").strip()
         if not nm:
             continue
+        puid = (p.get("uid") or "").strip()
+        is_merge = (puid and puid in existing_uids) or nm.lower() in existing_proj
         by_name[nm] = {"name": nm, "parent": (p.get("parent") or "").strip(),
-                       "status": "merge" if nm.lower() in existing_proj else "new", "children": []}
+                       "status": "merge" if is_merge else "new", "children": []}
     roots = []
     for node in by_name.values():
         par = node["parent"]
@@ -8171,137 +8252,184 @@ def import_links():
         else:
             ensure_category(cat)
 
-    proj_ids = {}
-    new_projects = set()  # [EXPORT-SUBTREE] noms des projets CRÉÉS par cet import (racines ciblables)
+    # [PROJECT-NAME-PER-FOLDER] v25 : résolution des projets UID-D'ABORD puis par (nom, parent).
+    # Le nom n'est plus une clef fiable dès qu'un homonyme existe → c'est l'uid qui porte le match
+    # (invariant 3). Compat v1→v24 : sans uid, résolution (nom, parent) = par CHEMIN, plus jamais
+    # à plat (les vieux exports avaient des noms globalement uniques → chemin toujours résolvable).
+    proj_ids = {}          # nom -> id local (dernier gagne ; fallback mémos/pièces jointes + vieux exports)
+    proj_by_uid = {}       # uid FICHIER -> id local (résolution uid-d'abord)
+    new_projects = set()   # [EXPORT-SUBTREE] noms CRÉÉS par cet import (racines ciblables)
 
-    def ensure_project(name, color="", tags="", emoji="", location=None, description="", marker_color="", is_trip=None):
-        name = (name or "").strip()
+    # Entrées projet du fichier (on tolère les entrées « chaîne nue » des très vieux exports).
+    file_projects = []
+    for p in (data.get("projects") or []):
+        if isinstance(p, dict) and (p.get("name") or "").strip():
+            file_projects.append(p)
+        elif not isinstance(p, dict) and (str(p) or "").strip():
+            file_projects.append({"name": str(p).strip()})
+    file_uid_entries = {(e.get("uid") or "").strip() for e in file_projects if (e.get("uid") or "").strip()}
+    file_names_all = {(e.get("name") or "").strip() for e in file_projects}
+
+    def _enrich_project(pid, e):
+        """Enrichit les champs VIDES d'un projet existant (non destructif, invariant 2)."""
+        row = db.execute("SELECT * FROM projects WHERE id = ?", (pid,)).fetchone()
+        if not row:
+            return
+        color = (e.get("color") or "").strip()
+        if color and not (row["color"] or "").strip():
+            db.execute("UPDATE projects SET color = ? WHERE id = ?", (color, pid))
+        tags = e.get("tags") or ""
+        if tags and not (row["tags"] or "").strip():
+            db.execute("UPDATE projects SET tags = ? WHERE id = ?", (_normalize_tags(tags), pid))
+        emoji = e.get("emoji") or ""
+        if emoji and not (row["emoji"] or "").strip():
+            db.execute("UPDATE projects SET emoji = ? WHERE id = ?", (_clean_emoji(emoji), pid))
+        location = e.get("location")
+        if location and not (row["location"] or "").strip():
+            db.execute("UPDATE projects SET location = ? WHERE id = ?", (_clean_location(location), pid))
+        description = e.get("description") or ""
+        if description and not (_row_get(row, "description") or "").strip():
+            db.execute("UPDATE projects SET description = ? WHERE id = ?", (_clean_description(description), pid))
+        marker = e.get("marker_color") or ""
+        if marker and not (_row_get(row, "marker_color") or "").strip():
+            db.execute("UPDATE projects SET marker_color = ? WHERE id = ?", (_clean_hex_color(marker, ""), pid))
+        # [MAP-TIMELINE] v20 : upsert non destructif — n'enrichit que si l'existant n'a PAS tranché (NULL).
+        it = _clean_is_trip(e.get("is_trip"))
+        if it is not None and _row_get(row, "is_trip", None) is None:
+            db.execute("UPDATE projects SET is_trip = ? WHERE id = ?", (it, pid))
+
+    def _ensure_project_entry(e, parent_local):
+        """Résout/crée UN projet du fichier, son parent DÉJÀ résolu (parent_local, None = racine).
+        1) par uid (nom différent = RENOMMÉ, newer-wins) ; 2) par (nom, parent) ; 3) création."""
+        name = (e.get("name") or "").strip()
+        uid = (e.get("uid") or "").strip()
+        if uid:  # 1) identité stable — l'uid porte le match, plus de doublon (invariant 3)
+            row = db.execute("SELECT * FROM projects WHERE uid = ?", (uid,)).fetchone()
+            if row:
+                local = row["id"]
+                # Le nom local n'est PAS écrasé (invariant 2 : les projets n'ont pas d'updated_at,
+                # donc « newer-wins » est indécidable → on ne détruit jamais un renommage local).
+                _enrich_project(local, e)  # enrichit seulement les champs VIDES
+                proj_by_uid[uid] = local
+                proj_ids[row["name"]] = local
+                return local
+        # 2) par (nom, parent) résolu — vieux exports (noms uniques) ET 1re adoption d'un projet uid.
+        row = db.execute(
+            "SELECT id FROM projects WHERE name = ? AND COALESCE(parent_id, 0) = COALESCE(?, 0)",
+            (name, parent_local),
+        ).fetchone()
+        if row:
+            local = row["id"]
+            _enrich_project(local, e)
+            if uid:
+                proj_by_uid[uid] = local  # mappe l'uid FICHIER ; l'uid LOCAL reste inchangé (invariant 3)
+            proj_ids[name] = local
+            return local
+        # 3) création (uid conservé si fourni, sinon généré) — parent déjà résolu → pas de collision racine.
+        new_uid = uid or str(uuid.uuid4())
+        max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
+        cur = db.execute(
+            "INSERT INTO projects (name, color, position, tags, emoji, location, description, marker_color, is_trip, parent_id, uid) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, (e.get("color") or "").strip(), max_pos + 1, _normalize_tags(e.get("tags") or ""),
+             _clean_emoji(e.get("emoji")), _clean_location(e.get("location")), _clean_description(e.get("description") or ""),
+             _clean_hex_color(e.get("marker_color") or "", ""), _clean_is_trip(e.get("is_trip")), parent_local, new_uid),
+        )
+        local = cur.lastrowid
+        proj_by_uid[new_uid] = local
+        proj_ids[name] = local
+        new_projects.add(name)
+        return local
+
+    def _resolve_parent_local(e):
+        """(parent_local, defer). defer=True → le parent est un projet du fichier pas encore résolu."""
+        puid = (e.get("parent_uid") or "").strip()
+        pname = (e.get("parent") or "").strip()
+        if puid:
+            if puid in proj_by_uid:
+                return proj_by_uid[puid], False
+            if puid in file_uid_entries:
+                return None, True  # parent (uid) dans le fichier, pas encore résolu → différer
+            row = db.execute("SELECT id FROM projects WHERE uid = ?", (puid,)).fetchone()
+            return (row["id"] if row else None), False  # hors fichier → existant, sinon racine
+        if pname:
+            if pname in proj_ids:
+                return proj_ids[pname], False
+            if pname in file_names_all:
+                return None, True  # parent (nom) dans le fichier, pas encore résolu → différer
+            row = db.execute("SELECT id FROM projects WHERE name = ? ORDER BY id LIMIT 1", (pname,)).fetchone()
+            return (row["id"] if row else None), False
+        return None, False  # pas de parent → racine
+
+    # Résolution en ordre topologique (le fichier peut lister un enfant avant son parent).
+    entry_local = {}  # index d'entrée -> id local (pour les pièces jointes de dossier)
+    pending = list(enumerate(file_projects))
+    guard = 0
+    while pending:
+        guard += 1
+        progressed = False
+        still = []
+        for idx, e in pending:
+            pl, defer = _resolve_parent_local(e)
+            if defer:
+                still.append((idx, e))
+                continue
+            entry_local[idx] = _ensure_project_entry(e, pl)
+            progressed = True
+        pending = still
+        if not progressed or guard > len(file_projects) + 2:
+            # cycle résiduel / parent introuvable → rattacher à la racine (déterministe, jamais d'erreur).
+            for idx, e in pending:
+                entry_local[idx] = _ensure_project_entry(e, None)
+            break
+
+    # [EXPORT-SUBTREE] « Importer ici » : rattache les RACINES NOUVELLES du fichier (parent hors
+    # fichier) au dossier cible. N'affecte QUE les projets créés par cet import (jamais un existant
+    # → invariant 2) ; « racine nouvelle » évaluée par uid-puis-chemin ([V20.12.53] mis à jour v25).
+    if target_parent_id is not None:
+        for idx, e in enumerate(file_projects):
+            name = (e.get("name") or "").strip()
+            if name not in new_projects:
+                continue  # projet existant → jamais déplacé
+            puid = (e.get("parent_uid") or "").strip()
+            pname = (e.get("parent") or "").strip()
+            has_parent_in_file = (puid and puid in file_uid_entries) or (not puid and bool(pname) and pname in file_names_all)
+            if has_parent_in_file:
+                continue  # a un parent DANS le fichier → sous-dossier, pas une racine
+            child_id = entry_local.get(idx)
+            if not child_id:
+                continue
+            resolved, err = _resolve_parent(db, child_id, target_parent_id)
+            if err or _sibling_name_taken(db, name, resolved, exclude_id=child_id):
+                continue  # collision au dossier cible → laisser à la racine (tolérant, jamais de 409)
+            db.execute("UPDATE projects SET parent_id = ? WHERE id = ?", (resolved, child_id))
+
+    def _resolve_memo_project(m):
+        """[PROJECT-NAME-PER-FOLDER] v25 : projet d'un mémo, uid-d'abord puis par nom. Nom inconnu
+        (mémo référençant un projet absent de projects[]) → création à la racine (comportement
+        d'ensure_project préservé)."""
+        pu = (m.get("project_uid") or "").strip()
+        if pu:
+            if pu in proj_by_uid:
+                return proj_by_uid[pu]
+            row = db.execute("SELECT id FROM projects WHERE uid = ?", (pu,)).fetchone()
+            if row:
+                return row["id"]
+        name = (m.get("project") or "").strip()
         if not name:
             return None
         if name in proj_ids:
             return proj_ids[name]
-        row = db.execute(
-            "SELECT id, color, tags, emoji, location, description, marker_color, is_trip FROM projects WHERE name = ?", (name,)
-        ).fetchone()
+        row = db.execute("SELECT id FROM projects WHERE name = ? ORDER BY id LIMIT 1", (name,)).fetchone()
         if row:
-            proj_ids[name] = row["id"]
-            if color and not (row["color"] or "").strip():
-                db.execute(
-                    "UPDATE projects SET color = ? WHERE id = ?", (color, row["id"])
-                )
-            if tags and not (row["tags"] or "").strip():
-                db.execute(
-                    "UPDATE projects SET tags = ? WHERE id = ?",
-                    (_normalize_tags(tags), row["id"]),
-                )
-            if emoji and not (row["emoji"] or "").strip():
-                db.execute(
-                    "UPDATE projects SET emoji = ? WHERE id = ?",
-                    (_clean_emoji(emoji), row["id"]),
-                )
-            if location and not (row["location"] or "").strip():
-                db.execute(
-                    "UPDATE projects SET location = ? WHERE id = ?",
-                    (_clean_location(location), row["id"]),
-                )
-            if description and not (_row_get(row, "description") or "").strip():
-                db.execute(
-                    "UPDATE projects SET description = ? WHERE id = ?",
-                    (_clean_description(description), row["id"]),
-                )
-            if marker_color and not (_row_get(row, "marker_color") or "").strip():
-                db.execute(
-                    "UPDATE projects SET marker_color = ? WHERE id = ?",
-                    (_clean_hex_color(marker_color, ""), row["id"]),
-                )
-            # [MAP-TIMELINE] v20 : upsert non destructif — n'enrichit que si l'existant
-            # n'a PAS tranché (NULL). Un 0/1 local n'est JAMAIS écrasé (ni par NULL,
-            # ni par une autre valeur — le tri-état local fait foi).
-            it = _clean_is_trip(is_trip)
-            if it is not None and _row_get(row, "is_trip", None) is None:
-                db.execute(
-                    "UPDATE projects SET is_trip = ? WHERE id = ?", (it, row["id"])
-                )
-        else:
-            max_pos = db.execute(
-                "SELECT COALESCE(MAX(position), -1) FROM projects"
-            ).fetchone()[0]
-            cur = db.execute(
-                "INSERT INTO projects (name, color, position, tags, emoji, location, description, marker_color, is_trip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (name, color or "", max_pos + 1, _normalize_tags(tags), _clean_emoji(emoji), _clean_location(location), _clean_description(description), _clean_hex_color(marker_color, ""), _clean_is_trip(is_trip)),
-            )
-            proj_ids[name] = cur.lastrowid
-            new_projects.add(name)  # [EXPORT-SUBTREE]
-        return proj_ids[name]
+            return row["id"]
+        return _ensure_project_entry({"name": name}, None)
 
-    for proj in data.get("projects") or []:
-        if isinstance(proj, dict):
-            ensure_project(
-                proj.get("name"),
-                (proj.get("color") or "").strip(),
-                proj.get("tags") or "",
-                proj.get("emoji") or "",
-                proj.get("location"),
-                proj.get("description") or "",
-                proj.get("marker_color") or "",
-                proj.get("is_trip"),  # [MAP-TIMELINE] v20 — absent (v1→v19) = None = hérite
-            )
-        else:
-            ensure_project(proj)
-
-    for proj in data.get("projects") or []:
-        if not isinstance(proj, dict):
-            continue
-        parent_name = (proj.get("parent") or "").strip()
-        child_id = proj_ids.get((proj.get("name") or "").strip())
-        if not parent_name or not child_id:
-            continue
-        parent_id = proj_ids.get(parent_name) or (
-            lambda r: r["id"] if r else None
-        )(db.execute("SELECT id FROM projects WHERE name = ?", (parent_name,)).fetchone())
-        if not parent_id:
-            continue
-        row = db.execute(
-            "SELECT parent_id FROM projects WHERE id = ?", (child_id,)
-        ).fetchone()
-        if row and row["parent_id"] is None:
-            resolved, err = _resolve_parent(db, child_id, parent_id)
-            if not err:
-                db.execute(
-                    "UPDATE projects SET parent_id = ? WHERE id = ?",
-                    (resolved, child_id),
-                )
-
-    # [EXPORT-SUBTREE] Ciblage « Importer ici » : rattache les RACINES NOUVELLES du fichier
-    # (parent hors fichier) au dossier cible. N'affecte QUE les projets créés par cet import
-    # (jamais un existant → invariant 2). Prime sur la résolution par nom pour ces racines.
-    if target_parent_id is not None:
-        file_names = {
-            (p.get("name") or "").strip()
-            for p in (data.get("projects") or []) if isinstance(p, dict) and (p.get("name") or "").strip()
-        }
-        for proj in data.get("projects") or []:
-            if not isinstance(proj, dict):
-                continue
-            name = (proj.get("name") or "").strip()
-            if name not in new_projects:
-                continue  # projet existant → jamais déplacé
-            par = (proj.get("parent") or "").strip()
-            if par and par in file_names:
-                continue  # a un parent DANS le fichier → sous-dossier, pas une racine
-            child_id = proj_ids.get(name)
-            if not child_id:
-                continue
-            resolved, err = _resolve_parent(db, child_id, target_parent_id)
-            if not err:
-                db.execute("UPDATE projects SET parent_id = ? WHERE id = ?", (resolved, child_id))
-
-    # [FOLDER-ATTACHMENTS] v23 : pièces jointes de dossier, rattachées par NOM (comme le projet).
+    # [FOLDER-ATTACHMENTS] v23 : pièces jointes de dossier (par index d'entrée → id résolu, robuste
+    # aux homonymes v25). Rattachées comme le reste du projet.
     _now_pa = datetime.now(timezone.utc).isoformat()
-    for proj in data.get("projects") or []:
-        if not isinstance(proj, dict):
-            continue
-        pid = proj_ids.get((proj.get("name") or "").strip())
+    for idx, proj in enumerate(file_projects):
+        pid = entry_local.get(idx)
         if pid:
             _import_project_attachments(db, pid, proj.get("attachments"), _now_pa)
 
@@ -8473,7 +8601,7 @@ def import_links():
             due_date = (memo.get("due_date") or "").strip()
             priority = map_priority(memo.get("priority"))
             subtasks = _subtasks_json(memo.get("subtasks"))
-            project_id = ensure_project(memo.get("project", ""))
+            project_id = _resolve_memo_project(memo)  # [PROJECT-NAME-PER-FOLDER] v25 : uid-d'abord
             images = _images_json(memo.get("images"), check_files=True)
             recurrence = _valid_recurrence(memo.get("recurrence"))
             memo_emoji = _clean_emoji(memo.get("emoji"))
