@@ -3310,9 +3310,13 @@ document.getElementById('create-loc-clear').addEventListener('click', () => {
   refreshCreateLoc();
 });
 
-function openCreateDialog(kind, item = null) {
+// [TOOLS-DOCK] `opts.parent_id` : pré-rempli par « Options… » de la mini-barre Dossier — le
+// POST /api/projects ignore parent_id, il est posé par un PUT juste après (flux existant).
+let createPendingParent = null;
+function openCreateDialog(kind, item = null, opts = null) {
   createKind = kind;
   editingItem = item;
+  createPendingParent = (opts && opts.parent_id) || null;
   const titles = {
     project: item ? '📁 Modifier le projet' : '📁 Nouveau projet',
     category: item ? '🗂 Modifier la catégorie' : '🗂 Nouvelle catégorie',
@@ -3750,8 +3754,13 @@ createForm.addEventListener('submit', async (e) => {
     if (editingItem) {
       await api(`${base}/${editingItem.id}`, { method: 'PUT', body });
     } else {
-      await api(base, { method: 'POST', body });
+      const created = await api(base, { method: 'POST', body });
+      // [TOOLS-DOCK] destination demandée (mini-barre Dossier → « Options… ») : POST puis PUT.
+      if (createKind === 'project' && createPendingParent && created && created.id) {
+        await api(`${base}/${created.id}`, { method: 'PUT', body: JSON.stringify({ parent_id: createPendingParent }) });
+      }
     }
+    createPendingParent = null;
     createDialog.close();
     editingItem = null;
     await loadAll();
@@ -7224,6 +7233,28 @@ function editTaskInline(container, contentDiv, memo) {
 // [SUBHIDE-V2] `memoJumpBar` ([MEMO-JUMP-VIEW]) vit désormais dans le partial (pure, sans état) :
 // les pages invitées en ont besoin aussi. Le CSS `.memo-jump-bar` reste par page.
 
+/* [TOOLS-DOCK] Dock d'outils du board (owner, boards de PROJET seulement — la vue globale
+   « Tous les mémos » garde sa barre telle quelle en V1). 4 bascules INDÉPENDANTES persistées
+   PAR BOARD (`toolsDock:<projectId>`), TOUT REPLIÉ par défaut : la barre de création, la
+   drop-zone Fichiers, le Vocal et la mini-barre Dossier ne mangent plus 150-200 px en
+   permanence. Les outils eux-mêmes ne changent pas — on ne fait que les afficher/masquer. */
+const TOOLS_DOCK_KEYS = ['memo', 'file', 'voice', 'folder'];
+let toolsDockFocusMemo = false;  // focus direct dans le champ titre quand on OUVRE l'outil Mémo
+function toolsDockState(pid) {
+  const empty = { memo: false, file: false, voice: false, folder: false };
+  try {
+    const raw = JSON.parse(localStorage.getItem('toolsDock:' + pid) || '{}');
+    TOOLS_DOCK_KEYS.forEach(k => { empty[k] = raw[k] === true; });
+  } catch (e) {}
+  return empty;
+}
+function setToolsDock(pid, key, val) {
+  const st = toolsDockState(pid);
+  st[key] = !!val;
+  try { localStorage.setItem('toolsDock:' + pid, JSON.stringify(st)); } catch (e) {}
+  return st;
+}
+
 function renderBoard() {
   const board = document.getElementById('memo-board');
   board.innerHTML = '';
@@ -7340,7 +7371,7 @@ function renderBoard() {
 
   // [UI-POLISH-BOARD] drop-zone fichiers + 🎤 Vocal du dossier : capturés ici, appendés plus bas
   // (juste au-dessus du 1er en-tête de section / état vide, collés à la liste — pas près du titre).
-  let pendingFolderAttach = null;
+  let pendingFolderAttach = null, pendingFolderAttachCfg = null;
   if (state.memoProject !== 'all' && state.memoProject !== 'inbox') {
     const proj = state.projects.find(p => p.id === state.memoProject);
     if (proj) {
@@ -7376,13 +7407,16 @@ function renderBoard() {
       board.appendChild(desc);
       // [FOLDER-ATTACHMENTS] Fichiers rattachés au dossier lui-même. [UI-POLISH-BOARD] appendé
       // plus bas (au-dessus de la 1re section), pas ici sous la description.
-      pendingFolderAttach = renderAttachments({
+      // [TOOLS-DOCK] `hideVoice` : le 🎤 sort de la section Fichiers (bascule « Vocal » propre au
+      // dock) ; même cfg → le bouton rendu à part garde EXACTEMENT le même flux d'enregistrement.
+      pendingFolderAttachCfg = {
         attachments: proj.attachments || [],
         canEdit: true,
         uploadUrl: `/api/projects/${proj.id}/attachments`,
         onChange: async () => { await loadAll(); },
         openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
-      });
+      };
+      pendingFolderAttach = renderAttachments(Object.assign({ hideVoice: true }, pendingFolderAttachCfg));
     }
     const recap = guestRecapEl('project', state.memoProject);
     if (recap) board.appendChild(recap);
@@ -7390,10 +7424,35 @@ function renderBoard() {
 
   // [HEADER-TOOLBAR v3] la barre d'actions vit ICI : sous le titre + description + rangée d'infos,
   // en pleine largeur dans son cadre (jamais à droite du titre).
-  if (tbCount) {
-    tb.end();
-    const row = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin:0 0 0.8rem' } });
-    row.appendChild(tb.bar);
+  // [TOOLS-DOCK] le dock (2e hdr-toolbar, même gabarit) s'aligne À DROITE sur la MÊME rangée
+  // que la barre d'actions (space-between) ; en ≤900 px le wrap le fait passer dessous.
+  const dockPid = (state.memoProject !== 'all' && state.memoProject !== 'inbox') ? state.memoProject : null;
+  const dock = dockPid ? toolsDockState(dockPid) : null;
+  let toolsBar = null;
+  if (dockPid) {
+    const td = hdrToolbar();
+    const mk = (key, icon, label, title) => {
+      const b = td.add({ icon, label, title, onClick: () => {
+        const next = !dock[key];
+        if (key === 'memo' && next) toolsDockFocusMemo = true;   // ouverture → focus titre
+        setToolsDock(dockPid, key, next);
+        renderBoard();
+      } });
+      if (dock[key]) b.classList.add('on');
+      b.setAttribute('aria-pressed', dock[key] ? 'true' : 'false');
+      return b;
+    };
+    mk('memo', 'pencil-plus', 'Mémo', 'Afficher/masquer la barre de création de mémo');
+    mk('file', 'paperclip', 'Fichier', 'Afficher/masquer la zone de dépôt de fichiers du dossier');
+    mk('voice', 'microphone', 'Vocal', 'Afficher/masquer le bouton d\'enregistrement vocal');
+    mk('folder', 'folder-plus', 'Dossier', 'Afficher/masquer la création de sous-dossier');
+    toolsBar = td.end();
+  }
+  if (tbCount || toolsBar) {
+    if (tbCount) tb.end();
+    const row = el('div', { attrs: { style: 'display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin:0 0 0.8rem' } });
+    if (tbCount) row.appendChild(tb.bar);
+    if (toolsBar) row.appendChild(toolsBar);
     board.appendChild(row);
   }
 
@@ -7410,7 +7469,8 @@ function renderBoard() {
       const fset = new Set([_bp.id, ...projectDescendants(_bp.id)]);
       const hasFestival = state.memos.some(m => fset.has(m.project_id) && m.due_date && m.due_time);
       if (!voteCreate && (hasNamed || hasDossier || hasFestival)) {
-        const frame = voteFrame();
+        // [TOOLS-DOCK] encart repliable sur sa légende (replié par défaut, persisté par board).
+        const frame = voteFrame({ count: (_bp.votes || []).length + (_bp.vote_enabled ? 1 : 0), storageKey: 'votesFrameOpen:' + _bp.id });
         const chips = voteChipsEl(_bp);
         if (chips) { chips.style.margin = '0'; frame.appendChild(chips); }
         if (voteExtras.childNodes.length) frame.appendChild(voteExtras);
@@ -7615,10 +7675,56 @@ function renderBoard() {
   txt.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
   addBtn.addEventListener('click', submit);
   addBar.append(row1, details);
-  board.appendChild(addBar);
+  // [TOOLS-DOCK] la barre de création n'est montée QUE si l'outil « Mémo » est ouvert (hors board
+  // de projet — vue globale/Inbox —, comportement V1 inchangé : elle est toujours là).
+  if (!dockPid || dock.memo) {
+    board.appendChild(addBar);
+    if (dockPid && dock.memo && toolsDockFocusMemo) { toolsDockFocusMemo = false; setTimeout(() => txt.focus(), 30); }
+  }
 
   // [UI-POLISH-BOARD] drop-zone + 🎤 Vocal du dossier : juste au-dessus du bloc Sous-dossiers.
-  if (pendingFolderAttach) board.appendChild(pendingFolderAttach);
+  // [TOOLS-DOCK] chacun derrière sa bascule.
+  if (pendingFolderAttach && (!dockPid || dock.file)) board.appendChild(pendingFolderAttach);
+  if (dockPid && dock.voice && pendingFolderAttachCfg) {
+    const vb = voiceAttachButton(pendingFolderAttachCfg);
+    if (vb) { vb.style.marginBottom = '0.6rem'; board.appendChild(vb); }
+    else board.appendChild(el('div', { attrs: { style: 'color:var(--muted);font-size:0.8rem;margin-bottom:0.6rem' }, text: '🎤 Enregistrement audio indisponible sur ce navigateur.' }));
+  }
+  // [TOOLS-DOCK] mini-barre « Dossier » : chemin RAPIDE au nom seul + « Options… » (pop-in projet
+  // complète, parent pré-rempli). ⚠️ POST /api/projects IGNORE parent_id → création rapide =
+  // POST puis PUT parent_id (comme les flux existants) ; collision de noms entre frères = 409
+  // serveur affiché proprement (jamais de 500) — cf. [PROJECT-NAME-PER-FOLDER] D4.
+  if (dockPid && dock.folder) {
+    const bp = state.projects.find(p => p.id === dockPid);
+    const bar = el('div', { attrs: { style: 'display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin:0 0 0.8rem' } });
+    const nameIn = el('input', {
+      attrs: { type: 'text', placeholder: '+ Nouveau sous-dossier dans « ' + (bp ? bp.name : '') + ' »…',
+        style: 'flex:1;min-width:200px;background:var(--panel);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.5rem 0.7rem;outline:none' },
+    });
+    const create = async () => {
+      const name = nameIn.value.trim();
+      if (!name) return;
+      try {
+        const created = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name }) });
+        // parent_id ignoré au POST → on le pose juste après (chemin des flux existants)
+        await api(`/api/projects/${created.id}`, { method: 'PUT', body: JSON.stringify({ parent_id: dockPid }) });
+      } catch (e) {
+        await notify(e.message || 'Création impossible.', { error: true });   // 409 nom déjà pris
+        return;
+      }
+      nameIn.value = '';
+      await loadAll();
+      flashSaved(true);
+    };
+    nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); create(); } });
+    const opts = el('button', { text: 'Options…', attrs: { type: 'button', title: 'Créer avec emoji, couleur, description…' } });
+    opts.addEventListener('click', () => openCreateDialog('project', null, { parent_id: dockPid }));
+    lucioleize(opts, 'luc-neutral');
+    const go = mabGlowButton('mab-btn mab-add', 'Créer', { title: 'Créer le sous-dossier' });
+    go.addEventListener('click', create);
+    bar.append(nameIn, opts, go);
+    board.appendChild(bar);
+  }
 
   // [BOARD-SUBHIDE] / [SUBHIDE-V2] cadre « SOUS-DOSSIERS » collé à la liste (après Fichiers/Vocal,
   // juste au-dessus de la 1re section) : chips masquer/afficher + actions Tous/Aucun/Inverser.
@@ -7631,6 +7737,19 @@ function renderBoard() {
     onChange: renderBoard,
   });
   if (subHide.bar) board.appendChild(subHide.bar);
+
+  // [TOOLS-DOCK] BONUS : glisser un FICHIER au-dessus de la liste déplie automatiquement la
+  // drop-zone (le geste réveille l'outil). Garde anti-faux-positif : on ne réagit qu'aux
+  // transferts contenant des fichiers (`types` inclut 'Files') — un drag de mémo/projet
+  // interne ne déclenche rien.
+  if (dockPid && !dock.file) {
+    board.addEventListener('dragenter', (e) => {
+      const t = e.dataTransfer;
+      if (!t || !Array.from(t.types || []).includes('Files')) return;
+      setToolsDock(dockPid, 'file', true);
+      renderBoard();
+    });
+  }
 
   // [SUBHIDE-V2] « ⤓ Aller en bas » HORS du cadre, entre lui et la 1re section (décision maquette v2).
   // Masquée par défaut ; révélée en fin de rendu si la liste est assez longue (> 8 mémos).

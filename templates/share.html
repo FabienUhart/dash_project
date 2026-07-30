@@ -1799,7 +1799,8 @@ function renderShareVotesBar() {
   if (!proj.vote_enabled && !votes.length && !proj.can_create_vote && !_fest) return;
   // [VOTES-FRAME] encart légendé « 🗳 Votes » : chips de scrutins (nom + nb voix), vote-dossier, création
   // (soumise à can_create_vote, inchangé), Résultats. Monochrome au repos (chips .prio-btn), accent = sélection.
-  const frame = voteFrame();
+  // [TOOLS-DOCK] encart repliable sur sa légende (replié par défaut, persisté par token+dossier).
+  const frame = voteFrame({ count: votes.length + (proj.vote_enabled ? 1 : 0), storageKey: 'votesFrameOpen:' + TOKEN + ':' + proj.id });
   if (proj.vote_enabled) frame.appendChild(shareChip('🗳 (dossier)', shareSelectedVoteId === null, () => { shareSelectedVoteId = null; render(); }));
   votes.forEach(v => {
     const n = voteNamedCount(v);

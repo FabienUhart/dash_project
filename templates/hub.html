@@ -995,7 +995,8 @@ function hubVotesBar() {
   const chip = (label, active, on) => { const b = el('button', { class: 'prio-btn', text: label, attrs: { type: 'button', style: active ? 'background:var(--accent);border-color:var(--accent);color:#10141a' : '' } }); b.addEventListener('click', on); return b; };
   // [VOTES-FRAME] encart légendé « 🗳 Votes » : chips de scrutins (nom + nb voix) + vote-dossier + création
   // (soumise à can_create_vote, inchangé). Hub n'a pas de « Résultats » festival à relocaliser.
-  const frame = voteFrame();
+  // [TOOLS-DOCK] encart repliable sur sa légende (replié par défaut, persisté par dossier focus).
+  const frame = voteFrame({ count: votes.length + (proj.vote_enabled ? 1 : 0), storageKey: 'votesFrameOpen:hub:' + proj.id });
   if (proj.vote_enabled) frame.appendChild(chip('🗳 (dossier)', hubSelectedVoteId === null, () => { hubSelectedVoteId = null; render(); }));
   votes.forEach(v => {
     const n = voteNamedCount(v);

@@ -3065,7 +3065,9 @@ function renderAttachments(cfg) {
   wrap.appendChild(head);
   list.forEach(a => wrap.appendChild(attachRow(a, cfg)));
   if (cfg.canEdit) wrap.appendChild(attachUploader(cfg));
-  if (cfg.canEdit) { const vb = voiceAttachButton(cfg); if (vb) wrap.appendChild(vb); }  // [VOICE-MESSAGES]
+  // [VOICE-MESSAGES] — [TOOLS-DOCK] `hideVoice` sort le bouton 🎤 de la section (le dock le
+  // rend alors séparément, via le MÊME `voiceAttachButton(cfg)` : flux d'enregistrement inchangé).
+  if (cfg.canEdit && !cfg.hideVoice) { const vb = voiceAttachButton(cfg); if (vb) wrap.appendChild(vb); }
   return wrap;
 }
 
@@ -4329,6 +4331,11 @@ const HDR_ICONS = {
   archive: ['M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z', 'M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-10', 'M10 12h4'],
   map: ['M3 7v13l6 -2l6 2l6 -2v-13l-6 2l-6 -2z', 'M9 5v13', 'M15 7v13'],
   heart: ['M19.5 12.6l-7.5 7.4l-7.5 -7.4a5 5 0 1 1 7.5 -6.6a5 5 0 1 1 7.5 6.6'],
+  // [TOOLS-DOCK] 4 icônes Tabler outline du dock d'outils (additif, inline — invariant 6, zéro CDN).
+  'pencil-plus': ['M4 20h4l10.5 -10.5a1.5 1.5 0 0 0 -4 -4l-10.5 10.5v4', 'M13.5 6.5l4 4', 'M16 19h6', 'M19 16v6'],
+  paperclip: ['M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5'],
+  microphone: ['M9 2m0 3a3 3 0 0 1 3 -3a3 3 0 0 1 3 3v5a3 3 0 0 1 -3 3a3 3 0 0 1 -3 -3z', 'M5 10a7 7 0 0 0 14 0', 'M8 21l8 0', 'M12 17l0 4'],
+  'folder-plus': ['M12 19h-7a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2h4l3 3h7a2 2 0 0 1 2 2v3.5', 'M16 19h6', 'M19 16v6'],
 };
 function hdrIcon(name) {
   const NS = 'http://www.w3.org/2000/svg';
@@ -4361,6 +4368,11 @@ function _hdrToolbarStyle() {
     + '.hdr-btn:hover,.hdr-btn:focus-visible{background:var(--panel-2);border-color:var(--border);color:var(--accent)}'
     + '.hdr-btn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}'
     + '.hdr-btn:disabled{opacity:0.5;cursor:default}'
+    // [TOOLS-DOCK] bouton-bascule OUVERT : la MATIÈRE dit l'état (fond panel-2 + bordure accent
+    // + trait accent sous l'icône), jamais d'aplat accent plein — doctrine Luciole.
+    + '.hdr-btn.on{background:var(--panel-2);border-color:var(--accent);color:var(--accent)}'
+    + '.hdr-btn.on::after{content:"";position:absolute;left:50%;transform:translateX(-50%);bottom:6px;width:18px;height:2px;border-radius:2px;background:var(--accent)}'
+    + '.hdr-toolbar.compact .hdr-btn.on::after{bottom:3px;width:14px}'
     + '.hdr-btn .hdr-ic{width:22px;height:22px;flex:0 0 auto}'
     + '.hdr-btn .hdr-lbl{font-size:0.68rem;font-weight:500;white-space:nowrap;color:var(--muted);max-width:70px;overflow:hidden;text-overflow:ellipsis}'
     + '.hdr-btn:hover .hdr-lbl,.hdr-btn:focus-visible .hdr-lbl{color:var(--accent)}'
@@ -4401,17 +4413,56 @@ function _hdrToolbarStyle() {
     // [VOTES-FRAME] encart « Votes » (consultation) : cadre légendé (pattern fieldset), légende à
     // cheval sur la bordure haute. Bordure forte, monochrome au repos. Rendu conditionnel côté JS.
     + '.vote-frame{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem;border:1px solid var(--border-strong,var(--border));border-radius:10px;padding:0.75rem 0.6rem 0.55rem;margin:0.1rem 0 0.9rem;width:fit-content;max-width:100%}'
-    + '.vote-frame-legend{position:absolute;top:-0.62rem;left:0.7rem;background:var(--bg);padding:0 0.4rem;font-size:0.72rem;font-weight:600;color:var(--muted);display:inline-flex;align-items:center;gap:0.3rem}';
+    + '.vote-frame-legend{position:absolute;top:-0.62rem;left:0.7rem;background:var(--bg);padding:0 0.4rem;font-size:0.72rem;font-weight:600;color:var(--muted);display:inline-flex;align-items:center;gap:0.3rem}'
+    // [TOOLS-DOCK] encart replié : cadre escamoté, la légende redevient une ligne dans le flux.
+    + '.vote-frame.collapsed{border-color:transparent;padding:0;margin:0.1rem 0 0.6rem}'
+    + '.vote-frame.collapsed .vote-frame-legend{position:static;background:none;padding:0}'
+    + '.vote-frame-legend:hover{color:var(--text)}';
   document.head.appendChild(st);
 }
-// [VOTES-FRAME] cadre légendé « 🗳 Votes ». Le caller y appende les chips de scrutins + vote-dossier.
-function voteFrame() {
+/* [VOTES-FRAME] cadre légendé « 🗳 Votes ». Le caller appende ses chips dans `frame.body`
+   (repli sur `frame` si l'appelant est ancien). [TOOLS-DOCK] cfg optionnel = encart REPLIABLE
+   SUR SA LÉGENDE : { count, storageKey } → replié (défaut) le cadre est escamoté et la légende
+   devient une ligne cliquable « 🗳 Votes · N » ; déplier restaure l'encart ACTUEL à l'identique
+   (aucun accès perdu — consigne historique [VOTES-FRAME]). État persisté par contexte via
+   `storageKey` (owner par board, share par token, hub par focus : clés distinctes). */
+function voteFrame(cfg) {
   _hdrToolbarStyle();
   const frame = el('div', { class: 'vote-frame' });
   const lg = el('span', { class: 'vote-frame-legend' });
   lg.appendChild(el('span', { text: '🗳', attrs: { 'aria-hidden': 'true' } }));
-  lg.appendChild(el('span', { text: 'Votes' }));
+  const label = el('span', { text: 'Votes' });
+  lg.appendChild(label);
   frame.appendChild(lg);
+  const body = el('div', { attrs: { style: 'display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem' } });
+  frame.appendChild(body);
+  frame.body = body;
+  // Les appelants existants font `frame.appendChild(chip)` : on route vers le corps repliable,
+  // zéro réécriture des 3 pages (la légende, elle, a déjà été posée sur le cadre).
+  frame.appendChild = (node) => body.appendChild(node);
+  if (!cfg) return frame;
+  const n = Number(cfg.count) || 0;
+  let open = false;
+  try { open = localStorage.getItem(cfg.storageKey) === '1'; } catch (e) {}
+  lg.style.cursor = 'pointer';
+  lg.setAttribute('role', 'button');
+  lg.setAttribute('tabindex', '0');
+  const sync = () => {
+    body.style.display = open ? 'flex' : 'none';
+    label.textContent = open ? 'Votes' : ('Votes' + (n ? ' · ' + n : ''));
+    lg.title = open ? 'Replier l\'encart des votes' : 'Afficher les votes';
+    lg.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // Replié : plus de cadre ni de légende flottante — une simple ligne discrète.
+    frame.classList.toggle('collapsed', !open);
+  };
+  const toggle = () => {
+    open = !open;
+    try { localStorage.setItem(cfg.storageKey, open ? '1' : '0'); } catch (e) {}
+    sync();
+  };
+  lg.addEventListener('click', toggle);
+  lg.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  sync();
   return frame;
 }
 // [VOTES-FRAME] nb de voix total d'un vote nommé = somme des voix de ses options (front, sans route).
