@@ -1,6 +1,7 @@
 import calendar
 import hashlib
 import hmac
+import html
 import json
 import mimetypes
 import os
@@ -64,7 +65,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "26"  # X = version du format d'export (invariant 1) — v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "27"  # X = version du format d'export (invariant 1) — v27 = [MEMO-LINKS] liens entre mémos ; v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -790,6 +791,27 @@ def init_db():
             UNIQUE(memo_id, voter)
         )
         """
+    )
+    # [MEMO-LINKS] D1 : liens entre mémos. Symétrique en EFFET (visible/suivable des deux côtés)
+    # mais orienté en MÉMOIRE : src = le mémo depuis lequel le lien a été posé (pilote le style
+    # des chips, D3). UNE seule ligne par paire quel que soit le sens → index unique sur la paire
+    # NON ORDONNÉE (CASE déterministe, pas de fonction non déterministe dans l'index).
+    # Additive (CREATE TABLE IF NOT EXISTS), jamais destructive. created_by = pattern v19.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memo_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            src_memo_id INTEGER NOT NULL,
+            dst_memo_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            created_by TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_memo_links_pair ON memo_links ("
+        "CASE WHEN src_memo_id < dst_memo_id THEN src_memo_id ELSE dst_memo_id END, "
+        "CASE WHEN src_memo_id < dst_memo_id THEN dst_memo_id ELSE src_memo_id END)"
     )
     # [VOTE-GROUPS] V20.9 : votes NOMMÉS multiples par dossier. vote_id sur memo_votes :
     # NULL = voix du vote du DOSSIER (V1/V2, zéro migration) ; non NULL = voix d'un vote nommé.
@@ -3087,8 +3109,123 @@ def _next_due(due_str, recurrence):
     return nxt.isoformat()
 
 
-def _memo_dict(row, owner_name=None):
+# ───────────────────────── [MEMO-LINKS] liens entre mémos (D1/D4) ─────────────────────────
+MEMO_LINKS_MAX = 20  # plafond par mémo (garde-fou anti-dérive, 400 explicite au-delà)
+
+
+def _memo_link_rows(db, memo_ids):
+    """Liens touchant `memo_ids`, mémos en corbeille EXCLUS (masqués mais conservés, D1)."""
+    ids = [int(i) for i in memo_ids if i]
+    if not ids:
+        return []
+    ph = ",".join("?" * len(ids))
+    return db.execute(
+        f"SELECT l.* FROM memo_links l "
+        f"JOIN memos ms ON ms.id = l.src_memo_id JOIN memos md ON md.id = l.dst_memo_id "
+        f"WHERE (l.src_memo_id IN ({ph}) OR l.dst_memo_id IN ({ph})) "
+        f"AND COALESCE(ms.deleted_at, '') = '' AND COALESCE(md.deleted_at, '') = '' "
+        f"ORDER BY l.id",
+        ids + ids,
+    ).fetchall()
+
+
+def _memo_link_title(row):
+    """Titre affichable d'un mémo relié — TEXTE seulement (jamais de HTML, cf. points d'attention)."""
+    title = (_row_get(row, "title", "") or "").strip()
+    if title:
+        return title[:80]
+    txt = re.sub(r"<[^>]+>", " ", _row_get(row, "content", "") or "")
+    txt = html.unescape(txt)
+    return re.sub(r"\s+", " ", txt).strip()[:80]
+
+
+def _links_map(db, memo_ids, scope_ids=None):
+    """{memo_id: [{memo_id, direction, title, emoji, project_id}]} borné au scope du LECTEUR :
+    un lien vers un mémo hors scope est OMIS silencieusement (jamais de titre-fantôme, D4).
+    direction 'out' = ce mémo est la source (chip pleine), 'in' = il est référencé (chip pointillée)."""
+    out = {}
+    rows = _memo_link_rows(db, memo_ids)
+    if not rows:
+        return out
+    others = {r["src_memo_id"] for r in rows} | {r["dst_memo_id"] for r in rows}
+    ph = ",".join("?" * len(others))
+    infos = {
+        m["id"]: m
+        for m in db.execute(f"SELECT * FROM memos WHERE id IN ({ph})", list(others)).fetchall()
+    }
+    allowed = set(int(i) for i in scope_ids) if scope_ids is not None else None
+    known = set(int(i) for i in memo_ids)
+    for r in rows:
+        for mid, other, direction in (
+            (r["src_memo_id"], r["dst_memo_id"], "out"),
+            (r["dst_memo_id"], r["src_memo_id"], "in"),
+        ):
+            if mid not in known:
+                continue
+            if allowed is not None and (other not in allowed or mid not in allowed):
+                continue  # hors scope du lecteur → omis
+            info = infos.get(other)
+            if info is None:
+                continue
+            out.setdefault(mid, []).append({
+                "memo_id": other,
+                "direction": direction,
+                "title": _memo_link_title(info),
+                "emoji": _row_get(info, "emoji", "") or "",
+                "project_id": _row_get(info, "project_id", None),
+            })
+    return out
+
+
+def _link_pair_exists(db, a, b):
+    return db.execute(
+        "SELECT id FROM memo_links WHERE (src_memo_id = ? AND dst_memo_id = ?) "
+        "OR (src_memo_id = ? AND dst_memo_id = ?)",
+        (a, b, b, a),
+    ).fetchone()
+
+
+def _link_count(db, memo_id):
+    return db.execute(
+        "SELECT COUNT(*) FROM memo_links l "
+        "JOIN memos ms ON ms.id = l.src_memo_id JOIN memos md ON md.id = l.dst_memo_id "
+        "WHERE (l.src_memo_id = ? OR l.dst_memo_id = ?) "
+        "AND COALESCE(ms.deleted_at, '') = '' AND COALESCE(md.deleted_at, '') = ''",
+        (memo_id, memo_id),
+    ).fetchone()[0]
+
+
+def _create_memo_link(db, src_id, dst_id, created_by=""):
+    """Pose un lien src→dst. Renvoie (payload, status). Auto-lien 400, plafond 20/mémo 400,
+    re-poser dans l'autre sens = no-op idempotent (une seule ligne par paire non ordonnée)."""
+    if src_id == dst_id:
+        return {"error": "Un mémo ne peut pas être relié à lui-même."}, 400
+    if _link_pair_exists(db, src_id, dst_id):
+        return {"ok": True, "already": True}, 200
+    for mid in (src_id, dst_id):
+        if _link_count(db, mid) >= MEMO_LINKS_MAX:
+            return {"error": f"Ce mémo a déjà {MEMO_LINKS_MAX} liens (maximum)."}, 400
+    db.execute(
+        "INSERT OR IGNORE INTO memo_links (src_memo_id, dst_memo_id, created_at, created_by) "
+        "VALUES (?, ?, ?, ?)",
+        (src_id, dst_id, datetime.now(timezone.utc).isoformat(), created_by or ""),
+    )
+    db.commit()
+    return {"ok": True}, 201
+
+
+def _delete_memo_link(db, a, b):
+    db.execute(
+        "DELETE FROM memo_links WHERE (src_memo_id = ? AND dst_memo_id = ?) "
+        "OR (src_memo_id = ? AND dst_memo_id = ?)",
+        (a, b, b, a),
+    )
+    db.commit()
+
+
+def _memo_dict(row, owner_name=None, links=None):
     d = dict(row)
+    d["links"] = links or []  # [MEMO-LINKS] runtime-only, JAMAIS exporté (l'export a `memo_links`)
     cb = (d.get("created_by") or "").strip()
     # '' = propriétaire (résolu à l'affichage, survit au renommage owner) ;
     # chaîne non vide = identité invité « Nom <email> ».
@@ -3248,9 +3385,10 @@ def list_memos():
     vmap = {pr["id"]: _vote_voters_map(db, pr["id"]) for pr in enabled}
     amap = _attachments_map(db, [r["id"] for r in rows], lambda r: "/api/attachments/" + str(r["id"]))  # [ATTACHMENTS]
     hmap = _hearts_map(db)  # [FESTIVAL-VOTE] ❤️ par mémo
+    lmap = _links_map(db, [r["id"] for r in rows])  # [MEMO-LINKS] owner = tout (mono-base)
     out = []
     for row in rows:
-        d = _memo_dict(row, owner_name)
+        d = _memo_dict(row, owner_name, lmap.get(row["id"], []))
         d["attachments"] = amap.get(d["id"], [])  # [ATTACHMENTS]
         d.update(_heart_fields(hmap.get(d["id"], []), "", owner_name))  # [FESTIVAL-VOTE] owner = voter ''
         g = guest_last.get(d["id"])
@@ -3590,6 +3728,38 @@ def _purge_memo_row(db, memo_id):
     db.execute("DELETE FROM memo_votes WHERE memo_id = ?", (memo_id,))  # [VOTE-DECISION] voix dossier + nommées
     db.execute("DELETE FROM vote_options WHERE memo_id = ?", (memo_id,))  # [VOTE-GROUPS] retire des options nommées
     db.execute("DELETE FROM memo_hearts WHERE memo_id = ?", (memo_id,))  # [FESTIVAL-VOTE] ❤️ purgés
+    # [MEMO-LINKS] purge en cascade des liens (les deux sens) — la corbeille les MASQUE,
+    # la purge définitive les supprime (D1).
+    db.execute("DELETE FROM memo_links WHERE src_memo_id = ? OR dst_memo_id = ?", (memo_id, memo_id))
+
+
+# [MEMO-LINKS] D4 — owner : tout (mono-base). Pose et retrait du lien ; la LECTURE passe par
+# les payloads mémo existants (`links`), aucune route de lecture nouvelle.
+@app.route("/api/memos/<int:memo_id>/links", methods=["POST"])
+def add_memo_link(memo_id):
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    try:
+        other = int(data.get("memo_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "memo_id requis"}), 400
+    if other == memo_id:  # auto-lien : 400 explicite AVANT la recherche (sinon 404 trompeur)
+        return jsonify({"error": "Un mémo ne peut pas être relié à lui-même."}), 400
+    rows = db.execute(
+        "SELECT id FROM memos WHERE id IN (?, ?) AND COALESCE(deleted_at, '') = ''",
+        (memo_id, other),
+    ).fetchall()
+    if len({r["id"] for r in rows}) != 2:
+        return jsonify({"error": "mémo introuvable"}), 404
+    payload, status = _create_memo_link(db, memo_id, other, "")
+    return jsonify(payload), status
+
+
+@app.route("/api/memos/<int:memo_id>/links/<int:other_id>", methods=["DELETE"])
+def remove_memo_link(memo_id, other_id):
+    db = get_db()
+    _delete_memo_link(db, memo_id, other_id)
+    return "", 204
 
 
 @app.route("/api/trash", methods=["GET"])
@@ -4750,8 +4920,8 @@ def _send_hub_invite(cfg, to_email, name, hub_url, pin):
         s.send_message(msg)
 
 
-def _share_memo_dict(row):
-    d = _memo_dict(row)
+def _share_memo_dict(row, links=None):
+    d = _memo_dict(row, None, links)
     return {
         "id": d["id"],
         "content": d["content"],
@@ -4773,6 +4943,7 @@ def _share_memo_dict(row):
         "map_groups": d.get("map_groups", []),
         "created_at": d.get("created_at", "") or "",
         "vote_excluded": bool(d.get("vote_excluded")),  # [VOTE-EXCLUDE] lecture invité (badge)
+        "links": d.get("links", []),  # [MEMO-LINKS] déjà borné au scope par l'appelant (D4)
     }
 
 
@@ -6352,12 +6523,13 @@ def hub_data(hub_token):
             tok = pr["share_token"]
             pr["attachments"] = [_attach_row_dict(a, "/share/" + tok + "/attachment/" + str(a["id"])) for a in pamap.get(pr["id"], [])]
     memos = []
+    hub_links = _links_map(db, list(rows_by_id.keys()), scope_ids=list(rows_by_id.keys()))  # [MEMO-LINKS]
     for mid, r in rows_by_id.items():
         covering = _cover_memo(r["project_id"], mid)
         if not covering:
             continue  # sécurité : jamais un mémo hors des shares de l'e-mail
         win = _hub_winner(covering)
-        d = _share_memo_dict(r)
+        d = _share_memo_dict(r, hub_links.get(mid, []))  # [MEMO-LINKS] borné aux mémos du hub
         d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(mid, [])
         d["share_token"] = win["token"]
@@ -6621,8 +6793,11 @@ def share_data(token):
         p["can_create_vote"] = p["can_add"] and me is not None and _resolve_vote_create(db, p["id"]) == "guests"
     att_map = _attachments_map(db, [r["id"] for r in rows], lambda a: "/share/" + token + "/attachment/" + str(a["id"]))  # [ATTACHMENTS]
     hmap = _hearts_map(db, memo_ids)  # [FESTIVAL-VOTE] ❤️ par mémo (scope du partage)
+    # [MEMO-LINKS] liens BORNÉS au scope du partage : un lien vers un mémo hors scope est
+    # simplement omis (jamais de titre-fantôme — D4, invariant 5).
+    lmap = _links_map(db, memo_ids, scope_ids=memo_ids)
     for r in rows:
-        d = _share_memo_dict(r)
+        d = _share_memo_dict(r, lmap.get(r["id"], []))
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
             d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(r["id"], [])
@@ -7396,6 +7571,68 @@ def share_add_comment(token, memo_id):
     return jsonify(_comment_dict(row)), 201
 
 
+# [MEMO-LINKS] D4 — invité : routes publiques sous /share/* (bypass Authelia existant,
+# invariant 5 — aucun préfixe de premier niveau). Invité APPROUVÉ requis + capacité d'écriture
+# sur les DEUX mémos (matrice [GUEST-ROLES] action 'own' : éditeur oui, commentateur/suiveur non
+# — relier modifie la donnée). Les deux mémos doivent être dans le scope de CE partage : un mémo
+# de l'espace perso ou d'un autre partage → 403 EXPLICITE (exposition consentie = tranche B,
+# non livrée). Scope revalidé serveur à la pose comme à la lecture.
+def _share_link_guard(db, token, memo_id, other_id):
+    """(share, guest, memo, other, erreur) — erreur = (payload, status) si refus."""
+    share = _share_by_token(db, token)
+    if not share:
+        return None, None, None, None, ({"error": "invalid"}, 404)
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return None, None, None, None, ({"error": "guest_required"}, 403)
+    allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
+    if memo_id not in allowed_ids:
+        return None, None, None, None, ({"error": "not found"}, 404)
+    if other_id not in allowed_ids:
+        return None, None, None, None, (
+            {"error": "Ce mémo est hors du périmètre de ce partage — impossible de le relier ici."},
+            403,
+        )
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    other = db.execute("SELECT * FROM memos WHERE id = ?", (other_id,)).fetchone()
+    if not memo or not other:
+        return None, None, None, None, ({"error": "not found"}, 404)
+    for row in (memo, other):
+        if not _role_allows(db, share, "own", guest=guest, memo_row=row):
+            return None, None, None, None, ({"error": "non autorisé"}, 403)
+    return share, guest, memo, other, None
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/links", methods=["POST"])
+def share_add_memo_link(token, memo_id):
+    db = get_db()
+    # Jeton d'abord (un token invalide répond 404, jamais un 400 qui laisserait deviner
+    # l'existence de la route), puis format du corps.
+    if not _share_by_token(db, token):
+        return jsonify({"error": "invalid"}), 404
+    data = request.get_json(silent=True) or {}
+    try:
+        other_id = int(data.get("memo_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "memo_id requis"}), 400
+    share, guest, memo, other, err = _share_link_guard(db, token, memo_id, other_id)
+    if err:
+        return jsonify(err[0]), err[1]
+    author = guest["name"] or guest["email"]
+    payload, status = _create_memo_link(db, memo_id, other_id, f"{author} <{guest['email']}>")
+    return jsonify(payload), status
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/links/<int:other_id>", methods=["DELETE"])
+def share_remove_memo_link(token, memo_id, other_id):
+    db = get_db()
+    share, guest, memo, other, err = _share_link_guard(db, token, memo_id, other_id)
+    if err:
+        return jsonify(err[0]), err[1]
+    _delete_memo_link(db, memo_id, other_id)
+    return "", 204
+
+
 @app.route("/share/<token>/comment/<int:comment_id>/react", methods=["POST"])
 def share_react_comment(token, comment_id):
     # [COMMENT-REACTIONS] Réagir côté invité. Route publique sous /share/* (bypass Authelia,
@@ -7854,6 +8091,7 @@ def _build_export(db, root_id=None):
         d = _memo_dict(r)
         mid = d.pop("id", None)
         d.pop("created_by_display", None)  # runtime-only, jamais exporté ; created_by (brut) reste
+        d.pop("links", None)  # [MEMO-LINKS] runtime-only : les liens voyagent dans `memo_links` (uid)
         d.pop("end_time", None)  # [FESTIVAL-VOTE] non exporté (export reste v23, comme les voix)
         d.pop("perm_vote", None)  # [GUEST-ROLES] override d'atelier, jamais exporté (comme les voix)
         d.pop("perm_comment", None)
@@ -7930,8 +8168,27 @@ def _build_export(db, root_id=None):
         cid = d.pop("id", None)
         d["reactions"] = reacts_by_cid.get(cid, [])
         out_comments.append(d)
+    # [MEMO-LINKS] v27 : liens entre mémos par UID (jamais d'id). Bornés aux mémos exportés
+    # (sous-arbre [EXPORT-SUBTREE] inclus) et hors corbeille — un lien vers un mémo non exporté
+    # est simplement omis (l'import est tolérant). Absent chez un importeur v1→v26 = aucun lien.
+    memo_uid_by_id = {r["id"]: (_row_get(r, "uid", "") or "") for r in memos}
+    out_memo_links = []
+    if memo_uid_by_id:
+        ph_l = ",".join("?" * len(memo_uid_by_id))
+        ids_l = list(memo_uid_by_id.keys())
+        for r in db.execute(
+            f"SELECT * FROM memo_links WHERE src_memo_id IN ({ph_l}) AND dst_memo_id IN ({ph_l}) ORDER BY id",
+            ids_l + ids_l,
+        ).fetchall():
+            su, du = memo_uid_by_id.get(r["src_memo_id"], ""), memo_uid_by_id.get(r["dst_memo_id"], "")
+            if not su or not du:
+                continue
+            out_memo_links.append({
+                "src_uid": su, "dst_uid": du,
+                "created_at": r["created_at"], "created_by": r["created_by"] or "",
+            })
     result = {
-        "version": int(APP_VERSION),  # [MEMO-DATE-RANGE] v24 (source unique = APP_VERSION)
+        "version": int(APP_VERSION),  # [MEMO-LINKS] v27 (source unique = APP_VERSION)
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -7940,6 +8197,7 @@ def _build_export(db, root_id=None):
         "memos": out_memos,
         "history": [dict(r) for r in history],
         "comments": out_comments,
+        "memo_links": out_memo_links,  # [MEMO-LINKS] v27
     }
     # [REACTION-PALETTE] v21 : palette custom exportée avec les réglages (comme les priorités).
     # Émise SEULEMENT si l'owner a configuré une palette (clé présente) → un export par défaut
@@ -8012,6 +8270,7 @@ def _purge_trash():
             )
             conn.execute("DELETE FROM memo_comments WHERE memo_id = ?", (mid,))
             conn.execute("DELETE FROM memo_hearts WHERE memo_id = ?", (mid,))  # [FESTIVAL-VOTE]
+            conn.execute("DELETE FROM memo_links WHERE src_memo_id = ? OR dst_memo_id = ?", (mid, mid))  # [MEMO-LINKS]
         conn.commit()
     finally:
         conn.close()
@@ -8862,6 +9121,31 @@ def import_links():
                     (cid, r_emoji, r_voter, r_at),
                 )
 
+    # [MEMO-LINKS] v27 : liens entre mémos, résolus UID-D'ABORD (les deux mémos par uid ;
+    # sinon lien IGNORÉ — tolérant, jamais de 400). Dédup par paire NON ORDONNÉE (index unique
+    # + garde applicative) → ré-import v27 = 0 doublon. ADDITIF NON DESTRUCTIF : on n'enlève
+    # jamais un lien local. Absent (v1→v26) = aucun lien = rendu identique (invariant 2).
+    imported_memo_links = 0
+    for ml in data.get("memo_links") or []:
+        if not isinstance(ml, dict):
+            continue
+        src_row = memos_by_uid.get((ml.get("src_uid") or "").strip())
+        dst_row = memos_by_uid.get((ml.get("dst_uid") or "").strip())
+        if not src_row or not dst_row or src_row["id"] == dst_row["id"]:
+            continue
+        if _link_pair_exists(db, src_row["id"], dst_row["id"]):
+            continue
+        db.execute(
+            "INSERT OR IGNORE INTO memo_links (src_memo_id, dst_memo_id, created_at, created_by) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                src_row["id"], dst_row["id"],
+                (ml.get("created_at") or "").strip() or now,
+                str(ml.get("created_by") or "")[:200],
+            ),
+        )
+        imported_memo_links += 1
+
     db.commit()
     return jsonify(
         {
@@ -8873,6 +9157,7 @@ def import_links():
             "skipped_memos": skipped_memos,
             "imported_history": imported_history,
             "imported_comments": imported_comments,
+            "imported_memo_links": imported_memo_links,  # [MEMO-LINKS] v27
         }
     )
 
