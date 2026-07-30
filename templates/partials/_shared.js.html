@@ -3084,6 +3084,149 @@ function _pictosStyle() {
     + '.task-pictos .badge.clickable:hover{color:var(--text);border-color:var(--muted)}';
   document.head.appendChild(st);
 }
+/* ===== [MEMO-LINKS] tranche A — liens symétriques entre mémos (spec docs/specs/MEMO-LINKS…) =====
+   Helpers PURS (règle du partial) : ni réseau ni `state`/`DATA` — chaque page fournit les données
+   et exécute les écritures dans les callbacks. Aucun style bespoke : chips au gabarit `.prio-btn`
+   et tokens existants (invariant 9). */
+
+// Distance haversine en mètres entre deux {lat,lng} (0 si l'un manque). Sert au picker
+// « proches d'abord » (D2). Pur, zéro lib (invariant 6).
+function geoDistanceM(a, b) {
+  if (!a || !b || a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
+  const R = 6371000, rad = (x) => x * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.min(1, Math.sqrt(s))));
+}
+function fmtDistance(m) {
+  if (m == null) return '';
+  return m < 1000 ? ('à ' + (m < 100 ? m : Math.round(m / 50) * 50) + ' m') : ('à ' + (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km');
+}
+// Titre d'un mémo relié, en TEXTE (jamais de HTML — point d'attention de la spec), tronqué.
+function linkTitle(t, max) {
+  const s = String(t || '').replace(/\s+/g, ' ').trim() || (typeof MEMO_EMPTY_LABEL === 'string' ? MEMO_EMPTY_LABEL : 'sans titre');
+  return s.length > (max || 30) ? s.slice(0, (max || 30) - 1) + '…' : s;
+}
+// D3 — chips sur les CARDS, des deux côtés : `out` (posé ici) = bordure pleine « 🔗 titre » ;
+// `in` (référencé par) = bordure pointillée « ⤺ titre ». Clic = ouvre l'éditeur du mémo relié.
+// Anti-débordement : max 3 chips + « +n » (comme les pictos [CARD-PREVIEW]).
+function memoLinkChips(links, onOpen, max) {
+  const list = (links || []).filter(l => l && l.memo_id);
+  if (!list.length) return null;
+  const cap = max || 3;
+  const row = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;margin-top:0.35rem' } });
+  list.slice(0, cap).forEach(l => {
+    const inbound = l.direction === 'in';
+    const chip = el('button', {
+      class: 'prio-btn',
+      attrs: {
+        type: 'button',
+        title: (inbound ? 'Référencé par : ' : 'Relié à : ') + String(l.title || ''),
+        style: 'padding:0.05rem 0.45rem;font-size:0.72rem;max-width:14rem;overflow:hidden;'
+          + 'text-overflow:ellipsis;white-space:nowrap' + (inbound ? ';border-style:dashed' : ''),
+      },
+    });
+    chip.textContent = (inbound ? '⤺ ' : '🔗 ') + (l.emoji ? l.emoji + ' ' : '') + linkTitle(l.title);
+    chip.addEventListener('click', (e) => { e.stopPropagation(); if (onOpen) onOpen(l.memo_id); });
+    row.appendChild(chip);
+  });
+  if (list.length > cap) {
+    row.appendChild(el('span', { text: '+' + (list.length - cap),
+      attrs: { style: 'font-size:0.72rem;color:var(--muted)', title: list.slice(cap).map(l => l.title).join(', ') } }));
+  }
+  return row;
+}
+// D2 — section « 🔗 Relié à » de l'éditeur (3 pages). cfg :
+//   { links, candidates:[{id,title,project_id,location,emoji}], current:{id,location,project_id},
+//     canEdit, onAdd(id), onRemove(id), onOpen(id) }
+// Picker façon recherche globale : PROCHES géolocalisés en tête (« à 400 m »), puis même dossier,
+// puis pertinence texte. Entrée = pose le 1er résultat. Aucune fermeture d'éditeur.
+function memoLinksSection(cfg) {
+  const links = cfg.links || [];
+  if (!links.length && !cfg.canEdit) return null;   // rien à voir ni à poser
+  const wrap = el('div', { attrs: { style: 'margin-top:0.6rem' } });
+  wrap.appendChild(el('div', { class: 'me-label', text: '🔗 Relié à' + (links.length ? ' (' + links.length + ')' : ''),
+    attrs: { style: 'font-size:0.78rem;font-weight:600;color:var(--muted);margin-bottom:0.25rem' } }));
+  const chips = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center' } });
+  links.forEach(l => {
+    const inbound = l.direction === 'in';
+    const chip = el('span', { class: 'prio-btn',
+      attrs: { style: 'display:inline-flex;align-items:center;gap:0.3rem;padding:0.1rem 0.45rem;font-size:0.75rem'
+        + (inbound ? ';border-style:dashed' : '') } });
+    const open = el('span', { attrs: { style: 'cursor:pointer;max-width:12rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',
+      title: (inbound ? 'Référencé par : ' : 'Relié à : ') + String(l.title || '') } });
+    open.textContent = (inbound ? '⤺ ' : '🔗 ') + (l.emoji ? l.emoji + ' ' : '') + linkTitle(l.title, 28);
+    open.addEventListener('click', () => cfg.onOpen && cfg.onOpen(l.memo_id));
+    chip.appendChild(open);
+    if (cfg.canEdit) {
+      const x = el('button', { text: '×', attrs: { type: 'button', title: 'Délier',
+        style: 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.95rem;line-height:1;padding:0' } });
+      x.addEventListener('click', () => cfg.onRemove && cfg.onRemove(l.memo_id));
+      chip.appendChild(x);
+    }
+    chips.appendChild(chip);
+  });
+  if (!links.length) chips.appendChild(el('span', { text: 'Aucun lien.', attrs: { style: 'font-size:0.75rem;color:var(--muted);font-style:italic' } }));
+  wrap.appendChild(chips);
+  if (!cfg.canEdit) return wrap;
+
+  const linked = new Set(links.map(l => l.memo_id));
+  const box = el('div', { attrs: { style: 'position:relative;margin-top:0.35rem' } });
+  const input = el('input', { attrs: { type: 'text', placeholder: 'Relier à un mémo… (titre)',
+    style: 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.85rem;padding:0.35rem 0.5rem;box-sizing:border-box' } });
+  const results = el('div', { attrs: { style: 'display:none;flex-direction:column;gap:0.15rem;margin-top:0.25rem;max-height:11rem;overflow-y:auto;'
+    + 'background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:0.25rem' } });
+  const rank = (q) => {
+    const cur = cfg.current || {};
+    return (cfg.candidates || [])
+      .filter(c => c.id !== cur.id && !linked.has(c.id))
+      .map(c => {
+        const dist = geoDistanceM(cur.location, c.location);
+        const sameProj = cur.project_id != null && c.project_id === cur.project_id;
+        const hay = String(c.title || '').toLowerCase();
+        const hit = !q || hay.includes(q);
+        return { c, dist, sameProj, hit, pos: q ? hay.indexOf(q) : 0 };
+      })
+      .filter(r => r.hit)
+      .sort((a, b) => {
+        const ad = a.dist == null ? Infinity : a.dist, bd = b.dist == null ? Infinity : b.dist;
+        if (ad !== bd) return ad - bd;                       // proches d'abord (D2)
+        if (a.sameProj !== b.sameProj) return a.sameProj ? -1 : 1;  // puis même dossier
+        return a.pos - b.pos;                                // puis pertinence texte
+      })
+      .slice(0, 8);
+  };
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    const rows = rank(q);
+    results.innerHTML = '';
+    if (!rows.length) { results.style.display = 'none'; return; }
+    rows.forEach(r => {
+      const b = el('button', { attrs: { type: 'button',
+        style: 'display:flex;align-items:center;gap:0.4rem;background:none;border:none;color:var(--text);font:inherit;'
+          + 'font-size:0.8rem;text-align:left;padding:0.25rem 0.35rem;border-radius:6px;cursor:pointer;width:100%' } });
+      b.appendChild(el('span', { text: (r.c.emoji ? r.c.emoji + ' ' : '') + linkTitle(r.c.title, 48),
+        attrs: { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+      if (r.dist != null) b.appendChild(el('span', { text: fmtDistance(r.dist), attrs: { style: 'font-size:0.7rem;color:var(--accent);flex-shrink:0' } }));
+      else if (r.sameProj) b.appendChild(el('span', { text: 'même dossier', attrs: { style: 'font-size:0.7rem;color:var(--muted);flex-shrink:0' } }));
+      b.addEventListener('mouseenter', () => { b.style.background = 'var(--panel)'; });
+      b.addEventListener('mouseleave', () => { b.style.background = 'none'; });
+      b.addEventListener('click', () => { input.value = ''; results.style.display = 'none'; cfg.onAdd && cfg.onAdd(r.c.id); });
+      results.appendChild(b);
+    });
+    results.style.display = 'flex';
+  };
+  input.addEventListener('input', draw);
+  input.addEventListener('focus', draw);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); const first = results.querySelector('button'); if (first) first.click(); }
+    if (e.key === 'Escape') { results.style.display = 'none'; }
+  });
+  box.append(input, results);
+  wrap.appendChild(box);
+  return wrap;
+}
+
 function memoPictosRow(cfg) {
   const subs = cfg.subtasks || [];
   const nImg = cfg.images || 0, nAtt = cfg.attachments || 0, nCom = cfg.comments || 0;

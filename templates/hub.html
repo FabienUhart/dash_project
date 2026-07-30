@@ -449,7 +449,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <h1>📂 Vos dossiers partagés</h1>
   <p class="sub">Entrez votre code à 4 chiffres pour accéder à tous vos dossiers.</p>
   <input id="pin" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="••••">
-  <button class="btn primary" id="pin-btn" style="width:100%;margin-top:0.8rem">Accéder</button>
+  <button class="btn" id="pin-btn" style="width:100%;margin-top:0.8rem">Accéder</button>
   <div class="err" id="hub-error"></div>
 </div>
 
@@ -488,13 +488,14 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <label class="me-label">Images</label>
   <div id="ed-images" style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center"></div>
   <div id="ed-attachments"></div>
+  <div id="ed-links"></div><!-- [MEMO-LINKS] section « 🔗 Relié à » (rendue par renderEdLinks) -->
   <label class="me-label">Commentaires</label>
   <div id="ed-comments"></div>
   </div><!-- /.dlg-scroll -->
   <div class="dlg-actions">
     <button class="btn danger" id="ed-del" style="margin-right:auto">🗑 Corbeille</button>
     <button class="btn" id="ed-cancel">Fermer</button>
-    <button class="btn primary" id="ed-save">Enregistrer</button>
+    <button class="btn" id="ed-save">Enregistrer</button>
   </div>
 </dialog>
 
@@ -525,7 +526,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
     <div id="map-el" style="flex:1;min-width:260px;height:min(60vh,460px);border-radius:8px;background:var(--panel-2)"></div>
     <div id="map-list" style="width:230px;max-height:min(60vh,460px);overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem"></div>
   </div>
-  <div class="dlg-actions"><button class="btn primary" id="map-close">Fermer</button></div>
+  <div class="dlg-actions"><button class="btn" id="map-close">Fermer</button></div>
 </dialog>
 <dialog id="lightbox" style="padding:0;border:none;background:transparent;max-width:96vw;max-height:96vh"></dialog>
 
@@ -897,6 +898,12 @@ function memoCard(m) {
     onComments: (m.comments || []).length ? () => openEditor(m) : null,
   });
   if (_pic) content.appendChild(_pic);
+  // [MEMO-LINKS] D3 : chips des deux côtés ; clic = éditeur du relié (stopPropagation dans le helper).
+  const _lk = memoLinkChips(m.links, (otherId) => {
+    const target = (DATA.memos || []).find((x) => x.id === otherId);
+    if (target) openEditor(target);
+  });
+  if (_lk) content.appendChild(_lk);
   content.addEventListener('click', () => openEditor(m));
   row.appendChild(content);
   const badges = el('div', { class: 'badges' });
@@ -1541,6 +1548,7 @@ function openEditor(m) {
   renderEdPeople(ro);
   renderEdImages(m, ro);
   renderEdAttachments(m, ro);  // [ATTACHMENTS]
+  renderEdLinks(m, ro);        // [MEMO-LINKS]
   renderEdComments(m, ro);
   document.getElementById('ed-save').style.display = ro ? 'none' : '';
   document.getElementById('ed-del').style.display = ro ? 'none' : '';
@@ -1573,6 +1581,42 @@ function openHubMemoAttachments(m) {
       openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
     };
   });
+}
+
+// [MEMO-LINKS] D2/D4 — section « 🔗 Relié à » du hub. Le picker est borné aux mémos du MÊME
+// partage (`share_token`) : relier deux partages distincts est hors périmètre V1 (403 serveur).
+// Routes invité EXISTANTES sous /share/<token>/… (invariant 5), scope revalidé serveur.
+function renderEdLinks(m, ro) {
+  const box = document.getElementById('ed-links');
+  if (!box) return;
+  box.innerHTML = '';
+  const fresh = (DATA.memos || []).find((x) => x.id === m.id) || m;
+  const sameShare = (DATA.memos || []).filter((x) => x.share_token === m.share_token && x.can_edit);
+  const sec = memoLinksSection({
+    links: fresh.links || [],
+    canEdit: !ro,
+    current: { id: m.id, location: m.location, project_id: m.project_id },
+    candidates: sameShare.map((x) => ({
+      id: x.id, title: x.title || stripTags(x.content || '') || MEMO_EMPTY_LABEL,
+      project_id: x.project_id, location: x.location, emoji: x.emoji,
+    })),
+    onAdd: async (otherId) => {
+      const r = await api(m.share_token, '/memo/' + m.id + '/links', { method: 'POST', body: JSON.stringify({ memo_id: otherId }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); await notify(e.error || 'Impossible de relier ces mémos.', { error: true }); return; }
+      await reload(); renderEdLinks(m, ro); flashSaved(true);
+    },
+    onRemove: async (otherId) => {
+      await api(m.share_token, '/memo/' + m.id + '/links/' + otherId, { method: 'DELETE' });
+      await reload(); renderEdLinks(m, ro); flashSaved(true);
+    },
+    onOpen: (otherId) => {
+      const target = (DATA.memos || []).find((x) => x.id === otherId);
+      if (!target) return;
+      document.getElementById('ed').close();
+      setTimeout(() => openEditor(target), 60);
+    },
+  });
+  if (sec) box.appendChild(sec);
 }
 
 // [ATTACHMENTS] Section « 📎 Fichiers » de l'éditeur hub (scopée au share du dossier).
@@ -1748,6 +1792,16 @@ document.getElementById('map-close').addEventListener('click', closeHubMap);
 // [MAP-CLOSE-UX] ✕ sticky en haut = même fermeture que le Fermer du pied.
 document.getElementById('map-close-top').addEventListener('click', closeHubMap);
 mapDialog.addEventListener('close', () => { if (activeMap) { activeMap.remove(); activeMap = null; } });
+// [LUCIOLE-SWEEP] parité avec les pieds owner/share : UNE seule `.luc-primary` par pop-in.
+// `#pin-btn` (formulaire d'accès) garde son `width:100%` inline. Non convertis (doctrine) :
+// #notify-dialog, `.btn.danger` (🗑 Corbeille), les toggles de vue Plan/Agenda (classe `primary`
+// pilotée par `syncViewBtns`), chips `.prio-btn`, `.hdr-btn`.
+[
+  ['pin-btn', 'luc-primary'],     // formulaire PIN — première impression invitée
+  ['ed-save', 'luc-primary'],     // #ed « Enregistrer »
+  ['ed-cancel', 'luc-neutral'],
+  ['map-close', 'luc-neutral'],   // le ✕ reste le geste principal
+].forEach(([id, variant]) => lucioleize(document.getElementById(id), variant));
 // [AGENDA] deux toggles de vue exclusifs (Plan / Agenda) — la classe primary suit VIEW.
 function syncViewBtns() {
   document.getElementById('btn-plan').classList.toggle('primary', VIEW === 'plan');

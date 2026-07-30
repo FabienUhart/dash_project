@@ -1854,7 +1854,7 @@ dialog .actions {
     <!-- [LINK-ADD-RELOCATE] Ajout de lien dans la vue Liens (retiré du header). Même dialog/flow
          (#add-link → openDialog()). Barre visible seulement en vue Liens (togglée dans renderAll). -->
     <div id="links-actions" style="margin-bottom:0.75rem;display:flex;gap:0.5rem;flex-wrap:wrap">
-      <button id="add-link" class="primary">+ Ajouter un lien</button>
+      <button id="add-link">+ Ajouter un lien</button>
       <button id="add-cat-page">+ Ajouter une catégorie</button>
     </div>
     <!-- [HEADER-ADD-CONTEXT] En-tête de bloc Liens : remplace la barre 2 boutons en mobile ≤900px
@@ -1905,7 +1905,7 @@ dialog .actions {
     <label>Mémo<textarea name="memo" rows="3" placeholder="Notes, identifiants, rappels..."></textarea></label>
     <div class="actions">
       <button type="button" id="cancel">Annuler</button>
-      <button type="submit" class="primary">Sauver</button>
+      <button type="submit" id="link-save">Sauver</button>
     </div>
   </form>
 </dialog>
@@ -1922,7 +1922,7 @@ dialog .actions {
   <h3 id="revisions-title">🕘 Versions</h3>
   <div id="revisions-list" style="max-height:55vh;overflow-y:auto"></div>
   <div class="actions">
-    <button type="button" id="revisions-close" class="primary">Fermer</button>
+    <button type="button" id="revisions-close">Fermer</button>
   </div>
 </dialog>
 
@@ -1938,7 +1938,7 @@ dialog .actions {
       <option value="contributor">➕ Contributeur — ajoute et gère SES ajouts</option>
       <option value="editor" selected>✏️ Éditeur — tout modifier</option>
     </select>
-    <button id="share-add-role" class="primary">+ Créer le lien</button>
+    <button id="share-add-role">+ Créer le lien</button>
   </div>
   <p id="share-role-hint" style="font-size:0.78rem;color:var(--muted);margin:0.4rem 0 0"></p>
   <p style="font-size:0.78rem;color:var(--muted);margin:0.75rem 0 0">
@@ -1946,7 +1946,7 @@ dialog .actions {
     Révoque un lien à tout moment avec ×.
   </p>
   <div class="actions">
-    <button type="button" id="share-close" class="primary">Fermer</button>
+    <button type="button" id="share-close">Fermer</button>
   </div>
 </dialog>
 
@@ -1971,7 +1971,7 @@ dialog .actions {
     <div id="map-list" style="width:230px;max-height:min(60vh,480px);overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem"></div>
   </div>
   <div class="actions" style="margin-top:0.6rem">
-    <button type="button" id="map-close" class="primary">Fermer</button>
+    <button type="button" id="map-close">Fermer</button>
   </div>
 </dialog>
 
@@ -2026,7 +2026,7 @@ dialog .actions {
     <p style="margin:0;color:var(--muted);font-size:0.78rem">Changer l'e-mail est transparent pour l'invité : lien, code et session inchangés. L'historique (commentaires, créations) garde l'ancienne identité.</p>
     <div class="actions">
       <button type="button" id="guest-edit-cancel">Annuler</button>
-      <button type="submit" class="primary">Enregistrer</button>
+      <button type="submit" id="guest-edit-save">Enregistrer</button>
     </div>
   </form>
 </dialog>
@@ -2117,7 +2117,7 @@ dialog .actions {
     </div><!-- /.dlg-scroll -->
     <div class="actions">
       <button type="button" id="create-cancel">Annuler</button>
-      <button type="submit" class="primary" id="create-submit">Créer</button>
+      <button type="submit" id="create-submit">Créer</button>
     </div>
   </form>
 </dialog>
@@ -2132,7 +2132,7 @@ dialog .actions {
   <div id="ipv-bilan" style="font-size:0.85rem;margin-bottom:0.5rem;color:var(--text)"></div>
   <div class="actions">
     <button type="button" id="ipv-cancel">Annuler</button>
-    <button type="button" id="ipv-import" class="primary">Importer</button>
+    <button type="button" id="ipv-import">Importer</button>
   </div>
 </dialog>
 
@@ -2174,6 +2174,7 @@ dialog .actions {
   </div>
   <div id="me-photos"></div>
   <div id="me-attachments"></div>
+  <div id="me-links"></div><!-- [MEMO-LINKS] section « 🔗 Relié à » (rendue par renderMeLinks) -->
   <details id="me-comments-acc" class="me-acc">
     <summary id="me-comments-sum">💬 Commentaires</summary>
     <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
@@ -2184,7 +2185,7 @@ dialog .actions {
          elle suit la couleur du bouton Luciole (muted au repos, réveillée au survol). -->
     <button type="button" id="memo-edit-versions" class="me-versions"><svg class="ic" aria-hidden="true"><use href="#ic-history"/></svg> Voir les versions</button>
     <button type="button" id="memo-edit-cancel">Annuler</button>
-    <button type="button" id="memo-edit-save" class="primary">Sauver</button>
+    <button type="button" id="memo-edit-save">Sauver</button>
   </div>
 </dialog>
 
@@ -2369,7 +2370,7 @@ dialog .actions {
   </div>
 
   <div class="actions">
-    <button id="settings-close" class="primary">Fermer</button>
+    <button id="settings-close">Fermer</button>
   </div>
 </dialog>
 
@@ -3318,7 +3319,7 @@ function openCreateDialog(kind, item = null) {
     priority: item ? '⚑ Modifier la priorité' : '⚑ Nouvelle priorité',
   };
   document.getElementById('create-title').textContent = titles[kind];
-  document.getElementById('create-submit').textContent = item ? 'Enregistrer' : 'Créer';
+  lucLabel(document.getElementById('create-submit'), item ? 'Enregistrer' : 'Créer');  // [LUCIOLE-SWEEP] écrit dans .mab-btxt
   document.getElementById('create-tags-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-desc-label').style.display = kind === 'project' ? '' : 'none';
   document.getElementById('create-loc-label').style.display = kind === 'project' ? '' : 'none';
@@ -3693,7 +3694,7 @@ function openImportPreview(report, fileData, targetId, targetName, fileName) {
     bilanEl.textContent = parts.join(' · ') || 'Rien à importer.';
     importBtn.disabled = N === 0;
     importBtn.style.opacity = N === 0 ? '0.6' : '';
-    importBtn.textContent = N === 0 ? 'Rien à importer' : ('Importer ' + N + ' élément' + (N > 1 ? 's' : ''));
+    lucLabel(importBtn, N === 0 ? 'Rien à importer' : ('Importer ' + N + ' élément' + (N > 1 ? 's' : '')));  // [LUCIOLE-SWEEP]
     importBtn.onclick = async () => {
       importBtn.disabled = true;
       try {
@@ -5772,6 +5773,30 @@ const memoEditDialog = document.getElementById('memo-edit-dialog');
 lucioleize(document.getElementById('memo-edit-versions'), 'luc-neutral');
 lucioleize(document.getElementById('memo-edit-cancel'), 'luc-neutral');
 lucioleize(document.getElementById('memo-edit-save'), 'luc-primary');
+
+// [LUCIOLE-SWEEP] déploiement du style aux pop-ins restantes (docs/design/LUCIOLE-boutons.md) :
+// UNE seule `.luc-primary` par pop-in, le reste en `.luc-neutral`. `lucioleize` ne touche ni au
+// `type` (les submit restent des submit) ni aux handlers — il enveloppe juste le libellé dans
+// `.mab-btxt`. NON convertis (doctrine) : #confirm-dialog / #notify-dialog (confirmations sobres),
+// `button.danger` (rouge), boutons ronds des cards, `.hdr-btn` (lueur seule), chips `.prio-btn`.
+[
+  ['add-link', 'luc-primary'],            // barre de la vue Liens
+  ['create-submit', 'luc-primary'],       // #create-dialog (submit du <form> #create)
+  ['create-cancel', 'luc-neutral'],
+  ['link-save', 'luc-primary'],           // #link-dialog (submit)
+  ['cancel', 'luc-neutral'],              // #link-dialog « Annuler »
+  ['share-add-role', 'luc-primary'],      // #share-dialog
+  ['share-close', 'luc-neutral'],
+  ['guest-edit-save', 'luc-primary'],     // #guest-edit-dialog (submit)
+  ['guest-edit-cancel', 'luc-neutral'],
+  ['settings-close', 'luc-neutral'],
+  ['revisions-close', 'luc-neutral'],
+  ['ipv-import', 'luc-primary'],          // #import-preview-dialog
+  ['map-close', 'luc-neutral'],           // le ✕ de [MAP-CLOSE-UX] reste le geste principal
+].forEach(([id, variant]) => lucioleize(document.getElementById(id), variant));
+// Les deux boutons dont le LIBELLÉ change en cours de route s'écrivent dans `.mab-btxt`
+// (pattern `syncDetails` de la 142) — sinon `textContent` écraserait la lueur.
+function lucLabel(btn, text) { if (btn) (btn.querySelector('.mab-btxt') || btn).textContent = text; }
 let quillInstance = null;
 let editingMemoId = null;
 let editingMemo = null;
@@ -6168,6 +6193,41 @@ async function refreshMeAttachments(memo) {
   renderMeAttachments(memo);
 }
 
+// [MEMO-LINKS] D2 — section « 🔗 Relié à » de l'éditeur owner. Le picker propose TOUS les mémos
+// non supprimés (owner = mono-base, D4), classés proches-d'abord par le helper partagé. Écriture
+// via les routes owner POST/DELETE /api/memos/<id>/links ; rafraîchissement sans reload complet.
+function renderMeLinks(memo) {
+  const box = document.getElementById('me-links');
+  if (!box) return;
+  box.innerHTML = '';
+  const fresh = state.memos.find((x) => x.id === memo.id) || memo;
+  const sec = memoLinksSection({
+    links: fresh.links || [],
+    canEdit: true,
+    current: { id: memo.id, location: memo.location, project_id: memo.project_id },
+    candidates: (state.memos || []).map((m) => ({
+      id: m.id, title: m.title || stripHTML(m.content || '') || MEMO_EMPTY_LABEL,
+      project_id: m.project_id, location: m.location, emoji: m.emoji,
+    })),
+    onAdd: async (otherId) => {
+      try { await api(`/api/memos/${memo.id}/links`, { method: 'POST', body: JSON.stringify({ memo_id: otherId }) }); }
+      catch (e) { await notify(e.message || 'Impossible de relier ces mémos.', { error: true }); return; }
+      await loadAll(); renderMeLinks(memo); flashSaved(true);
+    },
+    onRemove: async (otherId) => {
+      await api(`/api/memos/${memo.id}/links/${otherId}`, { method: 'DELETE' });
+      await loadAll(); renderMeLinks(memo); flashSaved(true);
+    },
+    onOpen: (otherId) => {
+      const target = (state.memos || []).find((x) => x.id === otherId);
+      if (!target) return;
+      memoEditDialog.close();
+      setTimeout(() => openMemoEditor(target), 60);   // même mécanique que [MEMO-CARD-CLICK]
+    },
+  });
+  if (sec) box.appendChild(sec);
+}
+
 function openMemoEditor(memo) {
   const q = getQuill();
   if (!q) return false;
@@ -6183,6 +6243,7 @@ function openMemoEditor(memo) {
   renderMeMeta(memo);         // [LESS-BUTTONS] projet/échéance/priorité/emoji/couleur/récurrence/hors-vote
   renderMePhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderMeAttachments(memo);  // [ATTACHMENTS]
+  renderMeLinks(memo);        // [MEMO-LINKS] section « 🔗 Relié à »
   const mc = document.getElementById('me-comments');
   mc.innerHTML = '';
   mc.appendChild(commentsBlockEl(memo));
@@ -6789,6 +6850,13 @@ function taskEl(memo) {
     onComments: memo.comment_count ? () => { expandedMemos.add(memo.id); renderBoard(); } : null,
   });
   if (pictos) content.appendChild(pictos);
+  // [MEMO-LINKS] D3 : chips des DEUX côtés (pleine = posé ici, pointillée « ⤺ » = référencé par).
+  // Clic = ouvre l'éditeur du mémo relié SANS changer de vue (mécanique [MEMO-CARD-CLICK]).
+  const lrow = memoLinkChips(memo.links, (otherId) => {
+    const target = (state.memos || []).find((x) => x.id === otherId);
+    if (target) openMemoEditor(target);
+  });
+  if (lrow) content.appendChild(lrow);
   const vrow = voteRowEl(memo);
   if (vrow) content.appendChild(vrow);
   row.appendChild(content);

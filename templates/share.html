@@ -921,7 +921,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
     <div id="map-list" style="width:230px;max-height:min(60vh,460px);overflow-y:auto;display:flex;flex-direction:column;gap:0.3rem"></div>
   </div>
   <div class="dlg-actions" style="margin-top:0.6rem">
-    <button type="button" id="map-close" class="primary">Fermer</button>
+    <button type="button" id="map-close">Fermer</button>
   </div>
 </dialog>
 
@@ -967,7 +967,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div class="dlg-actions">
     <button type="button" id="pd-move" style="margin-right:auto">↗ Déplacer vers…</button>
     <button type="button" id="pd-cancel">Annuler</button>
-    <button type="button" id="pd-save" class="primary">Enregistrer</button>
+    <button type="button" id="pd-save">Enregistrer</button>
   </div>
 </dialog>
 
@@ -986,10 +986,11 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="q-meta"></div>
   <div id="q-photos"></div>
   <div id="q-attachments"></div>
+  <div id="q-links"></div><!-- [MEMO-LINKS] section « 🔗 Relié à » (rendue par renderQLinks) -->
   </div><!-- /.dlg-scroll -->
   <div class="dlg-actions">
     <button type="button" id="edit-cancel">Annuler</button>
-    <button type="button" id="edit-save" class="primary">Enregistrer</button>
+    <button type="button" id="edit-save">Enregistrer</button>
   </div>
 </dialog>
 
@@ -1580,6 +1581,45 @@ function renderQAttachments(memo) {
   }));
 }
 
+// [MEMO-LINKS] D2/D4 — section « 🔗 Relié à » côté invité. Le picker ne propose QUE les mémos
+// du scope du partage (DATA.memos, déjà borné serveur) et le lien n'est posable que si l'invité
+// peut éditer LES DEUX mémos (matrice [GUEST-ROLES]) ; le serveur revalide tout (invariant 5) —
+// un mémo hors scope répond 403 explicite (exposition consentie = tranche B, non livrée).
+function renderQLinks(memo) {
+  const box = document.getElementById('q-links');
+  if (!box) return;
+  box.innerHTML = '';
+  const fresh = (DATA.memos || []).find((x) => x.id === memo.id) || memo;
+  const sec = memoLinksSection({
+    links: fresh.links || [],
+    canEdit: canEditMemo(fresh),
+    current: { id: memo.id, location: memo.location, project_id: memo.project_id },
+    candidates: (DATA.memos || []).filter((m) => canEditMemo(m)).map((m) => ({
+      id: m.id, title: m.title || stripTags(m.content || '') || MEMO_EMPTY_LABEL,
+      project_id: m.project_id, location: m.location, emoji: m.emoji,
+    })),
+    onAdd: async (otherId) => {
+      const r = await fetch(API + '/memo/' + memo.id + '/links', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+        body: JSON.stringify({ memo_id: otherId }),
+      });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); await notify(e.error || 'Impossible de relier ces mémos.', { error: true }); return; }
+      await load(); renderQLinks(memo); flashSaved(true);
+    },
+    onRemove: async (otherId) => {
+      await fetch(API + '/memo/' + memo.id + '/links/' + otherId, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } });
+      await load(); renderQLinks(memo); flashSaved(true);
+    },
+    onOpen: (otherId) => {
+      const target = (DATA.memos || []).find((x) => x.id === otherId);
+      if (!target) return;
+      editDialog.close();
+      setTimeout(() => openEditor(target, el('span', ''), el('span', '')), 60);
+    },
+  });
+  if (sec) box.appendChild(sec);
+}
+
 function openEditor(memo, contentEl, taskEl) {
   const q = getShareQuill();
   if (!q) {
@@ -1607,6 +1647,7 @@ function openEditor(memo, contentEl, taskEl) {
   renderQMeta(memo);         // [LESS-BUTTONS] échéance / priorité / position
   renderQPhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderQAttachments(memo);  // [ATTACHMENTS]
+  renderQLinks(memo);        // [MEMO-LINKS]
   const titleEl = document.getElementById('q-title');
   if (titleEl) titleEl.value = memo.title || '';
   editAssignees = [...(memo.assignees || [])];
@@ -3032,6 +3073,12 @@ function render() {
       onAttach: (memo.attachments || []).length ? () => openShareMemoAttachments(memo) : null,
     });
     if (_pic) content.appendChild(_pic);
+    // [MEMO-LINKS] D3 : chips des deux côtés ; clic = éditeur du mémo relié (si droit d'éditer).
+    const _lk = memoLinkChips(memo.links, (otherId) => {
+      const target = (DATA.memos || []).find((x) => x.id === otherId);
+      if (target && canEditMemo(target)) openEditor(target, el('span', ''), el('span', ''));
+    });
+    if (_lk) content.appendChild(_lk);
     const _vr = shareVoteRow(memo);
     if (_vr) content.appendChild(_vr);
     row.appendChild(content);
@@ -3357,6 +3404,17 @@ projBtn.addEventListener('click', (e) => withBusy(e.currentTarget, addSubProject
   projBtn.append(ic, document.createTextNode('Créer'));
   lucioleize(projBtn, 'luc-neutral');
 })();
+
+// [LUCIOLE-SWEEP] parité avec le pied owner (147) : UNE seule `.luc-primary` par pop-in.
+// `lucioleize` ne change ni le type ni les handlers. Non convertis (doctrine) : #notify-dialog,
+// `.confirm-danger` (danger rouge), chips `.prio-btn`, `.hdr-btn`.
+[
+  ['edit-save', 'luc-primary'],    // #edit-dialog « Enregistrer »
+  ['edit-cancel', 'luc-neutral'],
+  ['pd-save', 'luc-primary'],      // #proj-dialog « Enregistrer »
+  ['pd-cancel', 'luc-neutral'],
+  ['map-close', 'luc-neutral'],    // le ✕ reste le geste principal
+].forEach(([id, variant]) => lucioleize(document.getElementById(id), variant));
 
 load();
 setInterval(load, 15000);
