@@ -474,9 +474,12 @@ span.prio-btn:hover { color: var(--muted); background: var(--panel-2); border-co
 #guest-error { flex-basis: 100%; margin: 0.2rem 0 0; color: var(--danger); font-size: 0.82rem; }
 #guest-error:empty { display: none; }
 #add-bar, #proj-bar { display: flex; gap: 0.5rem; margin: 1rem 0; }
+/* [GUEST-ADD-BAR] la barre mémo invitée passe au gabarit owner [ADD-BAR-V2] : rangée 1 + rangée 2
+   repliable, donc empilement vertical (le contenu est construit par guestMemoAddBar du partial). */
+#add-bar { flex-direction: column; }
 #proj-bar { margin-top: 0.4rem; }
 #add-bar[hidden], #proj-bar[hidden], #guest-banner[hidden], #tiles[hidden] { display: none; }
-#add-bar select {
+#add-bar select, .mab-row2 select, .mab-row2 input[type="date"], .mab-row2 input[type="time"] {
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); font: inherit; font-size: 0.85rem; padding: 0.4rem 0.5rem; max-width: 11rem;
 }
@@ -485,10 +488,8 @@ span.prio-btn:hover { color: var(--muted); background: var(--panel-2); border-co
   color: var(--text); font: inherit; font-size: 0.85rem; padding: 0.45rem 0.8rem; outline: none;
 }
 #proj-bar input:focus { border-style: solid; border-color: var(--accent); }
-#proj-bar button {
-  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
-  border-radius: 6px; padding: 0.45rem 0.9rem; font: inherit; cursor: pointer;
-}
+/* [GUEST-ADD-BAR] « Créer » (sous-projet) passe en Luciole NEUTRE (voir le bloc LUCIOLE plus bas) :
+   plus de gabarit propre ici, sinon la spécificité d'id écraserait .mab-btn. */
 #tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(95px, 1fr));
@@ -509,17 +510,104 @@ span.prio-btn:hover { color: var(--muted); background: var(--panel-2); border-co
 .tile .tn { font-weight: 700; float: right; }
 .tile .tl { font-size: 0.7rem; font-weight: 600; display: block; }
 .tile.active { border-color: var(--accent); background: #15232e; }
-#add-bar input {
-  flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+#add-bar input[type="text"] {
+  flex: 1; min-width: 180px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text); font: inherit; padding: 0.55rem 0.8rem; outline: none;
 }
-#add-bar input:focus { border-color: var(--accent); box-shadow: var(--ring); }
-#add-bar button {
-  background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: #04161f; border: none; border-radius: var(--radius-sm);
-  padding: 0.5rem 1rem; font: inherit; cursor: pointer; font-weight: 600;
-  box-shadow: 0 2px 10px rgba(79,195,247,0.25); transition: filter 0.18s var(--ease);
+#add-bar input[type="text"]:focus { border-color: var(--accent); box-shadow: var(--ring); }
+/* [SUBHIDE-V2] barre de saut ⤓/⤒ (helper partagé memoJumpBar) — même mise en page que le owner. */
+.memo-jump-bar { display: flex; justify-content: flex-end; margin: -0.2rem 0 0.8rem; }
+/* [GUEST-ADD-BAR] mise en page de la barre (miroir de [ADD-BAR-V2] owner) ; le style des boutons
+   est le bloc LUCIOLE plus bas. Le fond accent plein d'« Ajouter » a disparu (interdit par le
+   style Luciole — docs/design/LUCIOLE-boutons.md). */
+.mab-row1 { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.mab-row2 { display: flex; gap: 1rem 1.2rem; flex-wrap: wrap; align-items: center;
+  padding: 0.6rem 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
+.mab-group { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.mab-lbl { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.mab-arrow { color: var(--muted); }
+.mab-prios { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.mab-bar { display: flex; flex-direction: column; gap: 0.5rem; }
+/* ===== LUCIOLE (docs/design/LUCIOLE-boutons.md) — recopié à l'identique du dashboard owner.
+   Bordure fine accent FIGÉE sur fond panel-2, lueur « caméléon » qui suit la souris (span
+   .mab-glow piloté par attachLuciole du partial), micro-lift au survol, état déplié dit par la
+   MATIÈRE + le libellé (« Détails » ⇄ « Réduire »). Chaque color-mix est doublé d'un repli rgba ;
+   le mode clair est monochrome au repos (verre) et prend l'accent au survol. ===== */
+.mab-btn {
+  min-height: 40px; padding: 0.2rem 0.9rem; white-space: nowrap;
+  border: 1px solid rgba(79, 195, 247, 0.45);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 9px; background: var(--panel-2);
+  color: var(--accent); font: inherit; font-size: 0.85rem; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.2s ease, transform 0.2s ease-in-out;
 }
-#add-bar button:hover { filter: brightness(1.08); }
+.mab-btn:hover {
+  border-color: rgba(79, 195, 247, 0.8);
+  border-color: color-mix(in srgb, var(--accent) 80%, transparent);
+  background: #2c4557;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+.mab-btn:active { transform: translateY(0) scale(0.97); box-shadow: none; }
+.mab-details-btn { min-width: 5.6em; }
+.mab-details-btn.on, .mab-details-btn.on:hover {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--panel-2) 0%, rgba(79, 195, 247, 0.18) 100%);
+  background: linear-gradient(180deg, var(--panel-2) 0%, color-mix(in srgb, var(--accent) 18%, var(--panel-2)) 100%);
+  transform: none; box-shadow: none;
+}
+.mab-glow {
+  position: absolute; left: -16px; top: -16px; width: 34px; height: 34px;
+  border-radius: 50%; background: var(--accent); filter: blur(18px);
+  transform: translate(-50%, -50%); opacity: 0; transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+.mab-btn:hover .mab-glow { opacity: 0.55; }
+.mab-btxt { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 0.35em; }
+@media (prefers-reduced-motion: reduce) {
+  .mab-btn, .mab-glow { transition: none; }
+  .mab-btn:hover { transform: none; }
+}
+:root[data-theme="light"] .mab-btn {
+  background: rgba(255, 255, 255, 0.75);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-color: rgba(190, 200, 212, 0.8);
+  color: #3b444d;
+  box-shadow: 0 2px 8px rgba(20, 30, 40, 0.07);
+}
+:root[data-theme="light"] .mab-btn:hover {
+  background: rgba(79, 195, 247, 0.10);
+  border-color: #8a97a3;
+  box-shadow: 0 7px 16px rgba(20, 30, 40, 0.13);
+}
+:root[data-theme="light"] .mab-glow { background: #1e88e5; width: 30px; height: 30px; filter: blur(12px); }
+:root[data-theme="light"] .mab-btn:hover .mab-glow { opacity: 0.55; }
+:root[data-theme="light"] .mab-details-btn.on,
+:root[data-theme="light"] .mab-details-btn.on:hover {
+  background: #eef0f3; border-color: #5f6b76; color: #1c2530;
+  box-shadow: inset 0 1px 3px rgba(20, 30, 40, 0.08);
+}
+.mab-btn.luc-neutral { border-color: var(--border); color: var(--muted); }
+.mab-btn.luc-neutral:hover { color: var(--text); }
+:root[data-theme="light"] .mab-btn.luc-neutral { border-color: #c9d2da; color: #5f6b76; }
+:root[data-theme="light"] .mab-btn.luc-neutral:hover { color: #1c2530; }
+.mab-btn.luc-primary {
+  font-weight: 600;
+  background: #22384a;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+}
+.mab-btn.luc-primary:hover {
+  background: #2c4557;
+  background: color-mix(in srgb, var(--accent) 24%, var(--panel-2));
+}
+:root[data-theme="light"] .mab-btn.luc-primary {
+  background: rgba(79, 195, 247, 0.12); border-color: #4fc3f7; color: #1565c0;
+}
+:root[data-theme="light"] .mab-btn.luc-primary:hover { background: rgba(79, 195, 247, 0.22); }
 .empty { color: var(--muted); font-style: italic; padding: 1rem 0; text-align: center; }
 footer { text-align: center; color: var(--muted); font-size: 0.72rem; padding: 1.5rem; }
 /* ---------- accessibilité (Lot 1+2) ---------- */
@@ -804,11 +892,9 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="pdesc" hidden style="color:var(--muted);font-size:0.85rem;margin:0 0 0.7rem;white-space:pre-wrap"></div>
   <div id="pfiles"></div>
   <div id="tiles" hidden></div>
-  <div id="add-bar" hidden>
-    <input id="add-input" type="text" placeholder="+ Ajouter un élément… (Entrée)">
-    <select id="add-project" hidden></select>
-    <button id="add-btn">Ajouter</button>
-  </div>
+  <!-- [GUEST-ADD-BAR] conteneur seul : la barre (rangée 1 + rangée 2 repliable, Luciole) est
+       construite par guestMemoAddBar() du partial à chaque render(), avec les dossiers scopés. -->
+  <div id="add-bar" hidden></div>
   <div id="proj-bar" hidden>
     <input id="proj-input" type="text" placeholder="+ Nouveau sous-projet… (Entrée)">
     <button id="proj-btn">Créer</button>
@@ -2785,27 +2871,7 @@ function render() {
   const canAddHere = canAddNow() && DATA.kind === 'project' && addable.length > 0;
   document.getElementById('add-bar').hidden = !canAddHere;
   document.getElementById('proj-bar').hidden = !canAddHere;
-  const projSel = document.getElementById('add-project');
-  if (canAddHere && addable.length > 1) {
-    projSel.hidden = false;
-    const prev = projSel.value;
-    projSel.innerHTML = '';
-    addable.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.id;
-      opt.textContent = p.name;
-      projSel.appendChild(opt);
-    });
-    if (prev && addable.some(p => String(p.id) === prev)) projSel.value = prev;
-  } else if (canAddHere) {
-    // un seul dossier addable → sélecteur caché mais on cible ce dossier
-    projSel.hidden = true;
-    projSel.innerHTML = '';
-    const opt = document.createElement('option'); opt.value = addable[0].id; projSel.appendChild(opt);
-    projSel.value = String(addable[0].id);
-  } else {
-    projSel.hidden = true;
-  }
+  renderShareAddBar(addable, canAddHere);
   renderGuestBanner();
   renderSidebar();
   renderTiles();
@@ -2813,9 +2879,6 @@ function render() {
   // Le titre (nom du projet) peut faire varier la hauteur du header → re-mesurer
   // pour caler la barre de projets collante.
   syncHeaderHeight();
-
-  // pré-sélection sur le projet courant s'il est addable (sinon on garde le 1er addable)
-  if (!projSel.hidden && PFILTER !== 'all' && [...projSel.options].some(o => o.value === String(PFILTER))) projSel.value = String(PFILTER);
 
   // Vues Plan / Agenda : plein écran (board et barres d'ajout masqués).
   const treeBoard = document.getElementById('tree-board');
@@ -2868,6 +2931,9 @@ function render() {
     list.appendChild(el('div', 'empty', _sh.bar ? 'Tous les mémos sont masqués.' : 'Rien dans cette vue. 🎉'));
     return;
   }
+  // [SUBHIDE-V2] « ⤓ Aller en bas » (helper partagé, nouveau chez les invités) : hors du cadre
+  // Sous-dossiers, juste au-dessus des cards, même seuil que le owner (> 8 mémos affichés).
+  if (shown.length > 8) list.appendChild(memoJumpBar('down'));
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
   shown.forEach(memo => {
     const t = el('div', 'task' + (memo.done ? ' done' : '') + (shareOpenMemo === memo.id ? ' card-focus' : ''));
@@ -3186,6 +3252,8 @@ function render() {
     // existantes) et dans le menu ⋯ de la rangée. La card ne garde que la consultation active.
     list.appendChild(t);
   });
+  // [SUBHIDE-V2] pendant ⤒ du bas (parité owner : on peut revenir en haut après le saut).
+  if (shown.length > 8) list.appendChild(memoJumpBar('up'));
 }
 
 async function load() {
@@ -3210,22 +3278,56 @@ async function load() {
 document.getElementById('lightbox').addEventListener('click', () => document.getElementById('lightbox').close());
 // [LESS-BUTTONS] ferme les menus ⋯ des cards au clic ailleurs (un seul handler global).
 document.addEventListener('click', () => { document.querySelectorAll('.task-more .card-menu:not([hidden])').forEach(m => { m.hidden = true; }); });
-const addInput = document.getElementById('add-input');
-async function addMemo() {
-  const content = addInput.value.trim();
-  if (!content) return;
-  const projSel = document.getElementById('add-project');
-  const body = { content };
-  if (!projSel.hidden && projSel.value) body.project_id = Number(projSel.value);
-  const r = await fetch(API + '/memos', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
-    body: JSON.stringify(body),
+// [GUEST-ADD-BAR] barre mémo invitée = helper partagé guestMemoAddBar (parité owner [ADD-BAR-V2]).
+// Construite UNE fois puis rafraîchie (le poll 15 s ne doit pas effacer la saisie ni le repli).
+// Écriture : POST /share/<token>/memos EXISTANT (titre + dossier) puis, si des métadonnées sont
+// remplies, PUT /share/<token>/memo/<id> EXISTANT — zéro route nouvelle, scope et rôle revalidés
+// par le serveur (invariant 5). Matrice [GUEST-ROLES] : pouvoir créer (contributeur+) implique
+// pouvoir éditer SON mémo (action 'own') → la rangée 2 est offerte dès que canAddNow().
+let shareAddBarEl = null;
+function renderShareAddBar(addable, canAddHere) {
+  const host = document.getElementById('add-bar');
+  if (!canAddHere) { host.innerHTML = ''; shareAddBarEl = null; return; }
+  const folders = addable.map(p => ({
+    value: p.id,
+    label: (p.emoji ? p.emoji + ' ' : '') + p.name,   // nom SEUL — plus de préfixe « dans … »
+    selected: PFILTER !== 'all' && p.id === PFILTER,
+  }));
+  if (shareAddBarEl && shareAddBarEl.isConnected) { shareAddBarEl.updateFolders(folders); return; }
+  shareAddBarEl = guestMemoAddBar({
+    storageKey: 'shareAddDetailsOpen:' + TOKEN,
+    placeholder: '+ Titre du nouveau mémo… (Entrée)',
+    folders,
+    priorities: DATA.priorities || [],
+    allowMeta: canAddNow(),
+    onCreate: async ({ title, projectValue, meta }) => {
+      const body = { title };
+      if (projectValue) body.project_id = Number(projectValue);
+      const r = await fetch(API + '/memos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        notify(e.error || 'Création impossible', { error: true });
+        return false;
+      }
+      const m = await r.json().catch(() => null);
+      if (m && m.id && Object.keys(meta).length) {
+        await fetch(API + '/memo/' + m.id, {   // métadonnées : route scopée existante
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+          body: JSON.stringify(meta),
+        });
+      }
+      await load();
+      return true;
+    },
   });
-  if (r.ok) { addInput.value = ''; await load(); }
+  host.innerHTML = '';
+  host.appendChild(shareAddBarEl);
 }
-addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addMemo(); });
-document.getElementById('add-btn').addEventListener('click', (e) => withBusy(e.currentTarget, addMemo));
 
 const projInput = document.getElementById('proj-input');
 async function addSubProject() {
@@ -3243,7 +3345,18 @@ async function addSubProject() {
   }
 }
 projInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') addSubProject(); });
-document.getElementById('proj-btn').addEventListener('click', (e) => withBusy(e.currentTarget, addSubProject));
+// [GUEST-ADD-BAR] « Créer » : emoji 📁 remplacé par l'icône dossier TRAIT (hdrIcon du partial,
+// currentColor, zéro asset nouveau) et bouton converti en Luciole NEUTRE — hiérarchie visuelle :
+// l'ajout de mémo (accent) prime sur la création de dossier (neutre).
+const projBtn = document.getElementById('proj-btn');
+projBtn.addEventListener('click', (e) => withBusy(e.currentTarget, addSubProject));
+(function () {
+  const ic = hdrIcon('folder');
+  ic.setAttribute('width', '16'); ic.setAttribute('height', '16');
+  projBtn.textContent = '';
+  projBtn.append(ic, document.createTextNode('Créer'));
+  lucioleize(projBtn, 'luc-neutral');
+})();
 
 load();
 setInterval(load, 15000);

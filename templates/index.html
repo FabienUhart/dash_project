@@ -290,8 +290,9 @@ button.icon { padding: 0.45rem 0.6rem; }
 .snap-box.snap-after { border-color: var(--accent); }
 .snap-label { font-size: 0.68rem; color: var(--muted); font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
 .snap-box .snap-meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; }
-.snap-box .stline { font-size: 0.8rem; margin-top: 0.15rem; }
-.snap-box .stline.stdone { text-decoration: line-through; color: var(--muted); }
+/* [TRASH-PREVIEW] même gabarit de sous-tâche en lecture seule dans l'aperçu de la corbeille. */
+.snap-box .stline, #trash-preview-dialog .stline { font-size: 0.8rem; margin-top: 0.15rem; }
+.snap-box .stline.stdone, #trash-preview-dialog .stline.stdone { text-decoration: line-through; color: var(--muted); }
 .rev-actions { display: flex; gap: 0.4rem; width: 100%; }
 .rev-actions button { padding: 0.2rem 0.6rem; font-size: 0.78rem; }
 #shares-board { max-width: 760px; margin: 0 auto; }
@@ -301,6 +302,17 @@ button.icon { padding: 0.45rem 0.6rem; }
 .trash-row .grow { flex: 1; min-width: 0; }
 .trash-heading { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trash-meta { color: var(--muted); font-size: 0.78rem; margin-top: 0.15rem; }
+/* [TRASH-PREVIEW] la ligne entière ouvre l'aperçu (les boutons gardent leur action) : même
+   révélation au survol que les cards (bordure muted), tokens existants. */
+.trash-row.trash-clickable { cursor: pointer; }
+.trash-row.trash-clickable:hover { border-color: var(--muted); }
+.trash-row.trash-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Aperçu = LECTURE SEULE : les listes à cocher du contenu riche ne réagissent pas (aucun handler
+   n'est posé ici — on neutralise juste l'affordance de survol héritée des cards). */
+#trash-preview-dialog .task-content li[data-list] { cursor: default; }
+#trash-preview-dialog .task-content li[data-list]:hover { background: none; }
+.tp-sec { margin-top: 0.9rem; }
+.tp-sec-head { font-size: 0.78rem; font-weight: 600; color: var(--muted); margin-bottom: 0.3rem; }
 .btn-soft { font: inherit; font-size: 0.8rem; padding: 0.28rem 0.6rem; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
 /* ---------- vue Plan (arbre projets → mémos) ---------- */
 #tree-board { max-width: 920px; margin: 0 auto; }
@@ -785,7 +797,91 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 /* [ADD-BAR-V2] barre d'ajout variante A : rangée 1 (titre + Détails + Ajouter) + rangée 2 repliable. */
 #memo-add-bar { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem; }
 .mab-row1 { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
-.mab-details-btn { white-space: nowrap; }
+/* [ADD-BAR-GLOW] bouton « final » validé sur maquette (30 juil.) : les DEUX boutons
+   au même gabarit accent — bordure fine FIGÉE (aucune animation de contour), fond
+   var(--panel-2), texte accent. Survol = lueur « caméléon » qui suit la souris
+   (span .mab-glow piloté en JS, lissage rAF, zéro lib — invariant 6) + bordure qui
+   se réveille. État DÉPLIÉ de « Détails » = bordure accent pleine + fond dégradé
+   statique (l'état est dit par la matière ET le libellé Détails ⇄ Réduire, plus
+   aucun aplat accent — anti-pattern « inverted toggle »). Chaque règle color-mix est
+   doublée d'un repli rgba (déclaration ignorée si color-mix non supporté). */
+.mab-btn {
+  min-height: 40px; padding: 0.2rem 0.9rem; white-space: nowrap;
+  border: 1px solid rgba(79, 195, 247, 0.45);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 9px; background: var(--panel-2);
+  color: var(--accent); font: inherit; font-size: 0.85rem; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.2s ease, transform 0.2s ease-in-out;
+}
+/* [LUCIOLE] micro-lift au survol (geste du dock uiverse validé Fabien 30 juil.,
+   demandé clair ET sombre) : le bouton se soulève de 2 px avec une ombre portée douce,
+   et le FOND S'IMPRÈGNE d'accent (14 %) sous la lueur — validé comparatif « fond bleuté »
+   30 juil. Réservé au survol — l'état déplié `.on` reste immobile (état persistant = stable).
+   Règles complètes du style : docs/design/LUCIOLE-boutons.md */
+.mab-btn:hover {
+  border-color: rgba(79, 195, 247, 0.8);
+  border-color: color-mix(in srgb, var(--accent) 80%, transparent);
+  background: #2c4557;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+.mab-btn:active { transform: translateY(0) scale(0.97); box-shadow: none; }
+.mab-details-btn { min-width: 5.6em; } /* « Détails »/« Réduire » sans saut de largeur */
+.mab-details-btn.on, .mab-details-btn.on:hover {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--panel-2) 0%, rgba(79, 195, 247, 0.18) 100%);
+  background: linear-gradient(180deg, var(--panel-2) 0%, color-mix(in srgb, var(--accent) 18%, var(--panel-2)) 100%);
+  transform: none;
+  box-shadow: none;
+}
+.mab-glow {
+  position: absolute; left: -16px; top: -16px; width: 34px; height: 34px;
+  border-radius: 50%; background: var(--accent); filter: blur(18px);
+  transform: translate(-50%, -50%); opacity: 0; transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+.mab-btn:hover .mab-glow { opacity: 0.55; }
+.mab-btxt { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .mab-btn, .mab-glow { transition: none; }
+  .mab-btn:hover { transform: none; }
+}
+/* [ADD-BAR-GLOW v4] mode CLAIR « synthèse » (comparatif dock uiverse, version 4 validée
+   Fabien 30 juil.) : monochrome encre (la couleur reste aux DONNÉES) + VERRE discret
+   (fond blanc translucide, backdrop-blur 8px, ombre douce) + micro-lift partagé avec le
+   sombre. État déplié = pastille grise PLATE avec léger creux (fini le dégradé en clair),
+   immobile. La lueur caméléon garde sa paire GRISE côté JS (data-theme au pointerenter).
+   Gris en dur scoped au thème clair = exception locale (valeurs du comparatif validé). */
+:root[data-theme="light"] .mab-btn {
+  background: rgba(255, 255, 255, 0.75);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-color: rgba(190, 200, 212, 0.8);
+  color: #3b444d;
+  box-shadow: 0 2px 8px rgba(20, 30, 40, 0.07);
+}
+:root[data-theme="light"] .mab-btn:hover {
+  background: rgba(79, 195, 247, 0.10);
+  border-color: #8a97a3;
+  box-shadow: 0 7px 16px rgba(20, 30, 40, 0.13);
+}
+/* [LUCIOLE] en clair, le spot passe en BLEU PROFOND à flou serré (le pastel accent se
+   noyait dans le blanc — comparatif contrasté validé 30 juil.) ; le survol devient un
+   moment accent, comme la barre du board en clair. Repos toujours monochrome. */
+:root[data-theme="light"] .mab-glow {
+  background: #1e88e5; width: 30px; height: 30px; filter: blur(12px);
+}
+:root[data-theme="light"] .mab-btn:hover .mab-glow { opacity: 0.55; }
+:root[data-theme="light"] .mab-details-btn.on,
+:root[data-theme="light"] .mab-details-btn.on:hover {
+  background: #eef0f3;
+  border-color: #5f6b76;
+  color: #1c2530;
+  box-shadow: inset 0 1px 3px rgba(20, 30, 40, 0.08);
+}
 .mab-row2 { display: flex; gap: 1rem 1.2rem; flex-wrap: wrap; align-items: center;
   padding: 0.6rem 0.7rem; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
 .mab-group { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
@@ -1364,13 +1460,14 @@ dialog .actions {
    #map-dialog) : dialog en colonne flex, contenu scrollable (flex:1), pied d'actions STATIC =
    dernier enfant hors zone de scroll → toujours visible, collé au bord bas, zéro liseré, et le
    scroll s'arrête AU-DESSUS de la barre (Commentaires atteignables). Le padding migre sur .dlg-scroll. */
-#memo-edit-dialog, #create-dialog { flex-direction: column; max-height: 92vh; overflow: hidden; padding: 0; }
-#memo-edit-dialog[open], #create-dialog[open] { display: flex; }  /* [open] : sinon on écrase le dialog:not([open]){display:none} du navigateur */
-#memo-edit-dialog .dlg-scroll, #create-dialog .dlg-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.25rem 1.5rem; }
+/* [TRASH-PREVIEW] l'aperçu de la corbeille rejoint le même patron (contenu scrollable, pied fixe). */
+#memo-edit-dialog, #create-dialog, #trash-preview-dialog { flex-direction: column; max-height: 92vh; overflow: hidden; padding: 0; }
+#memo-edit-dialog[open], #create-dialog[open], #trash-preview-dialog[open] { display: flex; }  /* [open] : sinon on écrase le dialog:not([open]){display:none} du navigateur */
+#memo-edit-dialog .dlg-scroll, #create-dialog .dlg-scroll, #trash-preview-dialog .dlg-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.25rem 1.5rem; }
 #create-dialog .dlg-scroll { display: flex; flex-direction: column; gap: 0.75rem; }  /* remplace le gap de `dialog form` */
 #create-dialog #create-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0; gap: 0; }
 #create-dialog .me-head { flex: 0 0 auto; padding: 1.25rem 1.5rem 0; }
-#memo-edit-dialog .actions, #create-dialog .actions {
+#memo-edit-dialog .actions, #create-dialog .actions, #trash-preview-dialog .actions {
   position: static; flex: 0 0 auto; margin: 0; padding: 0.7rem 1.5rem;
   border-top: 1px solid var(--border); background: var(--panel); border-radius: 0 0 14px 14px;
 }
@@ -1394,6 +1491,35 @@ dialog .actions {
 .me-acc[open] > summary::after { content: ' ▾'; }
 .me-versions { min-width: 44px; min-height: 36px; padding: 0.2rem 0.6rem; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); color: var(--muted); margin-right: auto; cursor: pointer; }
 .me-versions:hover { background: var(--panel); color: var(--text); }
+/* [LUCIOLE-POPIN] variantes Luciole pour pieds de pop-in (règles : docs/design/LUCIOLE-boutons.md).
+   Placé APRÈS .me-versions dans la cascade + sélecteurs à 2 classes → gagne sur les gabarits
+   historiques. .luc-neutral = secondaire (Annuler, Voir les versions) : repos discret muted,
+   le survol Luciole de base (fond imprégné + lift + lueur) fait le reste. .luc-primary =
+   action principale (Sauver) : teinte accent AU REPOS — JAMAIS d'aplat plein (remplace
+   button.primary dans l'éditeur ; le gradient .primary survit ailleurs, à convertir au fil de l'eau). */
+#memo-edit-dialog .actions .mab-btn, #trash-preview-dialog .actions .mab-btn { min-height: 40px; padding: 0.2rem 0.9rem; }
+/* [VERSIONS-ICON] libellé icône + texte du pied : le span .mab-btxt posé par lucioleize()
+   aligne l'icône trait sur la ligne de base du texte (aucun sélecteur bespoke). */
+#memo-edit-dialog .actions .mab-btn .mab-btxt, #trash-preview-dialog .actions .mab-btn .mab-btxt { display: inline-flex; align-items: center; gap: 0.35em; }
+.mab-btn.luc-neutral { border-color: var(--border); color: var(--muted); }
+.mab-btn.luc-neutral:hover { color: var(--text); }
+:root[data-theme="light"] .mab-btn.luc-neutral { border-color: #c9d2da; color: #5f6b76; }
+:root[data-theme="light"] .mab-btn.luc-neutral:hover { color: #1c2530; }
+.mab-btn.luc-primary {
+  font-weight: 600;
+  background: #22384a;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
+}
+.mab-btn.luc-primary:hover {
+  background: #2c4557;
+  background: color-mix(in srgb, var(--accent) 24%, var(--panel-2));
+}
+:root[data-theme="light"] .mab-btn.luc-primary {
+  background: rgba(79, 195, 247, 0.12);
+  border-color: #4fc3f7;
+  color: #1565c0;
+}
+:root[data-theme="light"] .mab-btn.luc-primary:hover { background: rgba(79, 195, 247, 0.22); }
 .icon-btn { background: none; border: 1px solid transparent; color: var(--muted); cursor: pointer; font-size: 1.2rem; line-height: 1; border-radius: 6px; padding: 0.1rem 0.5rem; }
 .icon-btn:hover { background: var(--panel-2); color: var(--text); }
 .card-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 6; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 0.25rem; display: flex; flex-direction: column; min-width: 9.5rem; }
@@ -1539,7 +1665,7 @@ dialog .actions {
   .mab-group { flex-wrap: wrap; }
   #memo-add-bar input[type="date"], #memo-add-bar input[type="time"], #memo-add-bar select { min-height: 40px; flex: 1 1 auto; }
   .mab-prios .prio-btn { min-height: 40px; }
-  .mab-details-btn, #memo-add-bar .primary { min-height: 40px; }
+  #memo-add-bar .mab-btn { min-height: 40px; }   /* [ADD-BAR-POLISH] gabarit card, plus de .primary */
   /* [HEADER-ADD-CONTEXT] Mobile ≤900px : la barre 2 boutons #links-actions disparaît (masquée
      ci-dessous), remplacée par l'en-tête de bloc « 🔗 Liens + » ; « + » du bloc Mémos révélé.
      `:not([hidden])` bat le base `#links-blockhead{display:none}` (renderAll toggle [hidden] par vue). */
@@ -2054,7 +2180,9 @@ dialog .actions {
   </details>
   </div><!-- /.dlg-scroll -->
   <div class="actions">
-    <button type="button" id="memo-edit-versions" class="me-versions">📜 Voir les versions</button>
+    <!-- [VERSIONS-ICON] icône trait « history » (sprite Lucide, currentColor) au lieu de l'emoji 📜 :
+         elle suit la couleur du bouton Luciole (muted au repos, réveillée au survol). -->
+    <button type="button" id="memo-edit-versions" class="me-versions"><svg class="ic" aria-hidden="true"><use href="#ic-history"/></svg> Voir les versions</button>
     <button type="button" id="memo-edit-cancel">Annuler</button>
     <button type="button" id="memo-edit-save" class="primary">Sauver</button>
   </div>
@@ -4678,7 +4806,16 @@ function renderTrash() {
     board.appendChild(empty);
   }
   items.forEach(m => {
-    const row = el('div', { class: 'trash-row' });
+    // [TRASH-PREVIEW] la ligne entière ouvre l'aperçu lecture seule (clavier inclus) ; les deux
+    // boutons gardent leur action (stopPropagation) pour ne pas ouvrir la pop-in en même temps.
+    const row = el('div', {
+      class: 'trash-row trash-clickable',
+      attrs: { title: 'Aperçu du mémo', tabindex: '0', role: 'button' },
+      on: {
+        click: (e) => { if (e.target.closest('button')) return; openTrashPreview(m); },
+        keydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTrashPreview(m); } },
+      },
+    });
     const main = el('div', { class: 'grow' });
     const label = m.title || stripHTML(m.content || '').slice(0, 90) || MEMO_EMPTY_LABEL;
     main.appendChild(el('div', { class: 'trash-heading', text: (m.emoji ? m.emoji + ' ' : '') + label }));
@@ -4686,19 +4823,164 @@ function renderTrash() {
     row.appendChild(main);
     row.appendChild(el('button', {
       class: 'btn-soft', text: '↩ Restaurer',
-      on: { click: async () => { await api(`/api/trash/${m.id}/restore`, { method: 'POST' }); await openTrashView(); renderSidebar(); } },
+      on: { click: async (e) => { e.stopPropagation(); await trashRestore(m.id); } },
     }));
     row.appendChild(el('button', {
       class: 'danger btn-soft', text: 'Supprimer',
-      on: { click: async () => {
-        if (!(await confirmPopin('Supprimer définitivement ce mémo ?\nCette action est irréversible.', { okLabel: 'Supprimer' }))) return;
-        await api(`/api/trash/${m.id}`, { method: 'DELETE' });
-        await openTrashView();
-        renderSidebar();
-      } },
+      on: { click: async (e) => { e.stopPropagation(); await trashPurge(m.id); } },
     }));
     board.appendChild(row);
   });
+}
+
+// [TRASH-PREVIEW] actions de la corbeille factorisées (ligne ET pop-in d'aperçu) — routes existantes.
+async function trashRestore(id) {
+  await api(`/api/trash/${id}/restore`, { method: 'POST' });
+  await openTrashView();
+  renderSidebar();
+}
+async function trashPurge(id) {
+  if (!(await confirmPopin('Supprimer définitivement ce mémo ?\nCette action est irréversible.', { okLabel: 'Supprimer' }))) return false;
+  await api(`/api/trash/${id}`, { method: 'DELETE' });
+  await openTrashView();
+  renderSidebar();
+  return true;
+}
+
+// [TRASH-PREVIEW] pop-in d'aperçu LECTURE SEULE d'un mémo en corbeille : on voit ce qu'on s'apprête
+// à restaurer ou à purger (contenu riche, sous-tâches, photos, fichiers) — aucune écriture tant
+// qu'on n'a pas cliqué Restaurer/Supprimer. `dialog` natif (invariant 8 : entrée CSS `dlg-in`,
+// zéro GSAP) donc `uiBusy()` couvre déjà le poll 15 s. Zéro route : /api/trash renvoie les mémos
+// complets (`_memo_dict`). Pied au style Luciole (docs/design/LUCIOLE-boutons.md) ; le danger
+// reste ROUGE (`button.danger`), jamais en Luciole.
+let trashPreviewDialog = null;
+function openTrashPreview(memo) {
+  if (!trashPreviewDialog) {
+    trashPreviewDialog = el('dialog', { class: 'dlg-wide', attrs: { id: 'trash-preview-dialog' } });
+    document.body.appendChild(trashPreviewDialog);
+  }
+  const dlg = trashPreviewDialog;
+  dlg.innerHTML = '';
+  const scroll = el('div', { class: 'dlg-scroll' });
+
+  const head = el('div', { class: 'me-head' });
+  head.appendChild(el('h3', { icon: 'trash', text: 'Aperçu du mémo supprimé', attrs: { style: 'margin:0' } }));
+  scroll.appendChild(head);
+
+  // — en-tête contextuel (miroir lecture seule de renderMeContext : pas de « Voir dans la liste »,
+  //   le mémo n'est plus dans une liste) —
+  const ctx = el('div', { class: 'me-context' });
+  const crumb = el('div', { class: 'me-crumb' });
+  crumb.appendChild(el('span', { class: 'me-sep', text: '📌' }));
+  const projs = projectAncestorIds(memo.project_id).reverse()
+    .map(id => state.projects.find(p => p.id === id)).filter(Boolean);
+  if (!memo.project_id) {
+    crumb.appendChild(el('span', { class: 'me-crumb-node', text: '📥 Inbox' }));
+  } else if (!projs.length) {
+    // le dossier d'origine n'existe plus (supprimé depuis) → on le dit au lieu d'un fil vide
+    crumb.appendChild(el('span', { class: 'me-crumb-node', attrs: { style: 'color:var(--muted);font-style:italic' }, text: '(dossier supprimé)' }));
+  } else {
+    projs.forEach((p, i) => {
+      if (i) crumb.appendChild(el('span', { class: 'me-sep', text: '›' }));
+      const node = el('span', { class: 'me-crumb-node' });
+      node.appendChild(comboIcon(p.emoji, usableProjColor(p.color), '📁'));
+      node.appendChild(el('span', { text: ' ' + p.name }));
+      crumb.appendChild(node);
+    });
+  }
+  ctx.appendChild(crumb);
+  if (memo.created_at) {
+    const d = new Date(memo.created_at);
+    if (!isNaN(d)) {
+      const who = memo.created_by_display || state.ownerName || 'Fabien';
+      const date = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+      const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      ctx.appendChild(el('div', { class: 'me-meta', text: `🕒 Créé par @${who} le ${date} à ${time}` }));
+    }
+  }
+  if (memo.deleted_at) ctx.appendChild(el('div', { class: 'me-meta', text: '🗑 Supprimé le ' + fmtDeleted(memo.deleted_at) }));
+  scroll.appendChild(ctx);
+
+  // — titre (repli sur l'accroche du contenu, comme les cards [MEMO-TITLE-FALLBACK]) —
+  const stripped = stripHTML(memo.content || '').trim();
+  const tl = el('div', { class: 'task-title' });
+  if (memo.emoji) tl.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
+  tl.appendChild(el('span', { text: memo.title || (stripped ? memoLeadText(stripped) : MEMO_EMPTY_LABEL) }));
+  if (!memo.title && !stripped) tl.style.cssText = 'font-weight:500;color:var(--muted);font-style:italic';
+  scroll.appendChild(tl);
+
+  // — badges (mêmes classes que les cards) : échéance/plage + heure, priorité, récurrence, assignés —
+  const badges = el('div', { class: 'task-badges' });
+  const prio = prioOf(memo.priority);
+  if (prio && prio.color) {
+    badges.appendChild(el('span', {
+      class: 'prio-chip', text: prio.name || ('P' + memo.priority),
+      attrs: { title: 'Priorité ' + (prio.name || ''), style: 'background:' + prio.color + ';color:' + textOn(prio.color) },
+    }));
+  }
+  const due = dueInfo(memo.due_date, memo.due_end);
+  if (due) {
+    const t = fmtMemoRange(memo.due_time, memo.end_time);
+    badges.appendChild(el('span', { class: 'badge ' + due.cls, text: '📅 ' + due.label + (t ? ' · ' + t : '') }));
+  }
+  if (memo.recurrence) badges.appendChild(el('span', { class: 'badge', text: '🔁 ' + (RECUR_SHORT[memo.recurrence] || memo.recurrence) }));
+  if (memo.location) badges.appendChild(locBadgeEl(memo.location));
+  (memo.assignees || []).forEach(a => badges.appendChild(el('span', { class: 'badge', text: '@' + a })));
+  if (badges.children.length) scroll.appendChild(badges);
+
+  // — contenu riche : MÊME pipeline que le contenu complet des cards (tableaux rendus statiques,
+  //   liens/tags/mentions), mais SANS wireChecklist → cases à cocher inertes (lecture seule) —
+  if (stripped || isRichHTML(memo.content)) {
+    const content = el('div', { class: 'task-content tp-sec' });
+    content.appendChild(contentNode(memo.content, memo));
+    scroll.appendChild(content);
+  }
+
+  // — sous-tâches en lecture seule (gabarit .stline des révisions) —
+  const subs = memo.subtasks || [];
+  if (subs.length) {
+    const box = el('div', { class: 'tp-sec' });
+    box.appendChild(el('div', { class: 'tp-sec-head', text: '☑ Sous-tâches (' + subs.length + ')' }));
+    subs.forEach(st => box.appendChild(el('div', { class: 'stline' + (st.done ? ' stdone' : ''), text: (st.done ? '☑ ' : '☐ ') + st.content })));
+    scroll.appendChild(box);
+  }
+
+  // — photos : vignettes ?size=t + visionneuse (les originaux vivent tant que la purge n'a pas
+  //   eu lieu — invariant 7) ; canEdit:false → ni upload ni suppression —
+  const photos = renderMemoPhotos({
+    images: memo.images || [], canEdit: false,
+    imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`, exifUrl: (n) => `/api/image-exif/${n}`,
+  });
+  if (photos) { photos.classList.add('tp-sec'); scroll.appendChild(photos); }
+
+  // — pièces jointes : noms seuls en V1 (téléchargement hors périmètre) —
+  const atts = memo.attachments || [];
+  if (atts.length) {
+    const box = el('div', { class: 'tp-sec' });
+    box.appendChild(el('div', { class: 'tp-sec-head', text: '📎 Fichiers (' + atts.length + ')' }));
+    atts.forEach(a => box.appendChild(el('div', { class: 'trash-meta', text: '• ' + (a.orig_name || a.filename || '') })));
+    scroll.appendChild(box);
+  }
+
+  dlg.appendChild(scroll);
+
+  // — pied : danger rouge à gauche, Fermer + Restaurer en Luciole à droite —
+  const actions = el('div', { class: 'actions' });
+  actions.appendChild(el('button', {
+    class: 'danger', text: 'Supprimer définitivement',
+    attrs: { type: 'button', style: 'margin-right:auto' },
+    on: { click: async () => { if (await trashPurge(memo.id)) dlg.close(); } },
+  }));
+  const closeBtn = el('button', { text: 'Fermer', attrs: { type: 'button' }, on: { click: () => dlg.close() } });
+  const restoreBtn = el('button', {
+    text: '↩ Restaurer', attrs: { type: 'button' },
+    on: { click: async () => { await trashRestore(memo.id); dlg.close(); } },
+  });
+  actions.append(closeBtn, restoreBtn);
+  dlg.appendChild(actions);
+  lucioleize(closeBtn, 'luc-neutral');
+  lucioleize(restoreBtn, 'luc-primary');
+  dlg.showModal();
 }
 
 /* ------------------------------------------------ vue Plan (arbre) */
@@ -5480,7 +5762,16 @@ document.getElementById('share-add-role').addEventListener('click', async () => 
 
 /* ------------------------------------------------ éditeur riche */
 
+// [GUEST-ADD-BAR] Les helpers Luciole (mabMixHex / attachLuciole / mabGlowButton / lucioleize)
+// vivent désormais dans templates/partials/_shared.js.html — fonctions pures, partagées par les
+// 3 pages (le partial s'exécute avant ce script). Le CSS Luciole, lui, reste par page.
+
 const memoEditDialog = document.getElementById('memo-edit-dialog');
+// [LUCIOLE-POPIN] pied de l'éditeur : Versions/Annuler en Luciole NEUTRE, Sauver en
+// Luciole PRIMAIRE (teinte accent, fini le dégradé plein trop prononcé en clair).
+lucioleize(document.getElementById('memo-edit-versions'), 'luc-neutral');
+lucioleize(document.getElementById('memo-edit-cancel'), 'luc-neutral');
+lucioleize(document.getElementById('memo-edit-save'), 'luc-primary');
 let quillInstance = null;
 let editingMemoId = null;
 let editingMemo = null;
@@ -6862,19 +7153,8 @@ function editTaskInline(container, contentDiv, memo) {
   });
 }
 
-// [MEMO-JUMP-VIEW] barre de saut de la vue Mémos (haut/bas). Même mécanique que le bouton de la
-// colonne (window scrolle) ; recréée par renderBoard, sans état.
-function memoJumpBar(dir) {
-  const down = dir === 'down';
-  const bar = el('div', { class: 'memo-jump-bar' });
-  bar.appendChild(el('button', {
-    class: 'prio-btn',
-    text: down ? '⤓ Aller en bas' : '⤒ Remonter',
-    attrs: { type: 'button', title: down ? 'Aller en bas de la liste' : 'Remonter en haut de la liste' },
-    on: { click: () => { const sc = document.scrollingElement || document.documentElement; window.scrollTo({ top: down ? sc.scrollHeight : 0, behavior: 'smooth' }); } },
-  }));
-  return bar;
-}
+// [SUBHIDE-V2] `memoJumpBar` ([MEMO-JUMP-VIEW]) vit désormais dans le partial (pure, sans état) :
+// les pages invitées en ont besoin aussi. Le CSS `.memo-jump-bar` reste par page.
 
 function renderBoard() {
   const board = document.getElementById('memo-board');
@@ -7170,11 +7450,14 @@ function renderBoard() {
   // rangée 2 repliable (Quand = plage due_date→due_end + heure, Priorité en boutons, Récurrence,
   // Dossier), état mémorisé localStorage. POST /api/memos existant (due_end/due_time déjà gérés).
   const addBar = el('div', { attrs: { id: 'memo-add-bar' } });
+  // [LUCIOLE-POPIN] les helpers Luciole (mabMixHex/attachLuciole/mabGlowButton/lucioleize)
+  // sont désormais TOP-LEVEL (déclarations function, hoistées) — ils servent aussi au pied
+  // de l'éditeur de mémo. Voir le bloc « Helpers Luciole » plus bas + docs/design/LUCIOLE-boutons.md.
   // — rangée 1 —
   const row1 = el('div', { class: 'mab-row1' });
   const txt = el('input', { attrs: { type: 'text', placeholder: '+ Titre du nouveau mémo…' } });
-  const detailsBtn = el('button', { class: 'prio-btn mab-details-btn', attrs: { type: 'button', title: 'Afficher/masquer date, priorité, récurrence, dossier' } });
-  const addBtn = el('button', { class: 'primary', text: 'Ajouter' });
+  const detailsBtn = mabGlowButton('mab-btn mab-details-btn', 'Détails', { title: 'Afficher/masquer date, priorité, récurrence, dossier' });
+  const addBtn = mabGlowButton('mab-btn mab-add', 'Ajouter');
   row1.append(txt, detailsBtn, addBtn);
   // — rangée 2 (repliable) —
   const details = el('div', { class: 'mab-row2', attrs: { id: 'memo-add-details' } });
@@ -7228,7 +7511,17 @@ function renderBoard() {
   const DET_KEY = 'memoAddDetailsOpen';
   let detOpen = false;
   try { detOpen = localStorage.getItem(DET_KEY) === '1'; } catch (e) {}
-  const syncDetails = () => { details.style.display = detOpen ? '' : 'none'; detailsBtn.textContent = 'Détails ' + (detOpen ? '⌃' : '⌄'); };
+  // [ADD-BAR-GLOW] l'état déplié est porté par la classe `.on` (bordure pleine + fond
+  // dégradé statique) ET par le libellé qui bascule « Détails » ⇄ « Réduire » (pattern
+  // « More/Fewer options » du guide MS de divulgation progressive) ; aria-expanded
+  // pour les lecteurs d'écran. min-width CSS = pas de saut de largeur au changement.
+  const syncDetails = () => {
+    details.style.display = detOpen ? '' : 'none';
+    const lbl = detailsBtn.querySelector('.mab-btxt');
+    if (lbl) lbl.textContent = detOpen ? 'Réduire' : 'Détails';
+    detailsBtn.classList.toggle('on', detOpen);
+    detailsBtn.setAttribute('aria-expanded', detOpen ? 'true' : 'false');
+  };
   syncDetails();
   detailsBtn.addEventListener('click', () => { detOpen = !detOpen; try { localStorage.setItem(DET_KEY, detOpen ? '1' : '0'); } catch (e) {} syncDetails(); });
   const submit = async () => {
@@ -7256,14 +7549,12 @@ function renderBoard() {
   addBar.append(row1, details);
   board.appendChild(addBar);
 
-  // [MEMO-JUMP-VIEW] barre « Aller en bas » juste sous la barre d'ajout, au-dessus des sections.
-  // Masquée par défaut ; révélée en fin de rendu si la liste est assez longue (> 8 mémos).
-  const jumpTop = memoJumpBar('down');
-  jumpTop.style.display = 'none';
-  board.appendChild(jumpTop);
+  // [UI-POLISH-BOARD] drop-zone + 🎤 Vocal du dossier : juste au-dessus du bloc Sous-dossiers.
+  if (pendingFolderAttach) board.appendChild(pendingFolderAttach);
 
-  // [BOARD-SUBHIDE] chips masquer/afficher par sous-projet (sous les tuiles + barre d'ajout,
-  // au-dessus des sections). Affichage seul : tuiles/compteurs/carte gardent le périmètre complet.
+  // [BOARD-SUBHIDE] / [SUBHIDE-V2] cadre « SOUS-DOSSIERS » collé à la liste (après Fichiers/Vocal,
+  // juste au-dessus de la 1re section) : chips masquer/afficher + actions Tous/Aucun/Inverser.
+  // Affichage seul : tuiles/compteurs/carte gardent le périmètre complet.
   const subHide = subHideBar({
     storageKey: 'boardSubHide:' + state.memoProject,
     memos: allMemos,
@@ -7273,8 +7564,11 @@ function renderBoard() {
   });
   if (subHide.bar) board.appendChild(subHide.bar);
 
-  // [UI-POLISH-BOARD] drop-zone + 🎤 Vocal du dossier : juste au-dessus de la 1re section / état vide.
-  if (pendingFolderAttach) board.appendChild(pendingFolderAttach);
+  // [SUBHIDE-V2] « ⤓ Aller en bas » HORS du cadre, entre lui et la 1re section (décision maquette v2).
+  // Masquée par défaut ; révélée en fin de rendu si la liste est assez longue (> 8 mémos).
+  const jumpTop = memoJumpBar('down');
+  jumpTop.style.display = 'none';
+  board.appendChild(jumpTop);
 
   const memos = allMemos.filter(m => !subHide.isHidden(m));
   const pending = memos.filter(m => !m.done);
