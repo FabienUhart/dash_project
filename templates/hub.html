@@ -1054,8 +1054,14 @@ function dueInfo(m) {
   return { cls, label: '📅 ' + lbl + (tm ? ' · ' + tm : '') };
 }
 
+// [CARD-COVER] bascule Immersif/Compact persistée par dossier ouvert du hub (pattern toolsDock).
+function hubCoverKey() { return 'hubBoardCover:' + FOCUS; }
+
 function memoCard(m) {
   const task = el('div', { class: 'task' + (m.done ? ' done' : '') });
+  // [CARD-COVER] 1re photo en couverture quand le board est en Immersif (le hub n'a pas d'état
+  // « déplié » : la card reste une carte d'appel, le détail vit dans la fiche 👁 / l'éditeur).
+  const coverName = (cardCoverOn(hubCoverKey()) && (m.images || []).length) ? m.images[0] : '';
   const prio = prioOf(m.priority);
   let leftCol = '';
   if (!m.done) { leftCol = (prio && prio.color) ? prio.color : (usableProjColor((projById(m.project_id) || {}).color) || ''); }
@@ -1064,8 +1070,11 @@ function memoCard(m) {
   const check = el('button', { class: 'task-check', text: '✓', attrs: m.can_edit ? { title: m.done ? 'Rouvrir' : 'Terminer' } : { disabled: '', title: 'Lecture seule' } });
   if (m.can_edit) check.addEventListener('click', () => putMemo(m, { done: !m.done }));
   row.appendChild(check);
-  const content = el('div', { class: 'task-content clamp' });
-  if (m.title) {
+  const content = el('div', { class: 'task-content' + (coverName ? '' : ' clamp') });
+  if (coverName) {
+    // [CARD-COVER] carte d'appel : titre + une ligne, en TEXTE pur au-dessus du voile.
+    content.appendChild(memoCoverHead(m, memoCoverTexts(m, stripTags)));
+  } else if (m.title) {
     const tl = el('div', { class: 'task-title' }); if (m.emoji) tl.appendChild(el('span', { text: m.emoji + ' ' })); tl.appendChild(el('span', { text: m.title })); content.appendChild(tl);
     if (m.content) { const c = el('div'); if (isRich(m.content)) c.appendChild(sanitize(m.content)); else c.appendChild(linkify(m.content)); dressLinks(c); content.appendChild(c);
       if (m.can_edit) wireChecklist(content, m); }
@@ -1124,7 +1133,8 @@ function memoCard(m) {
   vBtn.appendChild(vIc);
   vBtn.addEventListener('click', (e) => { e.stopPropagation(); openMemoView(hubMemoViewCfg(), m.id); });
   acts.appendChild(vBtn);
-  row.appendChild(acts);
+  // [CARD-COVER] en immersif, les actions descendent en pied de card (bas à droite, en verre).
+  if (!coverName) row.appendChild(acts);
   const badges = el('div', { class: 'badges' });
   if (prio && prio.color && !m.done) badges.appendChild(el('span', { class: 'prio-chip', text: prio.name, attrs: { style: 'background:' + prio.color + ';color:' + textOn(prio.color) } }));
   const due = dueInfo(m); if (due) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: due.label }));
@@ -1136,14 +1146,36 @@ function memoCard(m) {
   task.appendChild(row);
   const vr = hubVoteRow(m);
   if (vr) task.appendChild(vr);
-  if ((m.images || []).length) {
-    const th = el('div', { class: 'thumbs' });
-    m.images.forEach(name => { const img = el('img', { attrs: { src: imgSize('/share/' + m.share_token + '/image/' + name, 't'), loading: 'lazy' } });   // [IMAGE-THUMBS] vignette
-      img.addEventListener('click', () => runImageViewer({ images: m.images, startIndex: m.images.indexOf(name),
-        imageUrl: n => '/share/' + m.share_token + '/image/' + n, downloadUrl: n => '/share/' + m.share_token + '/image/' + n,
-        exifUrl: n => '/share/' + m.share_token + '/image-exif/' + n }));
-      th.appendChild(img); });
-    task.appendChild(th);
+  // [CARD-COVER] la photo EST la card en immersif.
+  // [CARD-COVER v1.1] en compact, la bande de vignettes sous la card cède la place à la vignette
+  // carrée posée à DROITE de la rangée (helper partagé) ; la visionneuse montre toujours TOUT
+  // (bande de vignettes de [VIEWER-FILMSTRIP]), donc rien n'est perdu.
+  if (!coverName && (m.images || []).length) {
+    applyCardThumb(row, {
+      url: '/share/' + m.share_token + '/image/' + m.images[0], count: m.images.length,
+      onOpen: () => runImageViewer({
+        images: m.images, startIndex: 0,
+        imageUrl: n => '/share/' + m.share_token + '/image/' + n,
+        downloadUrl: n => '/share/' + m.share_token + '/image/' + n,
+        exifUrl: n => '/share/' + m.share_token + '/image-exif/' + n,
+      }),
+    });
+  }
+  // [CARD-COVER] pied (actions) puis habillage photo + voile, en DERNIER : la couche photo
+  // passe sous les rangées déjà construites. Clic sur la photo = visionneuse.
+  if (coverName) {
+    const foot = coverFoot();
+    foot.appendChild(acts);
+    task.appendChild(foot);
+    applyCardCover(task, {
+      url: '/share/' + m.share_token + '/image/' + coverName,
+      onOpen: () => runImageViewer({
+        images: m.images, startIndex: 0,
+        imageUrl: (n) => '/share/' + m.share_token + '/image/' + n,
+        downloadUrl: (n) => '/share/' + m.share_token + '/image/' + n,
+        exifUrl: (n) => '/share/' + m.share_token + '/image-exif/' + n,
+      }),
+    });
   }
   return task;
 }
@@ -1455,6 +1487,15 @@ function renderBoard() {
   if (_sh.bar) board.appendChild(_sh.bar);
   const shown = ms.filter(m => !_sh.isHidden(m));
   if (!shown.length) { board.appendChild(el('div', { class: 'empty', text: _sh.bar ? 'Tous les mémos sont masqués.' : 'Aucun mémo ici.' })); return; }
+  // [CARD-COVER] bascule « Immersif / Compact », persistée par dossier ouvert. Défaut = Compact.
+  {
+    const cov = coverToggleBar({
+      storageKey: hubCoverKey(),
+      hasPhotos: shown.some(m => (m.images || []).length),
+      onChange: render,
+    });
+    if (cov.bar) board.appendChild(cov.bar);
+  }
   // [SUBHIDE-V2] « ⤓ Aller en bas » (helper partagé) hors du cadre Sous-dossiers, même seuil que
   // le owner (> 8 mémos affichés) ; pendant ⤒ après la dernière card.
   if (shown.length > 8) board.appendChild(memoJumpBar('down'));

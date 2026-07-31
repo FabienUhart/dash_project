@@ -3201,11 +3201,21 @@ function render() {
     list.appendChild(el('div', 'empty', _sh.bar ? 'Tous les mémos sont masqués.' : 'Rien dans cette vue. 🎉'));
     return;
   }
+  // [CARD-COVER] bascule « Immersif / Compact », persistée par TOKEN + dossier ouvert (les
+  // invités du voyage sont le premier public de ce mode). Défaut = Compact.
+  const _cov = coverToggleBar({
+    storageKey: 'shareBoardCover:' + TOKEN + ':' + PFILTER,
+    hasPhotos: shown.some(m => (m.images || []).length),
+    onChange: render,
+  });
+  if (_cov.bar) list.appendChild(_cov.bar);
   // [SUBHIDE-V2] « ⤓ Aller en bas » (helper partagé, nouveau chez les invités) : hors du cadre
   // Sous-dossiers, juste au-dessus des cards, même seuil que le owner (> 8 mémos affichés).
   if (shown.length > 8) list.appendChild(memoJumpBar('down'));
   const prios = Object.fromEntries((DATA.priorities || []).map(p => [p.id, p]));
   shown.forEach(memo => {
+    // [CARD-COVER] la card ouverte depuis la carte reste DÉCLAMPÉE (rendu classique complet).
+    const coverName = (_cov.on && shareOpenMemo !== memo.id && (memo.images || []).length) ? memo.images[0] : '';
     const t = el('div', 'task' + (memo.done ? ' done' : '') + (shareOpenMemo === memo.id ? ' card-focus' : ''));
     t.dataset.memoId = memo.id;  // [MAP-MEMO-ROUNDTRIP] cible du scroll « Ouvrir le mémo » depuis la carte
     if (canEditMemo(memo) && DATA.kind === 'project') {  // [GUEST-ROLES] D&D = éditer ce mémo
@@ -3252,7 +3262,11 @@ function render() {
       tl.style.cssText = 'font-weight:' + (muted ? '500' : '600') + ';font-size:0.95rem;margin-bottom:0.15rem' + (muted ? ';color:var(--muted);font-style:italic' : '');
       return tl;
     };
-    if (memo.title) {
+    if (coverName) {
+      // [CARD-COVER] carte d'appel : titre + une ligne, en TEXTE pur au-dessus du voile
+      // (ni checklist, ni tableau, ni fil de commentaires — le détail vit dans la fiche 👁).
+      content.appendChild(memoCoverHead(memo, memoCoverTexts(memo, stripTags)));
+    } else if (memo.title) {
       const tl = mkTitle(false);
       if (memo.emoji) { const em = el('span', '', memo.emoji); em.style.marginRight = '0.35rem'; tl.appendChild(em); }
       tl.appendChild(document.createTextNode(memo.title));
@@ -3366,7 +3380,9 @@ function render() {
     vBtn.title = 'Voir le mémo';
     vBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openMemoView(shareMemoViewCfg(), memo.id); });
     acts.appendChild(vBtn);
-    row.appendChild(acts);
+    // [CARD-COVER] en immersif les actions descendent dans un pied de card (bas à droite,
+    // sur fond de verre) ; en compact elles restent où elles ont toujours été.
+    if (!coverName) row.appendChild(acts);
     if (canEditMemo(memo)) {  // [GUEST-ROLES] ✎/⋯ (éditer/supprimer) = own-or-editor
       const eBtn = el('button', 'task-edit');
       eBtn.appendChild(shareIcon('pencil'));
@@ -3389,7 +3405,7 @@ function render() {
     }
     t.appendChild(row);
 
-    (memo.subtasks || []).forEach((st, i) => {
+    (coverName ? [] : (memo.subtasks || [])).forEach((st, i) => {
       const s = el('div', 'subtask' + (st.done ? ' stdone' : ''));
       const cb = document.createElement('input');
       cb.type = 'checkbox';
@@ -3436,7 +3452,8 @@ function render() {
       t.appendChild(makeItemAdd());
     }
 
-    if ((memo.comments || []).length || canCommentMemo(memo)) {  // [GUEST-ROLES] commentateur+ ou override
+    // [CARD-COVER] le fil de commentaires n'a pas sa place sur une couverture (fiche 👁 / compact).
+    if (!coverName && ((memo.comments || []).length || canCommentMemo(memo))) {  // [GUEST-ROLES] commentateur+ ou override
       const cwrap = el('div', '');
       cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
       const comments = memo.comments || [];
@@ -3500,43 +3517,48 @@ function render() {
       if (comments.length && canCommentMemo(memo)) markMemoSeen(memo.id);
     }
 
-    if ((memo.images || []).length) {
-      // Une seule miniature normalisée + overlay « +N » ; la visionneuse montre tout. [CARD-REDESIGN]
-      const th = el('div', 'thumbs thumbs-collapsed');
-      memo.images.slice(0, 1).forEach(name => {
-        const wrap = el('span', 'thumb-wrap');
-        const img = document.createElement('img');
-        img.src = imgSize(API + '/image/' + name, 't');   // [IMAGE-THUMBS] vignette
-        img.loading = 'lazy';
-        img.addEventListener('click', () => {
-          runImageViewer({
-            images: memo.images, startIndex: memo.images.indexOf(name),
-            imageUrl: (n) => API + '/image/' + n,
-            downloadUrl: (n) => API + '/image/' + n,
-            exifUrl: (n) => API + '/image-exif/' + n,
-            canDelete: canEditMemo(memo),
-            onDelete: async (n) => {
-              const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, {
-                method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
-              });
-              if (r.ok) await load();
-            },
-          });
-        });
-        wrap.appendChild(img);
-        if (memo.images.length > 1) {
-          const more = el('span', 'thumb-more', '+' + (memo.images.length - 1));
-          wrap.appendChild(more);
-        }
-        th.appendChild(wrap);
+    // [CARD-COVER] la photo EST la card en immersif.
+    // [CARD-COVER v1.1] en compact, la bande de vignettes sous la card cède la place à la
+    // vignette carrée posée à DROITE de la rangée (helper partagé, `?size=t`, clic = visionneuse).
+    if (!coverName && (memo.images || []).length) {
+      applyCardThumb(row, {
+        url: API + '/image/' + memo.images[0], count: memo.images.length,
+        onOpen: () => runImageViewer({
+          images: memo.images, startIndex: 0,
+          imageUrl: (n) => API + '/image/' + n,
+          downloadUrl: (n) => API + '/image/' + n,
+          exifUrl: (n) => API + '/image-exif/' + n,
+          canDelete: canEditMemo(memo),
+          onDelete: async (n) => {
+            const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, {
+              method: 'DELETE', headers: { 'X-Guest-Token': guestToken() },
+            });
+            if (r.ok) await load();
+          },
+        }),
       });
-      t.appendChild(th);
     }
 
     // [LESS-BUTTONS] L'ancien bloc « memo-tools » (crumb, date/heure, priorité, Photo, Liste,
     // Position, Modifier, Déplacer, Corbeille, adresse, titre, assignés) a été retiré : ces
     // contrôles vivent désormais dans la pop-in « Modifier le mémo » (renderQMeta + sections
     // existantes) et dans le menu ⋯ de la rangée. La card ne garde que la consultation active.
+    // [CARD-COVER] pied (actions) puis habillage photo + voile, en DERNIER : la couche photo
+    // passe sous les rangées déjà construites. Clic sur la photo = visionneuse.
+    if (coverName) {
+      const foot = coverFoot();
+      foot.appendChild(acts);
+      t.appendChild(foot);
+      applyCardCover(t, {
+        url: API + '/image/' + coverName,
+        onOpen: () => runImageViewer({
+          images: memo.images, startIndex: 0,
+          imageUrl: (n) => API + '/image/' + n, downloadUrl: (n) => API + '/image/' + n, exifUrl: (n) => API + '/image-exif/' + n,
+          canDelete: canEditMemo(memo),
+          onDelete: async (n) => { const r = await fetch(API + '/memo/' + memo.id + '/images/' + n, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }); if (r.ok) await load(); },
+        }),
+      });
+    }
     list.appendChild(t);
   });
   // [SUBHIDE-V2] pendant ⤒ du bas (parité owner : on peut revenir en haut après le saut).
