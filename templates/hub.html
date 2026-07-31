@@ -81,9 +81,32 @@ header .spacer { flex: 1; }
 #sidebar .sitem:hover { background: var(--panel-2); }
 #sidebar .sitem.active { background: var(--panel-2); font-weight: 600; }
 #sidebar .sitem .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* [GUEST-FAVS] étoile d'épinglage : discrète, révélée au survol de la ligne en desktop ;
+   TOUJOURS visible (opacité réduite) en tactile/≤900 px — il n'y a pas de survol au doigt.
+   Épinglé = ★ accent. Tokens uniquement, aucun style bespoke au-delà de ces règles. */
+#sidebar .fav-star { background: none; border: none; padding: 0 0.15rem; margin-left: auto;
+  color: var(--muted); cursor: pointer; font-size: 0.9rem; line-height: 1; opacity: 0; flex-shrink: 0; }
+#sidebar .sitem:hover .fav-star, #sidebar .fav-star:focus-visible { opacity: 0.8; }
+#sidebar .fav-star.on { opacity: 1; color: var(--accent); }
+#sidebar .fav-hint { color: var(--muted); font-size: 0.72rem; font-style: italic; padding: 0.1rem 0.5rem 0.3rem; }
+@media (max-width: 900px), (pointer: coarse) { #sidebar .fav-star { opacity: 0.55; } }
 #sidebar .sitem .ro { font-size: 0.66rem; color: var(--muted); flex-shrink: 0; }
 /* [SIDEBAR-TREE] enfants dans un conteneur : indentation fixe ~17px/niveau + ligne
    guide verticale CSS (plus de connecteurs texte — dérive monospace avec les emojis). */
+/* [HUB-SECTIONS-FOLD] en-têtes de section repliables — gabarit `.sb-section-head` du owner. */
+#sidebar .sb-section-head {
+  display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.5rem; margin-top: 0.5rem;
+  cursor: pointer; color: var(--muted); font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; user-select: none; border-radius: 6px;
+}
+#sidebar .sb-section-head:hover { color: var(--text); background: var(--panel-2); }
+#sidebar .sb-section-head .sb-chevron { width: 1.1rem; flex-shrink: 0; font-size: 0.85rem; text-align: center; }
+#sidebar .sb-section-head .sb-section-label { flex: 1; min-width: 0; }
+/* [GUEST-TREE] chevron de repli DANS la ligne (colonne fixe, feuilles = span vide) et cible de
+   drop du drag-and-drop de dossiers — même gabarit que les sidebars owner et share. */
+#sidebar .sb-proj-chev { width: 1.1rem; flex-shrink: 0; text-align: center; color: var(--muted);
+  font-size: 0.85rem; line-height: 1; cursor: pointer; }
+#sidebar .sitem.droptarget { outline: 1px dashed var(--accent); outline-offset: -1px; }
 #sidebar .sb-kids { margin-left: 0.8rem; padding-left: 0.25rem; border-left: 1px solid var(--border); }
 #sidebar h4 { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.04em; margin: 1rem 0 0.3rem; }
 main { flex: 1; min-width: 0; padding: 1rem; }
@@ -203,11 +226,23 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .task.done .task-title, .task.done .task-content { text-decoration: line-through; color: var(--muted); }
 .task-content a { color: var(--accent); }
 .task-content li[data-list] { list-style: none; display: flex; align-items: flex-start; gap: 0.5rem; padding-left: 0; }
+/* [CHECKLIST-GAP] Quill scinde une liste à cocher en PLUSIEURS <ul> selon l'état coché des
+   items consécutifs : les marges entre blocs creusaient de faux « trous » dans la liste (cards
+   ET fiche de lecture). Deux listes à cocher ADJACENTES sont donc recollées (marge inter-blocs
+   à 0) ; la marge normale reste intacte dès qu'un paragraphe s'intercale — le trou VOULU reste
+   voulu. `:has()` cible les <ul> qui portent des items de checklist, jamais les listes à puces.
+   CSS seul, aucune donnée modifiée. */
+.task-content ul:has(> li[data-list]) + ul:has(> li[data-list]) { margin-top: 0; }
+.task-content ul:has(> li[data-list]):has(+ ul > li[data-list]) { margin-bottom: 0; }
+/* ⚠️ `:has()` ne peut pas être IMBRIQUÉ dans un autre `:has()` : la marge basse se cible
+   donc par `:has(+ ul > li[data-list])` (sélecteur relatif simple), pas par un `:has` niché. */
 .task-content li[data-list]::before { content: ''; flex: 0 0 auto; box-sizing: border-box; font-size: 0.85em;
   width: 1em; height: 1em; margin-top: 0.25em; border: 2px solid var(--muted); border-radius: 4px; }
 .task-content li[data-list="checked"]::before { content: '✓'; display: inline-flex; align-items: center;
   justify-content: center; background: var(--green); border-color: var(--green); color: #fff; line-height: 1; }
 .task-content li[data-list]:empty::before { display: none; }
+/* [MEMO-VIEW correctif 3] groupe d'actions de la card (👁) : poussé à droite, jamais séparé au wrap. */
+.task-acts { display: inline-flex; align-items: flex-start; gap: 0.25rem; flex-shrink: 0; margin-left: auto; }
 .badges { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; flex-basis: 100%; margin-left: 1.8rem; }
 .badge { font-size: 0.72rem; padding: 0.12rem 0.45rem; border-radius: 4px; background: var(--panel-2);
   color: var(--muted); white-space: nowrap; }
@@ -254,7 +289,9 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .agd-title { flex: 1; min-width: 0; text-align: center; }
 .agd-day { font-size: 1rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agd-count { font-size: 0.75rem; color: var(--muted); }
-.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer;
+  /* [POLISH-VIEWER-AGENDA-PRIO] icônes trait CENTRÉES (les glyphes ‹ › ✕ flottaient selon la police). */
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .agd-nav:hover, .agd-x:hover { border-color: var(--muted); color: var(--accent); }
 .agd-body { display: flex; flex-direction: column; gap: 0.3rem; max-height: 60vh; overflow-y: auto; }
 .agd-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.4rem 0.5rem; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; }
@@ -262,7 +299,7 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .agd-dot { flex: 0 0 auto; width: 0.7rem; height: 0.7rem; border-radius: 50%; }
 .agd-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agd-time { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.1rem 0.4rem; }
-.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; }
+.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; display: inline-flex; align-items: center; justify-content: center; }
 .agd-empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0.5rem; text-align: center; }
 .agd-foot { margin-top: 0.7rem; }
 .agd-add { width: 100%; }
@@ -367,6 +404,10 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
    remplissage rouge au survol seulement. Même taille que les autres boutons de la barre. */
 .iv-del { color: var(--danger); border-color: var(--danger); }
 .iv-del:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+/* [HUB-CHROME] danger DISCRET : monochrome au repos, rouge seulement au survol
+   (les boutons d'action de la pop-in Photos passent en icônes trait). */
+.iv-danger:hover { color: var(--danger); border-color: var(--danger); }
+
 
 @media (max-width: 900px) {
   /* Boutons photo carrés homogènes (cf. index.html/share.html). */
@@ -459,11 +500,17 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
     <h1 id="dash-name">📂 Mes dossiers</h1>
     <input id="search" type="text" placeholder="Rechercher…" autocomplete="off">
     <span class="spacer"></span>
+    <button class="btn" id="theme-btn" title="Thème">🌓</button>
+  </header>
+  <!-- [HUB-CHROME] Plan / Agenda / Carte quittent l'en-tête : ils vivent désormais dans une
+       barre monochrome à la RACINE (hdrToolbar, cf. renderBoard). Les boutons restent ici,
+       MASQUÉS, pour que toute la logique existante (syncViewBtns, syncMapBtn, handlers) marche
+       à l'identique — la barre ne fait que relayer le clic. -->
+  <div id="hub-legacy-btns" style="display:none">
     <button class="btn" id="btn-plan">🌳 Plan</button>
     <button class="btn" id="btn-agenda">📆 Agenda</button>
     <button class="btn" id="btn-map">🗺 Carte</button>
-    <button class="btn" id="theme-btn" title="Thème">🌓</button>
-  </header>
+  </div>
   <div class="layout">
     <nav id="sidebar"></nav>
     <main id="board"></main>
@@ -783,35 +830,191 @@ function syncMapBtn() {
   btn.textContent = '🗺 Carte (' + n + ')';
 }
 
+/* [GUEST-FAVS] Favoris de la sidebar du hub (V1 — `hub.html` seul ; la page share mono-partage
+   attendra une V2). 100 % LOCAL : `localStorage` par hub, AUCUNE donnée serveur, rien d'exporté,
+   aucun droit élargi (invariant 5 : affichage seul). Un favori dont le dossier a disparu
+   (partage révoqué) est ignoré ET purgé au rendu — jamais de ligne fantôme.
+   ⚠️ Écart au brief : la clef est `<share_token>|<project_id>` et NON le token seul — dans le hub
+   un même partage couvre le dossier ET tous ses descendants, donc le token seul ne distingue pas
+   deux dossiers du même partage. Le couple reste stable au renommage (c'est ce que visait le brief). */
+function hubFavsKey() { return 'hubFavs:' + HUB_TOKEN; }
+function hubFavsRead() {
+  try { const v = JSON.parse(localStorage.getItem(hubFavsKey()) || '[]'); return Array.isArray(v) ? v.filter(x => typeof x === 'string') : []; }
+  catch (e) { return []; }
+}
+function hubFavsWrite(list) { try { localStorage.setItem(hubFavsKey(), JSON.stringify(list)); } catch (e) {} }
+function hubFavId(p) { return (p.share_token || '') + '|' + p.id; }
+function hubFavToggle(p) {
+  const id = hubFavId(p);
+  const list = hubFavsRead();
+  const i = list.indexOf(id);
+  if (i >= 0) list.splice(i, 1); else list.push(id);   // ordre = ordre d'épinglage (réordonner = V2)
+  hubFavsWrite(list);
+  renderSidebar();
+}
+// Étoile ☆/★ posée en bout de ligne. Ne navigue jamais (stopPropagation).
+function hubFavStar(p, on) {
+  const b = el('button', { class: 'fav-star' + (on ? ' on' : ''), text: on ? '★' : '☆',
+    attrs: { type: 'button', title: on ? 'Retirer des favoris' : 'Épingler dans les favoris',
+      'aria-label': (on ? 'Retirer « ' : 'Épingler « ') + p.name + ' »', 'aria-pressed': on ? 'true' : 'false' } });
+  b.addEventListener('click', (e) => { e.stopPropagation(); hubFavToggle(p); });
+  return b;
+}
+
+/* [HUB-CHROME] Navigation = retour au BOARD. Avant, cliquer un dossier avec l'Agenda (ou le
+   Plan) ouvert laissait l'écran sur la vue : seul le compteur suivait. Toute entrée en focus
+   passe désormais par ce point unique — la vue se referme, le board demandé s'affiche. */
+/* [GUEST-TREE] repli des dossiers de la sidebar du hub : état LOCAL persisté PAR HUB
+   (`hubSbProjOpen:<hub_token>:<id>`, façon hubFavs), **déplié par défaut** — même défaut que les
+   sidebars owner (`sbProjOpen:<id>`) et share (`shareSbProjOpen:<TOKEN>:<id>`). Pur affichage. */
+/* [HUB-SECTIONS-FOLD] Sections de la sidebar repliables (⭐ FAVORIS / DOSSIERS PARTAGÉS), même
+   mécanique que le owner (`sbSection:<nom>`), persistée PAR HUB. Défauts : desktop = tout déplié
+   (comme avant) ; ≤ 900 px ou `pointer: coarse` = **FAVORIS REPLIÉE** (la sidebar s'empile AVANT
+   le contenu en mobile, un gros bloc de favoris repoussait la navigation), DOSSIERS PARTAGÉS
+   dépliée (c'est la navigation principale). Le compteur reste visible dans l'en-tête replié. */
+function hubStacked() { return window.matchMedia('(max-width: 900px), (pointer: coarse)').matches; }
+function hubSecOpen(name) {
+  try {
+    const v = localStorage.getItem('hubSbSection:' + HUB_TOKEN + ':' + name);
+    if (v === '0') return false;
+    if (v === '1') return true;
+  } catch (e) {}
+  return !(name === 'Favoris' && hubStacked());   // défaut : replié seulement pour Favoris en empilé
+}
+function toggleHubSec(name) {
+  try { localStorage.setItem('hubSbSection:' + HUB_TOKEN + ':' + name, hubSecOpen(name) ? '0' : '1'); } catch (e) {}
+}
+// En-tête de section cliquable (chevron + libellé + compteur optionnel).
+function hubSectionHead(name, label, count) {
+  const open = hubSecOpen(name);
+  const h = el('div', { class: 'sb-section-head', attrs: { role: 'button', tabindex: '0',
+    'aria-expanded': open ? 'true' : 'false', title: open ? 'Replier cette section' : 'Déplier cette section' } });
+  h.appendChild(el('span', { class: 'sb-chevron', text: open ? '▾' : '▸' }));
+  h.appendChild(el('span', { class: 'sb-section-label', text: label + (count ? ' · ' + count : '') }));
+  const act = () => { toggleHubSec(name); renderSidebar(); };
+  h.addEventListener('click', act);
+  h.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(); } });
+  return h;
+}
+
+function hubSbProjOpen(id) { try { return localStorage.getItem('hubSbProjOpen:' + HUB_TOKEN + ':' + id) !== '0'; } catch (e) { return true; } }
+function toggleHubSbProj(id) {
+  try { localStorage.setItem('hubSbProjOpen:' + HUB_TOKEN + ':' + id, hubSbProjOpen(id) ? '0' : '1'); } catch (e) {}
+}
+let hubDragProj = null;
+// Déplacement d'un dossier : route invitée EXISTANTE, message serveur (403/409) remonté tel quel.
+async function hubMoveProject(src, parentId) {
+  const r = await api(src.share_token, '/project/' + src.id, { method: 'PUT', body: JSON.stringify({ parent_id: parentId }) });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    await notify(e.error || 'Déplacement impossible.', { error: true });
+    return false;
+  }
+  await reload();          // re-render sidebar + board (le scroll de la page n'est pas touché)
+  flashSaved(true);
+  return true;
+}
+
+function hubFocusOn(pid) {
+  FOCUS = pid;
+  if (VIEW !== 'board') { VIEW = 'board'; syncViewBtns(); }
+  render();
+}
+
 function renderSidebar() {
   const nav = document.getElementById('sidebar'); nav.hidden = false; nav.innerHTML = '';
   const all = el('div', { class: 'sitem' + (FOCUS == null ? ' active' : '') });
   all.appendChild(el('span', { text: '📂' }));
   all.appendChild(el('span', { class: 'nm', text: 'Tout' }));
-  all.addEventListener('click', () => { FOCUS = null; render(); });
-  nav.appendChild(all);
-  nav.appendChild(el('h4', { text: 'DOSSIERS PARTAGÉS' }));
+  all.addEventListener('click', () => { hubFocusOn(null); });
+  nav.appendChild(all);   // « Tout » n'est pas épinglable (ni « Recevoir mon lien par e-mail »)
+
+  // [GUEST-FAVS] section ⭐ FAVORIS entre « Tout » et « DOSSIERS PARTAGÉS ».
+  const byId = new Map((DATA.projects || []).map(p => [hubFavId(p), p]));
+  const favIds = hubFavsRead();
+  const alive = favIds.filter(id => byId.has(id));
+  if (alive.length !== favIds.length) hubFavsWrite(alive);   // purge des partages révoqués
+  nav.appendChild(hubSectionHead('Favoris', '⭐ Favoris', alive.length));
+  if (!hubSecOpen('Favoris')) {
+    // section repliée : rien d'autre (le compteur vit dans l'en-tête)
+  } else if (!alive.length) {
+    nav.appendChild(el('div', { class: 'fav-hint', text: 'Survole un dossier et clique ☆ pour l\'épingler ici.' }));
+  } else {
+    alive.forEach(id => {
+      const p = byId.get(id);
+      const row = el('div', { class: 'sitem' + (FOCUS === p.id ? ' active' : ''), attrs: { title: p.name } });
+      if (p.emoji) row.appendChild(el('span', { text: p.emoji }));
+      else row.appendChild(el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;flex-shrink:0;background:' + (usableProjColor(p.color) || 'var(--gray)') } }));
+      row.appendChild(el('span', { class: 'nm', text: p.name }));
+      if (!p.can_edit) row.appendChild(el('span', { class: 'ro', text: '👁' }));
+      row.addEventListener('click', () => hubFocusOn(p.id));   // MÊME navigation que la ligne d'origine
+      row.appendChild(hubFavStar(p, true));
+      nav.appendChild(row);
+    });
+  }
+  nav.appendChild(hubSectionHead('Dossiers', '📂 Dossiers partagés'));
+  const _dossiersOpen = hubSecOpen('Dossiers');
   // racines = projets sans parent dans l'union (chaque share projet) ; mémos isolés listés à part
   const roots = (DATA.projects || []).filter(p => p.parent_id == null);
   // [SIDEBAR-TREE] arbre à indentation fixe (.sb-kids, ligne guide CSS) — plus de
   // connecteurs texte. Icône unique : emoji, sinon pastille couleur. Nom en title.
   const walk = (p, wrap) => {
     const row = el('div', { class: 'sitem' + (FOCUS === p.id ? ' active' : '') });
+    const kids = projChildren(p.id);
+    // [GUEST-TREE] chevron de repli : sur les dossiers AYANT des sous-dossiers seulement
+    // (feuilles = span vide, la colonne reste alignée). Clic chevron = replier/déplier,
+    // clic sur le nom = navigation (inchangé). Défaut DÉPLIÉ, comme les sidebars owner et share.
+    const chev = el('span', { class: 'sb-proj-chev', text: kids.length ? (hubSbProjOpen(p.id) ? '▾' : '▸') : '' });
+    if (kids.length) {
+      chev.title = hubSbProjOpen(p.id) ? 'Replier ce dossier' : 'Déplier ce dossier';
+      chev.addEventListener('click', (e) => { e.stopPropagation(); toggleHubSbProj(p.id); renderSidebar(); });
+    } else { chev.style.cursor = 'default'; }
+    row.appendChild(chev);
     if (p.emoji) row.appendChild(el('span', { text: p.emoji }));
     else { const d = el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;flex-shrink:0;background:' + (usableProjColor(p.color) || 'var(--gray)') } }); row.appendChild(d); }
     row.appendChild(el('span', { class: 'nm', text: p.name, attrs: { title: p.name } }));
     if (!p.can_edit) row.appendChild(el('span', { class: 'ro', text: '👁' }));
-    row.addEventListener('click', () => { FOCUS = p.id; render(); });
+    row.addEventListener('click', () => hubFocusOn(p.id));
+    row.appendChild(hubFavStar(p, alive.indexOf(hubFavId(p)) >= 0));   // [GUEST-FAVS] ★ pleine si épinglé
+    /* [GUEST-TREE] drag-and-drop de dossiers — ÉDITEURS seulement (invariant 5) : on ne propose
+       la poignée que si l'invité peut déplacer CE dossier (`can_edit`). Le déplacement passe par
+       la route invitée EXISTANTE (celle du « ↗ Déplacer vers… » : PUT /share/<t>/project/<id>
+       {parent_id}) — aucune route nouvelle ; le serveur revalide rôle + périmètre (hors scope
+       → 403, collision de noms entre frères → 409) et `hubPut` remonte le message tel quel. */
+    if (p.can_edit) {
+      row.draggable = true;
+      row.title = p.name + ' — glisser pour déplacer';
+      row.addEventListener('dragstart', (e) => { hubDragProj = p.id; e.dataTransfer.effectAllowed = 'move'; });
+      row.addEventListener('dragend', () => { hubDragProj = null; row.classList.remove('droptarget'); });
+    }
+    row.addEventListener('dragover', (e) => {
+      if (hubDragProj == null || hubDragProj === p.id) return;
+      if (projDescendants(hubDragProj).includes(p.id)) return;         // pas dans sa propre descendance
+      const src = projById(hubDragProj);
+      if (!src || src.share_token !== p.share_token) return;           // cross-partages : hors périmètre V1
+      e.preventDefault();
+      row.classList.add('droptarget');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('droptarget'));
+    row.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      row.classList.remove('droptarget');
+      const src = projById(hubDragProj);
+      hubDragProj = null;
+      if (!src || src.id === p.id) return;
+      await hubMoveProject(src, p.id);
+    });
     wrap.appendChild(row);
-    const kids = projChildren(p.id);
-    if (kids.length) {
+    if (kids.length && hubSbProjOpen(p.id)) {
       const kw = el('div', { class: 'sb-kids' });
       kids.forEach(c => walk(c, kw));
       wrap.appendChild(kw);
     }
   };
-  roots.forEach(p => walk(p, nav));
-  if (!roots.length && !(DATA.memos || []).length) nav.appendChild(el('div', { class: 'empty', text: 'Aucun dossier.' }));
+  if (_dossiersOpen) {
+    roots.forEach(p => walk(p, nav));
+    if (!roots.length && !(DATA.memos || []).length) nav.appendChild(el('div', { class: 'empty', text: 'Aucun dossier.' }));
+  }
 
   // [GUEST-RESEND-LINK] bouton discret : se renvoyer lien + code à l'adresse DÉJÀ
   // enregistrée (le serveur force le destinataire — rien à saisir). Uniquement dans
@@ -861,7 +1064,7 @@ function memoCard(m) {
   const content = el('div', { class: 'task-content clamp' });
   if (m.title) {
     const tl = el('div', { class: 'task-title' }); if (m.emoji) tl.appendChild(el('span', { text: m.emoji + ' ' })); tl.appendChild(el('span', { text: m.title })); content.appendChild(tl);
-    if (m.content) { const c = el('div'); if (isRich(m.content)) c.appendChild(sanitize(m.content)); else c.appendChild(linkify(m.content)); content.appendChild(c);
+    if (m.content) { const c = el('div'); if (isRich(m.content)) c.appendChild(sanitize(m.content)); else c.appendChild(linkify(m.content)); dressLinks(c); content.appendChild(c);
       if (m.can_edit) wireChecklist(content, m); }
   } else {
     // [MEMO-TITLE-FALLBACK] Pas de titre : accroche du contenu en style titre (gras), sans doublon
@@ -873,13 +1076,13 @@ function memoCard(m) {
     } else if (!isRich(m.content)) {
       content.appendChild(el('div', { class: 'task-title', text: memoLeadText(stripped) }));
       const rest = memoRestText(m.content);
-      if (rest) { const c = el('div'); c.appendChild(linkify(rest)); content.appendChild(c); }
+      if (rest) { const c = el('div'); c.appendChild(linkify(rest)); dressLinks(c); content.appendChild(c); }  // [LINK-RENDER correctif]
     } else {
       // [V23.6.100] Riche sans titre : 1re ligne/paragraphe/item promu en titre gras, extrait =
       // reste du contenu riche (checklists/tableaux préservés), sans duplication.
       const sp = splitLeadHtml(m.content);
       content.appendChild(el('div', { class: 'task-title', text: memoLeadText(sp.lead) }));
-      if (stripTags(sp.restHtml).trim()) { const c = el('div'); c.appendChild(sanitize(sp.restHtml)); content.appendChild(c); }
+      if (stripTags(sp.restHtml).trim()) { const c = el('div'); c.appendChild(sanitize(sp.restHtml)); dressLinks(c); content.appendChild(c); }
       if (m.can_edit) wireChecklist(content, m);
     }
   }
@@ -906,6 +1109,19 @@ function memoCard(m) {
   if (_lk) content.appendChild(_lk);
   content.addEventListener('click', () => openEditor(m));
   row.appendChild(content);
+  // [MEMO-VIEW] œil = fiche de LECTURE, visible pour TOUS les lecteurs (le hub n'a pas de sprite
+  // → icône trait `hdrIcon('eye')` du partial). stopPropagation : n'ouvre jamais l'éditeur.
+  // [MEMO-VIEW correctif 3] l'œil vit dans un GROUPE d'actions poussé à droite (`.task-acts`) :
+  // en ≤900 px la rangée wrappe (`.badges` prend 100 %) et un bouton isolé se détachait au milieu
+  // de la card. Groupé, il reste calé à droite du contenu, comme sur les autres pages.
+  const acts = el('div', { class: 'task-acts' });
+  const vBtn = el('button', { class: 'btn', attrs: { type: 'button', title: 'Voir le mémo',
+    style: 'padding:0.2rem 0.4rem;flex-shrink:0' } });
+  const vIc = hdrIcon('eye'); vIc.setAttribute('width', '16'); vIc.setAttribute('height', '16');
+  vBtn.appendChild(vIc);
+  vBtn.addEventListener('click', (e) => { e.stopPropagation(); openMemoView(hubMemoViewCfg(), m.id); });
+  acts.appendChild(vBtn);
+  row.appendChild(acts);
   const badges = el('div', { class: 'badges' });
   if (prio && prio.color && !m.done) badges.appendChild(el('span', { class: 'prio-chip', text: prio.name, attrs: { style: 'background:' + prio.color + ';color:' + textOn(prio.color) } }));
   const due = dueInfo(m); if (due) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: due.label }));
@@ -1097,13 +1313,15 @@ function wireChecklist(container, m) {
       const tpl = document.createElement('template'); tpl.innerHTML = m.content;
       const items = tpl.content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]');
       if (!items[i]) return; items[i].setAttribute('data-list', items[i].getAttribute('data-list') === 'checked' ? 'unchecked' : 'checked');
-      putMemo(m, { content: tpl.innerHTML });
+      putMemo(cur, { content: tpl.innerHTML });
     });
   });
 }
 
+let hubFilesCfg = null;   // [TOOLS-DOCK-GUEST] cfg de la drop-zone du dossier courant (dock/Vocal)
 function renderBoard() {
   const board = document.getElementById('board'); board.innerHTML = '';
+  hubFilesCfg = null;
   // [VOTE-GROUPS] reset de la sélection de scrutin au changement de dossier actif.
   if (hubVoteBoardPid !== FOCUS) { hubSelectedVoteId = null; hubVoteCreate = null; hubVoteBoardPid = FOCUS; }
   // [AGENDA-PROJECT] en-tête du dossier courant + bouton 📆 (agenda filtré sur ce
@@ -1158,20 +1376,68 @@ function renderBoard() {
       hd.appendChild(tb.bar);
       board.appendChild(hd);
       // [FOLDER-ATTACHMENTS] fichiers rattachés au dossier courant (sous l'en-tête).
+      // [TOOLS-DOCK-GUEST] montés derrière leurs bascules ; `hideVoice` sort le 🎤 (même cfg
+      // → flux d'enregistrement identique).
       if ((fp.attachments || []).length || fp.can_add) {  // [GUEST-ROLES] PJ dossier = contributeur
-        board.appendChild(renderAttachments({
+        hubFilesCfg = {
           attachments: fp.attachments || [],
           canEdit: !!fp.can_add,
           uploadUrl: '/share/' + fp.share_token + '/project/' + fp.id + '/attachments',
           headers: { 'X-Guest-Token': gtFor(fp.share_token) },
           onChange: async () => { await reload(); },
           openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
-        }));
+        };
+      }
+      // Le dock rejoint la barre d'actions du dossier, à droite de la même rangée.
+      const dk = hubDockState();
+      const dockBar = hubToolsDock({
+        memo: editableProjects().length > 0,
+        folder: editableProjects().length > 0,
+        file: !!hubFilesCfg,
+        voice: !!hubFilesCfg && !!fp.can_add,
+      });
+      if (dockBar) { dockBar.style.marginLeft = '0.5rem'; hd.appendChild(dockBar); }
+      if (hubFilesCfg && dk.file) board.appendChild(renderAttachments(Object.assign({ hideVoice: true }, hubFilesCfg)));
+      if (hubFilesCfg && dk.voice && fp.can_add) {
+        const vb = voiceAttachButton(hubFilesCfg);
+        if (vb) { vb.style.marginBottom = '0.5rem'; board.appendChild(vb); }
+        else board.appendChild(voiceUnavailableNote('margin-bottom:0.5rem'));   // [POLISH-VIEWER-AGENDA-PRIO] icône trait
+      }
+      // Glisser un FICHIER sur le board déplie l'outil Fichier (recette owner 154).
+      if (hubFilesCfg && !dk.file && fp.can_add) {
+        board.addEventListener('dragenter', (e) => {
+          const t = e.dataTransfer;
+          if (!t || !Array.from(t.types || []).includes('Files')) return;
+          setHubDock('file', true); render();
+        });
       }
     }
   }
-  board.appendChild(addBar());
-  const spb = subProjBar(); if (spb) board.appendChild(spb); // [GUEST-SUBPROJECT]
+  // [TOOLS-DOCK-GUEST] à la RACINE (« Tout ») il n'y a pas de barre d'actions : le dock s'affiche
+  // SEUL, aligné à droite, juste au-dessus des barres d'ajout.
+  const dock = hubDockState();
+  if (FOCUS == null) {
+    // [HUB-CHROME] barre monochrome GLOBALE (Plan / Agenda / Carte) — même gabarit que les
+    // barres de board (hdrToolbar/hdrBtn, lueur et glowwrap hérités, gotcha V26.2.136) ;
+    // elle RELAIE les boutons historiques masqués : zéro logique dupliquée.
+    const nav = hdrToolbar();
+    const relay = (id) => document.getElementById(id).click();
+    nav.add({ icon: 'sitemap', label: 'Plan', title: 'Arborescence de tous vos dossiers', onClick: () => relay('btn-plan') });
+    nav.add({ icon: 'calendar', label: 'Agenda', title: 'Agenda global de vos dossiers', onClick: () => relay('btn-agenda') });
+    const nPts = (typeof L === 'undefined') ? 0 : hubMapPoints().length;
+    if (nPts) nav.add({ icon: 'map', label: 'Carte', count: nPts, title: 'Voir les points géolocalisés', onClick: () => relay('btn-map') });
+    const navBar = nav.end();
+    const rootDock = hubToolsDock({ memo: editableProjects().length > 0, folder: editableProjects().length > 0, file: false, voice: false });
+    const wrap = el('div', { attrs: { style: 'display:flex;align-items:center;justify-content:flex-end;gap:0.5rem;flex-wrap:wrap;margin:0 0 0.6rem' } });
+    wrap.appendChild(navBar);
+    if (rootDock) wrap.appendChild(rootDock);   // dock en bout de rangée
+    board.appendChild(wrap);
+  }
+  if (dock.memo) {
+    board.appendChild(addBar());
+    if (hubDockFocusMemo) { hubDockFocusMemo = false; setTimeout(() => { const i = document.querySelector('#board .mab-row1 input[type=text]'); if (i) i.focus(); }, 40); }
+  }
+  if (dock.folder) { const spb = subProjBar(); if (spb) board.appendChild(spb); }  // [GUEST-SUBPROJECT]
   const vb = hubVotesBar(); if (vb) board.appendChild(vb); // [VOTE-GROUPS] chips/création/gestion
   const ms = focusedMemos().slice().sort((a, b) => (a.done - b.done) || (a.due_date || '').localeCompare(b.due_date || ''));
   // [BOARD-SUBHIDE] chips masquer/afficher par sous-projet (affichage seul — carte inchangée).
@@ -1194,6 +1460,48 @@ function renderBoard() {
 
 // [GUEST-ROLES] dossiers où l'invité peut AJOUTER (contributeur+) — pilote les barres d'ajout.
 function editableProjects() { return (DATA.projects || []).filter(p => p.can_add); }
+/* [TOOLS-DOCK-GUEST] Dock d'outils repliables du hub — parité avec le dock owner
+   ([TOOLS-DOCK] V27.1.154) et la page share. Une icône n'apparaît QUE si l'outil est DÉJÀ
+   disponible pour ce rôle : le dock AFFICHE ou MASQUE, il n'élargit JAMAIS un droit
+   (invariant 5). Persistance par focus (`toolsDock:hub:<focus>`), tout replié par défaut. */
+function hubDockKey() { return 'toolsDock:hub:' + (FOCUS == null ? 'all' : FOCUS); }
+function hubDockState() {
+  const st = { memo: false, file: false, voice: false, folder: false };
+  try {
+    const raw = JSON.parse(localStorage.getItem(hubDockKey()) || '{}');
+    Object.keys(st).forEach(k => { st[k] = raw[k] === true; });
+  } catch (e) {}
+  return st;
+}
+function setHubDock(key, val) {
+  const st = hubDockState();
+  st[key] = !!val;
+  try { localStorage.setItem(hubDockKey(), JSON.stringify(st)); } catch (e) {}
+}
+let hubDockFocusMemo = false;   // focus du champ titre à l'ouverture de l'outil Mémo
+// Construit le dock : `avail` = outils réellement disponibles ; `host` = barre d'actions du
+// dossier (dock à droite, même rangée) ou null → le caller pose le dock seul, aligné à droite.
+function hubToolsDock(avail) {
+  const keys = [
+    ['memo', 'pencil-plus', 'Mémo', 'Afficher/masquer la barre de création de mémo'],
+    ['file', 'paperclip', 'Fichier', 'Afficher/masquer la zone de dépôt de fichiers'],
+    ['voice', 'microphone', 'Vocal', 'Afficher/masquer l\'enregistrement vocal'],
+    ['folder', 'folder-plus', 'Dossier', 'Afficher/masquer la création de sous-dossier'],
+  ].filter(([k]) => avail[k]);
+  if (!keys.length) return null;            // lecture seule → aucun dock
+  const st = hubDockState();
+  const td = hdrToolbar();
+  keys.forEach(([k, icon, label, title]) => {
+    const b = td.add({ icon, label, title, onClick: () => {
+      const next = !st[k];
+      if (k === 'memo' && next) hubDockFocusMemo = true;
+      setHubDock(k, next); render();
+    } });
+    if (st[k]) b.classList.add('on');
+    b.setAttribute('aria-pressed', st[k] ? 'true' : 'false');
+  });
+  return td.end();
+}
 
 // [GUEST-SUBPROJECT] création de sous-projet depuis le hub (parité share.html) :
 // routée vers le POST /share/<share_token>/projects du dossier PARENT choisi —
@@ -1282,7 +1590,7 @@ function renderPlan() {
     if (p.emoji) row.appendChild(el('span', { text: p.emoji }));
     row.appendChild(el('span', { class: 'nm', text: p.name }));
     if (!p.can_edit) row.appendChild(el('span', { class: 'ro', attrs: { style: 'color:var(--muted);font-size:0.7rem' }, text: '👁' }));
-    row.addEventListener('click', () => { FOCUS = p.id; VIEW = 'board'; render(); });
+    row.addEventListener('click', () => hubFocusOn(p.id));
     wrap.appendChild(row);
     const kids = projChildren(p.id), mm = memosOf(p.id);
     const items = [...mm.map(m => ({ m })), ...kids.map(c => ({ c }))];
@@ -1328,7 +1636,8 @@ function hubAgendaCfg() {
     memosForDay: (iso) => agendaGroupByDay(hubAgendaSrc())[iso] || [],
     chipColor: agendaChipColor,
     memoTitle: agendaMemoTitle,
-    openMemo: (m) => openEditor(m),
+    // [POLISH-VIEWER-AGENDA-PRIO] clic = fiche de lecture 👁 (droits appliqués par la fiche).
+    openMemo: (m) => openMemoView(hubMemoViewCfg(), m.id),
     canCreate: () => editableProjects().length > 0,
     createForDay: async (iso) => {
       const eps = editableProjects();
@@ -1493,6 +1802,7 @@ function getHubQuill() {
       modules: applyTableBetter({ toolbar: [[{ header: [1, 2, 3, false] }], ['bold', 'italic', 'underline', 'strike'],
         [{ color: [] }, { background: [] }], [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }], ['link', 'blockquote'], ['clean']] }) });
     addMentionMatcher(hubQuill);
+    setupAutoLink(hubQuill);   // [EDITOR-AUTOLINK]
     setupMentions(hubQuill, hubSuggestions, (name) => { if (!edAssignees.some(v => v.toLowerCase() === name.toLowerCase())) edAssignees.push(name); renderEdPeople(false); });
   }
   return hubQuill;
@@ -1511,6 +1821,72 @@ function renderEdContext(m) {
     crumb.appendChild(el('span', { class: 'me-crumb-node', text: (p.emoji ? p.emoji + ' ' : '') + p.name })); });
   crumb.appendChild(el('span', { class: 'me-sep', text: m.can_edit ? '· ✏️ modifiable' : '· 🔒 lecture seule' }));
   box.appendChild(crumb);
+}
+
+// [MEMO-VIEW] cfg hub : données de `DATA` (déjà bornées au scope) ; un mémo hors scope → null.
+function hubMemoViewCfg() {
+  return {
+    load: (id) => {
+      const m = (DATA.memos || []).find(x => x.id === id);
+      if (!m) return null;
+      const chain = [];
+      let pid = m.project_id;
+      const seen = new Set();
+      while (pid != null && !seen.has(pid)) {
+        seen.add(pid);
+        const p = projById(pid);
+        if (!p) break;
+        chain.unshift({ emoji: p.emoji, color: usableProjColor(p.color), name: p.name });
+        pid = p.parent_id;
+      }
+      const created = m.created_at ? new Date(m.created_at) : null;
+      const fmt = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+        + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const due = dueInfo(m);
+      let node = null;
+      if (isRich(m.content)) { node = el('div', {}); node.appendChild(sanitize(m.content)); }
+      else if ((m.content || '').trim()) { node = el('div', { attrs: { style: 'white-space:pre-wrap' } }); node.appendChild(linkify(m.content)); }
+      if (node) dressLinks(node);   // [LINK-RENDER] fiche de lecture
+      return {
+        memo: m,
+        title: m.title || memoLeadText(isRich(m.content) ? splitLeadHtml(m.content).lead : stripTags(m.content || '').trim()) || MEMO_EMPTY_LABEL,
+        crumb: chain,
+        createdLine: created && !isNaN(created) ? '🕒 Créé le ' + fmt(created) : '',
+        updatedLine: '',
+        canEdit: !!m.can_edit,
+        prio: (DATA.priorities || []).find(x => x.id === m.priority) || null,
+        dueLabel: due ? due.label : '',
+        locLabel: m.location && m.location.label ? m.location.label : '',
+        links: m.links || [],
+        images: m.images || [],
+        subtasks: m.subtasks || [],
+        contentNode: node,
+      };
+    },
+    onEdit: (m) => openEditor(m),
+    // [MEMO-VIEW évolution] même appel que la card du hub (PUT sur le partage du mémo, scope
+    // et rôle revalidés serveur) ; `reload()` rafraîchit les cards derrière.
+    onToggleSub: (m, subtasks) => putMemo(m, { subtasks }),
+    // [MEMO-VIEW correctif 2] checklist du CONTENU : même bascule que `wireChecklist` des cards.
+    onToggleCheck: (m, i) => {
+      // ⚠️ mémo relu FRAIS : la fiche n'est pas redessinée après une écriture, `m` serait périmé.
+      const cur = (DATA.memos || []).find(x => x.id === m.id) || m;
+      const tpl = document.createElement('template');
+      tpl.innerHTML = cur.content;
+      const items = tpl.content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]');
+      if (!items[i]) return;
+      items[i].setAttribute('data-list', items[i].getAttribute('data-list') === 'checked' ? 'unchecked' : 'checked');
+      putMemo(cur, { content: tpl.innerHTML });
+    },
+    // Les URL d'image sont scopées au partage DU mémo affiché (chaque dossier du hub a son token).
+    imageUrl: (n, m) => '/share/' + m.share_token + '/image/' + n,
+    onOpenPhoto: (images, i, m) => runImageViewer({
+      images, startIndex: i,
+      imageUrl: (n) => '/share/' + m.share_token + '/image/' + n,
+      downloadUrl: (n) => '/share/' + m.share_token + '/image/' + n,
+      exifUrl: (n) => '/share/' + m.share_token + '/image-exif/' + n,
+    }),
+  };
 }
 
 function openEditor(m) {
@@ -1670,33 +2046,78 @@ function renderEdImages(m, ro) {
 }
 function renderEdComments(m, ro) {
   const cw = document.getElementById('ed-comments'); cw.innerHTML = '';
-  (m.comments || []).forEach(c => { const r = el('div', { class: 'comment' });
-    r.appendChild(el('span', { class: 'ca', text: (c.author || '').replace(/\s*<[^>]*>/, ''), attrs: c.guest ? { style: 'color:var(--guest,#b39ddb)' } : {} }));
-    // [VOICE-MESSAGES] marqueur [audio:...] → bulle vocale (PJ du mémo) ; sinon texte.
-    const cb = el('span', { class: 'cb' });
-    const vf = renderVoiceBody(c.body, voiceUrlFor(m.attachments));
-    if (vf) cb.appendChild(vf); else cb.textContent = c.body;
-    r.appendChild(cb); cw.appendChild(r);
-    // [GUEST-ROLES] réagir = commentateur (ou override perm_comment='all' du mémo).
-    cw.appendChild(reactionRow(c.reactions, !!m.can_comment, async (emoji) => {
-      const resp = await api(m.share_token, '/comment/' + c.id + '/react', { method: 'POST', body: JSON.stringify({ emoji }) });
-      if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
-      else notify('Réaction impossible.', { error: true });
+  // [COMMENTS-V2] bulles (squelette partagé `cmtRow`) ; le hub n'a pas de réponses imbriquées
+  // (pas de `parent_id` exposé ici) → fil à plat, comme avant. Droits INCHANGÉS.
+  // [COMMENT-PRIO-CONFIG] priorités = LA liste configurée par le propriétaire (`DATA.priorities`).
+  const prioPal = cmtPrioPalette(DATA.priorities || []);
+  cmtHideVoiceLogs(m.comments || []).forEach(c => {
+    const vf = renderVoiceBody(c.body, voiceUrlFor(m.attachments));   // [VOICE-MESSAGES]
+    const bodyNode = vf || commentBodyNode(c.body);                   // [COMMENT-LINKIFY]
+    const when = c.created_at ? new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '';
+    const _sys = cmtSystemInfo(c.body);   // [SYSTEM-LINES-MONO]
+    cw.appendChild(cmtRow({
+      author: c.author, guest: !!c.guest, bodyNode,
+      when: when + (vf ? (when ? ' · ' : '') + '🎤 message vocal' : ''),
+      priority: c.priority, prioColor: prioPal.color, prioLabel: prioPal.label,
+      deleted: !!c.deleted,   // [COMMENTS-V2 addendum] pierre tombale
+      system: _sys,           // [SYSTEM-LINES-MONO]
+      // [COMMENTS-V2 addendum] l'AUTEUR supprime SON message. `can_delete` vient du SERVEUR
+      // (match par e-mail) : la page affiche, le serveur tranche (403 sinon) — invariant 5.
+      actions: [
+        c.can_delete && { label: '✕', title: 'Supprimer mon message', danger: true, onClick: async () => {
+          if (!(await confirmPopin('Supprimer ton message ? Il laissera une trace « Message supprimé » et les réponses resteront.'))) return;
+          const resp = await api(m.share_token, '/comment/' + c.id, { method: 'DELETE' });
+          if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
+          else notify('Suppression impossible.', { error: true });
+        } },
+      ],
+      // [GUEST-ROLES] réagir = commentateur (ou override perm_comment='all' du mémo).
+      reactionsRow: reactionRow(c.reactions, !_sys && !!m.can_comment, async (emoji) => {
+        const resp = await api(m.share_token, '/comment/' + c.id + '/react', { method: 'POST', body: JSON.stringify({ emoji }) });
+        if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
+        else notify('Réaction impossible.', { error: true });
+      }),
     }));
   });
-  if (m.can_comment) { const inp = el('input', { attrs: { type: 'text', placeholder: '+ Commentaire…', style: 'width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:0.35rem 0.5rem;margin-top:0.4rem' } });  // [GUEST-ROLES]
-    inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b }) }); inp.value = ''; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); });
-    cw.appendChild(inp);
+  if (m.can_comment) {  // [GUEST-ROLES]
+    // [COMMENTS-V2] composer : avatar + champ arrondi (input + ⚑ + micro + envoyer).
+    // [COMMENT-PRIO-CONFIG] le hub gagne le drapeau ⚑ des deux autres pages : menu = LA liste
+    // configurée (`DATA.priorities`, déjà exposée), le serveur valide contre `priorities`.
+    _commentsV2Style();
+    const _me = (DATA && DATA.name) || 'moi';
+    const _solo = (m.assignees || []).filter(x => x && x !== _me);
+    const inp = el('input', { attrs: { type: 'text',
+      placeholder: _solo.length === 1 ? ('Écrire à ' + _solo[0].split(/\s+/)[0] + '… (@ pour mentionner)') : 'Écrire un commentaire… (@ pour mentionner)' } });
+    const prioSel = cmtPrioSelect(DATA.priorities || []);
+    inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b, priority: parseInt(prioSel.value, 10) || 0 }) }); inp.value = ''; prioSel.value = '0'; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); });
+    const composer = el('div', { class: 'cmt-composer' });
+    composer.appendChild(cmtAvatar(_me, true));
+    const field = el('div', { class: 'cmt-field' });
+    field.appendChild(inp);
+    // Drapeau ⚑ : habillage du <select> (qui reste DESSOUS, focusable → clavier préservé).
+    const flagWrap = el('span', { class: 'cmt-flagwrap' });
+    const flag = el('span', { class: 'cmt-ibtn', text: '⚑', attrs: { title: 'Priorité du commentaire', 'aria-hidden': 'true' } });
+    const syncFlag = () => { flag.style.color = prioPal.color(parseInt(prioSel.value, 10) || 0) || ''; };
+    prioSel.addEventListener('change', syncFlag); syncFlag();
+    flagWrap.append(flag, prioSel);
+    field.appendChild(flagWrap);
+    cw.appendChild(composer);
+    composer.appendChild(field);
     // [VOICE-MESSAGES] Commentaire vocal (invité hub approuvé, routes /share existantes, invariant 5).
     const vbtn = voiceCommentButton({
       uploadUrl: '/share/' + m.share_token + '/memo/' + m.id + '/attachments',
       headers: { 'X-Guest-Token': gtFor(m.share_token) },
       postComment: async (body) => {
-        await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: body }) });
+        await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: body, priority: parseInt(prioSel.value, 10) || 0 }) });
         await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro);
       },
     });
-    if (vbtn) cw.appendChild(vbtn);
+    if (vbtn) field.appendChild(vbtn);   // [COMPOSER-MIC-MONO] icône trait posée par le helper partagé
+    const send = el('button', { class: 'cmt-ibtn', attrs: { type: 'button', title: 'Envoyer (Entrée)' } });
+    const sic = hdrIcon('send'); sic.setAttribute('width', '16'); sic.setAttribute('height', '16');
+    send.appendChild(sic);
+    send.addEventListener('click', () => { if (inp.value.trim()) inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    field.appendChild(send);
   }
 }
 document.getElementById('ed-cancel').addEventListener('click', () => edDialog.close());

@@ -485,11 +485,26 @@ def init_db():
             email TEXT NOT NULL,
             name TEXT DEFAULT '',
             guest_token TEXT NOT NULL UNIQUE,
-            status TEXT NOT NULL DEFAULT 'pending',
+            -- [GUEST-AUTO-APPROVE] Défaut APPROUVÉ : un invité qui s'enregistre (PIN du lien) est
+            -- opérationnel immédiatement. Le rôle reste celui du partage — l'auto-approbation
+            -- ouvre la porte, PAS les droits. La révocation ('rejected' / suppression) reste le
+            -- seul contrôle owner. (Un DEFAULT ne se change pas sur une table existante : la
+            -- migration ci-dessous s'en charge pour l'existant.)
+            status TEXT NOT NULL DEFAULT 'approved',
             created_at TEXT DEFAULT '',
             approved_at TEXT DEFAULT ''
         )
         """
+    )
+    # [GUEST-AUTO-APPROVE] Migration DOUCE, idempotente : les invités restés « en attente »
+    # passent approuvés (décision Fabien : plus personne à valider). N'affecte NI les révoqués
+    # ('rejected' — la révocation reste), NI les rôles. Aucun changement de schéma nécessaire
+    # (le DEFAULT ne vaut que pour les nouvelles bases ; les INSERT posent le statut en clair).
+    conn.execute(
+        "UPDATE share_guests SET status = 'approved', "
+        "approved_at = CASE WHEN COALESCE(approved_at, '') = '' THEN ? ELSE approved_at END "
+        "WHERE status = 'pending'",
+        (datetime.now(timezone.utc).isoformat(),),
     )
     conn.execute(
         """
@@ -651,6 +666,12 @@ def init_db():
         conn.execute("ALTER TABLE memo_comments ADD COLUMN parent_id INTEGER")
     if "priority" not in ccols:
         conn.execute("ALTER TABLE memo_comments ADD COLUMN priority INTEGER DEFAULT 0")
+    # [COMMENTS-V2 addendum] Pierre tombale : suppression DOUCE d'un message (la ligne survit pour
+    # que le fil garde son contexte — les réponses restent en place), mais le CORPS est VIDÉ en base
+    # au même moment (l'auteur a retiré ses mots : ils ne voyagent plus, ni payload ni export).
+    # Colonne additive, jamais destructive (invariant 1). Vide = message vivant.
+    if "deleted_at" not in ccols:
+        conn.execute("ALTER TABLE memo_comments ADD COLUMN deleted_at TEXT DEFAULT ''")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS comment_seen (
@@ -3372,7 +3393,10 @@ def list_memos():
     ccounts = {
         r["memo_id"]: r["n"]
         for r in db.execute(
-            "SELECT memo_id, COUNT(*) AS n FROM memo_comments GROUP BY memo_id"
+            # [COMMENTS-V2 addendum] Les pierres tombales ne comptent pas dans le badge 💬 :
+            # le compteur annonce des messages, un message retiré n'en est plus un.
+            "SELECT memo_id, COUNT(*) AS n FROM memo_comments "
+            "WHERE COALESCE(deleted_at, '') = '' GROUP BY memo_id"
         ).fetchall()
     }
     owner_name = _owner_name(db)
@@ -5470,7 +5494,10 @@ def list_guests():
 def update_guest(guest_id):
     data = request.get_json(silent=True) or {}
     status = (data.get("status") or "").strip()
-    if status not in ("approved", "rejected", "pending"):
+    # [GUEST-AUTO-APPROVE] « pending » n'est plus un état posable : il n'y a plus de file de
+    # validation. Restent 'approved' (réactiver un invité révoqué) et 'rejected' (RÉVOCATION,
+    # seul contrôle owner désormais).
+    if status not in ("approved", "rejected"):
         return jsonify({"error": "status invalide"}), 400
     db = get_db()
     row = db.execute(
@@ -5727,7 +5754,9 @@ def _data_version(db):
         "SELECT * FROM shares ORDER BY id",
         "SELECT id, share_id, email, name, status, approved_at FROM share_guests ORDER BY id",
         "SELECT id, email, name, pin FROM guest_hubs ORDER BY id",
-        "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), '') FROM memo_comments",
+        # [COMMENTS-V2 addendum] MAX(deleted_at) : une suppression douce ne bouge ni le COUNT ni
+        # les MAX ci-dessus — sans ce signal, le poll owner ne verrait pas la pierre tombale.
+        "SELECT COUNT(*), COALESCE(MAX(id), 0), COALESCE(MAX(created_at), ''), COALESCE(MAX(deleted_at), '') FROM memo_comments",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM comment_reactions",  # [COMMENT-REACTIONS]
         # [VOTE-DECISION] voix ; les flags/état de vote des projets sont déjà couverts par
         # le « SELECT * FROM projects » ci-dessus (vote_enabled/deadline/closed/winner…).
@@ -5754,9 +5783,9 @@ def _data_version(db):
 @app.route("/api/activity", methods=["GET"])
 def activity():
     db = get_db()
-    pending = db.execute(
-        "SELECT COUNT(*) FROM share_guests WHERE status = 'pending'"
-    ).fetchone()[0]
+    # [GUEST-AUTO-APPROVE] plus de file de validation → le compteur reste exposé (compat des
+    # appelants) mais vaut 0 : plus aucun invité ne peut être « en attente ».
+    pending = 0
     revisions = db.execute(
         "SELECT r.*, m.content AS memo_content FROM memo_revisions r "
         "LEFT JOIN memos m ON m.id = r.memo_id "
@@ -5780,7 +5809,8 @@ def activity():
             unseen += 1
         out_rev.append(d)
     unseen += db.execute(
-        "SELECT COUNT(*) FROM memo_comments WHERE share_id IS NOT NULL AND created_at > ?",
+        "SELECT COUNT(*) FROM memo_comments WHERE share_id IS NOT NULL AND created_at > ? "
+        "AND COALESCE(deleted_at, '') = ''",   # [COMMENTS-V2 addendum] pas de 🔔 sur une tombale
         (seen_at,),
     ).fetchone()[0]
     return jsonify(
@@ -6036,19 +6066,31 @@ def _toggle_reaction(db, comment_id, emoji, voter):
         )
 
 
-def _comment_dict(r, seen_map=None, reactions_map=None, me=None, owner_name="", palette=None):
+def _comment_dict(r, seen_map=None, reactions_map=None, me=None, owner_name="", palette=None,
+                  can_delete=None):
+    # [COMMENTS-V2 addendum] `deleted` = pierre tombale : la ligne reste (le fil garde son contexte)
+    # mais le corps est déjà vide en base — auteur et heure sont conservés, rien d'autre ne sort.
+    # `can_delete` : le serveur tranche (invariant 5). None ⇒ règle « l'auteur supprime son message »,
+    # matchée par E-MAIL (identifiant stable, robuste au renommage d'invité [GUEST-EDIT]) ; les
+    # appels owner passent True (modération sur tout).
+    deleted = bool(_row_get(r, "deleted_at", "") or "")
+    if can_delete is None:
+        can_delete = (not deleted) and bool(_voter_email(r["author"])) \
+            and _voter_key(r["author"]) == _voter_key(me or "")
     return {
         "id": r["id"],
         "memo_id": r["memo_id"],
         "author": r["author"],
-        "body": r["body"],
+        "body": "" if deleted else r["body"],
         "created_at": r["created_at"],
         "guest": r["share_id"] is not None,
         "parent_id": _row_get(r, "parent_id"),
-        "priority": _row_get(r, "priority", 0) or 0,
-        "seen": (seen_map or {}).get(r["id"], []),
+        "priority": 0 if deleted else (_row_get(r, "priority", 0) or 0),
+        "deleted": deleted,
+        "can_delete": bool(can_delete) and not deleted,
+        "seen": [] if deleted else (seen_map or {}).get(r["id"], []),
         # [COMMENT-REACTIONS] agrégées pour l'appelant (me) ; voters = noms affichables seuls.
-        "reactions": _aggregate_reactions((reactions_map or {}).get(r["id"]), me, owner_name, palette),
+        "reactions": [] if deleted else _aggregate_reactions((reactions_map or {}).get(r["id"]), me, owner_name, palette),
     }
 
 
@@ -6073,7 +6115,8 @@ def _mark_comments_seen(db, memo_id, viewer):
         return
     now = datetime.now(timezone.utc).isoformat()
     for c in db.execute(
-        "SELECT id FROM memo_comments WHERE memo_id = ?", (memo_id,)
+        "SELECT id FROM memo_comments WHERE memo_id = ? AND COALESCE(deleted_at, '') = ''",
+        (memo_id,),   # [COMMENTS-V2 addendum]
     ).fetchall():
         db.execute(
             "INSERT OR IGNORE INTO comment_seen (comment_id, viewer, seen_at) VALUES (?, ?, ?)",
@@ -6081,12 +6124,19 @@ def _mark_comments_seen(db, memo_id, viewer):
         )
 
 
-def _valid_comment_priority(value):
+def _valid_comment_priority(db, value):
+    """[COMMENT-PRIO-CONFIG] Priorité d'un commentaire = un id de la liste CONFIGURÉE
+    (Paramètres → Priorités : P1…P4, « + Ajouter »), plus le 1-3 câblé d'origine.
+    Source de vérité unique = la table `priorities`. Tout id inconnu (ou une priorité
+    supprimée depuis) retombe sur 0 = « pas de priorité » — jamais d'erreur 400."""
     try:
         p = int(value)
     except (TypeError, ValueError):
         return 0
-    return p if p in (1, 2, 3) else 0
+    if p <= 0:
+        return 0
+    row = db.execute("SELECT 1 FROM priorities WHERE id = ?", (p,)).fetchone()
+    return p if row else 0
 
 
 def _valid_parent_comment(db, memo_id, parent_id):
@@ -6120,6 +6170,44 @@ def _insert_comment(db, memo_row, body, author, share_id=None, parent_id=None, p
     ).fetchone()
 
 
+# [COMMENTS-V2 addendum] Marqueur de message vocal posé dans le corps du commentaire par le front
+# (`[audio:<nom de fichier stocké>]`) — même forme que VOICE_MARKER_RE côté navigateur.
+VOICE_BODY_RE = re.compile(r"\[audio:([0-9a-f]{32}(?:\.[a-z0-9]{1,12})?)\]", re.I)
+
+
+def _soft_delete_comment(db, row):
+    """Pierre tombale : la LIGNE survit (le fil garde son contexte, les réponses restent en place)
+    mais le CONTENU est VIDÉ en base — les mots retirés ne voyagent plus dans les payloads ni dans
+    l'export. Les réactions et les accusés de lecture partent avec le message (une tombale n'a plus
+    d'actions). Vocal : le fichier de la pièce jointe référencée est PURGÉ, et la ligne système
+    « 📎 a ajouté le fichier … » qui l'annonçait est retirée (log machine, pas un message d'humain :
+    pas de tombale pour elle) — sinon elle réapparaîtrait, la bulle vocale n'étant plus là.
+    Idempotent : re-supprimer une tombale ne fait rien."""
+    if (_row_get(row, "deleted_at", "") or ""):
+        return
+    body = row["body"] or ""
+    for fname in VOICE_BODY_RE.findall(body):
+        att = db.execute(
+            "SELECT * FROM attachments WHERE memo_id = ? AND filename = ?",
+            (row["memo_id"], fname),
+        ).fetchone()
+        if not att:
+            continue
+        _delete_attachment_file(att["filename"])
+        db.execute("DELETE FROM attachments WHERE id = ?", (att["id"],))
+        orig = att["orig_name"] or att["filename"]
+        db.execute(
+            "DELETE FROM memo_comments WHERE memo_id = ? AND body LIKE ? AND body LIKE ?",
+            (row["memo_id"], "📎%", "%" + orig + "%"),
+        )
+    db.execute("DELETE FROM comment_reactions WHERE comment_id = ?", (row["id"],))
+    db.execute("DELETE FROM comment_seen WHERE comment_id = ?", (row["id"],))
+    db.execute(
+        "UPDATE memo_comments SET body = '', deleted_at = ? WHERE id = ?",
+        (datetime.now(timezone.utc).isoformat(), row["id"]),
+    )
+
+
 def _attach_log_comment(db, memo_row, added, names, author, share_id):
     """[ATTACHMENTS-COMMENT] Commentaire automatique d'ajout/suppression de fichier. Commentaire
     NORMAL (compte dans 💬, déclenche 🔔 si invité via share_id) attribué à l'auteur de l'action.
@@ -6147,7 +6235,9 @@ def list_comments(memo_id):
     reacts = _comment_reactions_map(db, ids)  # [COMMENT-REACTIONS]
     owner_name = _owner_name(db)
     palette = _reaction_palette(db)  # [REACTION-PALETTE]
-    return jsonify([_comment_dict(r, seen, reacts, me="", owner_name=owner_name, palette=palette) for r in rows])
+    # can_delete=True : l'owner modère tout (y compris les messages d'invités).
+    return jsonify([_comment_dict(r, seen, reacts, me="", owner_name=owner_name, palette=palette,
+                                  can_delete=True) for r in rows])
 
 
 @app.route("/api/memos/<int:memo_id>/comments", methods=["POST"])
@@ -6161,10 +6251,10 @@ def add_comment(memo_id):
     if not body:
         return jsonify({"error": "body required"}), 400
     parent_id = _valid_parent_comment(db, memo_id, data.get("parent_id")) if data.get("parent_id") else None
-    priority = _valid_comment_priority(data.get("priority"))
+    priority = _valid_comment_priority(db, data.get("priority"))
     row = _insert_comment(db, memo, body, "moi", parent_id=parent_id, priority=priority)
     db.commit()
-    return jsonify(_comment_dict(row)), 201
+    return jsonify(_comment_dict(row, can_delete=True)), 201
 
 
 @app.route("/api/memos/<int:memo_id>/comments/seen", methods=["POST"])
@@ -6177,9 +6267,13 @@ def mark_comments_seen_owner(memo_id):
 
 @app.route("/api/comments/<int:comment_id>", methods=["DELETE"])
 def delete_comment(comment_id):
+    # [COMMENTS-V2 addendum] L'owner modère TOUT (comme avant), mais la suppression est désormais
+    # DOUCE : pierre tombale au lieu d'un trou dans le fil — les réponses gardent leur contexte.
     db = get_db()
-    db.execute("DELETE FROM comment_reactions WHERE comment_id = ?", (comment_id,))  # [COMMENT-REACTIONS]
-    db.execute("DELETE FROM memo_comments WHERE id = ?", (comment_id,))
+    row = db.execute("SELECT * FROM memo_comments WHERE id = ?", (comment_id,)).fetchone()
+    if not row:
+        return "", 204                                   # idempotent (déjà parti)
+    _soft_delete_comment(db, row)
     db.commit()
     return "", 204
 
@@ -6194,7 +6288,12 @@ def _react_result(db, comment_id, me):
 def react_comment(comment_id):
     # [COMMENT-REACTIONS] Réagir (owner, voter = ''). Toggle. 400 hors palette, 404 inconnu.
     db = get_db()
-    if not db.execute("SELECT 1 FROM memo_comments WHERE id = ?", (comment_id,)).fetchone():
+    # [COMMENTS-V2 addendum] une pierre tombale n'a plus d'actions : on ne réagit pas à un
+    # message supprimé (le front n'affiche pas la palette, le serveur le garantit).
+    if not db.execute(
+        "SELECT 1 FROM memo_comments WHERE id = ? AND COALESCE(deleted_at, '') = ''",
+        (comment_id,),
+    ).fetchone():
         return jsonify({"error": "not found"}), 404
     emoji = _valid_reaction_emoji((request.get_json(silent=True) or {}).get("emoji"), _reaction_palette(db))
     if not emoji:
@@ -7564,11 +7663,11 @@ def share_add_comment(token, memo_id):
     if not body:
         return jsonify({"error": "body required"}), 400
     parent_id = _valid_parent_comment(db, memo_id, data.get("parent_id")) if data.get("parent_id") else None
-    priority = _valid_comment_priority(data.get("priority"))
+    priority = _valid_comment_priority(db, data.get("priority"))
     author = guest["name"] or guest["email"]
     row = _insert_comment(db, memo, body, f"{author} <{guest['email']}>", share["id"], parent_id=parent_id, priority=priority)
     db.commit()
-    return jsonify(_comment_dict(row)), 201
+    return jsonify(_comment_dict(row, can_delete=True)), 201
 
 
 # [MEMO-LINKS] D4 — invité : routes publiques sous /share/* (bypass Authelia existant,
@@ -7633,6 +7732,32 @@ def share_remove_memo_link(token, memo_id, other_id):
     return "", 204
 
 
+@app.route("/share/<token>/comment/<int:comment_id>", methods=["DELETE"])
+def share_delete_comment(token, comment_id):
+    # [COMMENTS-V2 addendum] L'AUTEUR supprime SON message, invité compris. Route publique sous
+    # /share/* (bypass Authelia existant, invariant 5 — aucun préfixe de premier niveau).
+    # C'est le SERVEUR qui tranche : invité APPROUVÉ + mémo du commentaire dans le scope de CE
+    # partage + identité de l'auteur vérifiée par E-MAIL (stable au renommage [GUEST-EDIT]).
+    # Viser le message d'un autre → 403. `can_edit` NON requis : retirer ses propres mots n'est pas
+    # éditer le mémo — c'est le pendant du droit d'avoir écrit.
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return jsonify({"error": "guest_required"}), 403
+    row = db.execute("SELECT * FROM memo_comments WHERE id = ?", (comment_id,)).fetchone()
+    if not row or row["memo_id"] not in {r["id"] for r in _share_scope_memos(db, share)}:
+        return jsonify({"error": "not found"}), 404
+    me = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    if not _voter_email(row["author"]) or _voter_key(row["author"]) != _voter_key(me):
+        return jsonify({"error": "Seul l'auteur peut supprimer son message."}), 403
+    _soft_delete_comment(db, row)
+    db.commit()
+    return "", 204
+
+
 @app.route("/share/<token>/comment/<int:comment_id>/react", methods=["POST"])
 def share_react_comment(token, comment_id):
     # [COMMENT-REACTIONS] Réagir côté invité. Route publique sous /share/* (bypass Authelia,
@@ -7645,7 +7770,10 @@ def share_react_comment(token, comment_id):
     guest = _guest_from_request(db, share)
     if not guest or guest["status"] != "approved":
         return jsonify({"error": "guest_required", "status": guest["status"] if guest else "anonymous"}), 403
-    crow = db.execute("SELECT id, memo_id FROM memo_comments WHERE id = ?", (comment_id,)).fetchone()
+    crow = db.execute(
+        "SELECT id, memo_id FROM memo_comments WHERE id = ? AND COALESCE(deleted_at, '') = ''",
+        (comment_id,),
+    ).fetchone()   # [COMMENTS-V2 addendum] pas de réaction sur une tombale
     if not crow or crow["memo_id"] not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
     # [GUEST-ROLES] réagir = commentateur (ou override perm_comment='all' du mémo → viewer).
@@ -8153,7 +8281,8 @@ def _build_export(db, root_id=None):
         "SELECT c.id, c.memo_uid, c.author, c.body, c.created_at, "
         "COALESCE(c.priority, 0) AS priority, p.created_at AS parent_created_at "
         "FROM memo_comments c LEFT JOIN memo_comments p ON p.id = c.parent_id "
-        "WHERE c.memo_uid != '' ORDER BY c.created_at, c.id"
+        "WHERE c.memo_uid != '' AND COALESCE(c.deleted_at, '') = '' "
+        "ORDER BY c.created_at, c.id"   # [COMMENTS-V2 addendum] tombales exclues
     ).fetchall()
     if subtree is not None:
         comments = [r for r in comments if r["memo_uid"] in memo_uids]
@@ -9089,7 +9218,7 @@ def import_links():
         if key in existing_comments:
             cid = comment_id_by_key.get((c_uid, c_at))
         else:
-            c_prio = _valid_comment_priority(c.get("priority"))
+            c_prio = _valid_comment_priority(db, c.get("priority"))
             parent_at = (c.get("parent_created_at") or "").strip()
             parent_id = comment_id_by_key.get((c_uid, parent_at)) if parent_at else None
             cur = db.execute(
