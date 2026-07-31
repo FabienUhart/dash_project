@@ -4689,6 +4689,204 @@ function initPomodoro() {
 }
 initPomodoro();
 
+/* ═══════════ [GUEST-SETTINGS] engrenage « Paramètres » des pages invitées ═══════════
+   Maquette v2 validée Fabien : un engrenage EN-TÊTE (hub ET share) ouvre UN composant qui a
+   DEUX présentations — `<dialog>` centré en ≥ 900 px, BOTTOM-SHEET (monte du bas, poignée de
+   préhension, corps scrollable) en ≤ 900 px ou pointeur grossier. Frontend PUR : zéro route
+   nouvelle, tout est LOCAL au navigateur de l'invité (localStorage) SAUF l'envoi d'e-mail, qui
+   réutilise la route existante `/share/hub/<token>/send-link` (invariant 5 : rien de neuf n'est
+   exposé). Pas de GSAP sur le dialog (invariant 8) ; tokens et classes existants (invariant 9).
+   cfg = { email?: {label?, onSend: async () => ({ok, msg})}, favorites?: {count, onClear},
+           sections?: [{ title, node }] } — chaque page ne passe QUE ce qui la concerne. */
+
+// Préférence de thème à TROIS états (Auto / Clair / Sombre). Le mode « Auto » suit
+// `prefers-color-scheme` et se re-résout quand l'OS bascule. La valeur RÉSOLUE continue d'être
+// écrite dans `localStorage.theme` par `setTheme` → le script anti-FOUC du <head> (qui lit
+// `theme`) fonctionne à l'identique. Clé de la PRÉFÉRENCE : `themePref`. Arbitrage assumé :
+// le thème reste une préférence de NAVIGATEUR (globale), pas par token — un invité qui ouvre
+// deux partages veut un seul thème ; les réglages propres à un accès (favoris) restent par token.
+function themePref() {
+  try {
+    const v = localStorage.getItem('themePref');
+    if (v === 'light' || v === 'dark' || v === 'auto') return v;
+    // Migration douce : un invité qui avait déjà choisi son thème à la lune garde SON choix
+    // (l'ancienne clé `theme` fait foi une fois) au lieu de repartir en Auto sans prévenir.
+    const legacy = localStorage.getItem('theme');
+    return (legacy === 'light' || legacy === 'dark') ? legacy : 'auto';
+  } catch (e) { return 'auto'; }
+}
+function resolveThemePref(p) {
+  if (p === 'light' || p === 'dark') return p;
+  try { return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { return 'dark'; }
+}
+function applyThemePref(p) {
+  try { localStorage.setItem('themePref', p); } catch (e) {}
+  setTheme(resolveThemePref(p));
+}
+// À appeler une fois au boot d'une page invitée : applique la préférence et suit l'OS en Auto.
+function initThemePref() {
+  applyThemePref(themePref());
+  try {
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => { if (themePref() === 'auto') setTheme(resolveThemePref('auto')); };
+    if (mq.addEventListener) mq.addEventListener('change', onChange); else if (mq.addListener) mq.addListener(onChange);
+  } catch (e) {}
+}
+function _guestSettingsStyle() {
+  if (document.getElementById('guest-settings-style')) return;
+  const st = document.createElement('style'); st.id = 'guest-settings-style';
+  st.textContent =
+    '#guest-settings-dialog{width:min(420px,94vw);max-width:min(420px,94vw);border:1px solid var(--border);'
+    + 'border-radius:14px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 18px 50px rgba(0,0,0,0.45)}'
+    + '#guest-settings-dialog[open]{display:flex;flex-direction:column;max-height:88vh}'
+    + '#guest-settings-dialog::backdrop{background:rgba(0,0,0,0.5)}'
+    + '.gs-handle{display:none}'
+    + '.gs-head{flex:0 0 auto;display:flex;align-items:center;gap:0.5rem;padding:0.9rem 1.1rem 0.2rem}'
+    + '.gs-head h3{margin:0;font-size:1rem;flex:1;min-width:0}'
+    + '.gs-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0.4rem 1.1rem 1rem}'
+    + '.gs-sec{margin-top:0.9rem}.gs-sec:first-child{margin-top:0.3rem}'
+    + '.gs-sec-h{font-size:0.7rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;'
+    + 'color:var(--muted);margin-bottom:0.4rem;display:flex;align-items:center;gap:0.35rem}'
+    + '.gs-row{display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap}'
+    + '.gs-hint{font-size:0.75rem;color:var(--muted);margin-top:0.3rem}'
+    + '.gs-foot{flex:0 0 auto;display:flex;justify-content:flex-end;gap:0.5rem;padding:0.7rem 1.1rem;'
+    + 'border-top:1px solid var(--border);background:var(--panel)}'
+    // ≤900 px / pointeur grossier : MÊME composant, présentation bottom-sheet.
+    + '@media (max-width:900px),(pointer:coarse){'
+    // `inset:auto 0 0 0` + `width:auto` + `margin:0` : on laisse la LARGEUR se déduire des deux
+    // bords (100vw déborderait de la barre de défilement, et le `margin:auto` du UA décollait la
+    // feuille du bas). `box-sizing:border-box` garde la bordure dans la largeur.
+    + '#guest-settings-dialog{box-sizing:border-box;width:100%;max-width:100%;inset:auto 0 0 0;margin:0;'
+    + 'position:fixed;border-radius:16px 16px 0 0;border-bottom:none}'
+    // ⚠️ chaque page anime l'entrée de SES pop-ins (`dialog[open]{animation:dlg-in}` — scale 0.97
+    // + translateY) : sur une feuille collée en bas, ce transform la décentre et la fait dépasser
+    // sous le pli. On le neutralise ici, et l'entrée « qui monte » est rendue par `gs-up`.
+    + '#guest-settings-dialog[open]{max-height:82vh;animation:none;transform:none}'
+    + '.gs-handle{display:block;width:38px;height:4px;border-radius:2px;background:var(--border);margin:0.5rem auto 0}'
+    + '.gs-head{padding-top:0.5rem}}'
+    + '@media (prefers-reduced-motion:no-preference){'
+    // ⚠️ le littéral « { » suivi de « # » ouvrirait un COMMENTAIRE JINJA dans ce partial
+    // (`{#` … `#}`) → on coupe la chaîne entre les deux caractères. Rendu identique.
+    + '@media (max-width:900px),(pointer:coarse){' + '#guest-settings-dialog[open]{animation:gs-up 0.22s ease}}}'
+    + '@keyframes gs-up{from{transform:translateY(100%)}to{transform:none}}';
+  document.head.appendChild(st);
+}
+// Bouton engrenage de l'en-tête invité. `cls` = la classe de bouton d'en-tête de la page
+// (`btn` côté hub, `icon` côté share) → il hérite du gabarit local, invariant 9.
+function guestGearButton(cls, onClick) {
+  const b = el('button', { class: (cls || '') + ' gs-gear', attrs: { type: 'button', id: 'guest-settings-btn',
+    title: 'Paramètres', 'aria-label': 'Paramètres' } });
+  b.appendChild(hdrIconAt('settings', 18));
+  b.addEventListener('click', onClick);
+  return b;
+}
+function openGuestSettings(cfg) {
+  cfg = cfg || {};
+  _guestSettingsStyle();
+  let dlg = document.getElementById('guest-settings-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'guest-settings-dialog';
+    document.body.appendChild(dlg);
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });   // voile = sortir
+  }
+  const gear = document.getElementById('guest-settings-btn');
+  if (gear) gear.classList.add('on');
+  const section = (title) => {
+    const s = el('div', { class: 'gs-sec' });
+    s.appendChild(el('div', { class: 'gs-sec-h', text: title }));
+    return s;
+  };
+  const draw = () => {
+    dlg.innerHTML = '';
+    dlg.appendChild(el('div', { class: 'gs-handle', attrs: { 'aria-hidden': 'true' } }));
+    const head = el('div', { class: 'gs-head' });
+    head.appendChild(el('h3', { text: 'Paramètres' }));
+    dlg.appendChild(head);
+    const body = el('div', { class: 'gs-body' });
+
+    // (a) MON ACCÈS — se renvoyer son lien (route existante ; le serveur FORCE le destinataire).
+    if (cfg.email) {
+      const s = section('Mon accès');
+      const row = el('div', { class: 'gs-row' });
+      const send = el('button', { class: 'prio-btn', attrs: { type: 'button' } });
+      send.appendChild(hdrIconAt('send', 14));
+      send.appendChild(el('span', { text: cfg.email.label || 'Recevoir mon lien par e-mail' }));
+      send.style.cssText = 'display:inline-flex;align-items:center;gap:0.35rem';
+      const state = el('span', { class: 'gs-hint', attrs: { 'aria-live': 'polite', style: 'margin:0' } });
+      let busy = false;
+      send.addEventListener('click', async () => {
+        if (busy || send.disabled) return;                    // pas d'envoi répété
+        busy = true; send.disabled = true; send.style.opacity = '0.6';
+        state.textContent = 'Envoi…';
+        let res = null;
+        try { res = await cfg.email.onSend(); } catch (e) { res = { ok: false, msg: 'Envoi impossible.' }; }
+        busy = false;
+        state.textContent = (res && res.msg) || (res && res.ok ? 'Envoyé.' : 'Envoi impossible.');
+        if (res && res.ok) {
+          notify((res && res.msg) || 'Envoyé ! Vérifie ta boîte mail (et les spams).');
+          send.style.opacity = '0.6';                          // reste désactivé : un envoi suffit
+        } else { send.disabled = false; send.style.opacity = ''; }
+      });
+      row.appendChild(send); s.appendChild(row); s.appendChild(state);
+      s.appendChild(el('div', { class: 'gs-hint', text: 'Le lien part à votre adresse enregistrée — rien à saisir.' }));
+      body.appendChild(s);
+    }
+
+    // (b) AFFICHAGE — thème Auto / Clair / Sombre (la lune de l'en-tête a disparu).
+    {
+      const s = section('Affichage');
+      const row = el('div', { class: 'gs-row' });
+      const cur = themePref();
+      [['auto', 'Auto'], ['light', 'Clair'], ['dark', 'Sombre']].forEach(([val, label]) => {
+        const b = el('button', { class: 'prio-btn', text: label, attrs: { type: 'button', 'aria-pressed': cur === val ? 'true' : 'false' } });
+        if (cur === val) { b.style.background = 'var(--accent)'; b.style.borderColor = 'var(--accent)'; b.style.color = '#10141a'; }
+        b.addEventListener('click', () => { applyThemePref(val); draw(); });
+        row.appendChild(b);
+      });
+      s.appendChild(row);
+      s.appendChild(el('div', { class: 'gs-hint', text: 'Auto suit le réglage de votre appareil.' }));
+      body.appendChild(s);
+    }
+
+    // (c) ⭐ FAVORIS — hub seulement (le share est mono-partage).
+    if (cfg.favorites) {
+      const n = cfg.favorites.count || 0;
+      const s = section('⭐ Favoris');
+      s.appendChild(el('div', { class: 'gs-hint', attrs: { style: 'margin:0 0 0.4rem' },
+        text: n ? (n + ' dossier' + (n > 1 ? 's' : '') + ' épinglé' + (n > 1 ? 's' : '')) : 'Aucun dossier épinglé.' }));
+      if (n) {
+        const clear = dangerSoftBtn('Vider les favoris', async () => {
+          if (!(await confirmPopin('Retirer les ' + n + ' dossier(s) de vos favoris ?\nLes dossiers eux-mêmes ne sont pas touchés.', { okLabel: 'Vider' }))) return;
+          cfg.favorites.onClear();
+          draw();
+        }, { icon: 'trash' });
+        s.appendChild(clear);
+      }
+      s.appendChild(el('div', { class: 'gs-hint', text: 'Réordonner les favoris arrivera dans une prochaine version.' }));
+      body.appendChild(s);
+    }
+
+    (cfg.sections || []).forEach(sec => {
+      if (!sec || !sec.node) return;
+      const s = section(sec.title || '');
+      s.appendChild(sec.node);
+      body.appendChild(s);
+    });
+
+    dlg.appendChild(body);
+    const foot = el('div', { class: 'gs-foot' });
+    const close = el('button', { text: 'Fermer', attrs: { type: 'button' } });
+    close.addEventListener('click', () => dlg.close());
+    foot.appendChild(close);
+    lucioleize(close, 'luc-neutral');
+    dlg.appendChild(foot);
+  };
+  draw();
+  dlg.addEventListener('close', () => { const g = document.getElementById('guest-settings-btn'); if (g) g.classList.remove('on'); }, { once: true });
+  if (!dlg.open) dlg.showModal();
+}
+
 // ───────────────────────── [FX-CONVERTER] convertisseur de devises ─────────────────────────
 // Widget flottant calqué sur initPomodoro (lanceur + panneau déplaçables, afficher/masquer,
 // positions/masquage persistés localStorage). Taux BCE base EUR servis par le backend
@@ -5420,6 +5618,56 @@ function mabGlowButton(cls, label, attrs) {
   const glow = el('span', { class: 'mab-glow' });
   btn.append(glow, el('span', { class: 'mab-btxt', text: label }));
   attachLuciole(btn, glow);
+  return btn;
+}
+/* ===== [DANGER-SOFT] le danger MURMURE au repos =====
+   Doctrine (docs/design/LUCIOLE-boutons.md, § Danger — 31 juil. 2026) : un bouton destructif ne
+   prend JAMAIS l'accent ni l'aplat au repos. Au repos il est monochrome (fond `--panel`, bordure
+   `--border`, libellé `--muted`, icône Tabler `trash` en TRAIT — plus aucun emoji 🗑) ; il ROUGIT
+   au survol ET au `:focus-visible` (bordure + texte + icône `--red`/`--danger`, fond `--panel-2`).
+   C'est le LIBELLÉ qui porte la gravité (« Vider la corbeille », « Supprimer définitivement »),
+   plus la couleur permanente — et `confirmPopin` reste OBLIGATOIRE avant toute exécution.
+   Exception assumée : le bouton de CONFIRMATION de la pop-in (`#confirm-yes`) garde son rouge
+   plein — c'est la dernière marche, l'intention y est déjà déclarée. */
+function _dangerSoftStyle() {
+  if (document.getElementById('danger-soft-style')) return;
+  const st = document.createElement('style'); st.id = 'danger-soft-style';
+  st.textContent = '.danger-soft{display:inline-flex;align-items:center;gap:0.35rem;background:var(--panel);'
+    + 'border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:0.35rem 0.7rem;'
+    + 'font:inherit;font-size:0.85rem;line-height:1;cursor:pointer}'
+    + '.danger-soft:hover,.danger-soft:focus-visible{background:var(--panel-2);'
+    + 'border-color:var(--red,var(--danger));color:var(--red,var(--danger))}'
+    + '.danger-soft:focus-visible{outline:2px solid var(--red,var(--danger));outline-offset:1px}'
+    // entrées de menu ⋯ : même doctrine, sans le cadre (une ligne de menu reste une ligne)
+    + '.card-menu .danger-item,.danger-item{display:flex;align-items:center;gap:0.4rem;color:var(--muted)}'
+    + '.card-menu .danger-item:hover,.card-menu .danger-item:focus-visible,'
+    + '.danger-item:hover,.danger-item:focus-visible{color:var(--red,var(--danger))}';
+  document.head.appendChild(st);
+}
+// Bouton destructif NEUF : icône trait + libellé explicite, danger discret.
+function dangerSoftBtn(label, onClick, opts) {
+  opts = opts || {};
+  _dangerSoftStyle();
+  const b = el('button', { class: 'danger-soft' + (opts.class ? ' ' + opts.class : ''),
+    attrs: { type: 'button', title: opts.title || label } });
+  b.appendChild(hdrIconAt(opts.icon || 'trash', 15));
+  b.appendChild(el('span', { text: label }));
+  if (onClick) b.addEventListener('click', onClick);
+  if (opts.style) b.style.cssText += opts.style;
+  return b;
+}
+// Convertit un bouton EXISTANT (markup statique, entrée de menu ⋯) : retire l'emoji de tête,
+// pose l'icône trait et la bonne classe. Idempotent. `mode` = 'item' → ligne de menu (pas de cadre).
+function dangerSoftize(btn, icon, mode) {
+  if (!btn || btn.dataset.dangerSoft) return btn;
+  _dangerSoftStyle();
+  const label = String(btn.textContent || '').replace(/^[^\p{L}\p{N}]+/u, '').trim();
+  btn.textContent = '';
+  btn.classList.remove('danger', 'btn-soft');
+  btn.classList.add(mode === 'item' ? 'danger-item' : 'danger-soft');
+  btn.appendChild(hdrIconAt(icon || 'trash', 15));
+  if (label) btn.appendChild(el('span', { text: label }));
+  btn.dataset.dangerSoft = '1';
   return btn;
 }
 // [LUCIOLE-POPIN] convertit un bouton EXISTANT au style Luciole : idempotent, enveloppe

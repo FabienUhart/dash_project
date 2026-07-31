@@ -92,7 +92,7 @@ header {
 }
 header h1 { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
 header .mode { font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
-header #theme-btn { margin-left: auto; }
+header .gs-gear { margin-left: auto; }   /* [GUEST-SETTINGS] l'engrenage prend la place de la lune */
 button.icon { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s var(--ease), transform 0.1s var(--ease); }
 button.icon:hover { background: var(--bg-elev); }
 button.icon:active { transform: scale(0.94); }
@@ -908,7 +908,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 <div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
   <h1 id="title">…</h1>
-  <button id="theme-btn" class="icon" title="Thème clair / sombre" aria-label="Basculer le thème"><svg class="ic"><use href="#ic-moon"/></svg></button>
+  <!-- [GUEST-SETTINGS] la lune a disparu : le thème vit dans la pop-in Paramètres, ouverte
+       par l'engrenage posé ici au boot (icône Tabler du partial). -->
   <span class="mode" id="mode"></span>
 </header>
 <div id="layout">
@@ -1065,8 +1066,12 @@ let GUEST = { status: 'anonymous', email: '', name: '' };
 
 // Thème clair / sombre (tokens surchargés sous [data-theme=light], persistant)
 const themeBtn = document.getElementById('theme-btn');
-setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
-if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
+// [GUEST-SETTINGS] thème à TROIS états (Auto / Clair / Sombre) réglé dans la pop-in Paramètres
+// (engrenage de l'en-tête) ; « Auto » suit l'appareil. La page share est mono-partage : ni
+// favoris ni renvoi de lien (route hub uniquement) → seule la section Affichage s'affiche.
+initThemePref();
+{ const _hdr = document.querySelector('header');
+  if (_hdr) _hdr.appendChild(guestGearButton('icon', () => openGuestSettings({}))); }
 
 syncHeaderHeight();
 window.addEventListener('resize', syncHeaderHeight);
@@ -2052,7 +2057,8 @@ function openShareVoteManage(v) {
   if (!closed) actions.appendChild(shareChip('🗳 Clore', false, async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await svPost('close'); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
   else actions.appendChild(shareChip('↻ Rouvrir', false, async () => { const r = await svPost('reopen', { vote_deadline: dl.value || '' }); if (r.ok) reloadClose(); else notify('Réouverture impossible.', { error: true }); }));
   actions.appendChild(shareChip('↺ Reset', false, async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await svPost('reset', { vote_deadline: dl.value || '' }); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
-  const del = el('button', 'prio-btn', '🗑 Supprimer'); del.style.cssText = 'color:var(--danger)';
+  // [DANGER-SOFT] supprimer un vote : icône trait, monochrome au repos, rouge au survol.
+  const del = dangerSoftBtn('Supprimer');
   del.addEventListener('click', async () => { if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer' }))) return; const r = await fetch(API + '/votes/' + v.id, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }); if (r.ok) { if (shareSelectedVoteId === v.id) shareSelectedVoteId = null; reloadClose(); } else notify('Impossible.', { error: true }); });
   actions.appendChild(del); body.appendChild(actions);
   const foot = el('div', 'dlg-actions');
@@ -2716,8 +2722,11 @@ function renderTiles() {
   if (DATA.can_edit && tn > 0) {
     const tile = el('div', 'tile' + (FILTER === 'trash' ? ' active' : ''));
     tile.appendChild(el('span', 'tn', String(tn)));
-    const l = el('span', 'tl', '🗑 Corbeille');
-    l.style.color = 'var(--danger)';
+    // [DANGER-SOFT] tuile Corbeille : icône TRAIT + libellé neutre (une tuile de filtre ne crie pas).
+    const l = el('span', 'tl');
+    l.style.cssText = 'display:inline-flex;align-items:center;gap:0.3rem';
+    l.appendChild(hdrIconAt('trash', 14));
+    l.appendChild(el('span', '', 'Corbeille'));
     tile.appendChild(l);
     tile.addEventListener('click', () => { FILTER = 'trash'; render(); });
     tiles.appendChild(tile);
@@ -3371,7 +3380,7 @@ function render() {
       const mv = el('button', '', '↗ Déplacer vers…');
       mv.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = true; openMoveShareMemo(memo); });
       moreMenu.appendChild(mv);
-      const del = el('button', 'danger-item', '🗑 Supprimer');
+      const del = dangerSoftize(el('button', 'danger-item', 'Supprimer'), 'trash', 'item');   // [DANGER-SOFT]
       del.addEventListener('click', async (e) => { e.stopPropagation(); moreMenu.hidden = true; const r = await fetch(API + '/memo/' + memo.id, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } }); if (r.ok) await load(); });
       moreMenu.appendChild(del);
       moreBtn.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
@@ -3647,6 +3656,7 @@ projBtn.addEventListener('click', (e) => withBusy(e.currentTarget, addSubProject
   ['map-close', 'luc-neutral'],    // le ✕ reste le geste principal
 ].forEach(([id, variant]) => lucioleize(document.getElementById(id), variant));
 
+_dangerSoftStyle();   // [DANGER-SOFT] feuille du danger discret posée dès le boot (helper partagé)
 load();
 setInterval(load, 15000);
 
