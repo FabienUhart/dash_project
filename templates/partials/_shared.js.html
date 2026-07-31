@@ -504,6 +504,250 @@ function memoJumpBar(dir) {
 // « 😊+ » → mini-palette (façon card-menu, fermeture au clic extérieur, CSS/markup — invariant 8).
 // PUR : cfg via callback. Identique 3 pages. La mini-palette lit la liste configurée courante.
 let REACTION_EMOJIS = ['👍', '👎', '❤️', '😂', '😮', '🎉'];
+/* ===== [COMMENTS-V2] Le fil de commentaires devient une conversation =====
+   Maquette validée (réf. visuelle « bulles », adaptée à la doctrine monochrome maison).
+   Frontend pur : les commentaires / réactions / vocaux EXISTANTS sont rendus autrement, aucune
+   donnée migrée, aucune route. Chaque page garde ses droits et ses appels — ici on ne fournit
+   que le SQUELETTE partagé (avatar + bulle + méta + actions + réponses repliables). */
+function _commentsV2Style() {
+  if (document.getElementById('comments-v2-style')) return;
+  const st = document.createElement('style');
+  st.id = 'comments-v2-style';
+  st.textContent =
+      '.cmt{display:flex;gap:0.5rem;align-items:flex-start;margin-top:0.45rem;position:relative}'
+    + '.cmt-av{flex:0 0 auto;width:26px;height:26px;border-radius:50%;background:var(--panel-2);'
+    + 'border:1px solid var(--border);color:var(--muted);font-size:0.62rem;font-weight:700;'
+    + 'display:inline-flex;align-items:center;justify-content:center;text-transform:uppercase}'
+    + '.cmt-av.guest{color:var(--guest,#b39ddb)}'
+    + '.cmt-main{flex:1 1 auto;min-width:0}'
+    // bulle : coin haut-gauche cassé (rayon 4) comme la maquette
+    + '.cmt-bubble{background:var(--panel-2);border:1px solid var(--border);border-radius:4px 12px 12px 12px;'
+    + 'padding:0.35rem 0.6rem;font-size:0.84rem;overflow-wrap:anywhere;white-space:pre-wrap}'
+    + '.cmt-auth{font-weight:700;margin-right:0.35em}'
+    + '.cmt-auth.guest{color:var(--guest,#b39ddb)}'
+    + '.cmt-foot{display:flex;align-items:center;gap:0.5rem;margin-top:0.15rem;padding-left:0.15rem;min-height:1.1rem}'
+    + '.cmt-when{font-size:0.68rem;color:var(--muted);flex:0 0 auto}'
+    + '.cmt-seen{font-size:0.68rem;color:var(--muted);flex:0 0 auto}'
+    // actions : invisibles au repos, révélées au survol du commentaire ET au focus clavier
+    + '.cmt-acts{display:flex;align-items:center;gap:0.5rem;opacity:0;transition:opacity .15s ease}'
+    + '.cmt:hover .cmt-acts,.cmt:focus-within .cmt-acts{opacity:1}'
+    + '.cmt-act{background:none;border:none;padding:0;min-height:0;font:inherit;font-size:0.68rem;'
+    + 'color:var(--muted);cursor:pointer}'
+    + '.cmt-act:hover{color:var(--accent)}'
+    + '.cmt-act.danger:hover{color:var(--red,var(--danger))}'
+    + '@media (max-width:900px),(pointer:coarse){.cmt-acts{opacity:0.55}}'
+    // réponses : indentation + connecteur en coude
+    + '.cmt.cmt-reply{margin-left:1.6rem;padding-left:0.7rem}'
+    + '.cmt.cmt-reply::before{content:"";position:absolute;left:0;top:-0.35rem;width:0.6rem;height:1.1rem;'
+    + 'border-left:2px solid var(--border);border-bottom:2px solid var(--border);border-bottom-left-radius:6px}'
+    + '.cmt-more{background:none;border:none;padding:0.1rem 0;margin-left:1.6rem;font:inherit;font-size:0.72rem;'
+    + 'color:var(--muted);cursor:pointer}'
+    + '.cmt-more:hover{color:var(--accent)}'
+    // priorité : mêmes couleurs que les cards (P1 rouge, P2 ambre, P3 vert, P4 bleu)
+    + '.cmt-prio{display:inline-block;font-size:0.62rem;font-weight:700;border-radius:4px;padding:0 0.3rem;'
+    + 'margin-right:0.35em;color:#10141a;vertical-align:1px}'
+    // composer : champ arrondi qui contient input + actions
+    + '.cmt-composer{display:flex;gap:0.5rem;align-items:center;margin-top:0.5rem}'
+    + '.cmt-field{flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:0.3rem;background:var(--bg);'
+    + 'border:1px solid var(--border);border-radius:999px;padding:0.15rem 0.35rem 0.15rem 0.7rem}'
+    + '.cmt-field:focus-within{border-color:var(--accent)}'
+    + '.cmt-field input[type=text]{flex:1 1 auto;min-width:0;background:none;border:none;outline:none;'
+    + 'color:var(--text);font:inherit;font-size:0.8rem;padding:0.25rem 0}'
+    + '.cmt-ibtn{flex:0 0 auto;width:26px;height:26px;min-height:0;padding:0;border:none;background:none;'
+    + 'color:var(--muted);cursor:pointer;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}'
+    + '.cmt-ibtn:hover{color:var(--accent)}'
+    + '.cmt-flagwrap{position:relative;display:inline-flex;flex:0 0 auto}'
+    // le <select> reste DESSOUS (accessibilité/clavier) : transparent mais focusable et cliquable
+    + '.cmt-flagwrap select{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}'
+    + '.cmt-flagwrap:focus-within .cmt-ibtn{color:var(--accent);outline:2px solid var(--accent);outline-offset:1px}'
+    // [SYSTEM-LINES-MONO] ligne système : plus de bulle du tout — ligne plate fantôme, muted
+    // italique, un cran plus petite. L'avatar RESTE (on veut savoir qui a agi) mais atténué.
+    + '.cmt-sysrow .cmt-av{opacity:0.45}'
+    + '.cmt-sysline{display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap;'
+    + 'color:var(--muted);font-style:italic;font-size:0.78rem;line-height:1.5;padding:0.1rem 0}'
+    + '.cmt-sysline .cmt-sys-ic{flex:0 0 auto;opacity:0.85}'
+    + '.cmt-sysline .cmt-sysauth{font-style:normal;font-weight:600}'
+    // micro-chip « app » : c'est le RAPPEL demandé — d'un coup d'œil, ce n'est pas un humain.
+    + '.cmt-app{display:inline-flex;align-items:center;gap:0.2em;font-style:normal;font-size:0.6rem;'
+    + 'letter-spacing:0.05em;text-transform:uppercase;color:var(--muted);border:1px solid var(--border);'
+    + 'border-radius:6px;padding:0.05rem 0.3rem;opacity:0.85;white-space:nowrap}'
+    + '.cmt-sysrow .cmt-foot{margin-top:0}'
+    + '.cmt-seen-ic{flex:0 0 auto;opacity:0.8;vertical-align:-2px}'
+    // [COMMENTS-V2 addendum] pierre tombale : gabarit bulle mais ÉTEINT — pas de fond accentué,
+    // bordure token, texte muted italique. L'auteur et l'heure restent (le contexte survit).
+    + '.cmt-bubble.cmt-dead{background:none;border-style:dashed}'
+    + '.cmt-bubble.cmt-dead .cmt-auth{color:var(--muted);font-weight:600}'
+    + '.cmt-tomb{color:var(--muted);font-style:italic}'
+    // [COMMENTS-V2] en-tête de section (sous-tâches) + champ d'ajout « invitation »
+    + '.cmt-sec-head{font-size:0.68rem;font-weight:700;letter-spacing:0.04em;color:var(--muted);margin:0.5rem 0 0.25rem}'
+    + '.st-addwrap{display:flex;align-items:center;gap:0.4rem;margin-top:0.3rem;padding:0.15rem 0.5rem;'
+    + 'border:1px dashed var(--border);border-radius:8px;color:var(--muted)}'
+    + '.st-addwrap:hover,.st-addwrap:focus-within{border-color:var(--accent);color:var(--accent)}'
+    + '.st-addwrap input{flex:1 1 auto;min-width:0;background:none;border:none;outline:none;color:var(--text);'
+    + 'font:inherit;font-size:0.8rem;padding:0.25rem 0}';
+  document.head.appendChild(st);
+}
+// Initiales d'un auteur (« Marie <m@x.fr> » → MA ; « moi » → selon la page).
+function cmtInitials(name) {
+  const n = String(name || '').replace(/\s*<[^>]*>/, '').trim();
+  if (!n) return '?';
+  const parts = n.split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? parts[0][0] + parts[1][0] : n.slice(0, 2)).toUpperCase();
+}
+function cmtAvatar(name, guest) {
+  return el('span', { class: 'cmt-av' + (guest ? ' guest' : ''), text: cmtInitials(name), attrs: { title: String(name || '') } });
+}
+/* [COMMENT-PRIO-CONFIG] Les priorités sont CONFIGURABLES (Paramètres → Priorités : P1…P4,
+   « + Ajouter », couleurs perso). Le drapeau ⚑ du composer et la chip de la bulle lisent donc
+   LA liste configurée — plus de 1-3 câblé. `prios` = la liste telle qu'exposée par la page
+   (`state.priorities` owner, `DATA.priorities` invité/hub : id + name + color, déjà triée). */
+function cmtPrioPalette(prios) {
+  const list = (prios || []).filter(p => p && p.id > 0);
+  const find = (id) => list.find(p => p.id === id) || null;
+  return {
+    list: list,
+    color: (id) => { const p = find(id); return (p && p.color) || ''; },
+    label: (id) => { const p = find(id); return (p && p.name) || ('P' + id); },
+  };
+}
+// <select> du drapeau ⚑ : « — » + une option par priorité configurée, dans l'ordre des Paramètres.
+function cmtPrioSelect(prios) {
+  const sel = el('select', { attrs: { title: 'Priorité du commentaire' } });
+  sel.appendChild(el('option', { attrs: { value: '0' }, text: '⚑ —' }));
+  cmtPrioPalette(prios).list.forEach((p) => sel.appendChild(el('option', { attrs: { value: String(p.id) }, text: p.name || ('P' + p.id) })));
+  return sel;
+}
+// Chip de priorité d'un commentaire — couleurs des cards, via la palette de la page.
+// Une priorité SUPPRIMÉE des Paramètres alors que des commentaires la portent : la page ne
+// trouve ni couleur ni libellé → chip NEUTRE (fond panel, bordure, libellé « P<id> »), jamais
+// de casse ni de commentaire perdu.
+function cmtPrioChip(priority, colorFor, labelFor) {
+  if (!priority) return null;
+  const c = (typeof colorFor === 'function' && colorFor(priority)) || '';
+  const lbl = (typeof labelFor === 'function' && labelFor(priority)) || ('P' + priority);
+  const chip = el('span', { class: 'cmt-prio', text: lbl, attrs: { title: 'Priorité ' + lbl } });
+  if (c) { chip.style.background = c; chip.style.color = textOn(c); }
+  else { chip.style.background = 'var(--panel-2)'; chip.style.color = 'var(--muted)'; chip.style.border = '1px solid var(--border)'; }
+  return chip;
+}
+/* Squelette d'un commentaire. cfg = { author, guest, bodyNode, when, seenText, priority,
+   prioColor(p), isReply, deleted, actions:[{label,title,danger,onClick}], reactionsRow }.
+   Renvoie l'élément ; la page reste maîtresse des droits et des appels réseau.
+   [COMMENTS-V2 addendum] `deleted` = PIERRE TOMBALE : même gabarit de bulle, mais éteinte —
+   auteur et heure conservés (le fil garde son contexte, les réponses restent dessous), corps
+   remplacé par « 🚫 Message supprimé », et PLUS AUCUNE action (ni Répondre, ni Réagir, ni ✕).
+   [SYSTEM-LINES-MONO] `system` = { icon, text } (via `cmtSystemInfo`) : le message AUTOMATIQUE
+   quitte la bulle pour une LIGNE PLATE fantôme (muted italique, icône trait, micro-chip « app »),
+   sans Répondre ni palette de réaction — un compteur déjà posé sur une vieille ligne reste
+   seulement LISIBLE (la page passe `canReact = false`, donc chips désactivées, pas de 😊+). */
+function cmtRow(cfg) {
+  _commentsV2Style();
+  const dead = !!cfg.deleted;
+  const sys = (!dead && cfg.system) ? cfg.system : null;
+  const row = el('div', { class: 'cmt' + (cfg.isReply ? ' cmt-reply' : '') + (sys ? ' cmt-sysrow' : '') });
+  row.appendChild(cmtAvatar(cfg.author, cfg.guest));
+  const main = el('div', { class: 'cmt-main' });
+  const author = String(cfg.author || '').replace(/\s*<[^>]*>/, '');
+  if (sys) {
+    const line = el('div', { class: 'cmt-sysline' });
+    const ic = hdrIcon(sys.icon);
+    ic.setAttribute('width', '14'); ic.setAttribute('height', '14'); ic.classList.add('cmt-sys-ic');
+    line.appendChild(ic);
+    line.appendChild(el('span', { class: 'cmt-sysauth', text: author, attrs: { title: String(cfg.author || '') } }));
+    line.appendChild(el('span', { text: sys.text }));
+    const chip = el('span', { class: 'cmt-app', attrs: { title: "Message automatique de l'application" } });
+    const gear = hdrIcon('settings'); gear.setAttribute('width', '11'); gear.setAttribute('height', '11');
+    chip.appendChild(gear);
+    chip.appendChild(el('span', { text: 'app' }));
+    line.appendChild(chip);
+    main.appendChild(line);
+  } else {
+  const bubble = el('div', { class: 'cmt-bubble' + (dead ? ' cmt-dead' : '') });
+  const p = dead ? null : cmtPrioChip(cfg.priority, cfg.prioColor, cfg.prioLabel);
+  if (p) bubble.appendChild(p);
+  bubble.appendChild(el('span', { class: 'cmt-auth' + (cfg.guest ? ' guest' : ''), text: author, attrs: { title: String(cfg.author || '') } }));
+  if (dead) bubble.appendChild(el('span', { class: 'cmt-tomb', text: '🚫 Message supprimé' }));
+  else if (cfg.bodyNode) bubble.appendChild(cfg.bodyNode);
+  main.appendChild(bubble);
+  }
+  const foot = el('div', { class: 'cmt-foot' });
+  // [COMPOSER-MIC-MONO] méta « … · 🎤 message vocal » : l'emoji laisse place à l'icône micro trait
+  // `currentColor` (même traitement que « 👁 vu par … » ci-dessous). Le texte, lui, ne bouge pas.
+  if (cfg.when) {
+    const when = el('span', { class: 'cmt-when' });
+    const i = String(cfg.when).indexOf('🎤');
+    if (i >= 0) {
+      const before = String(cfg.when).slice(0, i);
+      const rest = String(cfg.when).slice(i + '🎤'.length).replace(/^\s*/, '');
+      if (before) when.appendChild(document.createTextNode(before));
+      const mic = hdrIcon('microphone'); mic.setAttribute('width', '12'); mic.setAttribute('height', '12');
+      mic.classList.add('cmt-seen-ic');
+      when.appendChild(mic); when.appendChild(document.createTextNode(' ' + rest));
+    } else when.textContent = cfg.when;
+    foot.appendChild(when);
+  }
+  const acts = el('div', { class: 'cmt-acts' });
+  // Une ligne système ne se répond pas : on ne garde que les actions marquées `keepOnSystem`
+  // (aucune aujourd'hui — l'owner supprime un journal depuis la section Fichiers, pas d'ici).
+  ((dead || sys) ? [] : (cfg.actions || [])).filter(Boolean).forEach(a => {
+    const b = el('button', { class: 'cmt-act' + (a.danger ? ' danger' : ''), text: a.label,
+      attrs: { type: 'button', title: a.title || a.label } });
+    b.addEventListener('click', (e) => { e.stopPropagation(); a.onClick(row); });
+    acts.appendChild(b);
+  });
+  if (acts.children.length) foot.appendChild(acts);
+  // [SYSTEM-LINES-MONO] « 👁 vu par … » : l'emoji (rendu en gros et en couleur selon les polices)
+  // laisse place à l'icône œil trait `currentColor`, même famille que le reste du chrome.
+  if (cfg.seenText && !dead) {
+    const seen = el('span', { class: 'cmt-seen', attrs: { title: cfg.seenText } });
+    const rest = String(cfg.seenText).replace(/^👁\s*/, '');
+    if (rest !== cfg.seenText) {
+      const eye = hdrIcon('eye'); eye.setAttribute('width', '12'); eye.setAttribute('height', '12');
+      eye.classList.add('cmt-seen-ic');
+      seen.appendChild(eye); seen.appendChild(document.createTextNode(' ' + rest));
+    } else seen.textContent = cfg.seenText;
+    foot.appendChild(seen);
+  }
+  main.appendChild(foot);
+  // Réactions : jamais sur une tombale ; sur une ligne système, seulement si un compteur EXISTE
+  // déjà (rangée vide = rien du tout, pas de bloc fantôme).
+  if (cfg.reactionsRow && !dead && (!sys || cfg.reactionsRow.children.length)) main.appendChild(cfg.reactionsRow);
+  row.appendChild(main);
+  return row;
+}
+// Bouton « ▾ Voir n réponses de plus » / « ▴ Masquer » (état de SESSION, rien de persisté).
+function cmtMoreToggle(n, onToggle) {
+  const b = el('button', { class: 'cmt-more', attrs: { type: 'button' } });
+  let open = false;
+  const sync = () => { b.textContent = open ? '▴ Masquer' : ('▾ Voir ' + n + ' réponse' + (n > 1 ? 's' : '') + ' de plus'); };
+  sync();
+  b.addEventListener('click', () => { open = !open; sync(); onToggle(open); });
+  return b;
+}
+/* [COMMENTS-V2] Le fil ne montre qu'UNE bulle par vocal : la ligne système « 📎 a ajouté le
+   fichier « vocal-….webm » » est masquée dès qu'un message vocal est réellement rendu dans le
+   même fil (l'info reste dans l'historique et la section Fichiers). */
+/* [SYSTEM-LINES-MONO] Un message AUTOMATIQUE (journal de l'app) n'est pas un message humain :
+   il quitte le gabarit bulle pour une ligne plate fantôme. Détection sur les corps que le
+   serveur génère lui-même (`_attach_log_comment`) — motif strict « <emoji> a ajouté/supprimé … »
+   pour ne jamais transformer en journal le message d'un humain qui commencerait par 📎.
+   Renvoie { icon, text } (texte SANS l'emoji, repris par une icône trait) ou null. */
+const CMT_SYS_RE = /^(📎|🗑)\s+a\s+(ajouté|supprimé)\s/;
+function cmtSystemInfo(body) {
+  const t = String(body || '').trim();
+  const m = CMT_SYS_RE.exec(t);
+  if (!m) return null;
+  return { icon: m[1] === '🗑' ? 'trash' : 'paperclip', text: t.replace(/^(📎|🗑)\s+/, '') };
+}
+const CMT_VOICE_LOG_RE = /^📎 a ajouté le fichier « *vocal-\d+\.[a-z0-9]+ *»$/i;
+function cmtHideVoiceLogs(comments) {
+  const list = comments || [];
+  const hasVoice = list.some(c => VOICE_MARKER_RE.test(c.body || '') && (VOICE_MARKER_RE.lastIndex = 0, true));
+  VOICE_MARKER_RE.lastIndex = 0;
+  if (!hasVoice) return list;
+  return list.filter(c => !CMT_VOICE_LOG_RE.test((c.body || '').trim()));
+}
+
 function reactionRow(reactions, canReact, onToggle) {
   const row = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;margin-top:0.25rem' } });
   (reactions || []).forEach(r => {
@@ -1919,7 +2163,10 @@ async function runPhotoView(cfg) {
     const ph = vis[cur];
 
     // (1) Carrousel
-    const stage = el('div', { attrs: { style: 'position:relative;width:100%;height:min(46vh,300px);border-radius:8px;background:var(--panel-2) center/contain no-repeat;overflow:hidden;display:flex;align-items:center;justify-content:center' } });
+    // [PHOTOS-POPIN-SIZE] la scène prend TOUTE la hauteur libre de la pop-in (classe `.pv-stage`,
+    // CSS par page) ; la hauteur inline reste comme REPLI si la feuille manque, et le mobile
+    // retrouve l'ancien gabarit via la media query ≤900px. `center/contain` = object-fit contain.
+    const stage = el('div', { class: 'pv-stage', attrs: { style: 'position:relative;width:100%;flex:1 1 auto;min-height:min(46vh,300px);border-radius:8px;background:var(--panel-2) center/contain no-repeat;overflow:hidden;display:flex;align-items:center;justify-content:center' } });
     if (ph) stage.style.backgroundImage = 'url("' + cfg.imageUrl(ph.filename) + '")';
     const counter = el('span', { text: (cur + 1) + ' / ' + vis.length, attrs: { style: 'position:absolute;top:8px;right:10px;background:#000a;color:#fff;font-size:0.72rem;padding:0.1rem 0.45rem;border-radius:10px' } });
     stage.appendChild(counter);
@@ -1936,32 +2183,41 @@ async function runPhotoView(cfg) {
     body.appendChild(stage);
 
     // (3) Barre d'options (rotation/zoom vivent dans runImageViewer en plein écran)
-    const bar = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:center;margin:0.5rem 0 0.4rem' } });
+    const bar = el('div', { attrs: { style: 'display:flex;gap:0.3rem;align-items:center;margin:0.5rem 0 0.4rem;flex:0 0 auto' } });
     // [PHOTO-UI-CONSISTENCY] Boutons = .iv-btn (look cards). Principal (plein écran) en
     // accent (.iv-accent), suppression en danger (.iv-del). Une seule source de vérité.
-    const obtn = (txt, title, fn, cls) => el('button', { class: 'iv-btn' + (cls ? ' ' + cls : ''), text: txt, attrs: { type: 'button', title }, on: { click: fn } });
+    // [HUB-CHROME] boutons d'action monochromes : icône Tabler TRAIT (currentColor) au lieu des
+    // emojis/accent. La corbeille garde un danger DISCRET (rouge au survol seulement, `.iv-danger`).
+    const obtn = (icon, title, fn, cls) => {
+      const b2 = el('button', { class: 'iv-btn' + (cls ? ' ' + cls : ''), attrs: { type: 'button', title }, on: { click: fn } });
+      const ic = hdrIcon(icon); ic.setAttribute('width', '17'); ic.setAttribute('height', '17');
+      b2.appendChild(ic);
+      return b2;
+    };
     const openFull = () => runImageViewer({
       images: vis.map(p => p.filename), startIndex: cur,
       imageUrl: cfg.imageUrl, downloadUrl: cfg.downloadUrl, exifUrl: cfg.exifUrl,
       canDelete: !!cfg.canEdit,
       onDelete: async (name) => { const p = byName(name); if (p) { await cfg.deletePhoto(p); await reload(); } },
     });
-    bar.appendChild(obtn('⤢', 'Plein écran (zoom, rotation)', openFull, 'iv-accent'));
+    bar.appendChild(obtn('maximize', 'Plein écran (zoom, rotation)', openFull));
     if (ph) {
-      const dl = el('a', { class: 'iv-btn', text: '⬇', attrs: { href: cfg.downloadUrl(ph.filename), download: '', title: 'Télécharger' } });
+      const dl = el('a', { class: 'iv-btn', attrs: { href: (cfg.downloadUrl || cfg.imageUrl)(ph.filename), download: '', title: 'Télécharger' } });
+      const dic = hdrIcon('download'); dic.setAttribute('width', '17'); dic.setAttribute('height', '17');
+      dl.appendChild(dic);
       bar.appendChild(dl);
     }
-    if (ph && ph.has_gps) bar.appendChild(obtn('📍', 'Localiser cette photo sur la carte', () => cfg.openMap(ph.filename)));
+    if (ph && ph.has_gps) bar.appendChild(obtn('map-pin', 'Localiser cette photo sur la carte', () => cfg.openMap(ph.filename)));
     if (cfg.canEdit && ph) {
-      bar.appendChild(obtn('🗑', 'Supprimer cette photo', async () => {
+      bar.appendChild(obtn('trash', 'Supprimer cette photo', async () => {
         if (!(await confirmPopin('Supprimer cette photo ?\nElle sera retirée de son mémo.', { okLabel: 'Supprimer' }))) return;
         await cfg.deletePhoto(ph); await reload();
-      }, 'iv-del'));
+      }, 'iv-danger'));
     }
     body.appendChild(bar);
 
     // (5) Vignettes
-    const thumbs = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap;margin:0 0 0.6rem' } });
+    const thumbs = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap;margin:0 0 0.6rem;flex:0 0 auto' } });
     vis.forEach((p, i) => {
       const t = el('button', { attrs: { type: 'button', title: fmtTaken(p.taken_at) || p.filename, style: 'width:34px;height:34px;border-radius:5px;background:var(--panel-2) center/cover no-repeat;background-image:url("' + cfg.imageUrl(p.filename) + '");cursor:pointer;flex-shrink:0;border:' + (i === cur ? '2px solid var(--accent)' : '1px solid var(--border)') }, on: { click: () => { cur = i; render(); } } });
       thumbs.appendChild(t);
@@ -1975,7 +2231,7 @@ async function runPhotoView(cfg) {
     dated.forEach(p => { const k = dayKey(p); if (!(k in counts)) days.push(k); counts[k] = (counts[k] || 0) + 1; });
     const undatedN = photos.length - dated.length;
     if (days.length || undatedN) {
-      const frieze = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:flex-start;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:0.5rem' } });
+      const frieze = el('div', { attrs: { style: 'display:flex;gap:0.4rem;align-items:flex-start;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:0.5rem;flex:0 0 auto' } });
       // [PHOTO-UI-CONSISTENCY] Chips = .prio-btn ; sélection = accent standard ; compteur = .badge.
       const SEL = ';background:var(--accent);border-color:var(--accent);color:#10141a';
       frieze.appendChild(el('button', { class: 'prio-btn', text: 'Tout', attrs: { type: 'button', style: dayFilter ? '' : SEL }, on: { click: () => { dayFilter = null; expandedDay = null; cur = 0; render(); } } }));
@@ -2207,6 +2463,266 @@ function addMentionMatcher(q) {
   });
 }
 
+/* ===== [EDITOR-AUTOLINK] Les URL deviennent des liens toutes seules dans l'éditeur =====
+   Coller une URL la laissait en texte mort : il fallait re-sélectionner + bouton lien + re-coller
+   (double saisie pénible au doigt). Ici le format `link` est posé dans le DELTA Quill — donnée
+   riche propre, pas un post-traitement d'affichage (le `linkify()` du rendu des cards reste, il
+   couvre le contenu NON riche). Zéro lib : regex maison stricte, http/https uniquement. */
+// URL nue, sans la ponctuation de fin de phrase (« … voir https://x.fr/a. » → lien sans le point).
+const AUTOLINK_RE = /https?:\/\/[^\s<>"'`]+/g;
+function _autolinkTrim(url) {
+  const m = /[.,;:!?)\]}'"»]+$/.exec(url);
+  let u = m ? url.slice(0, -m[0].length) : url;
+  // une parenthèse fermante n'est retirée que si elle n'est pas appariée (Wikipédia…)
+  if (m && m[0].indexOf(')') >= 0 && (url.match(/\(/g) || []).length > (u.match(/\)/g) || []).length) u += ')';
+  return u;
+}
+/* [COMMENT-LINKIFY] Rendu d'un corps de commentaire : le champ est un `<input type="text">`
+   (pas de Quill) → l'auto-lien ne peut pas se faire à la SAISIE, il se fait au RENDU.
+   SÉCURITÉ : on part du TEXTE brut et on construit des nœuds (`createTextNode` + `<a>`) —
+   **jamais** de HTML assemblé, donc « <b>test</b> » tapé dans un commentaire reste du texte.
+   Même regex qu'[EDITOR-AUTOLINK] (`AUTOLINK_RE` + `_autolinkTrim`) : UNE source de vérité,
+   http/https seulement, ponctuation finale exclue. Les mentions « @Marie » et les emojis
+   traversent en texte, intacts. Rétroactif : c'est du rendu, aucune migration. */
+/* ===== [LINK-RENDER] Habillage des liens du CONTENU des mémos (maquette validée, règle B+C) =====
+   AFFICHAGE PUR : le `href` n'est JAMAIS modifié, aucune donnée touchée, rétroactif d'office.
+   Une seule source de vérité, appliquée au RENDU (cards + fiche de lecture, 3 pages).
+   1a. Texte du lien = son URL, et lien SEUL dans son bloc → **chip** (icône link + domaine gras
+       + chemin muted tronqué + ↗).
+   1b. Texte = son URL au milieu d'une phrase → **inline apprivoisé** (pas de soulignement plein,
+       bordure basse pointillée discrète, domaine gras, chemin muted).
+   2.  Texte PERSONNALISÉ (≠ URL) → texte conservé tel quel + habillage inline + ↗.
+   Dans une checklist / un tableau / une liste : TOUJOURS le rendu inline (jamais de chip dans une
+   ligne cochable). `title` = l'URL COMPLÈTE sur chaque lien habillé. */
+function _linkRenderStyle() {
+  if (document.getElementById('link-render-style')) return;
+  const st = document.createElement('style');
+  st.id = 'link-render-style';
+  st.textContent =
+    // ⚠️ Spécificité : chaque page a un `.task-content a { color: var(--accent) }` (0,1,1) qui bat
+    // un simple `.lnk` (0,1,0) → le repos serait accent. On qualifie donc avec `a.lnk` (0,1,1 +
+    // ordre) et on double avec `.task-content a.lnk` (0,2,1) pour gagner à coup sûr.
+      'a.lnk,.task-content a.lnk{display:inline;text-decoration:none;color:var(--text);'
+    + 'border-bottom:1px dotted var(--muted);overflow-wrap:anywhere;transition:color .15s ease,border-color .15s ease}'
+    + 'a.lnk:hover,.task-content a.lnk:hover{color:var(--accent);border-bottom-color:var(--accent)}'
+    + '.lnk .lnk-dom{font-weight:600}'
+    + '.lnk .lnk-path{color:var(--muted)}'
+    + '.lnk:hover .lnk-path{color:var(--accent)}'
+    + '.lnk .lnk-ext{font-size:0.78em;color:var(--muted);margin-left:0.15em}'
+    + '.lnk:hover .lnk-ext{color:var(--accent)}'
+    // chip : conteneur bordé, monochrome au repos, accent au survol ; ne déborde jamais la card
+    + 'a.lnk-chip,.task-content a.lnk-chip{display:inline-flex;align-items:center;gap:0.35em;max-width:100%;'
+    + 'vertical-align:baseline;border:1px solid var(--border);background:var(--panel-2);border-radius:8px;'
+    + 'padding:0.12em 0.5em;text-decoration:none;color:var(--text);overflow:hidden}'
+    + 'a.lnk-chip:hover,.task-content a.lnk-chip:hover{border-color:var(--accent);color:var(--accent)}'
+    + '.lnk-chip .lnk-ic{flex:0 0 auto;opacity:0.75}'
+    + '.lnk-chip:hover .lnk-ic{opacity:1}'
+    + '.lnk-chip .lnk-dom{font-weight:600;flex:0 0 auto}'
+    + '.lnk-chip .lnk-path{color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto}'
+    + '.lnk-chip:hover .lnk-path{color:var(--accent)}';
+  document.head.appendChild(st);
+}
+// Découpe une URL en { dom, path } pour l'affichage (https:// et www. retirés — jamais du href).
+function _linkParts(href) {
+  let rest = String(href || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+  const cut = rest.search(/[/?#]/);
+  return cut < 0 ? { dom: rest, path: '' } : { dom: rest.slice(0, cut), path: rest.slice(cut) };
+}
+// Le texte du lien EST-il son URL ? (tolère la forme raccourcie posée par `linkify`.)
+function _linkTextIsUrl(a) {
+  const t = (a.textContent || '').trim().replace(/…$/, '');
+  if (!t) return true;
+  const h = (a.getAttribute('href') || '').trim();
+  const norm = (x) => x.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/+$/, '');
+  const nt = norm(t), nh = norm(h);
+  return nt === nh || (nt.length > 8 && nh.indexOf(nt) === 0);
+}
+/* [LINK-RENDER correctif] Linkifie les URL restées en TEXTE dans un nœud déjà rendu.
+   Le postulat du lot initial (« le contenu non riche passe déjà par linkify ») était faux dans un
+   cas courant : un contenu RICHE (donc rendu par sanitizeHTML, sans linkify) peut contenir une URL
+   tapée avant [EDITOR-AUTOLINK] — elle restait du texte mort. On travaille sur les NŒUDS TEXTE
+   (jamais d'innerHTML : mentions, emojis et tout le markup existant sont préservés tels quels),
+   on saute ce qui est déjà dans un <a>/<code>/<pre> et le chrome de l'app. Même regex partagée
+   qu'[EDITOR-AUTOLINK]/[COMMENT-LINKIFY] (AUTOLINK_RE + _autolinkTrim) : une seule source de vérité. */
+function linkifyTextNodes(root) {
+  if (!root || !root.ownerDocument) return root;
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  const targets = [];
+  let n;
+  while ((n = walker.nextNode())) {
+    const t = n.nodeValue || '';
+    if (t.indexOf('http') < 0) continue;
+    const p = n.parentElement;
+    if (!p || p.closest('a, code, pre, .prio-btn, .chip, .mention, .hdr-btn, .me-crumb, .task-acts')) continue;
+    targets.push(n);
+  }
+  targets.forEach((node) => {
+    const text = node.nodeValue || '';
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    AUTOLINK_RE.lastIndex = 0;
+    while ((m = AUTOLINK_RE.exec(text)) !== null) {
+      const url = _autolinkTrim(m[0]);
+      if (!url) continue;
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const a = document.createElement('a');
+      a.href = url; a.textContent = url;                       // propriétés, jamais de HTML assemblé
+      a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = url;
+      a.addEventListener('click', (e) => e.stopPropagation()); // la card ne s'ouvre pas sous le lien
+      frag.appendChild(a);
+      last = m.index + url.length;
+    }
+    if (!frag.childNodes.length) return;
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.replaceWith(frag);
+  });
+  return root;
+}
+/* Habille les <a> d'un nœud DÉJÀ rendu. `opts.inlineOnly` force le mode inline (commentaires).
+   Idempotent (`data-dressed`), et ne touche jamais les chips/mentions/chrome de l'app.
+   [LINK-RENDER correctif] Linkifie d'ABORD les URL restées en texte (contenu riche compris) :
+   un seul point d'entrée pour tous les chemins de rendu, impossible d'en oublier un. */
+function dressLinks(root, opts) {
+  if (!root || !root.querySelectorAll) return root;
+  _linkRenderStyle();
+  linkifyTextNodes(root);
+  const inlineOnly = !!(opts && opts.inlineOnly);
+  root.querySelectorAll('a[href]').forEach((a) => {
+    if (a.dataset.dressed) return;
+    const href = a.getAttribute('href') || '';
+    if (!/^https?:\/\//i.test(href)) return;                 // http/https uniquement
+    if (a.closest('.prio-btn, .chip, .mention, .hdr-btn, .me-crumb, .task-acts')) return;  // chrome de l'app
+    a.dataset.dressed = '1';
+    a.title = href;                                          // l'URL COMPLÈTE au survol
+    const { dom, path } = _linkParts(href);
+    const custom = !_linkTextIsUrl(a);
+    // chip seulement si : texte = URL, lien SEUL dans son bloc, et hors liste/tableau/checklist
+    const parent = a.parentElement;
+    const alone = !custom && parent
+      && (parent.textContent || '').trim() === (a.textContent || '').trim()
+      && !a.closest('li, td, th');
+    if (!custom) {
+      a.textContent = '';
+      if (alone && !inlineOnly) {
+        a.className = (a.className ? a.className + ' ' : '') + 'lnk-chip';
+        const ic = hdrIcon('link'); ic.setAttribute('width', '15'); ic.setAttribute('height', '15');
+        ic.classList.add('lnk-ic');
+        a.appendChild(ic);
+        a.appendChild(el('span', { class: 'lnk-dom', text: dom }));
+        if (path) a.appendChild(el('span', { class: 'lnk-path', text: path }));
+        a.appendChild(el('span', { class: 'lnk-ext', text: '↗' }));
+        return;
+      }
+      a.className = (a.className ? a.className + ' ' : '') + 'lnk';
+      a.appendChild(el('span', { class: 'lnk-dom', text: dom }));
+      if (path) a.appendChild(el('span', { class: 'lnk-path', text: path }));
+      a.appendChild(el('span', { class: 'lnk-ext', text: '↗' }));
+      return;
+    }
+    // 2. texte personnalisé : on GARDE le texte, on ajoute l'habillage inline + ↗
+    a.className = (a.className ? a.className + ' ' : '') + 'lnk';
+    a.appendChild(el('span', { class: 'lnk-ext', text: '↗' }));
+  });
+  return root;
+}
+
+function commentBodyNode(text) {
+  const frag = document.createDocumentFragment();
+  const src = String(text == null ? '' : text);
+  let last = 0, m;
+  AUTOLINK_RE.lastIndex = 0;
+  while ((m = AUTOLINK_RE.exec(src)) !== null) {
+    const url = _autolinkTrim(m[0]);
+    if (m.index > last) frag.appendChild(document.createTextNode(src.slice(last, m.index)));
+    const a = document.createElement('a');
+    a.href = url;                       // http/https uniquement (garanti par la regex)
+    a.textContent = url;                // texte = l'URL, jamais du HTML
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    frag.appendChild(a);
+    last = m.index + url.length;
+  }
+  if (!last) return document.createTextNode(src);   // aucun lien → un simple nœud texte
+  if (last < src.length) frag.appendChild(document.createTextNode(src.slice(last)));
+  // [LINK-RENDER] habillage INLINE apprivoisé (jamais de chip dans un commentaire).
+  const box = document.createElement('span');
+  box.appendChild(frag);
+  dressLinks(box, { inlineOnly: true });
+  return box;
+}
+
+function setupAutoLink(q) {
+  if (!q || q.__autolink) return q;
+  q.__autolink = true;
+  const Delta = Quill.import('delta');
+
+  // 1) COLLER : chaque nœud TEXTE collé est découpé en (texte | lien | texte…). On NE touche pas
+  //    au texte déjà dans un <a> (Quill lui pose son propre format link).
+  q.clipboard.addMatcher(Node.TEXT_NODE, (node, delta) => {
+    if (node.parentElement && node.parentElement.closest('a')) return delta;
+    const text = node.data || '';
+    if (!/https?:\/\//i.test(text)) return delta;
+    const out = new Delta();
+    let last = 0;
+    AUTOLINK_RE.lastIndex = 0;
+    let m;
+    while ((m = AUTOLINK_RE.exec(text)) !== null) {
+      const url = _autolinkTrim(m[0]);
+      if (m.index > last) out.insert(text.slice(last, m.index));
+      out.insert(url, { link: url });
+      last = m.index + url.length;
+    }
+    if (!last) return delta;
+    if (last < text.length) out.insert(text.slice(last));
+    return out;
+  });
+
+  // 2) TAPER : une URL suivie d'un ESPACE ou d'une ENTRÉE est liée au moment du séparateur
+  //    (façon messageries). On ne réagit qu'aux frappes de l'utilisateur (`source === 'user'`)
+  //    et jamais à notre propre `formatText` (drapeau `busy`, sinon récursion).
+  let busy = false;
+  q.on('text-change', (delta, _old, source) => {
+    if (source !== 'user' || busy) return;
+    // Position DÉDUITE DU DELTA (retain cumulés) plutôt que de `getSelection()` : celle-ci peut
+    // être nulle (éditeur non focalisé, saisie programmatique, IME mobile) — le delta, lui, est
+    // toujours juste.
+    const ops = delta.ops || [];
+    let at = 0, ins = '';
+    for (const op of ops) {
+      if (typeof op.retain === 'number') { at += op.retain; continue; }
+      if (typeof op.insert === 'string') { ins = op.insert; break; }
+      return;                                                      // suppression/embed → rien à faire
+    }
+    if (ins !== ' ' && ins !== '\n') return;                       // seuls les séparateurs déclenchent
+    const end = at;                                                // fin du mot, juste avant le séparateur
+    if (end <= 0) return;
+    const caret = at + ins.length;
+    const start = Math.max(0, end - 2048);
+    const before = q.getText(start, end - start);
+    const m = /(?:^|\s)(https?:\/\/[^\s<>"'`]+)$/.exec(before);
+    if (!m) return;
+    const url = _autolinkTrim(m[1]);
+    const idx = end - url.length;
+    if (idx < 0) return;
+    if ((q.getFormat(idx, url.length) || {}).link) return;         // déjà un lien → on ne re-lie pas
+    // Étape d'historique PROPRE : `cutoff()` isole la transformation, donc un seul Ctrl+Z la défait
+    // sans effacer la frappe.
+    setTimeout(() => {
+      busy = true;
+      try {
+        if (q.history && q.history.cutoff) q.history.cutoff();
+        q.formatText(idx, url.length, 'link', url, 'user');
+        // Curseur remis APRÈS le séparateur. ⚠️ NE PAS appeler `q.format('link', false)` ici :
+        // à sélection vide Quill matérialise un « cursor blot » (`<span class="ql-cursor">`) qui
+        // se retrouvait DANS le HTML sauvegardé (`getSemanticHTML`). Inutile de toute façon : le
+        // séparateur est hors de la plage formatée, la frappe suivante n'hérite donc pas du lien.
+        if (q.hasFocus()) q.setSelection(caret, 0, 'silent');
+      } finally { busy = false; }
+    }, 0);
+  });
+  return q;
+}
+
 function attachInputMention(input, getNames) {
   const menu = document.createElement('div');
   menu.className = 'mention-menu';
@@ -2364,6 +2880,11 @@ function runImageViewer(cfg) {
   const dlg = document.getElementById('lightbox');
   if (!dlg || !cfg || !(cfg.images || []).length) return;
   const images = cfg.images.slice();
+  // [HUB-CHROME] `downloadUrl` est OPTIONNEL : plusieurs appelants (les pop-ins « Fichiers »
+  // des 3 pages, via `openImage`) ne passent que `imageUrl` → l'aperçu ⤢ plantait en silence
+  // (`cfg.downloadUrl is not a function`). Repli central sur `imageUrl` — motif déjà utilisé
+  // par `renderMemoPhotos`. `exifUrl` était déjà gardé (`if (cfg.exifUrl)`).
+  const _ivDownloadUrl = (n) => (cfg.downloadUrl || cfg.imageUrl)(n);
   let idx = Math.min(Math.max(cfg.startIndex || 0, 0), images.length - 1);
   let rot = 0, scale = 1, tx = 0, ty = 0;
   let strip = null; const thumbEls = [];   // [VIEWER-FILMSTRIP] bande de vignettes (>1 image)
@@ -2393,20 +2914,25 @@ function runImageViewer(cfg) {
   }
 
   // Barre d'options
+  // [POLISH-VIEWER-AGENDA-PRIO] les 7 contrôles passent en icônes Tabler TRAIT `currentColor`
+  // (gabarit `.iv-btn` inchangé : muted au repos, accent/texte au survol). La corbeille prend le
+  // danger DISCRET `.iv-danger` (rouge au SURVOL seulement) — plus de contour rouge au repos.
   const bar = el('div', { class: 'iv-bar' });
-  const dl = el('a', { class: 'iv-btn', text: '⬇', attrs: { download: '', title: 'Télécharger' } });
-  const rotL = el('button', { class: 'iv-btn', text: '↺', attrs: { title: 'Pivoter à gauche' } });
-  const rotR = el('button', { class: 'iv-btn', text: '↻', attrs: { title: 'Pivoter à droite' } });
-  const zoomOut = el('button', { class: 'iv-btn', text: '－', attrs: { title: 'Dézoomer' } });
-  const zoomIn = el('button', { class: 'iv-btn', text: '＋', attrs: { title: 'Zoomer' } });
+  const ivBtn = (tag, icon, title, cls) => ivIconBtn(tag, icon, title, cls);   // fabrique partagée
+  const dl = ivBtn('a', 'download', 'Télécharger');
+  dl.setAttribute('download', '');
+  const rotL = ivBtn('button', 'rotate', 'Pivoter à gauche');
+  const rotR = ivBtn('button', 'rotate-clockwise', 'Pivoter à droite');
+  const zoomOut = ivBtn('button', 'zoom-out', 'Dézoomer');
+  const zoomIn = ivBtn('button', 'zoom-in', 'Zoomer');
   bar.appendChild(dl); bar.appendChild(rotL); bar.appendChild(rotR);
   bar.appendChild(zoomOut); bar.appendChild(zoomIn);
   let delBtn = null;
   if (cfg.canDelete) {
-    delBtn = el('button', { class: 'iv-btn iv-del', text: '🗑', attrs: { title: 'Supprimer' } });
+    delBtn = ivBtn('button', 'trash', 'Supprimer', 'iv-danger');
     bar.appendChild(delBtn);
   }
-  const closeBtn = el('button', { class: 'iv-btn iv-close', text: '✕', attrs: { title: 'Fermer' } });
+  const closeBtn = ivBtn('button', 'x', 'Fermer', 'iv-close');
   bar.appendChild(closeBtn);
 
   function applyTransform() { img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + rot + 'deg) scale(' + scale + ')'; }
@@ -2419,7 +2945,7 @@ function runImageViewer(cfg) {
   function render() {
     const name = images[idx];
     img.src = imgSize(cfg.imageUrl(name), 's');   // [IMAGE-THUMBS] image écran ~1600px (dérivée)
-    dl.href = cfg.downloadUrl(name);              // ⬇ = original brut (inchangé)
+    dl.href = _ivDownloadUrl(name);               // ⬇ = original brut (inchangé)
     rot = 0; scale = 1; tx = 0; ty = 0;
     stage.classList.remove('zoomed');
     applyTransform();
@@ -2674,13 +3200,20 @@ function _agdRender() {
   const nav = (delta) => { agdIso = isoShift(agdIso, delta); if (cfg.onNav) cfg.onNav(agdIso); _agdRender(); };
   dlg.innerHTML = '';
   const head = el('div', { class: 'agd-head' });
-  head.appendChild(el('button', { class: 'agd-nav', text: '‹', attrs: { type: 'button', title: 'Jour précédent', 'aria-label': 'Jour précédent' }, on: { click: () => nav(-1) } }));
+  // [POLISH-VIEWER-AGENDA-PRIO] ‹ › ✕ : glyphes typographiques (dont le centrage dépendait de la
+  // police) remplacés par des icônes Tabler trait — centrage réglé par le CSS `.agd-nav`/`.agd-x`.
+  const agdIconBtn = (cls, icon, title, onClick) => {
+    const b = el('button', { class: cls, attrs: { type: 'button', title: title, 'aria-label': title }, on: { click: onClick } });
+    b.appendChild(hdrIconAt(icon, 18));
+    return b;
+  };
+  head.appendChild(agdIconBtn('agd-nav', 'chevron-left', 'Jour précédent', () => nav(-1)));
   const ttl = el('div', { class: 'agd-title' });
   ttl.appendChild(el('div', { class: 'agd-day', text: agendaDayLabel(cur) }));
   ttl.appendChild(el('div', { class: 'agd-count', text: list.length + ' mémo' + (list.length > 1 ? 's' : '') }));
   head.appendChild(ttl);
-  head.appendChild(el('button', { class: 'agd-nav', text: '›', attrs: { type: 'button', title: 'Jour suivant', 'aria-label': 'Jour suivant' }, on: { click: () => nav(1) } }));
-  head.appendChild(el('button', { class: 'agd-x', text: '✕', attrs: { type: 'button', title: 'Fermer', 'aria-label': 'Fermer' }, on: { click: () => dlg.close() } }));
+  head.appendChild(agdIconBtn('agd-nav', 'chevron-right', 'Jour suivant', () => nav(1)));
+  head.appendChild(agdIconBtn('agd-x', 'x', 'Fermer', () => dlg.close()));
   dlg.appendChild(head);
 
   const body = el('div', { class: 'agd-body' });
@@ -2692,7 +3225,11 @@ function _agdRender() {
     row.appendChild(el('span', { class: 'agd-t', text: cfg.memoTitle(m) }));
     const tl = cfg.timeLabel ? cfg.timeLabel(m) : (m.due_time ? fmtMemoTime(m.due_time) : '');
     if (tl) row.appendChild(el('span', { class: 'agd-time', text: tl }));
-    row.appendChild(el('span', { class: 'agd-chev', text: '›' }));
+    { const ch = el('span', { class: 'agd-chev' }); ch.appendChild(hdrIconAt('chevron-right', 16)); row.appendChild(ch); }
+    // [POLISH-VIEWER-AGENDA-PRIO] LIRE avant de modifier : la ligne ouvre la FICHE DE LECTURE 👁
+    // (`cfg.openMemo` pointe désormais sur `openMemoView` dans les 3 pages) ; son pied « ✎ Modifier »
+    // mène à l'éditeur pour qui en a le droit. `_agdEditorArm` est générique (il accroche le dialog
+    // qui vient de s'ouvrir) → le retour à la pop-in jour marche pour la fiche comme pour l'éditeur.
     const go = () => { const iso = agdIso; dlg.close(); cfg.openMemo(m); _agdEditorArm(dlg, cfg, iso, false); };  // drill-down
     row.addEventListener('click', go);
     row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
@@ -2702,10 +3239,13 @@ function _agdRender() {
 
   if (cfg.canCreate && cfg.canCreate()) {
     const foot = el('div', { class: 'agd-foot' });
-    foot.appendChild(el('button', { class: 'prio-btn agd-add', text: '＋ Mémo ce jour', attrs: { type: 'button' }, on: { click: () => {
+    // [HUB-CHROME] même famille Luciole que les autres pieds de pop-in (une pierre, 3 pages).
+    const addBtn = el('button', { class: 'agd-add', text: '＋ Mémo ce jour', attrs: { type: 'button' }, on: { click: () => {
       const iso = agdIso; dlg.close();
       if (cfg.createForDay) { cfg.createForDay(iso); if (cfg.createReturns !== false) _agdEditorArm(dlg, cfg, iso, true); }
-    } } }));
+    } } });
+    foot.appendChild(addBtn);
+    lucioleize(addBtn, 'luc-neutral');
     dlg.appendChild(foot);
   }
 }
@@ -2752,15 +3292,24 @@ function agendaStartMonth(memos, todayIso) {
 // Types « aperçu sûr » (preview=true : image/pdf/audio validés serveur) → aperçu ; le reste →
 // téléchargement forcé (?download=1). Upload streamé côté serveur ; barre de progression via XHR.
 function fmtBytes(n) { n = n || 0; if (n < 1024) return n + ' o'; if (n < 1048576) return (n / 1024).toFixed(0) + ' Ko'; return (n / 1048576).toFixed(1) + ' Mo'; }
-function attachIcon(mime) {
+// [HUB-CHROME] Icône de TYPE de fichier : emojis (🖼/🎵/📄…) remplacés par des icônes Tabler
+// TRAIT monochromes (`currentColor`, ~18px) — pop-in Fichiers ET pièces jointes de l'éditeur
+// (le helper est partagé, les 3 pages en profitent). `attachIconName` isole le mapping.
+function attachIconName(mime) {
   mime = mime || '';
-  if (mime.indexOf('image/') === 0) return '🖼';
-  if (mime === 'application/pdf') return '📄';
-  if (mime.indexOf('audio/') === 0) return '🎵';
-  if (mime.indexOf('video/') === 0) return '🎬';
-  if (/zip|compress|tar|rar|7z/.test(mime)) return '🗜';
-  if (/word|document|opendocument|sheet|excel|presentation|text/.test(mime)) return '📃';
-  return '📎';
+  if (mime.indexOf('image/') === 0) return 'photo';
+  if (mime === 'application/pdf') return 'file-text';
+  if (mime.indexOf('audio/') === 0) return 'music';
+  if (mime.indexOf('video/') === 0) return 'video';
+  if (/zip|compress|tar|rar|7z/.test(mime)) return 'package';
+  return 'paperclip';
+}
+function attachIcon(mime, size) {
+  const ic = hdrIcon(attachIconName(mime));
+  const px = String(size || 18);
+  ic.setAttribute('width', px); ic.setAttribute('height', px);
+  ic.style.flexShrink = '0';
+  return ic;
 }
 function _attachStyle() {
   if (document.getElementById('attach-style')) return;
@@ -2784,7 +3333,7 @@ function attachPreview(a, cfg) {
 }
 function attachRow(a, cfg) {
   const row = el('div', { class: 'attach-item' });
-  row.appendChild(el('span', { class: 'attach-ic', text: attachIcon(a.mime) }));
+  { const _ic = el('span', { class: 'attach-ic' }); _ic.appendChild(attachIcon(a.mime)); row.appendChild(_ic); }
   const meta = el('div', { class: 'attach-meta' });
   meta.appendChild(el('div', { class: 'attach-name', text: a.orig_name, attrs: { title: a.orig_name } }));
   meta.appendChild(el('div', { class: 'attach-size', text: fmtBytes(a.size) + (a.mime ? ' · ' + a.mime : '') }));
@@ -2792,16 +3341,20 @@ function attachRow(a, cfg) {
   // [VOICE-MESSAGES] PJ audio validée (preview=audio) → lecteur inline (bulle), pas de ⤢.
   if (isAudio) { _voiceStyle(); meta.appendChild(el('audio', { attrs: { controls: '', preload: 'none', src: a.url, style: 'margin-top:0.3rem;height:32px;max-width:100%' } })); }
   row.appendChild(meta);
+  // [EDITOR-FILES-MONO] actions de la ligne en icônes Tabler TRAIT (gabarit `.iv-btn`) ; la
+  // suppression prend le danger DISCRET `.iv-danger` (monochrome au repos, rouge au SURVOL) —
+  // fin de l'aplat/contour rouge permanent, doctrine Luciole : la couleur pleine dit la DONNÉE.
   const acts = el('div', { class: 'attach-acts' });
-  if (a.preview && !isAudio) acts.appendChild(el('button', { class: 'iv-btn', text: '⤢', attrs: { type: 'button', title: 'Aperçu' }, on: { click: () => attachPreview(a, cfg) } }));
-  acts.appendChild(el('a', { class: 'iv-btn', text: '⤓', attrs: { href: a.url + '?download=1', title: 'Télécharger', download: a.orig_name, rel: 'noopener' } }));
-  if (cfg.canEdit) acts.appendChild(el('button', {
-    class: 'iv-btn iv-del', text: '✕', attrs: { type: 'button', title: 'Supprimer' },
-    on: { click: async () => {
+  if (a.preview && !isAudio) acts.appendChild(ivIconBtn('button', 'maximize', 'Aperçu', '', { click: () => attachPreview(a, cfg) }));
+  { const d = ivIconBtn('a', 'download', 'Télécharger');
+    d.href = a.url + '?download=1'; d.setAttribute('download', a.orig_name); d.rel = 'noopener';
+    acts.appendChild(d); }
+  if (cfg.canEdit) acts.appendChild(ivIconBtn('button', 'trash', 'Supprimer', 'iv-danger', {
+    click: async () => {
       if (typeof confirmPopin === 'function' && !(await confirmPopin('Supprimer « ' + a.orig_name + ' » ?', { okLabel: 'Supprimer' }))) return;
       try { const r = await fetch(a.url, { method: 'DELETE', headers: cfg.headers || {} }); if (!r.ok) throw 0; } catch (e) { notify('Suppression impossible', { error: true }); return; }
       if (cfg.onChange) cfg.onChange();
-    } },
+    },
   }));
   row.appendChild(acts);
   return row;
@@ -2821,7 +3374,7 @@ function attachUpload(files, cfg, prog, bar) {
 function attachUploader(cfg) {
   const box = el('div', { class: 'attach-up' });
   const input = el('input', { attrs: { type: 'file', multiple: 'true', style: 'display:none' } });
-  const btn = el('button', { class: 'prio-btn', text: '+ Ajouter un fichier', attrs: { type: 'button' } });
+  const btn = plusBtn('Ajouter un fichier');   // [EDITOR-FILES-MONO] ＋ en icône trait
   const prog = el('div', { class: 'attach-prog', attrs: { style: 'display:none' } });
   const bar = el('div', { class: 'attach-bar' }); prog.appendChild(bar);
   btn.addEventListener('click', () => input.click());
@@ -2844,9 +3397,19 @@ const VOICE_MAX_MS = 5 * 60 * 1000;
 function _voiceStyle() {
   if (document.getElementById('voice-style')) return;
   const st = document.createElement('style'); st.id = 'voice-style';
-  st.textContent = '.voice-bubble{display:inline-flex;align-items:center;gap:0.4rem;background:var(--panel-2);border:1px solid var(--border);border-radius:14px;padding:0.2rem 0.5rem;max-width:100%;vertical-align:middle}'
-    + '.voice-bubble audio{height:32px;max-width:220px}'
+  st.textContent = '.voice-bubble{display:inline-flex;align-items:center;gap:0.5rem;background:var(--panel-2);border:1px solid var(--border);border-radius:14px;padding:0.25rem 0.6rem;max-width:100%;vertical-align:middle}'
+    // [COMMENTS-V2] le <audio> natif est MASQUÉ : il ne sert plus que de moteur, l'UI est à nous.
+    + '.voice-bubble audio{display:none}'
     + '.voice-bubble.voice-missing{color:var(--muted);font-size:0.8rem}'
+    + '.vb-play{flex:0 0 auto;width:28px;height:28px;min-height:0;padding:0;border-radius:50%;border:1px solid var(--border);'
+    + 'background:var(--panel);color:var(--muted);cursor:pointer;font-size:0.7rem;line-height:1;display:inline-flex;align-items:center;justify-content:center}'
+    + '.vb-play:hover{color:var(--accent);border-color:var(--accent)}'
+    + '.vb-wave{flex:1 1 auto;display:flex;align-items:center;gap:2px;height:22px;min-width:90px;max-width:180px;cursor:pointer}'
+    + '.vb-wave span{flex:1 1 auto;background:var(--border);border-radius:1px;transition:background .12s ease,transform .12s ease}'
+    + '.vb-wave span.on{background:var(--accent)}'
+    + '.voice-bubble.playing .vb-wave span.on{transform:scaleY(1.15)}'
+    + '.vb-dur{flex:0 0 auto;font-size:0.72rem;color:var(--muted);font-variant-numeric:tabular-nums;min-width:2.2em;text-align:right}'
+    + '.voice-bubble.playing .vb-dur{color:var(--accent)}'
     // [VOICE-MESSAGES V23.9.104] enregistreur = <dialog> modal → top-layer (s'empile AU-DESSUS de la
     // pop-in mémo, contrairement à un z-index) + compté par uiBusy(). Entrée CSS (invariant 8, pas de GSAP).
     + 'dialog.voice-rec{border:1px solid var(--border);border-radius:12px;padding:1rem;width:min(90vw,20rem);background:var(--panel);color:var(--text);box-shadow:0 8px 30px rgba(0,0,0,0.4)}'
@@ -2875,7 +3438,11 @@ function recordVoice() {
     const timeEl = el('div', { class: 'voice-rec-time' });
     const rowEl = el('div', { class: 'voice-rec-row' });
     const replayEl = el('div', { attrs: { style: 'margin:0.6rem 0 0;text-align:center' } });
-    dlg.appendChild(el('div', { attrs: { style: 'text-align:center;font-size:0.85rem;color:var(--muted)' }, text: '🎤 Message vocal' }));
+    // [POLISH-VIEWER-AGENDA-PRIO] chrome de la pop-in en icônes trait (le ● rouge de
+    // l'enregistrement EN COURS reste : c'est un ÉTAT, pas une décoration).
+    { const ttl = el('div', { attrs: { style: 'display:flex;align-items:center;justify-content:center;gap:0.35rem;font-size:0.85rem;color:var(--muted)' } });
+      ttl.appendChild(hdrIconAt('microphone', 15)); ttl.appendChild(el('span', { text: 'Message vocal' }));
+      dlg.appendChild(ttl); }
     dlg.appendChild(timeEl); dlg.appendChild(rowEl); dlg.appendChild(replayEl);
     document.body.appendChild(dlg);
     try { dlg.showModal(); } catch (e) { document.body.appendChild(dlg); }
@@ -2892,11 +3459,20 @@ function recordVoice() {
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); cleanup(null); });  // Échap = annuler proprement
     dlg.addEventListener('click', (e) => { if (e.target === dlg) cleanup(null); });   // clic backdrop = annuler
     const stopRec = () => { if (rec && rec.state === 'recording') rec.stop(); if (tick) clearInterval(tick); };
+    // Bouton « icône trait + libellé » de la pop-in vocale (gabarit `.prio-btn` inchangé).
+    const vrBtn = (icon, label, onClick, cls) => {
+      const b = el('button', { class: 'prio-btn' + (cls ? ' ' + cls : ''), attrs: { type: 'button', style: 'display:inline-flex;align-items:center;gap:0.3rem' }, on: { click: onClick } });
+      b.appendChild(hdrIconAt(icon, 15)); b.appendChild(el('span', { text: label }));
+      return b;
+    };
     const setStopped = () => {
-      timeEl.innerHTML = ''; timeEl.textContent = '■ ' + fmt(blob ? (startAt ? Date.now() - startAt : 0) : 0);
+      timeEl.innerHTML = '';
+      { const st = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.35rem' } });
+        st.appendChild(hdrIconAt('player-stop', 14)); st.appendChild(el('span', { text: fmt(blob ? (startAt ? Date.now() - startAt : 0) : 0) }));
+        timeEl.appendChild(st); }
       rowEl.innerHTML = '';
-      rowEl.appendChild(el('button', { class: 'prio-btn', text: '✕ Annuler', attrs: { type: 'button' }, on: { click: () => cleanup(null) } }));
-      rowEl.appendChild(el('button', { class: 'prio-btn primary', text: '✉️ Envoyer', attrs: { type: 'button' }, on: { click: () => cleanup({ blob: blob, filename: 'vocal-' + Date.now() + '.' + voiceExt(blob && blob.type || mime) }) } }));
+      rowEl.appendChild(vrBtn('x', 'Annuler', () => cleanup(null)));
+      rowEl.appendChild(vrBtn('send', 'Envoyer', () => cleanup({ blob: blob, filename: 'vocal-' + Date.now() + '.' + voiceExt(blob && blob.type || mime) }), 'primary'));
       replayEl.innerHTML = '';
       try { replayEl.appendChild(el('audio', { attrs: { controls: '', src: URL.createObjectURL(blob), style: 'width:100%' } })); } catch (e) {}
     };
@@ -2910,8 +3486,8 @@ function recordVoice() {
       tick = setInterval(() => { timeEl.innerHTML = '<span class="voice-rec-dot">●</span> ' + fmt(Date.now() - startAt); }, 250);
       timer = setTimeout(stopRec, VOICE_MAX_MS);
       rowEl.innerHTML = '';
-      rowEl.appendChild(el('button', { class: 'prio-btn', text: '✕ Annuler', attrs: { type: 'button' }, on: { click: () => cleanup(null) } }));
-      rowEl.appendChild(el('button', { class: 'prio-btn', text: '■ Stop', attrs: { type: 'button' }, on: { click: stopRec } }));
+      rowEl.appendChild(vrBtn('x', 'Annuler', () => cleanup(null)));
+      rowEl.appendChild(vrBtn('player-stop', 'Stop', stopRec));
     }).catch(() => { notify('Micro refusé ou indisponible.'); cleanup(null); });
   });
 }
@@ -2934,14 +3510,62 @@ function renderVoiceBody(text, urlFor) {
   if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
   return frag;
 }
+/* [COMMENTS-V2] Le message vocal devient une BULLE à part entière : bouton lecture rond
+   monochrome (accent au survol), onde stylisée en barres (teintées + animées pendant la lecture,
+   progression pilotée par `timeupdate`), durée à droite. Habillage du `<audio>` EXISTANT — aucune
+   lib. La durée n'est affichée que si les métadonnées la donnent (les webm enregistrés par le
+   navigateur annoncent souvent `Infinity` : repli = pas de durée, le fix est un lot séparé). */
 function voiceBubble(filename, urlFor) {
   const url = urlFor ? urlFor(filename) : null;
   const b = el('div', { class: 'voice-bubble' });
-  if (!url) { b.classList.add('voice-missing'); b.textContent = '🎤 audio indisponible'; return b; }
-  b.appendChild(el('span', { text: '🎤' }));
-  const a = el('audio', { attrs: { controls: '', preload: 'none', src: url } });
-  a.addEventListener('error', () => { b.classList.add('voice-missing'); b.innerHTML = ''; b.textContent = '🎤 audio indisponible'; });
-  b.appendChild(a);
+  // [COMPOSER-MIC-MONO] état « audio absent » : icône micro trait + texte, plus d'emoji coloré.
+  const missing = (node) => {
+    node.classList.add('voice-missing'); node.innerHTML = '';
+    const mic = hdrIcon('microphone'); mic.setAttribute('width', '14'); mic.setAttribute('height', '14');
+    mic.classList.add('cmt-seen-ic');
+    node.appendChild(mic); node.appendChild(document.createTextNode(' audio indisponible'));
+  };
+  if (!url) { missing(b); return b; }
+  const audio = el('audio', { attrs: { preload: 'metadata', src: url } });
+  const play = el('button', { class: 'vb-play', attrs: { type: 'button', title: 'Lire le message vocal', 'aria-label': 'Lire le message vocal' } });
+  const icPlay = () => { play.textContent = audio.paused ? '▶' : '❚❚'; };
+  icPlay();
+  const wave = el('div', { class: 'vb-wave', attrs: { 'aria-hidden': 'true' } });
+  const BARS = 22;
+  const bars = [];
+  for (let i = 0; i < BARS; i++) {
+    const h = 30 + Math.round(60 * Math.abs(Math.sin(i * 1.7) * Math.cos(i * 0.6)));   // profil stable, sans aléa
+    const bar = el('span', { attrs: { style: 'height:' + h + '%' } });
+    wave.appendChild(bar); bars.push(bar);
+  }
+  const dur = el('span', { class: 'vb-dur' });
+  const fmt = (t) => (isFinite(t) && t > 0) ? (Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0')) : '';
+  const setDur = () => { dur.textContent = fmt(audio.duration); };
+  audio.addEventListener('loadedmetadata', setDur);
+  audio.addEventListener('durationchange', setDur);
+  audio.addEventListener('timeupdate', () => {
+    const d = audio.duration;
+    const ratio = (isFinite(d) && d > 0) ? (audio.currentTime / d) : 0;
+    const upto = Math.round(ratio * BARS);
+    bars.forEach((bar, i) => bar.classList.toggle('on', i < upto));
+    if (isFinite(d) && d > 0) dur.textContent = fmt(d - audio.currentTime);
+  });
+  audio.addEventListener('play', () => { b.classList.add('playing'); icPlay(); });
+  audio.addEventListener('pause', () => { b.classList.remove('playing'); icPlay(); });
+  audio.addEventListener('ended', () => {
+    b.classList.remove('playing'); icPlay(); setDur();
+    bars.forEach(bar => bar.classList.remove('on'));
+  });
+  audio.addEventListener('error', () => { missing(b); });
+  play.addEventListener('click', (e) => { e.stopPropagation(); if (audio.paused) audio.play().catch(() => {}); else audio.pause(); });
+  // clic sur l'onde = navigation dans le message (si la durée est connue)
+  wave.addEventListener('click', (e) => {
+    const d = audio.duration;
+    if (!isFinite(d) || d <= 0) return;
+    const r = wave.getBoundingClientRect();
+    audio.currentTime = Math.max(0, Math.min(d, ((e.clientX - r.left) / r.width) * d));
+  });
+  b.append(play, wave, dur, audio);
   return b;
 }
 // URL de lecture d'une PJ vocale à partir de son filename : cherche la PJ du mémo (a.name) → a.url.
@@ -2957,10 +3581,13 @@ async function voiceUpload(cfg, res) {
   const rec = arr.find(x => x && x.orig_name === res.filename) || arr[arr.length - 1];
   return rec ? (rec.name || rec.filename || null) : null;
 }
-// Bouton 🎤 « Vocal » de la section Fichiers (owner + invité can_edit) : enregistre + upload + onChange.
+// Bouton « Vocal » de la section Fichiers (owner + invité can_edit) : enregistre + upload + onChange.
+// [POLISH-VIEWER-AGENDA-PRIO] icône micro TRAIT + libellé (gabarit `.prio-btn` inchangé).
 function voiceAttachButton(cfg) {
   if (!voiceAvailable()) return null;
-  const btn = el('button', { class: 'prio-btn', text: '🎤 Vocal', attrs: { type: 'button', title: 'Enregistrer un message vocal', style: 'margin-top:0.4rem' } });
+  const btn = el('button', { class: 'prio-btn', attrs: { type: 'button', title: 'Enregistrer un message vocal', style: 'margin-top:0.4rem;display:inline-flex;align-items:center;gap:0.3rem' } });
+  btn.appendChild(hdrIconAt('microphone', 15));
+  btn.appendChild(el('span', { text: 'Vocal' }));
   btn.addEventListener('click', async () => {
     const res = await recordVoice(); if (!res) return;
     const fn = await voiceUpload(cfg, res);
@@ -2968,11 +3595,23 @@ function voiceAttachButton(cfg) {
   });
   return btn;
 }
-// Bouton 🎤 du champ commentaire : enregistre → upload PJ → poste un commentaire [audio:<filename>].
+// [POLISH-VIEWER-AGENDA-PRIO] notice « pas d'enregistrement sur ce navigateur » (3 pages) :
+// icône micro trait + texte, tokens existants. `style` optionnel pour la marge propre à la page.
+function voiceUnavailableNote(style) {
+  const d = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.35rem;color:var(--muted);font-size:0.8rem;' + (style || '') } });
+  d.appendChild(hdrIconAt('microphone', 14));
+  d.appendChild(el('span', { text: 'Enregistrement audio indisponible sur ce navigateur.' }));
+  return d;
+}
+// Bouton micro du champ commentaire : enregistre → upload PJ → poste un commentaire [audio:<filename>].
 // cfg = { uploadUrl, headers?, postComment(body):Promise }.
+// [COMPOSER-MIC-MONO] icône TRAIT Tabler `currentColor` (gabarit `.cmt-ibtn` des voisins ⚑ / avion),
+// muted au repos, accent au survol — plus d'emoji coloré dans le composer.
 function voiceCommentButton(cfg) {
   if (!voiceAvailable()) return null;
-  const btn = el('button', { class: 'prio-btn', text: '🎤', attrs: { type: 'button', title: 'Commentaire vocal' } });
+  const btn = el('button', { class: 'cmt-ibtn', attrs: { type: 'button', title: 'Commentaire vocal', 'aria-label': 'Commentaire vocal' } });
+  const mic = hdrIcon('microphone'); mic.setAttribute('width', '16'); mic.setAttribute('height', '16');
+  btn.appendChild(mic);
   btn.addEventListener('click', async () => {
     const res = await recordVoice(); if (!res) return;
     const fn = await voiceUpload(cfg, res); if (!fn) return;
@@ -3031,9 +3670,10 @@ function downloadZipDialog(cfg) {
       dlg.appendChild(lbl);
     }
     const foot = el('div', { attrs: { style: 'display:flex;justify-content:flex-end;gap:0.5rem' } });
-    const cancel = el('button', { class: 'iv-btn', text: 'Annuler', attrs: { type: 'button' } });
+    // [HUB-CHROME] pied Luciole (docs/design/LUCIOLE-boutons.md) : Annuler neutre, Télécharger primaire.
+    const cancel = el('button', { text: 'Annuler', attrs: { type: 'button' } });
     cancel.addEventListener('click', () => dlg.close());
-    const go = el('button', { class: 'primary', text: 'Télécharger', attrs: { type: 'button' } });
+    const go = el('button', { text: 'Télécharger', attrs: { type: 'button' } });
     if (!cfg.count(scope, subs)) { go.disabled = true; go.style.opacity = '0.5'; }
     go.addEventListener('click', () => {
       const a = document.createElement('a');
@@ -3042,6 +3682,7 @@ function downloadZipDialog(cfg) {
       dlg.close();
     });
     foot.appendChild(cancel); foot.appendChild(go); dlg.appendChild(foot);
+    lucioleize(cancel, 'luc-neutral'); lucioleize(go, 'luc-primary');
   }
   render();
   dlg.showModal();
@@ -3050,10 +3691,12 @@ function renderAttachments(cfg) {
   _attachStyle();
   const wrap = el('div', { class: 'attach-sec' });
   const list = cfg.attachments || [];
+  // [EDITOR-FILES-MONO] en-tête « Fichiers (n) » : emoji 📎 → icône trait `paperclip` muted.
   const head = el('div', { class: 'attach-head', attrs: { style: 'display:flex;align-items:center;gap:0.4rem' } });
-  head.appendChild(el('span', { text: '📎 Fichiers' + (list.length ? ' (' + list.length + ')' : ''), attrs: { style: 'flex:1' } }));
+  head.appendChild(secHeadIcon('paperclip'));
+  head.appendChild(el('span', { text: 'Fichiers' + (list.length ? ' (' + list.length + ')' : ''), attrs: { style: 'flex:1' } }));
   if (cfg.zip && cfg.zip.url && attachZipCount(cfg, 'all') > 0) {  // [PHOTO-BATCH-DOWNLOAD] zip du mémo
-    const z = el('button', { class: 'iv-btn', text: '⤓', attrs: { type: 'button', title: 'Télécharger en .zip' } });
+    const z = ivIconBtn('button', 'download', 'Télécharger en .zip');
     z.addEventListener('click', () => downloadZipDialog({
       title: 'Télécharger les fichiers',
       hasSubprojects: false,
@@ -3147,8 +3790,12 @@ function memoLinksSection(cfg) {
   const links = cfg.links || [];
   if (!links.length && !cfg.canEdit) return null;   // rien à voir ni à poser
   const wrap = el('div', { attrs: { style: 'margin-top:0.6rem' } });
-  wrap.appendChild(el('div', { class: 'me-label', text: '🔗 Relié à' + (links.length ? ' (' + links.length + ')' : ''),
-    attrs: { style: 'font-size:0.78rem;font-weight:600;color:var(--muted);margin-bottom:0.25rem' } }));
+  // [EDITOR-FILES-MONO] en-tête « Relié à (n) » : emoji 🔗 → icône trait `link` muted (même
+  // traitement que « Photos » / « Fichiers » — un seul langage pour les en-têtes de l'éditeur).
+  { const h = el('div', { class: 'me-label', attrs: { style: 'display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;font-weight:600;color:var(--muted);margin-bottom:0.25rem' } });
+    h.appendChild(secHeadIcon('link'));
+    h.appendChild(el('span', { text: 'Relié à' + (links.length ? ' (' + links.length + ')' : '') }));
+    wrap.appendChild(h); }
   const chips = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center' } });
   links.forEach(l => {
     const inbound = l.direction === 'in';
@@ -3229,6 +3876,193 @@ function memoLinksSection(cfg) {
   return wrap;
 }
 
+/* ===== [MEMO-VIEW] Fiche de LECTURE d'un mémo (bouton 👁 des cards) =====
+   Builder PARTAGÉ (arbitrage documenté au journal) : il ne connaît ni le réseau, ni `state`,
+   ni `DATA` — chaque page fournit un `load(memoId)` qui renvoie les données DÉJÀ normalisées
+   (ou `null` si le mémo est hors du scope du lecteur) et les callbacks. Zéro champ, zéro Quill :
+   lecture pure. Patron de l'aperçu corbeille (V26.8.149) : `<dialog>` natif (invariant 8 —
+   entrée CSS, pas de GSAP ; `uiBusy()` couvre le poll), corps scrollable + pied fixe Luciole.
+   cfg = { load(memoId) → {
+     memo, crumb:[{emoji,color,name}], createdLine, updatedLine, canEdit, prio, dueLabel,
+     locLabel, links, images, subtasks, contentNode  // Node déjà sanitizé PAR LA PAGE
+   } | null, onEdit(memo), onOpenPhoto(images, index), title? } */
+let _mvDialog = null;
+function openMemoView(cfg, memoId) {
+  if (!_mvDialog) {
+    _mvDialog = el('dialog', { class: 'dlg-wide', attrs: { id: 'memo-view-dialog' } });
+    // [MEMO-VIEW correctif] Habillage porté par le composant lui-même (styles INLINE : ils
+    // gagnent sur le CSS de chaque page). Nécessaire car `share.html` déclare un
+    // `dialog { background: transparent; border: none }` — la fiche s'y affichait sans fond,
+    // le board flouté visible au travers, seul le pied ayant un fond. Mêmes tokens que
+    // l'aperçu corbeille (V26.8.149) → identique sur les 3 pages et dans les 2 thèmes.
+    _mvDialog.style.cssText = 'flex-direction:column;max-height:92vh;overflow:hidden;padding:0;'
+      + 'background:var(--panel);color:var(--text);border:1px solid var(--border);'
+      + 'border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,0.45)';
+    document.body.appendChild(_mvDialog);
+  }
+  const dlg = _mvDialog;
+  const draw = (id) => {
+    const d = cfg.load(id);
+    if (!d) return;                       // hors scope → on ne navigue pas (chip inerte côté rendu)
+    dlg.innerHTML = '';
+    const scroll = el('div', { attrs: { style: 'flex:1 1 auto;min-height:0;overflow-y:auto;max-height:430px;padding:1.1rem 1.35rem' } });
+    // — fil d'Ariane + méta —
+    const ctx = el('div', { attrs: { style: 'display:flex;flex-direction:column;gap:0.25rem;margin-bottom:0.7rem' } });
+    const crumb = el('div', { attrs: { style: 'display:flex;align-items:center;flex-wrap:wrap;gap:0.25rem;font-size:0.8rem;color:var(--text);min-width:0' } });
+    crumb.appendChild(el('span', { text: '📌', attrs: { style: 'color:var(--muted)' } }));
+    const path = (d.crumb || []);
+    if (!path.length) crumb.appendChild(el('span', { text: '📥 Inbox' }));
+    path.forEach((p, i) => {
+      if (i) crumb.appendChild(el('span', { text: '›', attrs: { style: 'color:var(--muted)' } }));
+      const node = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.25rem;max-width:14rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } });
+      if (p.emoji) node.appendChild(el('span', { text: p.emoji }));
+      else if (p.color) node.appendChild(el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;background:' + p.color } }));
+      node.appendChild(el('span', { text: p.name }));
+      crumb.appendChild(node);
+    });
+    ctx.appendChild(crumb);
+    const metas = [d.createdLine, d.updatedLine].filter(Boolean);
+    if (metas.length) ctx.appendChild(el('div', { text: metas.join(' · '), attrs: { style: 'font-size:0.76rem;color:var(--muted)' } }));
+    scroll.appendChild(ctx);
+    // — grand titre —
+    const h = el('div', { attrs: { style: 'display:flex;align-items:baseline;gap:0.5rem;flex-wrap:wrap;margin:0 0 0.5rem' } });
+    if (d.memo.emoji) h.appendChild(el('span', { text: d.memo.emoji, attrs: { style: 'font-size:1.6rem;line-height:1' } }));
+    h.appendChild(el('span', { text: d.title || d.memo.title || MEMO_EMPTY_LABEL,
+      attrs: { style: 'font-size:1.45rem;font-weight:700;line-height:1.25;min-width:0' } }));
+    scroll.appendChild(h);
+    // — badges (styles des cards) —
+    const badges = el('div', { class: 'task-badges', attrs: { style: 'display:flex;gap:0.35rem;flex-wrap:wrap;margin:0 0 0.8rem' } });
+    if (d.prio && d.prio.color) badges.appendChild(el('span', { class: 'prio-chip', text: d.prio.name || 'P',
+      attrs: { style: 'background:' + d.prio.color + ';color:' + textOn(d.prio.color) } }));
+    if (d.dueLabel) badges.appendChild(el('span', { class: 'badge', text: '📅 ' + d.dueLabel }));
+    if (d.locLabel) badges.appendChild(el('span', { class: 'badge', text: '📍 ' + d.locLabel }));
+    if (badges.children.length) scroll.appendChild(badges);
+    // — contenu riche, typo généreuse (le HTML est sanitizé PAR LA PAGE) —
+    if (d.contentNode) {
+      const body = el('div', { class: 'task-content', attrs: { style: 'font-size:0.98rem;line-height:1.75' } });
+      body.appendChild(d.contentNode);
+      scroll.appendChild(body);
+      /* [MEMO-VIEW correctif 2] La checklist du CONTENU (liste à cocher Quill — le cas d'usage
+         n°1 : « Courses de la semaine ») devient cochable DANS la fiche, même mécanique que les
+         cards : bascule OPTIMISTE de l'item puis `cfg.onToggleCheck(memo, index)` → le chemin
+         d'écriture EXISTANT de chaque page (PUT du contenu). Droits = ceux de la card
+         (`d.canEdit`) ; sans droit, le contenu reste inerte (comportement d'origine).
+         Pas de double-branchement possible : ce nœud est construit par `cfg.load` à chaque
+         rendu de la fiche — ce n'est JAMAIS le nœud de la card (qui garde son propre wiring). */
+      if (!(d.canEdit && typeof cfg.onToggleCheck === 'function')) {
+        // sans droit : items INERTES et curseur normal (le CSS des cards met `pointer` — on le neutralise
+        // ici pour ne pas promettre une action impossible).
+        body.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li) => { li.style.cursor = 'default'; });
+      } else {
+        body.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]').forEach((li, i) => {
+          li.style.cursor = 'pointer';
+          li.title = 'Cliquer pour cocher / décocher';
+          li.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const now = li.getAttribute('data-list') === 'checked';
+            li.setAttribute('data-list', now ? 'unchecked' : 'checked');   // optimiste
+            cfg.onToggleCheck(d.memo, i);
+          });
+        });
+      }
+    }
+    const section = (label) => {
+      const wrap = el('div', { attrs: { style: 'margin-top:0.9rem' } });
+      wrap.appendChild(el('div', { text: label, attrs: { style: 'font-size:0.72rem;font-weight:600;letter-spacing:0.04em;color:var(--muted);margin-bottom:0.35rem' } }));
+      return wrap;
+    };
+    // — 📷 photos —
+    const imgs = d.images || [];
+    if (imgs.length && cfg.onOpenPhoto) {
+      const sec = section('📷 PHOTOS (' + imgs.length + ')');
+      const grid = el('div', { attrs: { style: 'display:flex;gap:0.4rem;flex-wrap:wrap' } });
+      imgs.forEach((name, i) => {
+        const im = el('img', { attrs: { src: imgSize(cfg.imageUrl(name, d.memo), 't'), alt: '', loading: 'lazy',
+          style: 'width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer' } });
+        im.addEventListener('click', () => cfg.onOpenPhoto(imgs, i, d.memo));
+        grid.appendChild(im);
+      });
+      sec.appendChild(grid);
+      scroll.appendChild(sec);
+    }
+    // — 🔗 reliés (payload v27) : clic = la fiche se recharge sur le mémo relié —
+    const links = d.links || [];
+    if (links.length) {
+      const sec = section('🔗 RELIÉ À (' + links.length + ')');
+      const row = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap' } });
+      links.forEach(l => {
+        const reachable = !!cfg.load(l.memo_id);
+        const chip = el('button', { class: 'prio-btn', attrs: { type: 'button',
+          title: reachable ? 'Lire ce mémo' : 'Hors de votre périmètre',
+          style: 'padding:0.1rem 0.5rem;font-size:0.76rem;max-width:15rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+            + (l.direction === 'in' ? ';border-style:dashed' : '')
+            + (reachable ? '' : ';opacity:0.45;cursor:default') } });
+        chip.textContent = (l.direction === 'in' ? '⤺ ' : '⤻ ') + (l.emoji ? l.emoji + ' ' : '') + linkTitle(l.title, 34);
+        if (reachable) chip.addEventListener('click', () => draw(l.memo_id));
+        else chip.disabled = true;
+        row.appendChild(chip);
+      });
+      sec.appendChild(row);
+      scroll.appendChild(sec);
+    }
+    /* — ☑ sous-tâches — [MEMO-VIEW évolution] cochables DEPUIS la fiche, même mécanique que
+       les cards : mise à jour OPTIMISTE locale puis le MÊME appel que le board
+       (`cfg.onToggleSub(memo, subtasks)` → patchMemo / put / putMemo selon la page).
+       Droit = celui de la card (`d.canEdit`) : sans droit, les cases restent AFFICHÉES mais
+       inertes (curseur normal, aucun appel réseau). Seule la section est redessinée → la
+       fiche ne bouge pas, aucun re-scroll. Le reste de la fiche reste en lecture pure. */
+    const subs = (d.subtasks || []).map(s2 => ({ content: s2.content, done: !!s2.done }));
+    if (subs.length) {
+      const editable = !!d.canEdit && typeof cfg.onToggleSub === 'function';
+      const sec = section('☑ SOUS-TÂCHES (0/0)');
+      const head = sec.firstChild;
+      const list = el('div');
+      const paint = () => {
+        head.textContent = '☑ SOUS-TÂCHES (' + subs.filter(x => x.done).length + '/' + subs.length + ')';
+        list.innerHTML = '';
+        subs.forEach((s2, i) => {
+          const row = el(editable ? 'button' : 'div', {
+            attrs: {
+              style: 'display:flex;align-items:flex-start;gap:0.4rem;width:100%;text-align:left;background:none;'
+                + 'border:none;padding:0.1rem 0;font:inherit;font-size:0.85rem;'
+                + (editable ? 'cursor:pointer;' : '')
+                + 'color:' + (s2.done ? 'var(--muted)' : 'var(--text)'),
+            },
+          });
+          if (editable) { row.type = 'button'; row.title = s2.done ? 'Décocher' : 'Cocher'; }
+          row.appendChild(el('span', { text: s2.done ? '☑' : '☐', attrs: { style: 'flex-shrink:0' } }));
+          row.appendChild(el('span', { text: s2.content, attrs: { style: s2.done ? 'text-decoration:line-through' : '' } }));
+          if (editable) row.addEventListener('click', () => {
+            subs[i].done = !subs[i].done;      // optimiste : l'écran répond tout de suite
+            paint();
+            cfg.onToggleSub(d.memo, subs.map(x => ({ content: x.content, done: !!x.done })));
+          });
+          list.appendChild(row);
+        });
+      };
+      paint();
+      sec.appendChild(list);
+      scroll.appendChild(sec);
+    }
+    dlg.appendChild(scroll);
+    // — pied Luciole : Fermer (neutre) à gauche, ✎ Modifier (primaire) si le lecteur peut éditer —
+    const actions = el('div', { class: 'actions', attrs: { style: 'display:flex;gap:0.5rem;flex:0 0 auto;padding:0.7rem 1.35rem;border-top:1px solid var(--border);background:var(--panel)' } });
+    const close = el('button', { text: 'Fermer', attrs: { type: 'button', style: 'margin-right:auto' } });
+    close.addEventListener('click', () => dlg.close());
+    actions.appendChild(close);
+    lucioleize(close, 'luc-neutral');
+    if (d.canEdit && cfg.onEdit) {
+      const edit = el('button', { text: '✎ Modifier', attrs: { type: 'button' } });
+      edit.addEventListener('click', () => { const m = d.memo; dlg.close(); setTimeout(() => cfg.onEdit(m), 60); });
+      actions.appendChild(edit);
+      lucioleize(edit, 'luc-primary');
+    }
+    dlg.appendChild(actions);
+  };
+  draw(memoId);
+  if (!dlg.open) dlg.showModal();
+}
+
 function memoPictosRow(cfg) {
   const subs = cfg.subtasks || [];
   const nImg = cfg.images || 0, nAtt = cfg.attachments || 0, nCom = cfg.comments || 0;
@@ -3264,8 +4098,12 @@ function _photoSecStyle() {
     + '.mp-thumb{position:relative}'
     + '.mp-thumb img{height:64px;max-width:130px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:zoom-in;display:block}'
     + '.mp-thumb img:hover{border-color:var(--accent)}'
-    + '.mp-del{position:absolute;top:-6px;right:-6px;width:1.2rem;height:1.2rem;min-height:0;padding:0;font-size:0.75rem;line-height:1;border-radius:50%;background:var(--red);color:#fff;border:none;cursor:pointer;display:none}'
-    + '.mp-thumb:hover .mp-del{display:block}.mp-del:hover{background:#d32f2f}';
+    /* [EDITOR-FILES-MONO] danger DISCRET : la croix de vignette quitte l'APLAT ROUGE permanent
+       pour le gabarit des autres actions — fond panel, bordure, glyphe muted au repos ; rouge
+       (fond plein) au SURVOL seulement, quand le geste est engagé. */
+    + '.mp-del{position:absolute;top:-6px;right:-6px;width:1.3rem;height:1.3rem;min-height:0;padding:0;font-size:0.7rem;line-height:1;border-radius:50%;background:var(--panel);color:var(--muted);border:1px solid var(--border);cursor:pointer;display:none;align-items:center;justify-content:center}'
+    + '.mp-thumb:hover .mp-del{display:inline-flex}'
+    + '.mp-del:hover{background:var(--red,var(--danger));color:#fff;border-color:var(--red,var(--danger))}';
   document.head.appendChild(st);
 }
 function renderMemoPhotos(cfg) {
@@ -3274,8 +4112,10 @@ function renderMemoPhotos(cfg) {
   _attachStyle(); _photoSecStyle();
   const url = cfg.imageUrl, dl = cfg.downloadUrl || cfg.imageUrl;
   const wrap = el('div', { class: 'attach-sec' });
+  // [EDITOR-FILES-MONO] en-tête « Photos (n) » : emoji 📷 → icône trait `photo` muted.
   const head = el('div', { class: 'attach-head', attrs: { style: 'display:flex;align-items:center;gap:0.4rem' } });
-  head.appendChild(el('span', { text: '📷 Photos' + (images.length ? ' (' + images.length + ')' : ''), attrs: { style: 'flex:1' } }));
+  head.appendChild(secHeadIcon('photo'));
+  head.appendChild(el('span', { text: 'Photos' + (images.length ? ' (' + images.length + ')' : ''), attrs: { style: 'flex:1' } }));
   wrap.appendChild(head);
   if (images.length) {
     const grid = el('div', { class: 'mp-grid' });
@@ -3312,7 +4152,10 @@ function renderMemoPhotos(cfg) {
       if (f.files && f.files.length) { await cfg.onUpload([...f.files]); await cfg.onChange(); }
       f.value = '';
     });
-    wrap.appendChild(el('button', { class: 'prio-btn', text: '＋ Ajouter une photo', attrs: { type: 'button', style: 'margin-top:0.3rem' }, on: { click: () => f.click() } }));
+    { const add = plusBtn('Ajouter une photo');   // [EDITOR-FILES-MONO] ＋ en icône trait
+      add.style.marginTop = '0.3rem';
+      add.addEventListener('click', () => f.click());
+      wrap.appendChild(add); }
     wrap.appendChild(f);
   }
   return wrap;
@@ -3365,7 +4208,7 @@ function fileSourceEl(source, onOpen) {
 }
 function fileRow(entry, cfg) {
   const row = el('div', { class: 'fv-row' });
-  row.appendChild(el('span', { class: 'fv-ic', text: attachIcon(entry.mime) }));
+  { const _ic = el('span', { class: 'fv-ic' }); _ic.appendChild(attachIcon(entry.mime)); row.appendChild(_ic); }
   const meta = el('div', { class: 'fv-meta' });
   meta.appendChild(el('div', { class: 'fv-name', text: entry.orig_name, attrs: { title: entry.orig_name } }));
   meta.appendChild(fileSourceEl(entry.source, cfg.onOpenSource));
@@ -3373,16 +4216,17 @@ function fileRow(entry, cfg) {
   if (entry.size) row.appendChild(el('span', { class: 'fv-size', text: fmtBytes(entry.size) }));
   const acts = el('div', { class: 'fv-acts' });
   if (entry.preview) {
-    const v = el('button', { class: 'iv-btn', text: '⤢', attrs: { type: 'button', title: 'Aperçu' } });
+    const v = ivIconBtn('button', 'maximize', 'Aperçu');   // [EDITOR-FILES-MONO]
     v.addEventListener('click', () => {
       if ((entry.mime || '').indexOf('image/') === 0 && cfg.openImage) cfg.openImage(entry);
       else window.open(entry.url, '_blank', 'noopener');
     });
     acts.appendChild(v);
   }
-  acts.appendChild(el('a', { class: 'iv-btn', text: '⤓', attrs: {
-    href: entry.url + (entry.kind === 'attachment' ? '?download=1' : ''),
-    title: 'Télécharger', download: entry.orig_name, rel: 'noopener' } }));
+  { const d = ivIconBtn('a', 'download', 'Télécharger');   // [EDITOR-FILES-MONO]
+    d.href = entry.url + (entry.kind === 'attachment' ? '?download=1' : '');
+    d.setAttribute('download', entry.orig_name); d.rel = 'noopener';
+    acts.appendChild(d); }
   row.appendChild(acts);
   return row;
 }
@@ -3453,11 +4297,11 @@ function openFilesDialog(cfg) {
   const head = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.5rem;margin-bottom:0.7rem' } });
   head.appendChild(el('h3', { text: '📁 ' + (cfg.title || 'Fichiers'), attrs: { style: 'margin:0;font-size:1rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
   if (cfg.zip) {
-    const z = el('button', { class: 'iv-btn', text: '⤓', attrs: { type: 'button', title: 'Télécharger en .zip' } });
+    const z = ivIconBtn('button', 'download', 'Télécharger en .zip');   // [EDITOR-FILES-MONO]
     z.addEventListener('click', () => downloadZipDialog({ title: 'Télécharger les fichiers', hasSubprojects: !!cfg.zip.hasSubprojects, count: cfg.zip.count, buildUrl: cfg.zip.buildUrl }));
     head.appendChild(z);
   }
-  const x = el('button', { class: 'iv-btn', text: '✕', attrs: { type: 'button', title: 'Fermer' } });
+  const x = ivIconBtn('button', 'x', 'Fermer');   // [EDITOR-FILES-MONO]
   x.addEventListener('click', () => dlg.close());
   head.appendChild(x); dlg.appendChild(head);
   const slot = el('div', { text: 'Chargement…', attrs: { style: 'color:var(--muted);font-size:0.9rem' } });
@@ -4334,9 +5178,69 @@ const HDR_ICONS = {
   // [TOOLS-DOCK] 4 icônes Tabler outline du dock d'outils (additif, inline — invariant 6, zéro CDN).
   'pencil-plus': ['M4 20h4l10.5 -10.5a1.5 1.5 0 0 0 -4 -4l-10.5 10.5v4', 'M13.5 6.5l4 4', 'M16 19h6', 'M19 16v6'],
   paperclip: ['M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5'],
+  // [MEMO-VIEW] œil (fiche de lecture) — le hub n'a pas de sprite, il consomme hdrIcon.
+  eye: ['M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0', 'M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6'],
+  // [HUB-CHROME] passage des pop-ins (Photos / Fichiers) aux icônes TRAIT monochromes.
+  maximize: ['M4 8v-2a2 2 0 0 1 2 -2h2', 'M4 16v2a2 2 0 0 0 2 2h2', 'M16 4h2a2 2 0 0 1 2 2v2', 'M16 20h2a2 2 0 0 0 2 -2v-2'],
+  // [COMMENTS-V2] avion « send » du composer de commentaires.
+  plus: ['M12 5l0 14', 'M5 12l14 0'],
+  send: ['M10 14l11 -11', 'M21 3l-6.5 18a.55 .55 0 0 1 -1 0l-3.5 -7l-7 -3.5a.55 .55 0 0 1 0 -1l18 -6.5'],
+  // [SYSTEM-LINES-MONO] engrenage du micro-chip « app » des lignes de journal.
+  settings: ['M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z', 'M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0'],
+  // [LINK-RENDER] icône « link » (Tabler) de la chip de lien.
+  link: ['M9 15l6 -6', 'M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464', 'M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463'],
+  sitemap: ['M3 15m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M15 15m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M9 5m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M6 15v-1a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v1', 'M12 9v3'],
+  'map-pin': ['M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0', 'M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z'],
+  trash: ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12', 'M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3'],
+  photo: ['M15 8h.01', 'M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12z', 'M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5', 'M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3'],
+  music: ['M6 17m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M16 15m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M9 17v-13h10v13', 'M9 8h10'],
+  'file-text': ['M14 3v4a1 1 0 0 0 1 1h4', 'M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z', 'M9 9l1 0', 'M9 13l6 0', 'M9 17l6 0'],
+  video: ['M15 10l4.553 -2.276a1 1 0 0 1 1.447 .894v6.764a1 1 0 0 1 -1.447 .894l-4.553 -2.276v-4z', 'M3 6m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z'],
+  package: ['M12 3l8 4.5v9l-8 4.5l-8 -4.5v-9l8 -4.5', 'M12 12l8 -4.5', 'M12 12v9', 'M12 12l-8 -4.5'],
   microphone: ['M9 2m0 3a3 3 0 0 1 3 -3a3 3 0 0 1 3 3v5a3 3 0 0 1 -3 3a3 3 0 0 1 -3 -3z', 'M5 10a7 7 0 0 0 14 0', 'M8 21l8 0', 'M12 17l0 4'],
   'folder-plus': ['M12 19h-7a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2h4l3 3h7a2 2 0 0 1 2 2v3.5', 'M16 19h6', 'M19 16v6'],
+  // [POLISH-VIEWER-AGENDA-PRIO] barre de la visionneuse + chrome de la pop-in jour + pop-in vocale.
+  rotate: ['M19.95 11a8 8 0 1 0 -.5 4m.5 5v-5h-5'],
+  'rotate-clockwise': ['M4.05 11a8 8 0 1 1 .5 4m-.5 5v-5h5'],
+  'zoom-in': ['M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0', 'M7 10l6 0', 'M10 7l0 6', 'M21 21l-6 -6'],
+  'zoom-out': ['M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0', 'M7 10l6 0', 'M21 21l-6 -6'],
+  x: ['M18 6l-12 12', 'M6 6l12 12'],
+  'chevron-left': ['M15 6l-6 6l6 6'],
+  'chevron-right': ['M9 6l6 6l-6 6'],
+  'player-stop': ['M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z'],
 };
+// Icône trait dimensionnée en une ligne (raccourci du duo hdrIcon + setAttribute × 2).
+function hdrIconAt(name, px) {
+  const ic = hdrIcon(name);
+  ic.setAttribute('width', String(px)); ic.setAttribute('height', String(px));
+  return ic;
+}
+/* [EDITOR-FILES-MONO] Bouton d'action « icône trait » au gabarit `.iv-btn` (visionneuse, lignes de
+   pièces jointes, en-têtes de section, vue Fichiers) — une SEULE fabrique pour les 3 pages.
+   `cls` optionnel : 'iv-danger' = danger DISCRET (monochrome au repos, rouge au survol seulement),
+   jamais d'aplat rouge permanent. `on` = { click: fn }. tag = 'button' ou 'a'. */
+// [EDITOR-FILES-MONO] bouton « ＋ libellé » d'invitation (ajouter une photo / un fichier) :
+// le ＋ typographique devient l'icône trait `plus`, gabarit `.prio-btn` inchangé.
+function plusBtn(label) {
+  const b = el('button', { class: 'prio-btn', attrs: { type: 'button', style: 'display:inline-flex;align-items:center;gap:0.3rem' } });
+  b.appendChild(hdrIconAt('plus', 14));
+  b.appendChild(el('span', { text: label }));
+  return b;
+}
+// Icône TRAIT d'un en-tête de section (« Photos », « Fichiers »…) : ~14 px, muted, alignée
+// au texte — remplace les emojis 📷/📎 des en-têtes sans toucher au gabarit `.attach-head`.
+function secHeadIcon(name) {
+  const ic = hdrIconAt(name, 14);
+  ic.style.flexShrink = '0'; ic.style.opacity = '0.9';
+  return ic;
+}
+function ivIconBtn(tag, icon, title, cls, on) {
+  const b = el(tag || 'button', { class: 'iv-btn' + (cls ? ' ' + cls : ''), attrs: { title: title, 'aria-label': title } });
+  if ((tag || 'button') === 'button') b.type = 'button';
+  b.appendChild(hdrIconAt(icon, 18));
+  if (on && on.click) b.addEventListener('click', on.click);
+  return b;
+}
 function hdrIcon(name) {
   const NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(NS, 'svg');

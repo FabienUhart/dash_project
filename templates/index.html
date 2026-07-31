@@ -268,7 +268,7 @@ button.icon { padding: 0.45rem 0.6rem; }
 .guest-row .g-reject:hover { background: var(--red); color: #fff; }
 .status-pill { font-size: 0.68rem; padding: 0.08rem 0.4rem; border-radius: 4px; background: var(--panel-2); color: var(--muted); flex-shrink: 0; }
 .status-pill.approved { color: var(--green); }
-.status-pill.pending { color: var(--yellow); }
+.status-pill.pending { color: var(--yellow); }   /* [GUEST-AUTO-APPROVE] plus émis (aucun invité ne peut être en attente) — règle laissée inoffensive */
 .status-pill.rejected { color: var(--red); }
 .rev-row.expandable { cursor: pointer; }
 .rev-row.expandable:hover { background: var(--panel-2); }
@@ -343,7 +343,9 @@ button.icon { padding: 0.45rem 0.6rem; }
 .agd-title { flex: 1; min-width: 0; text-align: center; }
 .agd-day { font-size: 1rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agd-count { font-size: 0.75rem; color: var(--muted); }
-.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer;
+  /* [POLISH-VIEWER-AGENDA-PRIO] icônes trait CENTRÉES (les glyphes ‹ › ✕ flottaient selon la police). */
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .agd-nav:hover, .agd-x:hover { border-color: var(--muted); color: var(--accent); }
 .agd-body { display: flex; flex-direction: column; gap: 0.3rem; max-height: 60vh; overflow-y: auto; }
 .agd-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.4rem 0.5rem; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; }
@@ -351,7 +353,7 @@ button.icon { padding: 0.45rem 0.6rem; }
 .agd-dot { flex: 0 0 auto; width: 0.7rem; height: 0.7rem; border-radius: 50%; }
 .agd-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agd-time { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.1rem 0.4rem; }
-.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; }
+.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; display: inline-flex; align-items: center; justify-content: center; }
 .agd-empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0.5rem; text-align: center; }
 .agd-foot { margin-top: 0.7rem; }
 .agd-add { width: 100%; }
@@ -1002,7 +1004,7 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .task .task-actions .ic { width: 1.3em; height: 1.3em; }
 .task .task-actions button:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 /* Déplier et modifier = actions principales, mises en avant en bleu d'accent. */
-.task .task-actions .texp, .task .task-actions .tedit { color: var(--accent); border-color: var(--accent); }
+.task .task-actions .texp, .task .task-actions .tedit, .task .task-actions .tview { color: var(--accent); border-color: var(--accent); }  /* [MEMO-VIEW] 👁 même famille */
 /* === [CARD-REDESIGN] cards mémo resserrées === */
 /* Extrait tronqué à 3 lignes sur la card (contenu complet dans l'éditeur / au déplier). */
 .task .task-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }  /* [CARD-PREVIEW] extrait 2 lignes */
@@ -1196,6 +1198,10 @@ span.prio-btn { background: var(--panel-2); color: var(--text); border: 1px soli
    var(--red), remplissage rouge au survol seulement. Même taille que les autres boutons. */
 .iv-del { color: var(--red); border-color: var(--red); }
 .iv-del:hover { background: var(--red); color: #fff; border-color: var(--red); }
+/* [HUB-CHROME] danger DISCRET : monochrome au repos, rouge seulement au survol
+   (les boutons d'action de la pop-in Photos passent en icônes trait). */
+.iv-danger:hover { color: var(--red); border-color: var(--red); }
+
 @media (max-width: 900px) {
   /* [PHOTO-VIEWER-MOBILE] Barre photo : boutons CARRÉS homogènes. La règle tactile
      (button{min-height:44px}) les étirait en ovale → on fige width=height + min-height:0
@@ -1294,6 +1300,16 @@ aside#memo-panel {
 .task-content p { margin: 0 0 0.15rem; }
 .task-content p:last-child { margin-bottom: 0; }
 .task-content ul, .task-content ol { margin: 0.15rem 0; padding-left: 1.3rem; }
+/* [CHECKLIST-GAP] Quill scinde une liste à cocher en PLUSIEURS <ul> selon l'état coché des
+   items consécutifs : les marges entre blocs creusaient de faux « trous » dans la liste (cards
+   ET fiche de lecture). Deux listes à cocher ADJACENTES sont donc recollées (marge inter-blocs
+   à 0) ; la marge normale reste intacte dès qu'un paragraphe s'intercale — le trou VOULU reste
+   voulu. `:has()` cible les <ul> qui portent des items de checklist, jamais les listes à puces.
+   CSS seul, aucune donnée modifiée. */
+.task-content ul:has(> li[data-list]) + ul:has(> li[data-list]) { margin-top: 0; }
+.task-content ul:has(> li[data-list]):has(+ ul > li[data-list]) { margin-bottom: 0; }
+/* ⚠️ `:has()` ne peut pas être IMBRIQUÉ dans un autre `:has()` : la marge basse se cible
+   donc par `:has(+ ul > li[data-list])` (sélecteur relatif simple), pas par un `:has` niché. */
 .task-content h1, .task-content h2, .task-content h3 { margin: 0.25rem 0 0.15rem; font-weight: 600; }
 .task-content h1 { font-size: 1.15em; }
 .task-content h2 { font-size: 1.08em; }
@@ -1782,6 +1798,21 @@ dialog .actions {
 .leaflet-popup-content a:not(.prio-btn) { color: var(--accent); }
 .leaflet-popup-close-button { color: var(--muted) !important; }
 .leaflet-popup-close-button:hover { color: var(--text) !important; }
+
+/* [PHOTOS-POPIN-SIZE] La galerie Photos d'un dossier prenait une petite fraction de l'écran
+   (aperçu minuscule, 90 % du viewport vide). Grand format : min(1200px, 92vw) × 90vh, colonne
+   flex — la SCÈNE (.pv-stage) absorbe toute la hauteur libre, la bande vignettes + frise reste
+   dessous à sa taille naturelle. Dimensions et layout SEULEMENT, aucune logique touchée.
+   Le `display:flex` est porté par [open] : un <dialog> fermé doit rester `display:none`. */
+#photo-dialog[open] { display: flex; flex-direction: column; }
+#photo-dialog { width: min(1200px, 92vw); max-width: min(1200px, 92vw); height: 90vh; max-height: 90vh; }
+#photo-dialog #photo-head { flex: 0 0 auto; }
+#photo-dialog #photo-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+@media (max-width: 900px) {
+  /* Mobile : quasi plein écran, et la scène retrouve son gabarit d'origine (pas de régression). */
+  #photo-dialog { width: 96vw; max-width: 96vw; height: 94vh; max-height: 94vh; }
+  #photo-dialog .pv-stage { flex: 0 0 auto; height: min(46vh, 300px); }
+}
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
@@ -1990,7 +2021,7 @@ dialog .actions {
 
 <!-- [PHOTO-TEMPLATE-MEMO] Vue « Photos » du projet (carrousel + frise), corps construit
      par runPhotoView (partial). Pop-in comme #map-dialog ; pas de GSAP dessus (inv. 8). -->
-<dialog id="photo-dialog" style="width:min(560px,96vw);padding:0.9rem">
+<dialog id="photo-dialog" style="padding:0.9rem">
   <div id="photo-head" style="display:flex;align-items:center;gap:0.5rem;margin:0 0 0.6rem">
     <h3 id="photo-title" style="margin:0;font-size:1rem;flex:1;min-width:0">📷 Photos</h3>
     <button type="button" id="photo-close" class="prio-btn" title="Fermer">✕</button>
@@ -3141,7 +3172,9 @@ function agendaDayCfg() {
     memosForDay: (iso) => agendaGroupByDay(agendaSource())[iso] || [],
     chipColor: agendaChipColor,
     memoTitle: agendaMemoTitle,
-    openMemo: (m) => openMemoEditor(m),
+    // [POLISH-VIEWER-AGENDA-PRIO] clic sur une ligne = FICHE DE LECTURE 👁 (on lit d'abord) ;
+    // « ✎ Modifier » y mène à l'éditeur. Création : l'éditeur reste le chemin direct.
+    openMemo: (m) => openMemoView(memoViewCfg(), m.id),
     canCreate: () => true,
     // [AGENDA-DAY-POPIN] création → éditeur (la route owner /api/memos honore due_date) puis retour
     // à la pop-in jour à la fermeture (drill-down, y compris « annulé »). Titre placeholder éditable.
@@ -4674,6 +4707,7 @@ function contentNode(content, memo) {
     div.appendChild(linkify(content));
   }
   applyTags(div);
+  dressLinks(div);   // [LINK-RENDER] habillage des liens du contenu (affichage pur)
   if (memo) {
     div.querySelectorAll('.mention[data-mention]').forEach(sp => {
       if (assigneeNoAccess(sp.getAttribute('data-mention'), memo)) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
@@ -5127,16 +5161,20 @@ function guestRowEl(g, onChange) {
     info.appendChild(el('span', { class: 'rev-meta', text: (g.kind === 'memo' ? 'Mémo : ' : 'Projet : ') + stripHTML(g.target || '?') }));
   }
   row.appendChild(info);
-  row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { pending: 'en attente', approved: 'validé', rejected: 'refusé' }[g.status] || g.status }));
-  if (g.status !== 'approved') {
+  // [GUEST-AUTO-APPROVE] plus d'état « en attente » ni de bouton « ✓ Valider » : un invité qui
+  // s'enregistre (PIN du lien) est actif d'office. Restent la pastille de statut, la RÉVOCATION
+  // (« ✕ Révoquer ») et, pour un invité révoqué, la réactivation.
+  row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { approved: 'actif', rejected: 'révoqué' }[g.status] || g.status }));
+  if (g.status === 'rejected') {
     row.appendChild(el('button', {
-      class: 'g-approve', text: '✓ Valider',
+      class: 'g-approve', text: '↩ Réactiver',
+      attrs: { title: 'Redonner l\'accès à cet invité' },
       on: { click: async () => { await api(`/api/guests/${g.id}`, { method: 'PUT', body: JSON.stringify({ status: 'approved' }) }); await onChange(); } },
     }));
-  }
-  if (g.status !== 'rejected') {
+  } else {
     row.appendChild(el('button', {
-      class: 'g-reject', text: '✕ Refuser',
+      class: 'g-reject', text: '✕ Révoquer',
+      attrs: { title: 'Bloquer l\'accès de cet invité (réversible)' },
       on: { click: async () => { await api(`/api/guests/${g.id}`, { method: 'PUT', body: JSON.stringify({ status: 'rejected' }) }); await onChange(); } },
     }));
   }
@@ -5265,14 +5303,8 @@ async function renderShares() {
   const hubByEmail = new Map((hubs || []).map(h => [h.email, h]));
   const rerender = () => { renderShares(); refreshActivityBadge(); };
 
-  const pending = guests.filter(g => g.status === 'pending');
-  if (pending.length) {
-    const sec = el('div', { class: 'memo-section sec-overdue' });
-    const h = el('h2', { text: `DEMANDES EN ATTENTE (${pending.length})` });
-    sec.appendChild(h);
-    pending.forEach(g => sec.appendChild(guestRowEl(g, rerender)));
-    board.appendChild(sec);
-  }
+  // [GUEST-AUTO-APPROVE] la section « DEMANDES EN ATTENTE » disparaît : il n'y a plus de file
+  // de validation (l'enregistrement par PIN suffit). La liste des invités et la révocation restent.
 
   const byEmail = new Map();
   guests.forEach(g => {
@@ -5383,7 +5415,8 @@ async function renderShares() {
       info.appendChild(el('span', { class: 'rev-meta', text: 'depuis le ' + fmtWhen(g.created_at) }));
       row.appendChild(info);
       row.appendChild(el('span', { class: 'status-pill ' + (g.can_edit ? 'approved' : ''), icon: g.can_edit ? 'pencil' : 'eye', text: g.can_edit ? 'modification' : 'lecture' }));
-      row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { pending: 'en attente', approved: 'validé', rejected: 'refusé' }[g.status] || g.status }));
+      // [GUEST-AUTO-APPROVE] même vocabulaire que la liste : actif / révoqué (plus d'« en attente »).
+      row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { approved: 'actif', rejected: 'révoqué' }[g.status] || g.status }));
       row.appendChild(el('button', {
         text: '📋', attrs: { title: 'Copier le lien de cet accès' },
         on: { click: async (e) => {
@@ -5829,6 +5862,7 @@ function getQuill() {
       }),
     });
     addMentionMatcher(quillInstance);
+    setupAutoLink(quillInstance);   // [EDITOR-AUTOLINK]
     setupMentions(quillInstance, assigneeSuggestions, (name) => {
       if (!editingAssignees.some(x => x.toLowerCase() === name.toLowerCase())) editingAssignees.push(name);
       renderMePeople();
@@ -6783,6 +6817,54 @@ function openVoteManage(v) {
   dlg.showModal();
 }
 
+// [MEMO-VIEW] cfg owner de la fiche de lecture : données déjà normalisées (aucun appel API —
+// tout vient de `state`), sanitizer maison (`contentNode`), visionneuse existante.
+function memoViewCfg() {
+  return {
+    load: (id) => {
+      const m = (state.memos || []).find(x => x.id === id);
+      if (!m) return null;
+      const projs = projectAncestorIds(m.project_id).reverse()
+        .map(pid => state.projects.find(p => p.id === pid)).filter(Boolean)
+        .map(p => ({ emoji: p.emoji, color: usableProjColor(p.color), name: p.name }));
+      const created = m.created_at ? new Date(m.created_at) : null;
+      const updated = m.updated_at ? new Date(m.updated_at) : null;
+      const fmt = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+        + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const due = dueInfo(m.due_date, m.due_end);
+      const t = fmtMemoRange(m.due_time, m.end_time);
+      return {
+        memo: m,
+        title: m.title || memoLeadText(isRichHTML(m.content) ? splitLeadHtml(m.content).lead : stripHTML(m.content || '').trim()) || MEMO_EMPTY_LABEL,
+        crumb: projs,
+        createdLine: created && !isNaN(created)
+          ? '🕒 Créé par @' + (m.created_by_display || state.ownerName || 'Fabien') + ' le ' + fmt(created) : '',
+        updatedLine: updated && !isNaN(updated) ? '✎ modifié le ' + fmt(updated) : '',
+        canEdit: true,
+        prio: prioOf(m.priority),
+        dueLabel: due ? due.label + (t ? ' · ' + t : '') : '',
+        locLabel: m.location && m.location.label ? m.location.label : '',
+        links: m.links || [],
+        images: m.images || [],
+        subtasks: m.subtasks || [],
+        contentNode: (m.content && stripHTML(m.content).trim()) || isRichHTML(m.content) ? contentNode(m.content, m) : null,
+      };
+    },
+    onEdit: (m) => openMemoEditor(m),
+    // [MEMO-VIEW évolution] cocher depuis la fiche = MÊME appel que la card (patchMemo → PUT
+    // /api/memos/<id> puis loadAll) : la card derrière reflète l'état, la fiche reste ouverte.
+    onToggleSub: (m, subtasks) => patchMemo(m.id, { subtasks }),
+    // [MEMO-VIEW correctif 2] checklist du CONTENU : MÊME fonction que les cards.
+    // ⚠️ mémo relu FRAIS : la fiche n'est pas redessinée après une écriture, `m` serait périmé.
+    onToggleCheck: (m, i) => toggleCheckItem((state.memos || []).find(x => x.id === m.id) || m, i),
+    imageUrl: (n) => `/uploads/${n}`,
+    onOpenPhoto: (images, i) => runImageViewer({
+      images, startIndex: i, imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`,
+      exifUrl: (n) => `/api/image-exif/${n}`,
+    }),
+  };
+}
+
 function taskEl(memo) {
   const task = el('div', {
     class: 'task' + (memo.done ? ' done-task' : ''),
@@ -6929,6 +7011,11 @@ function taskEl(memo) {
       renderBoard();
     } },
   }));
+  // [MEMO-VIEW] œil = fiche de LECTURE (avant le crayon) : › / 👁 / ✎ / ⋯
+  actions.appendChild(el('button', {
+    class: 'tview', icon: 'eye', attrs: { title: 'Voir le mémo' },
+    on: { click: () => openMemoView(memoViewCfg(), memo.id) },
+  }));
   actions.appendChild(el('button', {
     class: 'tedit', icon: 'pencil', attrs: { title: 'Modifier ce mémo' },
     on: { click: () => { if (!openMemoEditor(memo)) editTaskInline(task, content, memo); } },
@@ -7061,15 +7148,24 @@ function assigneeRowEl(memo) {
   return row;
 }
 
-const COMMENT_PRIO_COL = { 1: '#ff5252', 2: 'var(--warn)', 3: '#66bb6a' };
+// [COMMENT-PRIO-CONFIG] priorités de commentaire = LA liste configurée (Paramètres → Priorités),
+// avec SES couleurs (celles des chips de cards) — plus de table 1-4 en dur.
+const commentPrioColor = (p) => cmtPrioPalette(state.priorities || []).color(p);
+const commentPrioLabel = (p) => cmtPrioPalette(state.priorities || []).label(p);
 
 function commentInputEl(memo, parentId, onPosted) {
-  const input = el('input', { attrs: { type: 'text', placeholder: (parentId ? '↩ Répondre… (Entrée)' : '💬 Commenter… (Entrée, @ pour mentionner)'), maxlength: '2000' } });
-  input.style.cssText = 'flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.84rem;padding:0.3rem 0.5rem';
+  _commentsV2Style();   // [COMMENTS-V2]
+  // BONUS : « Écrire à <prénom>… » quand le mémo a UN seul assigné, autre que le lecteur.
+  const me = state.ownerName || 'Fabien';
+  const solo = (memo.assignees || []).filter(x => x && x !== me);
+  const ph = parentId ? '↩ Répondre… (Entrée)'
+    : (solo.length === 1 ? ('Écrire à ' + solo[0].split(/\s+/)[0] + '… (@ pour mentionner)')
+                         : 'Écrire un commentaire… (@ pour mentionner)');
+  const input = el('input', { attrs: { type: 'text', placeholder: ph, maxlength: '2000' } });
   attachInputMention(input, () => assigneeSuggestions());
-  const prioSel = el('select', { attrs: { title: 'Priorité du commentaire' } });
-  prioSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:inherit;font-size:0.78rem;padding:0.25rem';
-  [['0', '⚑ —'], ['1', 'P1'], ['2', 'P2'], ['3', 'P3']].forEach(([v, t]) => prioSel.appendChild(el('option', { attrs: { value: v }, text: t })));
+  // [COMMENT-PRIO-CONFIG] le menu rend LA liste configurée (le serveur accepte tout id présent
+  // dans `priorities` — source de vérité unique, plus de 1-3 câblé de part et d'autre).
+  const prioSel = cmtPrioSelect(state.priorities || []);
   input.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter' || !input.value.trim()) return;
     e.preventDefault();
@@ -7080,9 +7176,20 @@ function commentInputEl(memo, parentId, onPosted) {
     memo.comment_count = (memo.comment_count || 0) + 1;
     onPosted();
   });
-  const row = el('div', { attrs: { style: 'display:flex;gap:0.35rem;margin-top:0.35rem' } });
-  row.appendChild(prioSel);
-  row.appendChild(input);
+  // [COMMENTS-V2] avatar du lecteur + champ arrondi contenant input + ⚑ + 🎤 + envoyer.
+  const row = el('div', { class: 'cmt-composer' });
+  row.appendChild(cmtAvatar(me, false));
+  const field = el('div', { class: 'cmt-field' });
+  field.appendChild(input);
+  // Drapeau ⚑ : habillage du <select> (qui reste DESSOUS, focusable → clavier préservé) ;
+  // il se teinte à la couleur de la priorité choisie.
+  const flagWrap = el('span', { class: 'cmt-flagwrap' });
+  const flag = el('span', { class: 'cmt-ibtn', text: '⚑', attrs: { title: 'Priorité du commentaire', 'aria-hidden': 'true' } });
+  const syncFlag = () => { const c = commentPrioColor(parseInt(prioSel.value, 10) || 0); flag.style.color = c || ''; };
+  prioSel.addEventListener('change', syncFlag);
+  syncFlag();
+  flagWrap.append(flag, prioSel);
+  field.appendChild(flagWrap);
   // [VOICE-MESSAGES] Commentaire vocal : enregistre → PJ v22 du mémo → commentaire [audio:<fn>].
   const vbtn = voiceCommentButton({
     uploadUrl: `/api/memos/${memo.id}/attachments`,
@@ -7095,7 +7202,18 @@ function commentInputEl(memo, parentId, onPosted) {
       onPosted();
     },
   });
-  if (vbtn) row.appendChild(vbtn);
+  if (vbtn) field.appendChild(vbtn);   // [COMPOSER-MIC-MONO] icône trait posée par le helper partagé
+  // Envoyer : avion en trait (même geste que la touche Entrée).
+  const send = el('button', { class: 'cmt-ibtn', attrs: { type: 'button', title: 'Envoyer (Entrée)' } });
+  const sic = hdrIcon('send'); sic.setAttribute('width', '16'); sic.setAttribute('height', '16');
+  send.appendChild(sic);
+  send.addEventListener('click', () => {
+    if (!input.value.trim()) return;
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  field.appendChild(send);
+  row.appendChild(field);
+  row.__reset = () => { syncFlag(); };
   return row;
 }
 
@@ -7105,61 +7223,63 @@ function commentsBlockEl(memo) {
   wrap.appendChild(list);
   const renderComments = (comments) => {
     list.innerHTML = '';
-    const renderOne = (c, isReply) => {
-      const r = el('div', { class: 'comment-row' + (isReply ? ' comment-reply' : '') });
-      if (c.priority) {
-        const pp = el('span', { class: 'c-prio', text: 'P' + c.priority });
-        pp.style.background = COMMENT_PRIO_COL[c.priority] || 'var(--muted)';
-        r.appendChild(pp);
-      }
+    // [COMMENTS-V2] une bulle par commentaire (avatar + bulle + méta + actions au survol).
+    const buildOne = (c, isReply) => {
       const author = (c.author || '').replace(/\s*<[^>]*>/, '');
-      const a = el('span', { class: 'c-author', text: (c.guest ? '👤 ' : '') + author });
-      if (c.guest) a.style.color = 'var(--guest)';
-      a.title = c.author;
-      r.appendChild(a);
-      // [VOICE-MESSAGES] corps avec marqueur [audio:...] → bulle vocale ; sinon texte.
-      const cbody = el('span', { class: 'c-body' });
+      // [VOICE-MESSAGES] corps avec marqueur [audio:...] → bulle vocale ; sinon texte (+ liens).
       const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));
-      if (vf) cbody.appendChild(vf); else cbody.textContent = c.body;
-      r.appendChild(cbody);
-      r.appendChild(el('span', { class: 'c-when', text: fmtWhen(c.created_at) }));
+      const bodyNode = vf || commentBodyNode(c.body);   // [COMMENT-LINKIFY]
       const others = (c.seen || []).filter(v => v && v !== author && v !== (state.ownerName || 'Fabien'));
-      if (others.length) r.appendChild(el('span', { class: 'c-seen', text: '👁 ' + others.join(', '), attrs: { title: 'Vu par ' + others.join(', ') } }));
-      if (!isReply) r.appendChild(el('button', {
-        text: '↩', attrs: { type: 'button', title: 'Répondre', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0' },
-        on: { click: () => {
-          if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
-          const rb = commentInputEl(memo, c.id, loadComments);
-          rb.classList.add('reply-box', 'comment-reply');
-          r.after(rb);
-          rb.querySelector('input').focus();
-        } },
-      }));
-      r.appendChild(el('button', {
-        text: '×', attrs: { type: 'button', title: 'Supprimer ce commentaire', style: 'background:none;border:none;color:var(--muted);cursor:pointer;padding:0' },
-        on: { click: async () => {
-          if (!(await confirmPopin('Supprimer ce commentaire ?'))) return;
-          await api(`/api/comments/${c.id}`, { method: 'DELETE' });
-          loadComments();
-        } },
-      }));
-      list.appendChild(r);
-      // [COMMENT-REACTIONS] rangée de chips + palette (owner peut toujours réagir).
-      const rr = reactionRow(c.reactions, true, async (emoji) => {
-        try { await api(`/api/comments/${c.id}/react`, { method: 'POST', body: JSON.stringify({ emoji }) }); loadComments(); }
-        catch (e) { await notify('Réaction impossible : ' + e.message, { error: true }); }
+      const _sys = cmtSystemInfo(c.body);   // [SYSTEM-LINES-MONO]
+      const row = cmtRow({
+        author: c.author, guest: !!c.guest, bodyNode,
+        when: fmtWhen(c.created_at) + (vf ? ' · 🎤 message vocal' : ''),
+        seenText: others.length ? ('👁 ' + others.join(', ')) : '',
+        priority: c.priority, prioColor: commentPrioColor, prioLabel: commentPrioLabel, isReply,
+        deleted: !!c.deleted,   // [COMMENTS-V2 addendum] pierre tombale (le serveur a déjà vidé le corps)
+        system: _sys,           // [SYSTEM-LINES-MONO] message automatique → ligne plate, pas une bulle
+        actions: [
+          !isReply && { label: '↩ Répondre', onClick: (r) => {
+            if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
+            const rb = commentInputEl(memo, c.id, loadComments);
+            rb.classList.add('reply-box', 'cmt-reply');
+            r.after(rb);
+            rb.querySelector('input').focus();
+          } },
+          // L'owner modère tout ; le serveur reste seul juge (can_delete).
+          (c.can_delete !== false) && { label: '✕', title: 'Supprimer ce message', danger: true, onClick: async () => {
+            if (!(await confirmPopin('Supprimer ce message ? Il laissera une trace « Message supprimé » et les réponses resteront.'))) return;
+            await api(`/api/comments/${c.id}`, { method: 'DELETE' });
+            loadComments();
+          } },
+        ],
+        // [COMMENT-REACTIONS] rangée de chips + palette (owner peut toujours réagir).
+        reactionsRow: reactionRow(c.reactions, !_sys, async (emoji) => {
+          try { await api(`/api/comments/${c.id}/react`, { method: 'POST', body: JSON.stringify({ emoji }) }); loadComments(); }
+          catch (e) { await notify('Réaction impossible : ' + e.message, { error: true }); }
+        }),
       });
-      if (isReply) rr.style.marginLeft = '1.5rem';
-      list.appendChild(rr);
+      return row;
     };
+    // au-delà de 2 réponses : les suivantes sont repliées (état de session, rien de persisté)
     comments.filter(c => !c.parent_id).forEach(c => {
-      renderOne(c, false);
-      comments.filter(ch => ch.parent_id === c.id).forEach(ch => renderOne(ch, true));
+      list.appendChild(buildOne(c, false));
+      const replies = comments.filter(ch => ch.parent_id === c.id);
+      replies.slice(0, 2).forEach(ch => list.appendChild(buildOne(ch, true)));
+      const extra = replies.slice(2);
+      if (extra.length) {
+        const holder = el('div');
+        holder.style.display = 'none';
+        extra.forEach(ch => holder.appendChild(buildOne(ch, true)));
+        list.appendChild(cmtMoreToggle(extra.length, (open) => { holder.style.display = open ? '' : 'none'; }));
+        list.appendChild(holder);
+      }
     });
   };
   const loadComments = async () => {
     try { await api(`/api/memos/${memo.id}/comments/seen`, { method: 'POST' }); } catch (e) { /* silencieux */ }
-    try { renderComments(await api(`/api/memos/${memo.id}/comments`)); } catch (e) { /* silencieux */ }
+    // [COMMENTS-V2] une seule bulle par vocal : la ligne système « 📎 … vocal-….webm » est masquée.
+    try { renderComments(cmtHideVoiceLogs(await api(`/api/memos/${memo.id}/comments`))); } catch (e) { /* silencieux */ }
   };
   if (memo.comment_count) loadComments();
   wrap.appendChild(commentInputEl(memo, null, loadComments));
@@ -7177,6 +7297,11 @@ function taskDetailEl(memo) {
   // échéance, priorité, emoji, couleur du point, récurrence, position, images, Partager, Versions,
   // hors-vote) vivent désormais dans la pop-in « Éditer le mémo » (✎ / renderMeMeta).
   const subs = memo.subtasks || [];
+  // [COMMENTS-V2] en-tête de section « ☑ SOUS-TÂCHES · n/total » — même vocabulaire que la fiche 👁.
+  if (subs.length) {
+    detail.appendChild(el('div', { class: 'cmt-sec-head',
+      text: '☑ SOUS-TÂCHES · ' + subs.filter(x => x.done).length + '/' + subs.length }));
+  }
   subs.forEach((st, i) => {
     const stRow = el('div', { class: 'subtask' + (st.done ? ' stdone' : '') });
     const cb = el('input', { attrs: { type: 'checkbox' } });
@@ -7197,14 +7322,19 @@ function taskDetailEl(memo) {
     detail.appendChild(stRow);
   });
 
-  const stAdd = el('input', { class: 'st-add', attrs: { type: 'text', placeholder: '+ sous-tâche (Entrée)' } });
+  // [COMMENTS-V2] l'ajout devient une invitation claire (icône ＋ trait + libellé explicite).
+  const stWrap = el('div', { class: 'st-addwrap' });
+  const stIc = hdrIcon('plus'); stIc.setAttribute('width', '14'); stIc.setAttribute('height', '14');
+  stWrap.appendChild(stIc);
+  const stAdd = el('input', { class: 'st-add', attrs: { type: 'text', placeholder: 'Ajouter une étape à cocher… (Entrée pour valider)' } });
   stAdd.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && stAdd.value.trim()) {
       e.preventDefault();
       patchMemo(memo.id, { subtasks: [...subs, { content: stAdd.value.trim(), done: false }] });
     }
   });
-  detail.appendChild(stAdd);
+  stWrap.appendChild(stAdd);
+  detail.appendChild(stWrap);
 
   detail.appendChild(commentsBlockEl(memo));
 
@@ -7688,7 +7818,7 @@ function renderBoard() {
   if (dockPid && dock.voice && pendingFolderAttachCfg) {
     const vb = voiceAttachButton(pendingFolderAttachCfg);
     if (vb) { vb.style.marginBottom = '0.6rem'; board.appendChild(vb); }
-    else board.appendChild(el('div', { attrs: { style: 'color:var(--muted);font-size:0.8rem;margin-bottom:0.6rem' }, text: '🎤 Enregistrement audio indisponible sur ce navigateur.' }));
+    else board.appendChild(voiceUnavailableNote('margin-bottom:0.6rem'));   // [POLISH-VIEWER-AGENDA-PRIO] icône trait
   }
   // [TOOLS-DOCK] mini-barre « Dossier » : chemin RAPIDE au nom seul + « Options… » (pop-in projet
   // complète, parent pré-rempli). ⚠️ POST /api/projects IGNORE parent_id → création rapide =
@@ -8316,10 +8446,28 @@ document.getElementById('add-cat-page').addEventListener('click', () => addCateg
   // [MEMO-JUMP-BOTTOM] ⤓ « Aller en bas » ↔ ⤒ « Remonter » de la colonne mémos (la fenêtre
   // scrolle ; l'aside n'existe qu'en vue Liens). Dans un <summary> → preventDefault + stopPropagation
   // pour ne pas (dé)plier le <details> (même précaution que #memo-add-btn / #memo-open).
+  // [MEMO-JUMP-MOBILE] En mode EMPILÉ (≤900 px), la colonne mémos est un bloc de la page :
+  // sauter « en bas » avec window.scrollTo(scrollHeight) traversait TOUS les liens (et ne
+  // servait à rien si le bloc était replié). En mobile, le geste est donc BORNÉ AU BLOC :
+  // ⤓ = déplier le bloc s'il est replié puis descendre jusqu'à sa fin (la note rapide),
+  // ⤒ = remonter à l'en-tête MÉMOS. Desktop : comportement d'origine INCHANGÉ (page entière).
   const memoJumpBtn = document.getElementById('memo-jump-btn');
   if (memoJumpBtn) {
     const scroller = document.scrollingElement || document.documentElement;
-    const atBottom = () => (window.innerHeight + window.scrollY) >= (scroller.scrollHeight - 4);
+    const stacked = () => window.matchMedia('(max-width: 900px)').matches;
+    const det = document.getElementById('memo-details');
+    const panel = document.getElementById('memo-panel');
+    // ⚠️ Cible = la FIN DE LA LISTE (#memos), PAS `#memo-quick-wrap` : celui-ci est
+    // `position:sticky;bottom:0` — toujours à l'écran, il aurait rendu « on est déjà en bas »
+    // vrai en permanence et le geste inopérant.
+    const endEl = () => document.getElementById('memos') || panel;
+    // « en bas » : page entière en desktop ; fin du BLOC mémos visible en mobile.
+    const atBottom = () => {
+      if (!stacked()) return (window.innerHeight + window.scrollY) >= (scroller.scrollHeight - 4);
+      if (!det.open) return false;                       // bloc replié → il reste à descendre
+      const r = endEl().getBoundingClientRect();
+      return r.bottom <= window.innerHeight + 4;
+    };
     const syncJump = () => {
       const bottom = atBottom();
       memoJumpBtn.textContent = bottom ? '⤒' : '⤓';
@@ -8329,9 +8477,21 @@ document.getElementById('add-cat-page').addEventListener('click', () => addCateg
     };
     memoJumpBtn.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      window.scrollTo({ top: atBottom() ? 0 : scroller.scrollHeight, behavior: 'smooth' });
+      if (!stacked()) {                                  // desktop : inchangé
+        window.scrollTo({ top: atBottom() ? 0 : scroller.scrollHeight, behavior: 'smooth' });
+        return;
+      }
+      if (atBottom()) {                                  // ⤒ : retour à l'en-tête du bloc
+        det.querySelector('summary').scrollIntoView({ block: 'start', behavior: 'smooth' });
+        return;
+      }
+      if (!det.open) det.open = true;                    // ⤓ : déplier d'abord (comme le « + »)
+      // laisse le layout se poser après le dépliage, puis descend à la FIN DU BLOC seulement
+      setTimeout(() => { endEl().scrollIntoView({ block: 'end', behavior: 'smooth' }); syncJump(); }, 30);
     });
     window.addEventListener('scroll', syncJump, { passive: true });
+    window.addEventListener('resize', syncJump);
+    det.addEventListener('toggle', syncJump);
     syncJump();
   }
 })();

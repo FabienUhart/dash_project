@@ -1,37 +1,42 @@
 {
-  "lot": "ATTACHMENTS",
-  "version": "V22.0.69",
-  "date": "2026-07-10",
-  "status": "[ATTACHMENTS] pièces jointes de tout type sur les mémos (upload + download, invités inclus). ⚠️ BUMP EXPORT → v22 (APP_VERSION=\"22\", entrée invariant 1 CLAUDE.md ajoutée, § Versionnage X=22). Code COMPLET (backend + 3 pages via partial), NON commité, NON journalisé (⚠️ REALISATION.md/BUILD_VERSION restent à V21.1.68 — tête au commit). Infra portée (MAX_CONTENT_LENGTH 320 Mo, gunicorn --timeout 300). Testé : 22 assertions backend (Flask test client) ALL PASS + py_compile + node --check ; rebuild OK (/api/version export=22, table réelle). SÉQUENCE : (1) validation Chrome + gros fichier par l'AGENT COWORK (owner + invité approuvé + anonyme) — PAS Claude Code, (2) journaliser [V22.0.69] + IDEAS/CLAUDE(§historique)/MEMORY, (3) commit [V22.0.69] + git tag V22.0.69 && git push origin V22.0.69 -> déploiement auto. ⚠️ TAG = V22.0.69 == tête REALISATION.md. Aucun commit/tag/push sans feu vert explicite.",
+  "lot": "PHOTOS-POPIN-SIZE",
+  "version": "V27.18.180",
+  "date": "2026-07-31",
+  "status": "La galerie Photos d'un dossier passe en grand format : min(1200px, 92vw) × 90vh, la scène du carrousel absorbe la hauteur libre (~78 % de la pop-in mesurés), vignettes et chips de dates gardent leur bandeau dessous. Mobile ≤ 900 px non régressé. DIMENSIONS ET LAYOUT SEULEMENT : aucune logique, zéro route, aucune donnée, export 27 inchangé, app.py intact. Rebuild local OK (/api/version = 27.18.180), NON commité.",
   "app_url": "http://localhost:8099/",
-  "export_decision": "BUMP X → v22 : chaque mémo gagne `attachments:[{filename, orig_name, mime, size, preview, created_at, created_by}]` (noms de fichiers seuls, JAMAIS le binaire — comme les images). Import ADDITIF : n'ajoute que les fichiers dont le binaire EXISTE sur le volume + pas déjà rattachés (dédup (memo_id, filename)) → ré-import = 0 doublon ; absent (v1→v21) = aucune pièce jointe, compat ascendante. Table `attachments` distincte de `memos.images` (photos EXIF/carte inchangées).",
-  "resume": "Joindre n'importe quel fichier (≤ 300 Mo) à un mémo, stocké dans data/uploads/, téléchargeable par tous ceux qui ont accès. Types « aperçu sûr » (image/pdf/audio validés par SIGNATURE) → aperçu inline ; tout le reste → téléchargement forcé (Content-Disposition: attachment, jamais inline = anti-XSS). Upload owner + invités approuvés (can_edit, scope) ; download owner + invités ayant accès.",
+  "volets": {
+    "1_grand_format": "#photo-dialog : min(560px,96vw) hauteur libre → min(1200px,92vw) × 90vh, en colonne flex. En-tête flex:0 0 auto ; #photo-body flex:1 1 auto + min-height:0 + overflow-y:auto.",
+    "2_scene": ".pv-stage (classe AJOUTÉE au carrousel dans le partial) : height:min(46vh,300px) FIGÉE → flex:1 1 auto + min-height:min(46vh,300px) de repli (si la feuille de la page manquait). L'aperçu reste en center/contain = object-fit contain, jamais déformé ni rogné.",
+    "3_bandeau": "Barre d'actions, vignettes et frise de dates passent en flex:0 0 auto → elles ne se font plus écraser par la scène ; le corps scrolle si la frise est longue.",
+    "4_mobile": "@media (max-width:900px) : 96vw × 94vh (quasi plein écran) et la scène RETROUVE son gabarit d'origine (flex:0 0 auto; height:min(46vh,300px)) — demande explicite de ne pas régresser le mobile.",
+    "5_detail_dialog": "Le display:flex est porté par #photo-dialog[OPEN] : le poser sur l'élément nu aurait rendu la pop-in visible en permanence (un <dialog> fermé doit rester display:none)."
+  },
+  "surfaces": "La pop-in n'existe que sur 2 pages : index.html (owner) et share.html (invité). Le HUB n'a PAS de galerie Photos de dossier (vérifié : aucun #photo-dialog, aucun appel à runPhotoView) — « 3 pages » se réduit donc ici à ces deux-là, le corps restant partagé (runPhotoView du partial). La visionneuse plein écran (#lightbox) n'est pas concernée, comme demandé.",
   "fichiers_modifies": [
-    "app.py : APP_VERSION=\"22\" ; MAX_CONTENT_LENGTH=320 Mo ; helpers ATTACHMENTS (SAFE_ATTACH_NAME, _clean_orig_name, _attach_preview signature image/pdf/audio, _save_attachment STREAMÉ sur disque + garde 300 Mo, _attach_row_dict, _attachments_map, _serve_attachment_row inline/attachment, _delete_attachment_file, _import_memo_attachments) ; migration table `attachments` ; routes owner GET/POST /api/memos/<id>/attachments + GET/DELETE /api/attachments/<id> (?download=1 force l'attachment) ; routes invité POST /share/<token>/memo/<id>/attachments (approuvé+can_edit+scope) + GET/DELETE /share/<token>/attachment/<id> (scope revalidé) ; exposition attachments dans list_memos + share_data + hub_data (URL scopée par mémo) ; purge cascade _purge_memo_row ; export v22 (niché) + import additif (branches update ET insert) ; _data_version + attachments.",
-    "Dockerfile : gunicorn CMD + --timeout 300 (upload lent de 300 Mo).",
-    "templates/partials/_shared.js.html : helper PARTAGÉ renderAttachments(cfg) — section « 📎 Fichiers », liste (icône par type, nom, taille), aperçu (👁 : image→openImage/runImageViewer, pdf/audio→nouvel onglet), download (⬇ ?download=1), suppression (✕ si can_edit), uploader (bouton + drag-drop, barre de progression XHR). CSS injecté une fois (#attach-style, tokens).",
-    "templates/index.html : #me-attachments dans l'éditeur mémo + renderMeAttachments/refreshMeAttachments (owner) ; badge 📎 n sur la card (taskEl).",
-    "templates/share.html : #q-attachments dans l'éditeur invité + renderQAttachments (canEdit=canEditNow(), header X-Guest-Token=guestToken()).",
-    "templates/hub.html : #ed-attachments dans l'éditeur + renderEdAttachments (header X-Guest-Token=gtFor(m.share_token), url upload/download via m.share_token).",
-    "[ATTACHMENTS-QUICKVIEW] (frontend pur, rejoint V22.0.69) : helper partagé attachQuickView(title, makeCfg) dans _shared.js.html (pop-in <dialog> créée à la volée, réutilise renderAttachments, pas de GSAP) ; badge 📎 n de la card rendu CLIQUABLE sur les 3 pages (stopPropagation) → openMemoAttachments (index) / openShareMemoAttachments (share) / openHubMemoAttachments (hub) : consultation lecture (aperçu 👁 + download ⬇), upload/suppression seulement si can_edit (mêmes cfg que l'éditeur). Ajout du badge 📎 aux cards share + hub (owner l'avait déjà).",
-    "[ATTACHMENTS-COMMENT] (backend seul, rejoint V22.0.69) : commentaire AUTOMATIQUE à l'ajout/suppression d'un fichier. Helper _attach_log_comment(db, memo_row, added, names, author, share_id) → réutilise _insert_comment (memo_comments) — commentaire NORMAL (compte dans 💬 via ccounts, déclenche 🔔 côté invité via share_id, purge en cascade, exporté depuis v21). Corps : « 📎 a ajouté le fichier « x » » / « 📎 a ajouté N fichiers : … » / « 🗑 a supprimé le fichier « x » » (le « par qui » = attribution du commentaire, non répété). Câblé dans les 4 routes (owner add/delete → author 'moi', share_id NULL ; invité add/delete → author « Nom <email> », share_id du partage — invariant 5 : déjà dans le scope approuvé). Export inchangé (commentaires normaux), ré-import dédup existante (0 doublon)."
+    "templates/partials/_shared.js.html : runPhotoView — classe .pv-stage + flex:1 1 auto/min-height sur la scène ; flex:0 0 auto sur la barre d'actions, les vignettes et la frise.",
+    "templates/index.html : largeur inline retirée du <dialog id=photo-dialog> + bloc CSS [PHOTOS-POPIN-SIZE] en FIN de <style> (gotcha cascade de CLAUDE.md).",
+    "templates/share.html : idem (largeur inline retirée, bloc CSS identique).",
+    "REALISATION.md [V27.18.180], IDEAS.md (✅ [PHOTOS-POPIN-SIZE])."
   ],
   "tests_valides_localement": [
-    "python3 -m py_compile app.py OK ; node --check des 3 pages + _shared.js.html OK.",
-    "Backend (Flask test client, copie de base, multipart) — 22 assertions ALL PASS : migration ; upload owner txt (download-only) + png (preview, mime image/png) + taille ; GET liste ; download txt=attachment / png=inline / png?download=1=attachment forcé ; /api/memos expose attachments ; export v22 niché ; ré-import 0 doublon ; _data_version change ; DELETE ; upload invité approuvé 201 + url scopée ; upload anonyme 403 ; download invité via token 200 ; download hors scope 404 (invariant 5).",
-    "Rebuild docker OK : /api/version export=22 ; table attachments présente."
+    "node --check 4 surfaces OK ; docker compose up -d --build OK ; GET / = 200 ; /api/version = {\"export\":27,\"version\":\"27.18.180\"}.",
+    "SMOKE Chrome (owner, écran 1920×958) : pop-in 1164×836 avec display:flex ; scène 1134×649 = 78 % de la hauteur de la pop-in ; background-size:contain ; #photo-body en overflow-y:auto ; aucun débordement horizontal du document.",
+    "CSSOM vérifié : les 4 règles desktop ET les 2 règles @media (max-width:900px) sont bien parsées et présentes.",
+    "Aucune donnée de test créée (la galerie a été instanciée avec des photos factices en mémoire, pop-in refermée ensuite)."
+  ],
+  "non_teste": [
+    "Rendu RÉEL en ≤ 900 px : l'outil de redimensionnement de fenêtre n'a pas changé le viewport de l'onglet (resté 1920×958), la media query n'a donc été validée que par le CSSOM. À contrôler en mode responsive / iPhone.",
+    "Page share non ouverte en navigateur par l'agent : même bloc CSS, même corps partagé."
   ],
   "a_verifier_par_fabien_en_live": [
-    "OWNER (localhost:8099) : ouvrir un mémo → section « 📎 Fichiers » → Ajouter un fichier (ou glisser-déposer) : un PDF/image/audio → bouton 👁 aperçu (image = visionneuse, pdf/audio = onglet) ; un .zip/.docx → PAS d'aperçu, ⬇ télécharge (le fichier s'ouvre JAMAIS inline). Barre de progression sur gros fichier. Supprimer. Badge 📎 n sur la card. GROS FICHIER (~300 Mo) : upload aboutit (patienter), download OK.",
-    "INVITÉ (partage d'un mémo/projet, approuvé + can_edit) : mêmes actions (upload/aperçu/download/suppression) ; anonyme ou lecture seule = pas d'upload/suppression (juste download/aperçu de l'existant). Hub : idem via le dossier.",
-    "SÉCURITÉ : un HTML/SVG uploadé se télécharge (jamais rendu inline). Scope : un invité ne voit/télécharge que les fichiers des mémos de son partage.",
-    "⚠️ INFRA (hors code, Fabien) : sur le Zimaboard, vérifier que le Caddyfile n'a PAS de request_body max_size < 320 Mo (Caddy v2 = pas de limite par défaut → passe a priori) ; espace disque data/uploads/ (300 Mo/fichier). SONDE bypass Authelia des nouvelles routes /share/<t>/memo/<id>/attachments + /share/<t>/attachment/<id> (sous /share/* → couvert par la règle existante ; confirmer)."
+    "Grand écran : l'image respire, la pop-in remplit l'écran sans déborder, l'aperçu n'est ni déformé ni rogné.",
+    "Vignettes et chips de dates toujours visibles sous l'image ; frise longue → le corps scrolle sans casser la scène.",
+    "≤ 900 px : quasi plein écran, gabarit de la scène inchangé par rapport à avant.",
+    "2 thèmes × owner et share. Navigation ‹ ›, plein écran, téléchargement, localisation carte et suppression inchangés."
   ],
   "notes": [
-    "Types « aperçu sûr » validés par SIGNATURE binaire (image via _looks_like_image, pdf %PDF-, audio mp3/wav/ogg/m4a/flac) ; sinon preview=0 → TOUJOURS Content-Disposition: attachment (anti-XSS). Le nom d'origine est assaini (_clean_orig_name), l'extension conservée pour le download ; le fichier sur disque = uuid.ext (SAFE_ATTACH_NAME).",
-    "Upload streamé (f.save = copyfileobj → disque, jamais 300 Mo en RAM ; Werkzeug spoole les gros champs sur /tmp). Garde de taille 300 Mo après écriture (le plafond 320 Mo borne le corps).",
-    "Invariant 5 : routes invité sous /share/* ; upload exige invité APPROUVÉ + can_edit + mémo dans le scope ; download exige le fichier dans le scope du token. Anonyme = 403 upload, 404 hors scope.",
-    "Table attachments SÉPARÉE de memos.images (photos EXIF/carte non touchées) — décision de moindre risque (image_meta/PHOTO-MAP intacts).",
-    "À FAIRE AU COMMIT : REALISATION.md [V22.0.69], IDEAS.md ([ATTACHMENTS] fait), CLAUDE.md § historique (l'entrée invariant 1 v22 + § Versionnage X=22 sont DÉJÀ posées), MEMORY.md."
+    "Invariants : 6 (rien d'externe), 8 (aucun GSAP sur le <dialog>), 9 (tokens/classes existants ; CSS par page comme le veut la convention).",
+    "⚠️ RAPPEL : sauvegarde export au format v27 toujours à refaire côté Fabien (depuis V27.0.153).",
+    "File d'attente NON commitée : V27.2.155 → V27.18.180."
   ]
 }

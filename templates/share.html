@@ -129,15 +129,9 @@ button.icon:active { transform: scale(0.94); }
 .sitem.droptarget { outline: 1px dashed var(--accent); color: var(--accent); }
 .sitem .cnt { margin-left: auto; font-size: 0.72rem; opacity: 0.7; flex-shrink: 0; }
 .sitem .slabel { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sitem .cat-edit {
-  position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
-  flex-shrink: 0; min-height: 0; width: 1.5rem; height: 1.5rem;
-  padding: 0; border: none; background: none;
-  color: var(--muted); cursor: pointer; border-radius: 5px; opacity: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.sitem:hover .cat-edit, .sitem:focus-within .cat-edit { opacity: 0.7; }
-.sitem .cat-edit:hover { opacity: 1; color: var(--text); background: var(--panel-2); }
+/* [PROJ-EDIT-BAR] Le crayon `.cat-edit` de la sidebar est SUPPRIMÉ (avec son CSS [SIDEBAR-EDIT-MONO]
+   devenu orphelin) : la sidebar redevient de la navigation pure. L'édition d'un dossier passe par
+   l'icône « Modifier » de la barre d'actions du board. */
 .sitem:hover .cnt, .sitem:focus-within .cnt { opacity: 0; }
 .sdot { width: 0.6rem; height: 0.6rem; border-radius: 50%; display: inline-block; flex-shrink: 0; }
 /* [SIDEBAR-TREE] .sb-tree (connecteurs texte) ne sert PLUS dans la sidebar — conservé
@@ -201,7 +195,9 @@ button.icon:active { transform: scale(0.94); }
 .agd-title { flex: 1; min-width: 0; text-align: center; }
 .agd-day { font-size: 1rem; font-weight: 700; text-transform: capitalize; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agd-count { font-size: 0.75rem; color: var(--muted); }
-.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font-size: 1.1rem; line-height: 1; cursor: pointer; }
+.agd-nav, .agd-x { flex: 0 0 auto; width: 2.2rem; height: 2.2rem; border-radius: 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer;
+  /* [POLISH-VIEWER-AGENDA-PRIO] icônes trait CENTRÉES (les glyphes ‹ › ✕ flottaient selon la police). */
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .agd-nav:hover, .agd-x:hover { border-color: var(--muted); color: var(--accent); }
 .agd-body { display: flex; flex-direction: column; gap: 0.3rem; max-height: 60vh; overflow-y: auto; }
 .agd-row { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding: 0.4rem 0.5rem; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--border); cursor: pointer; }
@@ -209,7 +205,7 @@ button.icon:active { transform: scale(0.94); }
 .agd-dot { flex: 0 0 auto; width: 0.7rem; height: 0.7rem; border-radius: 50%; }
 .agd-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agd-time { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.1rem 0.4rem; }
-.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; }
+.agd-chev { flex: 0 0 auto; color: var(--muted); font-size: 1.1rem; display: inline-flex; align-items: center; justify-content: center; }
 .agd-empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0.5rem; text-align: center; }
 .agd-foot { margin-top: 0.7rem; }
 .agd-add { width: 100%; }
@@ -249,8 +245,6 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
     /* Navigation projets collante : épinglée sous le header au défilement (--header-h mesuré en JS). */
     position: sticky; top: var(--header-h, 0px); z-index: 9; background: var(--panel); }
   .sitem { flex-shrink: 0; margin-bottom: 0; }
-  /* Crayon d'édition projet toujours visible au doigt (le survol n'existe pas). */
-  .sitem .cat-edit { opacity: 0.85; }
   /* Barre horizontale : l'arbre vertical n'a pas de sens → masquer connecteurs/chevrons.
      [SIDEBAR-TREE] conteneurs .sb-kids aplatis pour rester dans le flux horizontal. */
   .sb-tree, .sb-proj-chev { display: none; }
@@ -287,8 +281,11 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .task-check:disabled { cursor: default; opacity: 0.6; }
 .task.done .task-check { background: var(--green); border-color: var(--green); color: #fff; }
 .task-content { flex: 1; font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
+/* [MEMO-VIEW correctif 3] groupe d'actions : c'est le CONTENEUR qui pousse à droite (les boutons
+   ne portent plus `margin-left:auto`, sinon ils se séparaient au wrap mobile). */
+.task-acts { display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0; margin-left: auto; }
 .task-edit {
-  flex-shrink: 0; min-height: 0; width: 1.6rem; height: 1.6rem; margin-left: auto;
+  flex-shrink: 0; min-height: 0; width: 1.6rem; height: 1.6rem;
   padding: 0; border: none; background: none; color: var(--muted); cursor: pointer;
   border-radius: 5px; opacity: 0.55; display: inline-flex; align-items: center; justify-content: center;
 }
@@ -305,6 +302,16 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 .task-content a { color: var(--accent); }
 .task-content p { margin: 0 0 0.15rem; }
 .task-content ul, .task-content ol { margin: 0.15rem 0; padding-left: 1.3rem; }
+/* [CHECKLIST-GAP] Quill scinde une liste à cocher en PLUSIEURS <ul> selon l'état coché des
+   items consécutifs : les marges entre blocs creusaient de faux « trous » dans la liste (cards
+   ET fiche de lecture). Deux listes à cocher ADJACENTES sont donc recollées (marge inter-blocs
+   à 0) ; la marge normale reste intacte dès qu'un paragraphe s'intercale — le trou VOULU reste
+   voulu. `:has()` cible les <ul> qui portent des items de checklist, jamais les listes à puces.
+   CSS seul, aucune donnée modifiée. */
+.task-content ul:has(> li[data-list]) + ul:has(> li[data-list]) { margin-top: 0; }
+.task-content ul:has(> li[data-list]):has(+ ul > li[data-list]) { margin-bottom: 0; }
+/* ⚠️ `:has()` ne peut pas être IMBRIQUÉ dans un autre `:has()` : la marge basse se cible
+   donc par `:has(+ ul > li[data-list])` (sélecteur relatif simple), pas par un `:has` niché. */
 .task-content .ql-ui { display: none; }
 .task-content li[data-list="checked"], .task-content li[data-list="unchecked"] {
   list-style: none;
@@ -703,6 +710,10 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
    remplissage rouge au survol seulement. Même taille que les autres boutons de la barre. */
 .iv-del { color: var(--danger); border-color: var(--danger); }
 .iv-del:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+/* [HUB-CHROME] danger DISCRET : monochrome au repos, rouge seulement au survol
+   (les boutons d'action de la pop-in Photos passent en icônes trait). */
+.iv-danger:hover { color: var(--danger); border-color: var(--danger); }
+
 @media (max-width: 900px) {
   /* [PHOTO-VIEWER-MOBILE] Barre photo : boutons CARRÉS homogènes. La règle tactile
      (button{min-height:44px}) les étirait en ovale → on fige width=height + min-height:0
@@ -861,6 +872,21 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 .leaflet-popup-content a:not(.prio-btn) { color: var(--accent); }
 .leaflet-popup-close-button { color: var(--muted) !important; }
 .leaflet-popup-close-button:hover { color: var(--text) !important; }
+
+/* [PHOTOS-POPIN-SIZE] La galerie Photos d'un dossier prenait une petite fraction de l'écran
+   (aperçu minuscule, 90 % du viewport vide). Grand format : min(1200px, 92vw) × 90vh, colonne
+   flex — la SCÈNE (.pv-stage) absorbe toute la hauteur libre, la bande vignettes + frise reste
+   dessous à sa taille naturelle. Dimensions et layout SEULEMENT, aucune logique touchée.
+   Le `display:flex` est porté par [open] : un <dialog> fermé doit rester `display:none`. */
+#photo-dialog[open] { display: flex; flex-direction: column; }
+#photo-dialog { width: min(1200px, 92vw); max-width: min(1200px, 92vw); height: 90vh; max-height: 90vh; }
+#photo-dialog #photo-head { flex: 0 0 auto; }
+#photo-dialog #photo-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+@media (max-width: 900px) {
+  /* Mobile : quasi plein écran, et la scène retrouve son gabarit d'origine (pas de régression). */
+  #photo-dialog { width: 96vw; max-width: 96vw; height: 94vh; max-height: 94vh; }
+  #photo-dialog .pv-stage { flex: 0 0 auto; height: min(46vh, 300px); }
+}
 </style>
 <script>try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}</script>
 </head>
@@ -938,7 +964,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 </dialog>
 
 <!-- [PHOTO-TEMPLATE-MEMO] Vue « Photos » du projet (invité) — corps par runPhotoView. -->
-<dialog id="photo-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.9rem;width:min(560px,96vw);color:var(--text)">
+<dialog id="photo-dialog" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.9rem;color:var(--text)">
   <div id="photo-head" style="display:flex;align-items:center;gap:0.5rem;margin:0 0 0.6rem">
     <h3 id="photo-title" style="margin:0;font-size:1rem;flex:1;min-width:0">📷 Photos</h3>
     <button type="button" id="photo-close" class="prio-btn" title="Fermer">✕</button>
@@ -1057,6 +1083,67 @@ function linkWritable() {
   return (DATA.memos || []).some(m => m.can_comment || m.can_vote);
 }
 function canAddNow() { return !!(DATA && DATA.can_add) && approved(); }
+/* [TOOLS-DOCK-GUEST] Dock d'outils repliables côté invité — parité avec le dock owner
+   ([TOOLS-DOCK] V27.1.154). Une icône n'apparaît QUE si l'outil est DÉJÀ disponible pour ce
+   rôle : le dock AFFICHE ou MASQUE, il n'élargit JAMAIS un droit (invariant 5). Persistance
+   par contexte (`toolsDock:<TOKEN>:<PFILTER>`), tout replié par défaut. */
+function shareDockKey() { return 'toolsDock:' + TOKEN + ':' + PFILTER; }
+function shareDockState() {
+  const st = { memo: false, file: false, voice: false, folder: false };
+  try {
+    const raw = JSON.parse(localStorage.getItem(shareDockKey()) || '{}');
+    Object.keys(st).forEach(k => { st[k] = raw[k] === true; });
+  } catch (e) {}
+  return st;
+}
+function setShareDock(key, val) {
+  const st = shareDockState();
+  st[key] = !!val;
+  try { localStorage.setItem(shareDockKey(), JSON.stringify(st)); } catch (e) {}
+}
+let shareDockFocusMemo = false;   // focus direct dans le champ titre à l'ouverture de l'outil Mémo
+let shareFilesCfg = null;         // cfg de la drop-zone du dossier courant (partagée dock/Vocal)
+/* Rend le dock invité. `avail` = quels outils sont RÉELLEMENT disponibles pour ce rôle ;
+   aucune icône si aucun (suiveur → pas de dock du tout). Sur un board le dock rejoint la
+   barre d'actions à droite (même rangée, space-between + wrap) ; sans barre d'actions il
+   s'affiche SEUL, aligné à droite, juste au-dessus des barres d'ajout. */
+function renderShareToolsDock(avail) {
+  const prev = document.getElementById('share-tools-dock'); if (prev) prev.remove();
+  const keys = [
+    ['memo', 'pencil-plus', 'Mémo', 'Afficher/masquer la barre de création de mémo'],
+    ['file', 'paperclip', 'Fichier', 'Afficher/masquer la zone de dépôt de fichiers'],
+    ['voice', 'microphone', 'Vocal', 'Afficher/masquer l\'enregistrement vocal'],
+    ['folder', 'folder-plus', 'Dossier', 'Afficher/masquer la création de sous-dossier'],
+  ].filter(([k]) => avail[k]);
+  if (!keys.length) return;                   // suiveur / lecture seule → aucun dock
+  const st = shareDockState();
+  const td = hdrToolbar();
+  keys.forEach(([k, icon, label, title]) => {
+    const b = td.add({ icon, label, title, onClick: () => {
+      const next = !st[k];
+      if (k === 'memo' && next) shareDockFocusMemo = true;
+      setShareDock(k, next); render();
+    } });
+    if (st[k]) b.classList.add('on');
+    b.setAttribute('aria-pressed', st[k] ? 'true' : 'false');
+  });
+  const bar = td.end();
+  const wrap = el('div', { attrs: { id: 'share-tools-dock' } });
+  wrap.appendChild(bar);
+  const actions = document.getElementById('board-actions');
+  if (actions) {   // board : même rangée que la barre d'actions, dock à droite
+    actions.style.display = 'flex';
+    actions.style.alignItems = 'center';
+    actions.style.justifyContent = 'space-between';
+    actions.style.flexWrap = 'wrap';
+    actions.style.gap = '0.5rem';
+    actions.appendChild(wrap);
+  } else {         // pas de barre d'actions : dock seul, aligné à droite
+    wrap.style.cssText = 'display:flex;justify-content:flex-end;margin:0 0 0.6rem';
+    const anchor = document.getElementById('add-bar');
+    anchor.parentNode.insertBefore(wrap, anchor);
+  }
+}
 function canEditMemo(m) { return !!(m && m.can_edit) && approved(); }
 function canCommentMemo(m) { return !!(m && m.can_comment) && approved(); }
 function canVoteMemo(m) { return !!(m && m.can_vote) && approved(); }
@@ -1079,7 +1166,7 @@ function renderGuestBanner() {
   // approuvé, ni en attente, ni refusé. S'il est déjà à l'écran, NE PAS le
   // reconstruire : le refresh auto (setInterval 15s → load → ici) effacerait
   // ce que l'invité est en train de taper (prénom / e-mail / code).
-  const anonymous = !['approved', 'pending', 'rejected'].includes(GUEST.status);
+  const anonymous = !['approved', 'rejected'].includes(GUEST.status);   // [GUEST-AUTO-APPROVE] plus de 'pending'
   if (anonymous && document.getElementById('guest-form')) return;
   b.innerHTML = '';
   b.className = '';
@@ -1088,14 +1175,12 @@ function renderGuestBanner() {
     b.textContent = '✅ Connecté·e en tant que ' + (GUEST.name || GUEST.email) + ' — tes modifications sont signées.';
     return;
   }
-  if (GUEST.status === 'pending') {
-    b.className = 'pending';
-    b.innerHTML = '<h2>⏳ Demande envoyée</h2><p>Le propriétaire doit valider ton accès (' + GUEST.email + '). Cette page se met à jour automatiquement.</p>';
-    return;
-  }
+  // [GUEST-AUTO-APPROVE] plus d'état « en attente » : l'enregistrement par PIN rend l'invité
+  // actif immédiatement. Le cas 'pending' ne peut plus survenir côté serveur — le bloc est
+  // retiré. Reste la RÉVOCATION, seul contrôle owner.
   if (GUEST.status === 'rejected') {
     b.className = 'rejected';
-    b.innerHTML = '<h2>🚫 Accès refusé</h2><p>Le propriétaire n\'a pas validé cette adresse. Tu peux consulter, mais pas modifier.</p>';
+    b.innerHTML = '<h2>🚫 Accès révoqué</h2><p>Le propriétaire a retiré cet accès. Tu peux consulter, mais pas modifier.</p>';
     return;
   }
   b.innerHTML = '<h2>✏️ Pour modifier, présente-toi</h2><p>Ton e-mail signe tes modifications. Le code à 4 chiffres t\'a été donné par le propriétaire.</p>';
@@ -1284,7 +1369,10 @@ function shareNoAccess(name) {
   return !members.has((name || '').toLowerCase().trim());
 }
 
-const COMMENT_PRIO_COL = { 1: '#ff5252', 2: 'var(--warn)', 3: '#66bb6a' };
+// [COMMENT-PRIO-CONFIG] priorités = LA liste configurée par le propriétaire, exposée en LECTURE
+// dans `DATA.priorities` (id + nom + couleur) — plus de table 1-4 en dur côté invité.
+const commentPrioColor = (p) => cmtPrioPalette(DATA.priorities || []).color(p);
+const commentPrioLabel = (p) => cmtPrioPalette(DATA.priorities || []).label(p);
 const seenMarked = new Set();
 
 function markMemoSeen(memoId) {
@@ -1295,17 +1383,19 @@ function markMemoSeen(memoId) {
 
 // Champ commentaire invité (avec priorité + mention + parent éventuel).
 function shareCommentInput(memo, parentId) {
-  const row = el('div', '');
-  row.style.cssText = 'display:flex;gap:0.35rem;margin-top:0.3rem';
-  const prioSel = document.createElement('select');
-  prioSel.title = 'Priorité du commentaire';
-  prioSel.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.76rem;padding:0.2rem';
-  [['0', '⚑ —'], ['1', 'P1'], ['2', 'P2'], ['3', 'P3']].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; prioSel.appendChild(o); });
+  _commentsV2Style();   // [COMMENTS-V2]
+  const row = el('div', 'cmt-composer');
+  // [COMMENT-PRIO-CONFIG] menu = LA liste configurée (le serveur valide contre `priorities`).
+  const prioSel = cmtPrioSelect(DATA.priorities || []);
   const ci = document.createElement('input');
   ci.type = 'text';
-  ci.placeholder = parentId ? '↩ Répondre… (Entrée)' : '💬 Commenter… (Entrée, @ pour mentionner)';
+  // [COMMENTS-V2] « Écrire à <prénom>… » si le mémo a UN assigné autre que le lecteur.
+  const _me = (GUEST && (GUEST.name || GUEST.email)) || '';
+  const _solo = (memo.assignees || []).filter(x => x && x !== _me);
+  ci.placeholder = parentId ? '↩ Répondre… (Entrée)'
+    : (_solo.length === 1 ? ('Écrire à ' + _solo[0].split(/\s+/)[0] + '… (@ pour mentionner)')
+                          : 'Écrire un commentaire… (@ pour mentionner)');
   ci.maxLength = 2000;
-  ci.style.cssText = 'flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;font-size:0.8rem;padding:0.3rem 0.5rem';
   attachInputMention(ci, () => shareSuggestions());
   ci.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter' || !ci.value.trim()) return;
@@ -1319,8 +1409,17 @@ function shareCommentInput(memo, parentId) {
     });
     if (r.ok) await load(); else notify('Commentaire refusé.', { error: true });
   });
-  row.appendChild(prioSel);
-  row.appendChild(ci);
+  // [COMMENTS-V2] avatar + champ arrondi (input + ⚑ + 🎤 + envoyer) ; le <select> reste sous le
+  // drapeau pour rester utilisable au clavier.
+  row.appendChild(cmtAvatar(_me || 'moi', true));
+  const field = el('div', 'cmt-field');
+  field.appendChild(ci);
+  const flagWrap = el('span', 'cmt-flagwrap');
+  const flag = el('span', 'cmt-ibtn', '⚑'); flag.title = 'Priorité du commentaire';
+  const syncFlag = () => { flag.style.color = commentPrioColor(parseInt(prioSel.value, 10) || 0) || ''; };
+  prioSel.addEventListener('change', syncFlag); syncFlag();
+  flagWrap.append(flag, prioSel);
+  field.appendChild(flagWrap);
   // [VOICE-MESSAGES] Commentaire vocal invité (approuvé + can_edit, via les routes /share existantes,
   // invariant 5). Upload PJ v22 sur le mémo → commentaire [audio:<fn>].
   const vbtn = voiceCommentButton({
@@ -1335,7 +1434,13 @@ function shareCommentInput(memo, parentId) {
       if (r.ok) await load(); else notify('Commentaire refusé.', { error: true });
     },
   });
-  if (vbtn) row.appendChild(vbtn);
+  if (vbtn) field.appendChild(vbtn);   // [COMPOSER-MIC-MONO] icône trait posée par le helper partagé
+  const send = el('button', 'cmt-ibtn'); send.type = 'button'; send.title = 'Envoyer (Entrée)';
+  const sic = hdrIcon('send'); sic.setAttribute('width', '16'); sic.setAttribute('height', '16');
+  send.appendChild(sic);
+  send.addEventListener('click', () => { if (ci.value.trim()) ci.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+  field.appendChild(send);
+  row.appendChild(field);
   return row;
 }
 
@@ -1398,6 +1503,7 @@ function getShareQuill() {
       }),
     });
     addMentionMatcher(sQuill);
+    setupAutoLink(sQuill);   // [EDITOR-AUTOLINK]
     setupMentions(sQuill, shareSuggestions, (name) => {
       if (!editAssignees.some(v => v.toLowerCase() === name.toLowerCase())) editAssignees.push(name);
       renderQPeople();
@@ -1618,6 +1724,75 @@ function renderQLinks(memo) {
     },
   });
   if (sec) box.appendChild(sec);
+}
+
+// [MEMO-VIEW] cfg invité (share) : tout vient de `DATA` (déjà borné au scope serveur) —
+// un mémo hors scope renvoie null, donc sa chip de lien reste inerte (jamais de titre-fantôme).
+function shareMemoViewCfg() {
+  return {
+    load: (id) => {
+      const m = (DATA.memos || []).find(x => x.id === id);
+      if (!m) return null;
+      const chain = [];
+      let pid = m.project_id;
+      const seen = new Set();
+      while (pid != null && !seen.has(pid)) {
+        seen.add(pid);
+        const p = (DATA.projects || []).find(x => x.id === pid);
+        if (!p) break;
+        chain.unshift({ emoji: p.emoji, color: usableProjColor(p.color), name: p.name });
+        pid = p.parent_id;
+      }
+      const created = m.created_at ? new Date(m.created_at) : null;
+      const fmt = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+        + ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      // même libellé de date que les cards share (pas de `dueInfo` ici — il n'existe pas sur cette page)
+      const t = fmtMemoRange(m.due_time, m.end_time);
+      const dlbl = m.due_date
+        ? ((m.due_end && m.due_end > m.due_date) ? fmtDateRange(m.due_date, m.due_end) : fmtDayShort(m.due_date))
+        : '';
+      // même pipeline que les cards : sanitize() pour le riche, texte brut sinon
+      let node = null;
+      if (isRich(m.content)) { node = el('div', ''); node.appendChild(sanitize(m.content)); }
+      else if ((m.content || '').trim()) { node = el('div', ''); node.appendChild(linkifyText(m.content)); node.style.whiteSpace = 'pre-wrap'; }
+      if (node) dressLinks(node);   // [LINK-RENDER] fiche de lecture
+      return {
+        memo: m,
+        title: m.title || memoLeadText(isRich(m.content) ? splitLeadHtml(m.content).lead : stripTags(m.content || '').trim()) || MEMO_EMPTY_LABEL,
+        crumb: chain,
+        createdLine: created && !isNaN(created) ? '🕒 Créé le ' + fmt(created) : '',
+        updatedLine: '',
+        canEdit: canEditMemo(m),
+        prio: (DATA.priorities || []).find(x => x.id === m.priority) || null,
+        dueLabel: dlbl ? dlbl + (t ? ' · ' + t : '') : '',
+        locLabel: m.location && m.location.label ? m.location.label : '',
+        links: m.links || [],
+        images: m.images || [],
+        subtasks: m.subtasks || [],
+        contentNode: node,
+      };
+    },
+    onEdit: (m) => openEditor(m, el('span', ''), el('span', '')),
+    // [MEMO-VIEW évolution] même appel que la card invitée (PUT /share/<t>/memo/<id> scopé,
+    // droits revalidés serveur — invariant 5) ; `load()` rafraîchit les cards derrière.
+    onToggleSub: (m, subtasks) => put(m.id, { subtasks }),
+    // [MEMO-VIEW correctif 2] checklist du CONTENU : même bascule que la card invitée.
+    onToggleCheck: (m, i) => {
+      // ⚠️ mémo relu FRAIS : la fiche n'est pas redessinée après une écriture, `m` serait périmé.
+      const cur = (DATA.memos || []).find(x => x.id === m.id) || m;
+      const tpl = document.createElement('template');
+      tpl.innerHTML = cur.content;
+      const items = tpl.content.querySelectorAll('li[data-list="checked"], li[data-list="unchecked"]');
+      if (!items[i]) return;
+      items[i].setAttribute('data-list', items[i].getAttribute('data-list') === 'checked' ? 'unchecked' : 'checked');
+      put(cur.id, { content: tpl.innerHTML });
+    },
+    imageUrl: (n) => API + '/image/' + n,
+    onOpenPhoto: (images, i) => runImageViewer({
+      images, startIndex: i, imageUrl: (n) => API + '/image/' + n,
+      downloadUrl: (n) => API + '/image/' + n, exifUrl: (n) => API + '/image-exif/' + n,
+    }),
+  };
 }
 
 function openEditor(memo, contentEl, taskEl) {
@@ -2068,12 +2243,9 @@ function renderSidebar() {
         timer = setTimeout(() => { timer = null; select(); }, 250);
       });
       item.addEventListener('contextmenu', (e) => { e.preventDefault(); openProjEditor(proj); });
-      item.title = 'Modifier (crayon), double-clic ou clic droit';
-      const eb = el('button', 'cat-edit');
-      eb.appendChild(shareIcon('pencil'));
-      eb.title = 'Modifier ce projet';
-      eb.addEventListener('click', (e) => { e.stopPropagation(); openProjEditor(proj); });
-      item.appendChild(eb);
+      // [PROJ-EDIT-BAR] le ✎ quitte la sidebar (navigation seule, comme côté owner) : l'édition
+      // vit désormais dans la barre d'actions du board. Les gestes double-clic / clic droit restent.
+      item.title = 'Double-clic ou clic droit pour modifier';
     } else {
       item.addEventListener('click', select);
     }
@@ -2517,6 +2689,23 @@ function renderTiles() {
     tb.add({ icon: 'map', label: 'Carte', count: _located,
       title: 'Voir les points géolocalisés sur une carte', onClick: () => openShareMap() }); tbN++;
   }
+  // [PROJ-EDIT-BAR] « Modifier » en FIN de barre d'actions (avant la bascule «) : la barre AGIT sur
+  // l'existant, le dock CRÉE. Affiché seulement si le lecteur peut éditer CE dossier — la barre
+  // affiche, elle n'élargit aucun droit (invariant 5, le serveur revalide à l'enregistrement).
+  // Ouvre la pop-in projet EXISTANTE (#proj-dialog) : renommer / emoji / couleur / description /
+  // « ↗ Déplacer vers… », rien de neuf.
+  {
+    const _epid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
+    const _ep = (DATA.projects || []).find(p => p.id === _epid);
+    // Droit : `can_edit` du projet s'il est exposé, sinon la capacité d'édition du lien
+    // (`canEditNow()` — c'est exactement ce que gardait le crayon de la sidebar).
+    const _canEditProj = (_ep && _ep.can_edit !== undefined) ? !!_ep.can_edit : canEditNow();
+    if (_ep && _canEditProj && DATA.kind === 'project') {
+      if (tbN) tb.sep();
+      tb.add({ icon: 'pencil', label: 'Modifier', title: 'Modifier ce dossier (nom, emoji, couleur, déplacer…)',
+        onClick: () => openProjEditor(_ep) }); tbN++;
+    }
+  }
   if (tbN) {
     tb.end();
     const actions = el('div', { attrs: { id: 'board-actions', style: 'margin:0 0 0.6rem' } });
@@ -2692,7 +2881,9 @@ function shareAgendaCfg() {
     memosForDay: (iso) => agendaGroupByDay(shareAgendaSrc())[iso] || [],
     chipColor: agendaChipColor,
     memoTitle: agendaMemoTitle,
-    openMemo: (m) => agendaOpen(m),
+    // [POLISH-VIEWER-AGENDA-PRIO] clic = fiche de lecture 👁 (elle applique déjà les droits :
+    // pas de « ✎ Modifier » sans can_edit) ; la création garde le chemin éditeur.
+    openMemo: (m) => openMemoView(shareMemoViewCfg(), m.id),
     canCreate: () => canAddNow(),
     createForDay: async (iso) => {
       const pid = (shareAgendaFilter != null) ? shareAgendaFilter : ((PFILTER !== 'all') ? PFILTER : DATA.root_id);
@@ -2893,30 +3084,58 @@ function render() {
   // [FOLDER-ATTACHMENTS] fichiers rattachés au dossier courant (vue board d'un projet).
   const pfiles = document.getElementById('pfiles');
   pfiles.innerHTML = '';
+  shareFilesCfg = null;   // [TOOLS-DOCK-GUEST] cfg de la section Fichiers du dossier courant
   if (DATA.kind === 'project' && GVIEW === 'board') {
     const zpid = PFILTER !== 'all' ? PFILTER : DATA.root_id;
     const fp = (DATA.projects || []).find(p => p.id === zpid);
     if (fp && ((fp.attachments || []).length || canAddNow())) {  // [GUEST-ROLES] PJ dossier = contributeur
-      pfiles.appendChild(renderAttachments({
+      // [TOOLS-DOCK-GUEST] `hideVoice` : le 🎤 sort de la section (bascule « Vocal » du dock) ;
+      // même cfg → flux d'enregistrement identique. Chaque outil est monté derrière sa bascule.
+      shareFilesCfg = {
         attachments: fp.attachments || [],
         canEdit: canAddNow(),
         uploadUrl: API + '/project/' + fp.id + '/attachments',
         headers: { 'X-Guest-Token': guestToken() },
         onChange: async () => { await load(); },
         openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
-      }));
+      };
+      const _dk = shareDockState();
+      if (_dk.file) pfiles.appendChild(renderAttachments(Object.assign({ hideVoice: true }, shareFilesCfg)));
+      if (_dk.voice && canAddNow()) {
+        const vb = voiceAttachButton(shareFilesCfg);
+        if (vb) { vb.style.marginBottom = '0.5rem'; pfiles.appendChild(vb); }
+        else pfiles.appendChild(voiceUnavailableNote());   // [POLISH-VIEWER-AGENDA-PRIO] icône trait
+      }
+      // Glisser un FICHIER sur la page déplie l'outil Fichier (recette owner 154 ; garde
+      // `types` = 'Files' → un drag interne ne déclenche rien).
+      if (!_dk.file && canAddNow()) {
+        document.getElementById('list').addEventListener('dragenter', (e) => {
+          const t = e.dataTransfer;
+          if (!t || !Array.from(t.types || []).includes('Files')) return;
+          setShareDock('file', true); render();
+        });
+      }
     }
   }
   // [GUEST-ROLES passe 2] on ne peut ajouter que dans les dossiers OÙ on a le droit (can_add) :
   // zone (role_floor) et dossier perso inclus. Le sélecteur ne liste que ces dossiers.
   const addable = (DATA.projects || []).filter(p => p.can_add && approved());
   const canAddHere = canAddNow() && DATA.kind === 'project' && addable.length > 0;
-  document.getElementById('add-bar').hidden = !canAddHere;
-  document.getElementById('proj-bar').hidden = !canAddHere;
+  // [TOOLS-DOCK-GUEST] les deux barres passent DERRIÈRE leur bascule (repliées par défaut).
+  const _dock = shareDockState();
+  document.getElementById('add-bar').hidden = !(canAddHere && _dock.memo);
+  document.getElementById('proj-bar').hidden = !(canAddHere && _dock.folder);
   renderShareAddBar(addable, canAddHere);
+  if (canAddHere && _dock.memo && shareDockFocusMemo) {
+    shareDockFocusMemo = false;
+    setTimeout(() => { const i = document.querySelector('#add-bar input[type=text]'); if (i) i.focus(); }, 40);
+  }
   renderGuestBanner();
   renderSidebar();
   renderTiles();
+  // [TOOLS-DOCK-GUEST] APRÈS renderTiles : c'est lui qui crée `#board-actions` (la barre
+  // d'actions), et le dock doit s'y greffer à droite quand elle existe.
+  renderShareToolsDock({ memo: canAddHere, folder: canAddHere, file: !!shareFilesCfg, voice: !!shareFilesCfg && canAddNow() });
   applyA11y();
   // Le titre (nom du projet) peut faire varier la hauteur du header → re-mesurer
   // pour caler la barre de projets collante.
@@ -3011,6 +3230,7 @@ function render() {
       const exc = el('div', '');
       if (!plain && isRich(html)) exc.appendChild(sanitize(html));
       else exc.appendChild(linkifyText(html || ''));
+      dressLinks(exc);   // [LINK-RENDER]
       exc.querySelectorAll('.mention[data-mention]').forEach(sp => {
         if (shareNoAccess(sp.getAttribute('data-mention'))) { sp.classList.add('noaccess'); sp.title = NO_ACCESS_TIP; }
       });
@@ -3125,12 +3345,25 @@ function render() {
       if (hchip) row.appendChild(hchip);
     }
     // [CARD-PREVIEW] Le compteur 📎 passe dans la rangée de pictos (avec 📷) — anti-doublon.
+    // [MEMO-VIEW] œil = fiche de LECTURE, visible pour TOUS les lecteurs (suiveur inclus :
+    // c'est justement sa seule façon de lire confortablement). Placé AVANT le crayon.
+    // [MEMO-VIEW correctif 3] Les actions vivent dans UN conteneur `.task-acts` : en ≤900 px la
+    // rangée passe en `flex-wrap` et le contenu prend toute la largeur — sans groupe, le 👁
+    // (premier bouton, porteur du `margin-left:auto`) se détachait sur la ligne des badges
+    // pendant que ✎ et ⋯ basculaient plus loin. Groupés, ils wrappent ENSEMBLE, œil en tête.
+    const acts = el('div', 'task-acts');
+    const vBtn = el('button', 'task-edit');
+    vBtn.appendChild(shareIcon('eye'));
+    vBtn.title = 'Voir le mémo';
+    vBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openMemoView(shareMemoViewCfg(), memo.id); });
+    acts.appendChild(vBtn);
+    row.appendChild(acts);
     if (canEditMemo(memo)) {  // [GUEST-ROLES] ✎/⋯ (éditer/supprimer) = own-or-editor
       const eBtn = el('button', 'task-edit');
       eBtn.appendChild(shareIcon('pencil'));
       eBtn.title = 'Modifier ce mémo';
       eBtn.addEventListener('click', () => openEditor(memo, content, t));
-      row.appendChild(eBtn);
+      acts.appendChild(eBtn);
       // [LESS-BUTTONS] Menu ⋯ compact : Déplacer / Supprimer (le reste des contrôles passe en pop-in).
       const more = el('div', 'task-more'); more.style.cssText = 'position:relative;display:inline-flex';
       const moreBtn = el('button', 'task-edit', '⋯'); moreBtn.title = "Plus d'actions";
@@ -3143,7 +3376,7 @@ function render() {
       moreMenu.appendChild(del);
       moreBtn.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
       more.appendChild(moreBtn); more.appendChild(moreMenu);
-      row.appendChild(more);
+      acts.appendChild(more);
     }
     t.appendChild(row);
 
@@ -3198,63 +3431,60 @@ function render() {
       const cwrap = el('div', '');
       cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
       const comments = memo.comments || [];
-      const renderC = (c, isReply) => {
-        const r = el('div', 'comment-row');
-        r.style.cssText = 'display:flex;gap:0.5rem;align-items:flex-start;font-size:0.82rem;padding:0.3rem 0.5rem;background:var(--bg);border-radius:6px;margin-top:0.3rem' + (isReply ? ';margin-left:1.5rem;border-left:2px solid var(--border)' : '');
-        if (c.priority) {
-          const pp = el('span', '', 'P' + c.priority);
-          pp.style.cssText = 'flex-shrink:0;font-size:0.66rem;font-weight:700;color:#10141a;border-radius:4px;padding:0 0.3rem;line-height:1.5;background:' + (COMMENT_PRIO_COL[c.priority] || 'var(--muted)');
-          r.appendChild(pp);
-        }
+      // [COMMENTS-V2] une bulle par commentaire (squelette partagé `cmtRow`) — droits INCHANGÉS.
+      const buildC = (c, isReply) => {
         const author = (c.author || '').replace(/\s*<[^>]*>/, '');
-        const a = el('span', '', author);
-        a.style.cssText = 'font-weight:600;flex-shrink:0' + (c.guest ? ';color:var(--guest)' : '');
-        a.title = c.author;
-        r.appendChild(a);
-        const b = el('span', 'c-body', '');
-        b.style.cssText = 'flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere';
-        // [VOICE-MESSAGES] marqueur [audio:...] → bulle vocale (PJ du mémo) ; sinon texte.
-        const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));
-        if (vf) b.appendChild(vf); else b.textContent = c.body;
-        r.appendChild(b);
-        const w = el('span', '', new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }));
-        w.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0';
-        w.title = new Date(c.created_at).toLocaleString('fr-FR');
-        r.appendChild(w);
+        const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));   // [VOICE-MESSAGES]
+        const bodyNode = vf || commentBodyNode(c.body);                      // [COMMENT-LINKIFY]
         const self = (GUEST && (GUEST.name || GUEST.email)) || '';
         const others = (c.seen || []).filter(v => v && v !== author && v !== self);
-        if (others.length) {
-          const s = el('span', ''); s.append(shareIcon('eye'), ' ' + others.join(', '));
-          s.style.cssText = 'color:var(--muted);font-size:0.7rem;flex-shrink:0;white-space:nowrap';
-          s.title = 'Vu par ' + others.join(', ');
-          r.appendChild(s);
-        }
-        if (!isReply && canCommentMemo(memo)) {  // [GUEST-ROLES] répondre = commenter
-          const rep = el('span', ''); rep.appendChild(shareIcon('reply'));
-          rep.style.cssText = 'cursor:pointer;color:var(--muted);flex-shrink:0';
-          rep.title = 'Répondre';
-          rep.addEventListener('click', () => {
-            if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
-            const rb = shareCommentInput(memo, c.id);
-            rb.classList.add('reply-box');
-            rb.style.marginLeft = '1.5rem';
-            r.after(rb);
-            rb.querySelector('input').focus();
-          });
-          r.appendChild(rep);
-        }
-        cwrap.appendChild(r);
-        // [COMMENT-REACTIONS] chips + palette : invité APPROUVÉ peut réagir (can_edit non requis).
-        const rr = reactionRow(c.reactions, canCommentMemo(memo), async (emoji) => {  // [GUEST-ROLES] réagir = commentateur/override
-          const resp = await fetch(API + '/comment/' + c.id + '/react', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify({ emoji }) });
-          if (resp.ok) await load(); else notify('Réaction impossible.', { error: true });
+        const when = new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+        const _sys = cmtSystemInfo(c.body);   // [SYSTEM-LINES-MONO]
+        return cmtRow({
+          author: c.author, guest: !!c.guest, bodyNode, isReply,
+          when: when + (vf ? ' · 🎤 message vocal' : ''),
+          seenText: others.length ? ('👁 ' + others.join(', ')) : '',
+          priority: c.priority, prioColor: commentPrioColor, prioLabel: commentPrioLabel,
+          deleted: !!c.deleted,   // [COMMENTS-V2 addendum] pierre tombale
+          system: _sys,           // [SYSTEM-LINES-MONO]
+          actions: [
+            (!isReply && canCommentMemo(memo)) && { label: '↩ Répondre', onClick: (r) => {   // [GUEST-ROLES]
+              if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
+              const rb = shareCommentInput(memo, c.id);
+              rb.classList.add('reply-box');
+              rb.style.marginLeft = '1.5rem';
+              r.after(rb);
+              rb.querySelector('input').focus();
+            } },
+            // [COMMENTS-V2 addendum] l'AUTEUR supprime SON message. `can_delete` est calculé par le
+            // SERVEUR (match par e-mail) : la page ne fait qu'afficher — viser le message d'un
+            // autre reste refusé côté serveur (403), invariant 5.
+            c.can_delete && { label: '✕', title: 'Supprimer mon message', danger: true, onClick: async () => {
+              if (!(await confirmPopin('Supprimer ton message ? Il laissera une trace « Message supprimé » et les réponses resteront.'))) return;
+              const resp = await fetch(API + '/comment/' + c.id, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } });
+              if (resp.ok) await load(); else notify('Suppression impossible.', { error: true });
+            } },
+          ],
+          // [COMMENT-REACTIONS] invité APPROUVÉ peut réagir (can_edit non requis).
+          reactionsRow: reactionRow(c.reactions, !_sys && canCommentMemo(memo), async (emoji) => {
+            const resp = await fetch(API + '/comment/' + c.id + '/react', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify({ emoji }) });
+            if (resp.ok) await load(); else notify('Réaction impossible.', { error: true });
+          }),
         });
-        if (isReply) rr.style.marginLeft = '1.5rem';
-        cwrap.appendChild(rr);
       };
-      comments.filter(c => !c.parent_id).forEach(c => {
-        renderC(c, false);
-        comments.filter(ch => ch.parent_id === c.id).forEach(ch => renderC(ch, true));
+      // au-delà de 2 réponses : repliées derrière « ▾ Voir n réponses de plus » (état de session).
+      cmtHideVoiceLogs(comments).filter(c => !c.parent_id).forEach(c => {
+        cwrap.appendChild(buildC(c, false));
+        const replies = cmtHideVoiceLogs(comments).filter(ch => ch.parent_id === c.id);
+        replies.slice(0, 2).forEach(ch => cwrap.appendChild(buildC(ch, true)));
+        const extra = replies.slice(2);
+        if (extra.length) {
+          const holder = el('div', '');
+          holder.style.display = 'none';
+          extra.forEach(ch => holder.appendChild(buildC(ch, true)));
+          cwrap.appendChild(cmtMoreToggle(extra.length, (open) => { holder.style.display = open ? '' : 'none'; }));
+          cwrap.appendChild(holder);
+        }
       });
       if (canCommentMemo(memo)) cwrap.appendChild(shareCommentInput(memo, null));  // [GUEST-ROLES]
       t.appendChild(cwrap);
