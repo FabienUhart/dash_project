@@ -120,12 +120,41 @@ Trois déclinaisons, appliquées à un bouton EXISTANT via `lucioleize(btn, vari
   `.luc-neutral`, Sauver en `.luc-primary` — V26.7.147).
 - **Non** : cards mémo (`.task-actions` reste le gabarit des boutons ronds d'action),
   petites confirmations Oui/Non (`#confirm-dialog`/`#notify-dialog` — sobriété, et le
-  danger reste `button.danger` rouge), et tout contexte où une animation au survol
+  danger suit sa propre règle, voir § Danger), et tout contexte où une animation au survol
   distrairait d'une lecture (listes denses). La barre d'actions du board garde son
   propre gabarit (`hdr-btn`) — elle n'a QUE la lueur suiveuse, pas le lift ni le verre.
 - Toute nouvelle Luciole = mêmes tokens (`--accent`, `--panel-2`…), invariant 9 ;
   les hex en dur (gris du clair, `#1e88e5`, `#1565c0`) sont l'exception locale
   documentée ici.
+
+## Danger — il murmure au repos, il rougit au geste (V27.19.181, [DANGER-SOFT])
+
+Le danger **n'est pas une Luciole** (pas de lueur, pas de lift) — et il **n'est plus un cri**.
+Règle, valable partout dans l'app :
+
+1. **Au repos, il murmure.** Un bouton destructif ne prend **JAMAIS** l'accent, ni l'aplat, ni
+   le contour rouge permanent : fond `var(--panel)`, bordure `var(--border)`, libellé
+   `var(--muted)`, **icône Tabler `trash` en TRAIT** — plus aucun emoji 🗑. Il est là, lisible,
+   il ne hurle pas.
+2. **Au survol ET au `:focus-visible`, l'intention colore.** Bordure + texte + icône passent en
+   `var(--red)` / `var(--danger)`, fond légèrement teinté (`var(--panel-2)`). Le rouge dit le
+   geste engagé, pas l'état de repos — même logique que « le mouvement n'appartient qu'au geste ».
+3. **Le LIBELLÉ porte la gravité**, pas la couleur : « Vider la corbeille »,
+   « Supprimer définitivement », « Retirer l'invité ». Un libellé explicite protège mieux qu'un
+   aplat rouge auquel l'œil s'habitue.
+4. **`confirmPopin` reste OBLIGATOIRE** avant toute exécution destructive. Le style s'assouplit,
+   **le garde-fou ne bouge pas**.
+
+**Implémentation** (partial, 3 pages) : `_dangerSoftStyle()` pose la feuille, `dangerSoftBtn(label,
+onClick, opts)` crée un bouton neuf, `dangerSoftize(btn, icon, mode)` convertit un bouton existant
+(`mode: 'item'` pour une ligne de menu ⋯, sans cadre). Classes : **`.danger-soft`** (bouton),
+**`.danger-item`** (ligne de menu), et la même doctrine vit déjà dans **`.iv-danger`** (barre de la
+visionneuse, lignes de pièces jointes), **`.mp-del`** (croix de vignette photo) et le **✕ des
+commentaires**.
+
+**Seule exception assumée** : le bouton de confirmation de la pop-in (`#confirm-yes` /
+`.confirm-danger`) **garde son rouge plein**. C'est la dernière marche : l'intention y est déjà
+déclarée, l'aplat y est un rappel, pas une décoration.
 
 ## Historique
 
@@ -138,3 +167,7 @@ Trois déclinaisons, appliquées à un bouton EXISTANT via `lucioleize(btn, vari
   baptême « Luciole » + ce document.
 - V26.7.147 : helpers généralisés top-level (`attachLuciole`/`lucioleize`) + variantes
   `.luc-neutral`/`.luc-primary` ; premier pied de pop-in converti (éditeur de mémo).
+- V27.19.181 [DANGER-SOFT] : le danger cesse de crier — `.danger-soft` / `.danger-item`
+  (monochrome au repos, rouge au survol/focus, icône trait, plus aucun emoji 🗑) généralisés
+  aux pieds d'éditeur, à la vue Corbeille, à l'aperçu corbeille et à la vue Partages,
+  sur les 3 pages. `confirmPopin` inchangé ; `#confirm-yes` garde son rouge plein.

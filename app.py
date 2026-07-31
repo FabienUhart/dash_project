@@ -4918,6 +4918,18 @@ def _invite_throttled():
     return len(_INVITE_SENT) >= _INVITE_MAX
 
 
+def _mask_email(addr):
+    """[GUEST-SETTINGS] « fabien.uhart@gmail.com » → « f•••@g•••.com » : de quoi RECONNAÎTRE
+    l'adresse sans la ré-exposer. Tolérant : une entrée sans « @ » ressort vide."""
+    addr = (addr or "").strip()
+    if "@" not in addr:
+        return ""
+    local, _, domain = addr.partition("@")
+    head = (local[:1] or "") + "•••"
+    tld = domain.rpartition(".")[2]
+    return head + "@" + (domain[:1] or "") + "•••" + ("." + tld if tld and tld != domain else "")
+
+
 def _send_hub_invite(cfg, to_email, name, hub_url, pin):
     """Envoie le lien-hub + code à l'e-mail DU HUB (jamais un destinataire libre du client).
     starttls sur 587. Lève en cas d'échec SMTP (le secret n'apparaît jamais dans le message)."""
@@ -6779,7 +6791,10 @@ def hub_send_link(hub_token):
         app.logger.warning("send-link: échec SMTP pour le hub %s", hub["id"])
         return jsonify({"error": "échec de l'envoi"}), 502
     _RESEND_SENT.setdefault(hub["id"], []).append(time.time())
-    return jsonify({"ok": True})
+    # [GUEST-SETTINGS] le front confirme « envoyé à f•••@g•••.com » : on renvoie l'adresse
+    # MASQUÉE (jamais l'adresse complète dans un payload, même à son propriétaire — c'est un
+    # accusé, pas une donnée). Aucune route nouvelle : seul le corps de réponse s'enrichit.
+    return jsonify({"ok": True, "sent_to": _mask_email(to_email)})
 
 
 @app.route("/share/<token>/data")

@@ -1,42 +1,49 @@
 {
-  "lot": "PHOTOS-POPIN-SIZE",
-  "version": "V27.18.180",
+  "lot": "GUEST-SETTINGS (+ DANGER-SOFT dans le même wagon)",
+  "version": "V27.20.182",
   "date": "2026-07-31",
-  "status": "La galerie Photos d'un dossier passe en grand format : min(1200px, 92vw) × 90vh, la scène du carrousel absorbe la hauteur libre (~78 % de la pop-in mesurés), vignettes et chips de dates gardent leur bandeau dessous. Mobile ≤ 900 px non régressé. DIMENSIONS ET LAYOUT SEULEMENT : aucune logique, zéro route, aucune donnée, export 27 inchangé, app.py intact. Rebuild local OK (/api/version = 27.18.180), NON commité.",
+  "status": "Engrenage « Paramètres » dans l'en-tête des pages invitées (hub + share) : un seul composant, deux présentations (dialog centré ≥900 px, bottom-sheet ≤900 px / pointeur grossier). Sections Mon accès (renvoi du lien, route EXISTANTE, anti double envoi, toast avec e-mail masqué), Affichage (thème Auto/Clair/Sombre) et ⭐ Favoris (hub). La lune de l'en-tête et la ligne « Recevoir mon lien » de la sidebar disparaissent. Zéro route nouvelle, export 27 inchangé, aucune migration. Rebuild local OK (/api/version = 27.20.182), NI COMMIT NI PUSH — wagon du train n°2 avec [DANGER-SOFT] V27.19.181.",
   "app_url": "http://localhost:8099/",
   "volets": {
-    "1_grand_format": "#photo-dialog : min(560px,96vw) hauteur libre → min(1200px,92vw) × 90vh, en colonne flex. En-tête flex:0 0 auto ; #photo-body flex:1 1 auto + min-height:0 + overflow-y:auto.",
-    "2_scene": ".pv-stage (classe AJOUTÉE au carrousel dans le partial) : height:min(46vh,300px) FIGÉE → flex:1 1 auto + min-height:min(46vh,300px) de repli (si la feuille de la page manquait). L'aperçu reste en center/contain = object-fit contain, jamais déformé ni rogné.",
-    "3_bandeau": "Barre d'actions, vignettes et frise de dates passent en flex:0 0 auto → elles ne se font plus écraser par la scène ; le corps scrolle si la frise est longue.",
-    "4_mobile": "@media (max-width:900px) : 96vw × 94vh (quasi plein écran) et la scène RETROUVE son gabarit d'origine (flex:0 0 auto; height:min(46vh,300px)) — demande explicite de ne pas régresser le mobile.",
-    "5_detail_dialog": "Le display:flex est porté par #photo-dialog[OPEN] : le poser sur l'élément nu aurait rendu la pop-in visible en permanence (un <dialog> fermé doit rester display:none)."
+    "1_engrenage": "Icône Tabler `settings` via hdrIconAt (partial), posée AU BOOT en haut à droite du <header> du hub et du share, au gabarit de bouton LOCAL de chaque page (classe `btn` côté hub, `icon` côté share — invariant 9), monochrome au repos, classe `.on` tant que la pop-in est ouverte. #theme-btn (la lune) SUPPRIMÉ des deux pages ; la ligne « 📧 Recevoir mon lien par e-mail » RETIRÉE de la sidebar du hub.",
+    "2_popin": "<dialog> natif. ≥900 px : centré, min(420px,94vw), max-height 88vh. ≤900 px OU (pointer:coarse) : BOTTOM-SHEET — inset auto 0 0 0, largeur pleine, coins hauts 16px, poignée .gs-handle, corps scrollable, max-height 82vh, entrée `gs-up` sous prefers-reduced-motion:no-preference. Voile ou « Fermer » (Luciole neutre) pour sortir.",
+    "3_sections": "MON ACCÈS (hub seulement — la route est propre au hub) : POST /share/hub/<token>/send-link EXISTANTE, destinataire forcé serveur, bouton désactivé pendant ET après un envoi réussi (pas d'envoi répété), toast avec e-mail MASQUÉ. AFFICHAGE : chips Auto / Clair / Sombre ; « Auto » suit prefers-color-scheme et se re-résout au basculement OS ; préférence dans `themePref`, valeur RÉSOLUE toujours écrite dans `theme` par setTheme → script anti-FOUC du <head> INCHANGÉ ; migration douce (l'ancien choix `theme` est adopté la première fois). ⭐ FAVORIS (hub) : compteur + « Vider les favoris » en .danger-soft derrière confirmPopin ; réordonnancement annoncé en V2.",
+    "4_serveur": "SEULE touche backend : la réponse de la route EXISTANTE send-link gagne `sent_to` = adresse MASQUÉE, via le nouvel helper _mask_email() (fabien.uhart@gmail.com → f•••@g•••.com). C'est un accusé de réception, pas une donnée : l'adresse complète ne circule pas. Aucune route, aucun champ exporté, aucune migration."
   },
-  "surfaces": "La pop-in n'existe que sur 2 pages : index.html (owner) et share.html (invité). Le HUB n'a PAS de galerie Photos de dossier (vérifié : aucun #photo-dialog, aucun appel à runPhotoView) — « 3 pages » se réduit donc ici à ces deux-là, le corps restant partagé (runPhotoView du partial). La visionneuse plein écran (#lightbox) n'est pas concernée, comme demandé.",
+  "pieges_trouves_au_smoke": [
+    "Chaque page anime l'entrée de SES pop-ins (dialog[open]{animation:dlg-in} = scale(0.97) + translateY). Sur une feuille collée en bas, ce transform la rétrécissait de 3 % et la faisait dépasser sous le pli (mesuré : largeur 1852 au lieu de 1909, 9 px sous l'écran). Le bloc mobile neutralise animation + transform avant de poser gs-up.",
+    "JINJA : la chaîne CSS contenait `…coarse){#guest-settings-dialog…` → le `{#` ouvrait un COMMENTAIRE Jinja dans le partial (500 au rendu de toutes les pages). La chaîne est coupée entre `{` et `#` (rendu identique). À retenir pour tout futur CSS écrit dans le partial."
+  ],
   "fichiers_modifies": [
-    "templates/partials/_shared.js.html : runPhotoView — classe .pv-stage + flex:1 1 auto/min-height sur la scène ; flex:0 0 auto sur la barre d'actions, les vignettes et la frise.",
-    "templates/index.html : largeur inline retirée du <dialog id=photo-dialog> + bloc CSS [PHOTOS-POPIN-SIZE] en FIN de <style> (gotcha cascade de CLAUDE.md).",
-    "templates/share.html : idem (largeur inline retirée, bloc CSS identique).",
-    "REALISATION.md [V27.18.180], IDEAS.md (✅ [PHOTOS-POPIN-SIZE])."
+    "templates/partials/_shared.js.html : themePref/resolveThemePref/applyThemePref/initThemePref ; _guestSettingsStyle() ; guestGearButton(cls,onClick) ; openGuestSettings(cfg).",
+    "templates/hub.html : lune retirée du header ; initThemePref() + engrenage posé au boot ; hubSettingsCfg() (e-mail + favoris) ; ligne e-mail retirée de la sidebar.",
+    "templates/share.html : lune retirée du header ; CSS header .gs-gear ; initThemePref() + engrenage posé au boot (section Affichage seule).",
+    "app.py : helper _mask_email() + `sent_to` dans la réponse de hub_send_link (route existante).",
+    "REALISATION.md [V27.20.182], IDEAS.md (✅ [GUEST-SETTINGS], ⏳ [GUEST-SETTINGS V2])."
   ],
   "tests_valides_localement": [
-    "node --check 4 surfaces OK ; docker compose up -d --build OK ; GET / = 200 ; /api/version = {\"export\":27,\"version\":\"27.18.180\"}.",
-    "SMOKE Chrome (owner, écran 1920×958) : pop-in 1164×836 avec display:flex ; scène 1134×649 = 78 % de la hauteur de la pop-in ; background-size:contain ; #photo-body en overflow-y:auto ; aucun débordement horizontal du document.",
-    "CSSOM vérifié : les 4 règles desktop ET les 2 règles @media (max-width:900px) sont bien parsées et présentes.",
-    "Aucune donnée de test créée (la galerie a été instanciée avec des photos factices en mémoire, pop-in refermée ensuite)."
+    "python3 -m py_compile OK (+ _mask_email vérifié sur 4 entrées : adresse normale, courte, sans @, sans TLD) ; node --check 4 surfaces OK ; rebuild OK ; GET / = 200 ; /api/version = 27.20.182.",
+    "SMOKE HUB : engrenage `btn gs-gear` SVG dans le <header>, lune absente, plus de ligne e-mail dans la sidebar ; pop-in ouverte avec les 3 sections (Mon accès / Affichage / ⭐ Favoris — « 2 dossiers épinglés »), chips Auto*/Clair/Sombre, pied `mab-btn luc-neutral | Fermer`, engrenage en .on ; bascule Clair → themePref=light, theme=light, data-theme=light, chip pressée mise à jour ; retour Auto OK.",
+    "SMOKE SHARE : engrenage `icon gs-gear` SVG, lune absente, UNE seule section « Affichage », pop-in 407×185 centrée.",
+    "BOTTOM-SHEET (simulé en rejouant les déclarations de la media query) : x=0, largeur 1909 = largeur client, collé en bas (gap 0), transform:none, coins 16px/0, poignée visible, corps overflow-y:auto, max-height 82vh. Règles @media (max-width:900px),(pointer:coarse) présentes au CSSOM.",
+    "Aucune donnée touchée : les favoris réels de Fabien n'ont PAS été vidés, aucun e-mail n'a été envoyé (le bouton n'a pas été déclenché)."
   ],
   "non_teste": [
-    "Rendu RÉEL en ≤ 900 px : l'outil de redimensionnement de fenêtre n'a pas changé le viewport de l'onglet (resté 1920×958), la media query n'a donc été validée que par le CSSOM. À contrôler en mode responsive / iPhone.",
-    "Page share non ouverte en navigateur par l'agent : même bloc CSS, même corps partagé."
+    "Le bottom-sheet au VRAI viewport ≤ 900 px : l'outil de redimensionnement de fenêtre ne change pas le viewport de l'onglet dans ce harnais — géométrie validée par simulation + CSSOM. À sentir sur iPhone.",
+    "L'ENVOI réel de l'e-mail (SMTP) : non déclenché pour ne pas spammer la boîte de Fabien. Le chemin réseau est celui de [GUEST-RESEND-LINK], inchangé ; seule la réponse gagne `sent_to`.",
+    "Le rate-limit 429 (2 envois/h) : non provoqué ; le message serveur est relayé tel quel dans le toast."
   ],
   "a_verifier_par_fabien_en_live": [
-    "Grand écran : l'image respire, la pop-in remplit l'écran sans déborder, l'aperçu n'est ni déformé ni rogné.",
-    "Vignettes et chips de dates toujours visibles sous l'image ; frise longue → le corps scrolle sans casser la scène.",
-    "≤ 900 px : quasi plein écran, gabarit de la scène inchangé par rapport à avant.",
-    "2 thèmes × owner et share. Navigation ‹ ›, plein écran, téléchargement, localisation carte et suppression inchangés."
+    "Engrenage présent et lisible sur les 2 pages invitées, 2 thèmes ; pop-in desktop propre.",
+    "Envoi du lien : toast « Envoyé à f•••@… », bouton qui ne renvoie PAS deux fois.",
+    "Thème : Auto suit l'appareil, Clair/Sombre persistent au rechargement ; aucun flash au chargement.",
+    "« Vider les favoris » : confirm puis sidebar mise à jour.",
+    "Disparition confirmée de la lune et de la ligne « Recevoir mon lien » de la sidebar.",
+    "iPhone : la feuille monte du bas, poignée visible, corps scrollable, tap sur le voile pour fermer."
   ],
   "notes": [
-    "Invariants : 6 (rien d'externe), 8 (aucun GSAP sur le <dialog>), 9 (tokens/classes existants ; CSS par page comme le veut la convention).",
-    "⚠️ RAPPEL : sauvegarde export au format v27 toujours à refaire côté Fabien (depuis V27.0.153).",
-    "File d'attente NON commitée : V27.2.155 → V27.18.180."
+    "Invariants : 5 (aucune route publique nouvelle ; l'action e-mail reste la route hub existante, destinataire forcé serveur), 6 (SVG inline, zéro CDN), 8 (pas de GSAP sur le <dialog> — entrée CSS), 9 (gabarits de boutons locaux, chips .prio-btn, .danger-soft).",
+    "État du dépôt : deux lots NON commités dans ce wagon — [DANGER-SOFT] V27.19.181 et [GUEST-SETTINGS] V27.20.182. Dernier tag déployé : V27.18.180.",
+    "⚠️ RAPPEL : sauvegarde export au format v27 toujours à refaire côté Fabien."
   ]
 }

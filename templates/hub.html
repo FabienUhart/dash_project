@@ -55,7 +55,9 @@ button { font: inherit; cursor: pointer; }
   border-radius: 8px; padding: 0.4rem 0.7rem; }
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: var(--accent); color: #06212e; border: none; font-weight: 600; }
-.btn.danger { color: var(--danger); border-color: var(--danger); }
+/* [DANGER-SOFT] danger au repos = monochrome (le rouge n'arrive qu'au survol/focus). */
+.btn.danger { color: var(--muted); border-color: var(--border); display: inline-flex; align-items: center; gap: 0.35rem; }
+.btn.danger:hover, .btn.danger:focus-visible { color: var(--danger); border-color: var(--danger); background: var(--panel-2); }
 
 /* ── écran code ── */
 .codewrap { max-width: 460px; margin: 0 auto; padding: 3rem 1.1rem; }
@@ -500,7 +502,8 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
     <h1 id="dash-name">📂 Mes dossiers</h1>
     <input id="search" type="text" placeholder="Rechercher…" autocomplete="off">
     <span class="spacer"></span>
-    <button class="btn" id="theme-btn" title="Thème">🌓</button>
+    <!-- [GUEST-SETTINGS] la lune a disparu : le thème vit dans la pop-in Paramètres,
+         ouverte par l'engrenage posé ici au boot (icône Tabler du partial). -->
   </header>
   <!-- [HUB-CHROME] Plan / Agenda / Carte quittent l'en-tête : ils vivent désormais dans une
        barre monochrome à la RACINE (hdrToolbar, cf. renderBoard). Les boutons restent ici,
@@ -540,7 +543,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <div id="ed-comments"></div>
   </div><!-- /.dlg-scroll -->
   <div class="dlg-actions">
-    <button class="btn danger" id="ed-del" style="margin-right:auto">🗑 Corbeille</button>
+    <button class="btn danger" id="ed-del" style="margin-right:auto">Corbeille</button><!-- [DANGER-SOFT] icône trait posée au boot -->
     <button class="btn" id="ed-cancel">Fermer</button>
     <button class="btn" id="ed-save">Enregistrer</button>
   </div>
@@ -625,9 +628,27 @@ function textOn(hex) { const c = (hex || '').replace('#', ''); if (c.length < 6)
   return (0.299*r+0.587*g+0.114*b) > 150 ? '#15191e' : '#fff'; }
 const todayStr = () => { const d = new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 
-setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
-themeBtn.addEventListener('click', () => { const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-  setTheme(next); try { localStorage.setItem('theme', next); } catch (e) {} });
+// [GUEST-SETTINGS] thème à TROIS états (Auto / Clair / Sombre) piloté depuis la pop-in
+// Paramètres ; « Auto » suit l'appareil. La valeur résolue reste écrite dans `theme`
+// (le script anti-FOUC du <head> est inchangé).
+initThemePref();
+{ const _hdr = document.querySelector('#dash header');
+  if (_hdr) _hdr.appendChild(guestGearButton('btn', () => openGuestSettings(hubSettingsCfg()))); }
+// cfg de la pop-in : e-mail (route EXISTANTE, destinataire forcé serveur) + favoris locaux.
+function hubSettingsCfg() {
+  return {
+    email: (DATA && DATA.smtp_enabled) ? {
+      onSend: async () => {
+        const proof = hubProof();   // cookie de session seul si pas de jeton en repli
+        const r = await fetch(HUB_BASE + '/send-link', { method: 'POST', headers: proof ? { 'X-Guest-Token': proof } : {} });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) return { ok: true, msg: 'Envoyé à ' + (d.sent_to || 'votre adresse') + ' — vérifie aussi les spams.' };
+        return { ok: false, msg: d.error || 'Envoi impossible.' };
+      },
+    } : null,
+    favorites: { count: hubFavsRead().length, onClear: () => { hubFavsWrite([]); render(); } },
+  };
+}
 
 // ── écritures routées par item : token de l'item + son guest_token ──
 function gtFor(token) { try { return localStorage.getItem('dashguest:' + token) || ''; } catch (e) { return ''; } }
@@ -1016,26 +1037,8 @@ function renderSidebar() {
     if (!roots.length && !(DATA.memos || []).length) nav.appendChild(el('div', { class: 'empty', text: 'Aucun dossier.' }));
   }
 
-  // [GUEST-RESEND-LINK] bouton discret : se renvoyer lien + code à l'adresse DÉJÀ
-  // enregistrée (le serveur force le destinataire — rien à saisir). Uniquement dans
-  // le dash connecté (pas l'écran code : pas de preuve à ce stade), masqué si SMTP off.
-  if (DATA && DATA.smtp_enabled) {
-    const btn = el('div', {
-      class: 'sitem',
-      attrs: { style: 'margin-top:1rem;color:var(--muted);font-size:0.8rem', title: 'Recevoir ce lien et le code à votre adresse e-mail enregistrée' },
-    });
-    btn.appendChild(el('span', { text: '📧' }));
-    btn.appendChild(el('span', { class: 'nm', text: 'Recevoir mon lien par e-mail' }));
-    btn.addEventListener('click', async () => {
-      // Le cookie de session part seul (path scopé) ; header en repli si dispo.
-      const proof = hubProof();
-      const r = await fetch(HUB_BASE + '/send-link', { method: 'POST', headers: proof ? { 'X-Guest-Token': proof } : {} });
-      const e = await r.json().catch(() => ({}));
-      if (r.ok) notify('Envoyé ! Vérifie ta boîte mail (et les spams).');
-      else notify(e.error || 'Envoi impossible.', { error: true });
-    });
-    nav.appendChild(btn);
-  }
+  // [GUEST-SETTINGS] « Recevoir mon lien par e-mail » a quitté la sidebar : l'action vit
+  // désormais dans la pop-in Paramètres (engrenage de l'en-tête), section « Mon accès ».
 }
 
 function dueInfo(m) {
@@ -1288,7 +1291,8 @@ function openHubVoteManage(v) {
   if (!closed) actions.appendChild(abtn('🗳 Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
   else actions.appendChild(abtn('↻ Rouvrir', async () => { const r = await post('reopen', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Réouverture impossible.', { error: true }); }));
   actions.appendChild(abtn('↺ Reset', async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await post('reset', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
-  actions.appendChild(abtn('🗑 Supprimer', async () => { if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer' }))) return; const r = await api(token, '/votes/' + v.id, { method: 'DELETE' }); if (r.ok) { if (hubSelectedVoteId === v.id) hubSelectedVoteId = null; done(); } else notify('Impossible.', { error: true }); }, 'color:var(--danger)'));
+  // [DANGER-SOFT] supprimer un vote : bouton discret (icône trait, rouge au survol seulement).
+  actions.appendChild(dangerSoftBtn('Supprimer', async () => { if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer' }))) return; const r = await api(token, '/votes/' + v.id, { method: 'DELETE' }); if (r.ok) { if (hubSelectedVoteId === v.id) hubSelectedVoteId = null; done(); } else notify('Impossible.', { error: true }); }));
   body.appendChild(actions);
   const foot = el('div', { attrs: { style: 'display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.5rem' } });
   foot.appendChild(abtn('Annuler', () => dlg.close()));
@@ -2237,6 +2241,9 @@ document.getElementById('search').addEventListener('input', () => { if (VIEW ===
 
 // ── init : toujours tenter /data — cookie de session HttpOnly OU header localStorage
 // ([HUB-SESSION]) ; loadDash affiche l'écran code sur 403 (comportement inchangé sans session).
+_dangerSoftStyle();   // [DANGER-SOFT] feuille du danger discret posée dès le boot (helper partagé)
+// [DANGER-SOFT] pied de l'éditeur invité : l'emoji 🗑 laisse place à l'icône trait `trash`.
+{ const _edDel = document.getElementById('ed-del'); if (_edDel) _edDel.insertBefore(hdrIconAt('trash', 15), _edDel.firstChild); }
 (function init() { loadDash(); })();
 </script>
 </body>

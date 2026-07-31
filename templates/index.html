@@ -264,8 +264,10 @@ button.icon { padding: 0.45rem 0.6rem; }
 .guest-row button, .rev-row button { padding: 0.15rem 0.5rem; font-size: 0.78rem; flex-shrink: 0; }
 .guest-row .g-approve { border-color: var(--green); color: var(--green); }
 .guest-row .g-approve:hover { background: var(--green); color: #fff; }
-.guest-row .g-reject { border-color: var(--red); color: var(--red); }
-.guest-row .g-reject:hover { background: var(--red); color: #fff; }
+/* [DANGER-SOFT] révoquer/retirer : monochrome au repos, rouge au survol/focus (plus de contour
+   rouge permanent) — même doctrine que .danger-soft et .iv-danger. */
+.guest-row .g-reject { border-color: var(--border); color: var(--muted); }
+.guest-row .g-reject:hover, .guest-row .g-reject:focus-visible { border-color: var(--red); color: var(--red); background: var(--panel-2); }
 .status-pill { font-size: 0.68rem; padding: 0.08rem 0.4rem; border-radius: 4px; background: var(--panel-2); color: var(--muted); flex-shrink: 0; }
 .status-pill.approved { color: var(--green); }
 .status-pill.pending { color: var(--yellow); }   /* [GUEST-AUTO-APPROVE] plus émis (aucun invité ne peut être en attente) — règle laissée inoffensive */
@@ -1542,7 +1544,9 @@ dialog .actions {
 .card-menu[hidden] { display: none; }
 .card-menu button { background: none; border: none; color: var(--text); text-align: left; padding: 0.4rem 0.6rem; border-radius: 6px; cursor: pointer; font: inherit; font-size: 0.85rem; white-space: nowrap; }
 .card-menu button:hover { background: var(--panel); }
-.card-menu .danger-item { color: var(--red); }
+/* [DANGER-SOFT] le danger murmure au repos : ligne muted, rouge au survol/focus seulement. */
+.card-menu .danger-item { color: var(--muted); display: flex; align-items: center; gap: 0.4rem; }
+.card-menu .danger-item:hover, .card-menu .danger-item:focus-visible { color: var(--red); }
 /* [HEADER-ADD-CONTEXT] « + » contextuel par bloc — MOBILE ≤900px uniquement (masqué desktop ici,
    révélé dans le bloc « Overrides mémos mobile »). Bouton rond secondaire (PAS accent) au gabarit
    `.task .task-actions button` (invariant 9), tokens uniquement. */
@@ -2082,7 +2086,7 @@ dialog .actions {
       <button type="button" id="create-export">⬇ Exporter ce dossier (JSON)</button>
       <button type="button" id="create-import">⬆ Importer un dossier ici (JSON)</button>
       <input type="file" id="create-import-file" accept="application/json,.json" style="display:none">
-      <button type="button" id="create-delete" class="danger-item">🗑 Supprimer</button>
+      <button type="button" id="create-delete" class="danger-item"><svg class="ic" aria-hidden="true"><use href="#ic-trash"></use></svg>Supprimer</button>
     </div>
   </div>
   <form id="create-form">
@@ -2181,7 +2185,7 @@ dialog .actions {
     <div id="memo-menu" class="card-menu" hidden>
       <button type="button" id="memo-edit-share">🔗 Partager</button>
       <button type="button" id="memo-edit-dup">⧉ Dupliquer</button>
-      <button type="button" id="memo-edit-delete" class="danger-item">🗑 Supprimer</button>
+      <button type="button" id="memo-edit-delete" class="danger-item"><svg class="ic" aria-hidden="true"><use href="#ic-trash"></use></svg>Supprimer</button>
     </div>
   </div>
   <div id="me-context" class="me-context"></div>
@@ -4838,7 +4842,7 @@ function renderTrash() {
   }));
   if (items.length) {
     const empty = el('button', {
-      class: 'danger', icon: 'trash', text: 'Vider la corbeille',
+      class: 'danger-soft', icon: 'trash', text: 'Vider la corbeille',   // [DANGER-SOFT]
       attrs: { style: 'margin-bottom:0.8rem' },
       on: { click: async () => {
         if (!(await confirmPopin(`Supprimer définitivement les ${items.length} mémo(s) de la corbeille ?\nCette action est irréversible.`, { okLabel: 'Vider' }))) return;
@@ -4870,7 +4874,7 @@ function renderTrash() {
       on: { click: async (e) => { e.stopPropagation(); await trashRestore(m.id); } },
     }));
     row.appendChild(el('button', {
-      class: 'danger btn-soft', text: 'Supprimer',
+      class: 'danger-soft', icon: 'trash', text: 'Supprimer',   // [DANGER-SOFT]
       on: { click: async (e) => { e.stopPropagation(); await trashPurge(m.id); } },
     }));
     board.appendChild(row);
@@ -4896,7 +4900,7 @@ async function trashPurge(id) {
 // qu'on n'a pas cliqué Restaurer/Supprimer. `dialog` natif (invariant 8 : entrée CSS `dlg-in`,
 // zéro GSAP) donc `uiBusy()` couvre déjà le poll 15 s. Zéro route : /api/trash renvoie les mémos
 // complets (`_memo_dict`). Pied au style Luciole (docs/design/LUCIOLE-boutons.md) ; le danger
-// reste ROUGE (`button.danger`), jamais en Luciole.
+// n'est jamais en Luciole — il MURMURE au repos et rougit au survol (`.danger-soft`, [DANGER-SOFT]).
 let trashPreviewDialog = null;
 function openTrashPreview(memo) {
   if (!trashPreviewDialog) {
@@ -4942,7 +4946,8 @@ function openTrashPreview(memo) {
       ctx.appendChild(el('div', { class: 'me-meta', text: `🕒 Créé par @${who} le ${date} à ${time}` }));
     }
   }
-  if (memo.deleted_at) ctx.appendChild(el('div', { class: 'me-meta', text: '🗑 Supprimé le ' + fmtDeleted(memo.deleted_at) }));
+  // [DANGER-SOFT] méta de l'aperçu corbeille : emoji 🗑 → icône trait du sprite.
+  if (memo.deleted_at) ctx.appendChild(el('div', { class: 'me-meta', icon: 'trash', text: 'Supprimé le ' + fmtDeleted(memo.deleted_at) }));
   scroll.appendChild(ctx);
 
   // — titre (repli sur l'accroche du contenu, comme les cards [MEMO-TITLE-FALLBACK]) —
@@ -5008,10 +5013,10 @@ function openTrashPreview(memo) {
 
   dlg.appendChild(scroll);
 
-  // — pied : danger rouge à gauche, Fermer + Restaurer en Luciole à droite —
+  // — pied : danger DISCRET à gauche ([DANGER-SOFT]), Fermer + Restaurer en Luciole à droite —
   const actions = el('div', { class: 'actions' });
   actions.appendChild(el('button', {
-    class: 'danger', text: 'Supprimer définitivement',
+    class: 'danger-soft', icon: 'trash', text: 'Supprimer définitivement',   // [DANGER-SOFT]
     attrs: { type: 'button', style: 'margin-right:auto' },
     on: { click: async () => { if (await trashPurge(memo.id)) dlg.close(); } },
   }));
@@ -6792,7 +6797,7 @@ function openVoteManage(v) {
     try { await doAction('reset', { vote_deadline: dl.value || '' }); await reloadClose(); }
     catch (e) { await notify('Impossible : ' + e.message, { error: true }); }
   } } }));
-  actions.appendChild(el('button', { class: 'prio-btn danger', text: '🗑 Supprimer', on: { click: async () => {
+  actions.appendChild(el('button', { class: 'danger-soft', icon: 'trash', text: 'Supprimer', on: { click: async () => {
     if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer', danger: true }))) return;
     await api(`/api/votes/${v.id}`, { method: 'DELETE' });
     if (selectedVoteId === v.id) selectedVoteId = null;
@@ -7038,7 +7043,7 @@ function taskEl(memo) {
     on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; duplicateMemo(memo.id); } },
   }));
   moreMenu.appendChild(el('button', {
-    class: 'danger-item', text: '🗑 Supprimer',
+    class: 'danger-item', icon: 'trash', text: 'Supprimer',   // [DANGER-SOFT] plus d'emoji
     on: { click: (e) => { e.stopPropagation(); moreMenu.hidden = true; deleteMemo(memo.id); } },
   }));
   moreBtn.addEventListener('click', (e) => { e.stopPropagation(); moreMenu.hidden = !moreMenu.hidden; });
@@ -9034,6 +9039,7 @@ function adaptMemoPanel() { memoDetails.open = !mq.matches; }
 adaptMemoPanel();
 mq.addEventListener('change', adaptMemoPanel);
 
+_dangerSoftStyle();   // [DANGER-SOFT] feuille du danger discret posée dès le boot (helper partagé)
 // [WEB-CAPTURE] handleCapture après le 1er loadAll (openDialog a besoin des catégories chargées).
 loadAll().then(() => { try { handleCapture(); } catch (_) {} });
 refreshActivityBadge();
