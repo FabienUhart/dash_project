@@ -3906,6 +3906,19 @@ function openMemoView(cfg, memoId) {
     if (!d) return;                       // hors scope → on ne navigue pas (chip inerte côté rendu)
     dlg.innerHTML = '';
     const scroll = el('div', { attrs: { style: 'flex:1 1 auto;min-height:0;overflow-y:auto;max-height:430px;padding:1.1rem 1.35rem' } });
+    // — [CARD-COVER] bandeau de couverture : 1re photo du mémo, pleine largeur, AU-DESSUS du
+    //   fil d'Ariane et du titre. Voile bas léger pour asseoir ce qui suit ; clic = visionneuse
+    //   (même appel que la section 📷 plus bas). Mémo sans photo → fiche strictement inchangée.
+    const _cov = (d.images || []);
+    if (_cov.length && cfg.imageUrl) {
+      _coverStyle();
+      const band = el('div', { class: 'mv-cover' });
+      band.appendChild(el('img', { attrs: { src: imgSize(cfg.imageUrl(_cov[0], d.memo), 's'), alt: '', loading: 'lazy', decoding: 'async' } }));
+      band.appendChild(el('div', { class: 'tc-scrim' }));
+      if (cfg.onOpenPhoto) band.addEventListener('click', () => cfg.onOpenPhoto(_cov, 0, d.memo));
+      else band.style.cursor = 'default';
+      scroll.appendChild(band);
+    }
     // — fil d'Ariane + méta —
     const ctx = el('div', { attrs: { style: 'display:flex;flex-direction:column;gap:0.25rem;margin-bottom:0.7rem' } });
     const crumb = el('div', { attrs: { style: 'display:flex;align-items:center;flex-wrap:wrap;gap:0.25rem;font-size:0.8rem;color:var(--text);min-width:0' } });
@@ -4083,6 +4096,244 @@ function memoPictosRow(cfg) {
   if (nAtt) chip('📎 ' + nAtt, plural(nAtt, 'fichier joint') + (cfg.onAttach ? ' — voir' : ''), cfg.onAttach || null);
   if (nCom) chip('💬 ' + nCom, plural(nCom, 'commentaire') + (cfg.onComments ? ' — voir' : ''), cfg.onComments || null);
   return row;
+}
+
+/* ═══ [CARD-COVER] La 1re photo du mémo en COUVERTURE de card ═══════════════════════════
+   Frontend PUR : zéro route, zéro donnée nouvelle. La couverture = `memo.images[0]`, servie
+   en dérivée EXISTANTE `?size=s` d'[IMAGE-THUMBS] (`loading=lazy`) — donc rien de plus lourd
+   qu'une image de visionneuse déjà générée à l'upload. Quatre briques partagées par les
+   3 pages (ADR-001) : la bascule Immersif/Compact persistée PAR BOARD, l'habillage d'une
+   card (photo + voile + verre), un pied de card pour les pages qui n'en ont pas, et le
+   texte d'appel (titre + une ligne de description).
+   ⚠️ Couleurs : le voile reste SOMBRE et le texte overlay CLAIR dans les DEUX thèmes — un
+   voile clair ne rendrait pas un titre lisible sur une photo claire. Exception assumée à
+   l'invariant 9 (même doctrine que les overlays de la visionneuse `.iv-*`) : hors overlay,
+   tout reste aux tokens. Aucune animation (ni GSAP — invariant 8, ni parallaxe) : rien à
+   neutraliser sous `prefers-reduced-motion`. */
+function _coverStyle() {
+  if (document.getElementById('card-cover-style')) return;
+  const st = document.createElement('style'); st.id = 'card-cover-style';
+  st.textContent =
+    /* — bascule Immersif / Compact : segmented control monochrome. Luciole — jamais d'aplat
+       accent sur le chrome : l'état actif se dit par la MATIÈRE (fond panel-2) + le glyphe. */
+    '.cover-disp{display:flex;align-items:center;justify-content:flex-end;gap:0.4rem;margin:0 0 0.6rem}'
+    + '.cover-disp-lbl{font-size:0.72rem;color:var(--muted)}'
+    + '.cover-seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}'
+    + '.cover-seg button{height:30px;min-height:0;padding:0 0.7rem;background:transparent;border:none;border-radius:0;color:var(--muted);font:inherit;font-size:0.76rem;line-height:1;cursor:pointer;display:inline-flex;align-items:center;gap:0.3rem}'
+    + '.cover-seg button + button{border-left:1px solid var(--border)}'
+    + '.cover-seg button:hover{color:var(--text)}'
+    + '.cover-seg button.on{background:var(--panel-2);color:var(--accent)}'
+    + '.cover-seg .hdr-ic{width:14px;height:14px;flex-shrink:0}'
+    /* — la card immersive : photo au fond, voile par-dessus, contenu au-dessus du voile.
+       Pas d'`overflow:hidden` sur la card (il clipperait le menu ⋯) : l'arrondi est porté
+       par la couche photo, qui hérite du rayon de la card. */
+    + '.task.task-cover{position:relative;padding:0;min-height:238px;display:flex;flex-direction:column;justify-content:space-between;color:#eef4fa}'
+    /* tout ce que la page a construit passe AU-DESSUS du voile — sauf les deux couches
+       elles-mêmes (`:not(…)` : sinon cette règle, plus spécifique, les remettrait dans le flux). */
+    + '.task.task-cover > *:not(.tc-ph):not(.tc-scrim){position:relative;z-index:2}'
+    + '.task.task-cover .tc-ph{position:absolute;inset:0;z-index:0;border-radius:inherit;overflow:hidden;cursor:zoom-in}'
+    + '.task.task-cover .tc-ph img{width:100%;height:100%;object-fit:cover;display:block}'
+    + '.tc-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;border-radius:inherit;'
+      + 'background:linear-gradient(180deg,rgba(10,14,19,0.82) 0%,rgba(10,14,19,0.25) 38%,rgba(10,14,19,0.05) 55%,rgba(10,14,19,0.72) 100%)}'
+    + '.task.task-cover .task-row{padding:0.75rem 0.85rem 0;flex-wrap:wrap;row-gap:0.4rem;align-items:flex-start}'
+    + '.task.task-cover .task-content{flex:1 1 auto;min-width:0;white-space:normal}'
+    + '.task.task-cover .tc-title{font-weight:700;font-size:1.05rem;line-height:1.3;text-shadow:0 1px 6px rgba(0,0,0,0.65)}'
+    + '.task.task-cover .tc-desc{font-size:0.86rem;color:#dbe4ec;margin-top:0.1rem;text-shadow:0 1px 5px rgba(0,0,0,0.6);'
+      + 'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+    /* — badges/pastilles en VERRE (la pastille de priorité garde sa couleur : c'est une donnée) */
+    + '.task.task-cover .badge{background:rgba(16,20,26,0.72);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);'
+      + 'border:1px solid rgba(255,255,255,0.10);color:#dbe4ec}'
+    + '.task.task-cover .badge.due-late{color:#ef9a9a}'
+    + '.task.task-cover .badge.due-today{color:#ffd54f}'
+    + '.task.task-cover .asg-av{background:rgba(16,20,26,0.72);border-color:rgba(255,255,255,0.35);color:#eef4fa;box-shadow:none}'
+    + '.task.task-cover .task-check{background:rgba(16,20,26,0.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);border-color:rgba(255,255,255,0.5)}'
+    + '.task.task-cover .task-pictos{margin-top:0.4rem}'
+    /* — pied : projet à gauche, actions à droite, sur fond de verre flouté */
+    + '.task.task-cover .task-foot,.task.task-cover .tc-foot{display:flex;align-items:center;gap:0.5rem;'
+      + 'margin:0;padding:0.6rem 0.75rem;border-top:none;justify-content:space-between}'
+    + '.task.task-cover .tc-foot{justify-content:flex-end}'
+    + '.task.task-cover .foot-proj{color:#dbe4ec;text-shadow:0 1px 5px rgba(0,0,0,0.7)}'
+    + '.task.task-cover .task-actions button,.task.task-cover .tc-foot button,.task.task-cover .task-acts button{'
+      + 'background:rgba(16,20,26,0.66);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);'
+      + 'border:1px solid rgba(255,255,255,0.16);color:#dbe4ec}'
+    + '.task.task-cover .task-actions button:hover,.task.task-cover .tc-foot button:hover,.task.task-cover .task-acts button:hover{'
+      + 'background:rgba(16,20,26,0.85);border-color:rgba(255,255,255,0.32);color:#fff}'
+    + '.task.task-cover .task-actions .texp,.task.task-cover .task-actions .tedit,.task.task-cover .task-actions .tview,'
+      + '.task.task-cover .tc-foot .tc-primary{color:#7fd0ff;border-color:rgba(127,208,255,0.45)}'
+    /* le menu ⋯ reste une surface d'application normale (tokens), pas du verre */
+    + '.task.task-cover .card-menu{color:var(--text)}'
+    + '.task.task-cover .card-menu button{background:var(--panel);color:var(--text);border-color:var(--border);backdrop-filter:none}'
+    /* — [CARD-COVER v1.1] vignette du mode COMPACT : carré ~56 px calé à DROITE de la rangée et
+         centré verticalement, à la place de la bande de vignettes qui vivait sous la card.
+         Discrète par construction — c'est un indice, pas une couverture. */
+    /* ⚠️ HORS FLUX (absolue, place réservée par un `padding-right` sur la rangée) : en flux, elle
+       se rangeait APRÈS les badges — qui prennent `flex-basis:100%` en mobile (owner/share) et en
+       permanence (hub) — et tombait donc sur une 3e ligne. Absolue = la ligne des badges ne bouge
+       sur aucune page ni largeur, et le centrage vertical est vraiment celui de la rangée. */
+    + '.task-row.has-thumb{position:relative;padding-right:66px;min-height:62px}'
+    + '.tc-thumb{position:absolute;right:0;top:50%;transform:translateY(-50%);margin:0;'
+      + 'width:56px;height:56px;border-radius:8px;overflow:hidden;border:1px solid var(--border);'
+      + 'background:var(--panel-2);cursor:zoom-in}'
+    + '.tc-thumb img{width:100%;height:100%;object-fit:cover;display:block}'
+    + '.tc-thumb:hover{border-color:var(--accent)}'
+    + '.tc-thumb-more{position:absolute;right:2px;bottom:2px;font-size:0.62rem;line-height:1;'
+      + 'padding:2px 4px;border-radius:5px;background:rgba(10,14,19,0.72);color:#fff}'
+    /* hub : ses `.badges` sont en `flex-basis:100%` + marge gauche à TOUTE largeur (owner/share
+       ne le font qu'en mobile) → la somme déborde et mordrait la vignette. */
+    + '.task-row.has-thumb > .badges{flex-basis:auto;flex-grow:1;min-width:0}'
+    /* — bandeau de couverture de la fiche 👁 (pleine largeur : marges négatives du corps) */
+    + '.mv-cover{position:relative;margin:-1.1rem -1.35rem 0.9rem;height:200px;overflow:hidden;cursor:zoom-in}'
+    + '.mv-cover img{width:100%;height:100%;object-fit:cover;display:block}'
+    + '.mv-cover .tc-scrim{background:linear-gradient(180deg,rgba(10,14,19,0) 45%,rgba(10,14,19,0.55) 100%)}'
+    /* — mobile ≤900 px (la référence de Fabien EST un téléphone) : card un peu plus courte,
+         badges sur leur propre ligne, bascule inchangée. */
+    + '@media (max-width:900px){'
+      + '.task.task-cover{min-height:212px}'
+      + '.task.task-cover .task-badges,.task.task-cover .badges{flex-basis:100%;max-width:none}'
+      + '.mv-cover{height:158px;margin:-1.1rem -1.35rem 0.8rem}'
+      /* [CARD-COVER v1.1] vignette un peu plus petite au doigt ; la réservation de place suit.
+         Les badges passent en `flex-basis:100%` AVEC une marge gauche (règles des pages) : la
+         somme déborde la boîte de contenu et venait mordre la vignette → `basis:auto` + `grow`,
+         ils occupent exactement la place restante, sans déborder ni changer de ligne. */
+      + '.tc-thumb{width:48px;height:48px}'
+      + '.task-row.has-thumb{padding-right:58px;min-height:54px}'
+      + '.task-row.has-thumb > .task-badges,.task-row.has-thumb > .badges{flex-basis:auto;flex-grow:1;min-width:0}'
+    + '}';
+  document.head.appendChild(st);
+}
+// État de la bascule pour un board donné (défaut = COMPACT partout : rien ne change tant
+// que l'utilisateur n'a pas activé l'immersif). localStorage gardé, jamais exporté.
+function cardCoverOn(key) {
+  try { return localStorage.getItem(key) === '1'; } catch (e) { return false; }
+}
+/* Bascule « Immersif / Compact » d'un board. cfg = { storageKey, hasPhotos, onChange() }.
+   Renvoie { bar:Element|null, on:bool } — `bar` null quand AUCUN mémo affiché n'a de photo
+   (la bascule ne servirait à rien) ; l'état persisté est conservé pour autant. */
+function coverToggleBar(cfg) {
+  const on = cardCoverOn(cfg.storageKey);
+  if (!cfg.hasPhotos) return { bar: null, on: false };
+  _coverStyle();
+  const bar = el('div', { class: 'cover-disp' });
+  bar.appendChild(el('span', { class: 'cover-disp-lbl', text: 'Affichage' }));
+  const seg = el('div', { class: 'cover-seg' });
+  const mk = (icon, label, active, val, title) => {
+    const b = el('button', { class: 'cover-seg-btn' + (active ? ' on' : ''), attrs: { type: 'button', title: title } });
+    b.appendChild(hdrIconAt(icon, 14));
+    b.appendChild(el('span', { text: label }));
+    b.addEventListener('click', () => {
+      if (active) return;
+      try { localStorage.setItem(cfg.storageKey, val); } catch (e) { /* stockage indisponible : sans effet */ }
+      cfg.onChange();
+    });
+    return b;
+  };
+  seg.appendChild(mk('photo', 'Immersif', on, '1', 'Cards en couverture photo'));
+  seg.appendChild(mk('list', 'Compact', !on, '0', 'Cards en liste compacte'));
+  bar.appendChild(seg);
+  return { bar: bar, on: on };
+}
+// Habille une card en couverture : classe + couche photo + voile. cfg = { url, onOpen? }.
+// `url` = URL BRUTE de l'image (le `?size=s` est ajouté ici). Rien d'autre n'est touché :
+// les rangées déjà construites par la page passent au-dessus du voile via le CSS.
+function applyCardCover(task, cfg) {
+  _coverStyle();
+  task.classList.add('task-cover');
+  const ph = el('div', { class: 'tc-ph' });
+  ph.appendChild(el('img', { attrs: { src: imgSize(cfg.url, 's'), alt: '', loading: 'lazy', decoding: 'async' } }));
+  if (cfg.onOpen) ph.addEventListener('click', (e) => { e.stopPropagation(); cfg.onOpen(); });
+  else ph.style.cursor = 'default';
+  task.appendChild(ph);
+  task.appendChild(el('div', { class: 'tc-scrim' }));
+  return task;
+}
+// Pied de card immersive pour les pages SANS `.task-foot` (share, hub) : les actions y
+// descendent en bas à droite, comme dans la maquette.
+function coverFoot() { return el('div', { class: 'tc-foot' }); }
+/* [CARD-COVER v1.1] Vignette du mode COMPACT : la photo reste visible, mais en INDICE — un carré
+   ~56 px à droite de la rangée, centré verticalement, `?size=t` (dérivée déjà générée, zéro donnée
+   nouvelle). Elle REMPLACE la bande de vignettes qui vivait sous la card en compact (même photo,
+   plus large, moins discrète — la garder ferait doublon) ; l'état DÉPLIÉ owner, lui, retrouve la
+   bande complète (déplier = rendu classique). Clic = visionneuse, jamais l'édition
+   (`stopPropagation` : les cards share/hub ouvrent l'éditeur au clic).
+   cfg = { url (BRUTE), count, onOpen }. `row` reçoit `has-thumb` (réservation de place en mobile). */
+function applyCardThumb(row, cfg) {
+  _coverStyle();
+  const box = el('div', { class: 'tc-thumb', attrs: { title: (cfg.count > 1 ? cfg.count + ' photos' : 'Voir la photo') } });
+  box.appendChild(el('img', { attrs: { src: imgSize(cfg.url, 't'), alt: '', loading: 'lazy', decoding: 'async' } }));
+  if (cfg.count > 1) box.appendChild(el('span', { class: 'tc-thumb-more', text: '+' + (cfg.count - 1) }));
+  if (cfg.onOpen) box.addEventListener('click', (e) => { e.stopPropagation(); cfg.onOpen(); });
+  else box.style.cursor = 'default';
+  row.classList.add('has-thumb');
+  row.appendChild(box);
+  return box;
+}
+/* Texte d'appel d'une card en couverture : un titre + UNE ligne de description, en TEXTE pur
+   (jamais de HTML sur une photo : ni checklist, ni tableau, ni fil de commentaires — le détail
+   vit dans la fiche 👁 et l'état déplié). `strip` = le dé-balisage de la page appelante
+   (`stripHTML` côté owner, `stripTags` côté invité).
+   [V27.21.184] Un contenu RICHE ne passe PLUS par `strip()` : le dé-balisage colle les blocs
+   entre eux (« LaitPain completŒufs x12 ») et faisait déborder la 2e ligne dans le titre
+   (« …pour mamieidée : un châle »). On réutilise `splitLeadHtml` (le fix HTML-aware du 158) :
+   accroche = la 1re ligne SEULE, description = la ligne SUIVANTE seule, jamais la purée. */
+const _COVER_RICH_RE = /<(p|div|ul|ol|li|br|h[1-6]|blockquote|table|pre)\b/i;
+// Résumé chiffré d'une liste. Arbitrage : « n articles » présumerait des courses alors qu'une
+// checklist est souvent une liste de tâches → libellé neutre « n éléments », et si les items
+// portent des CASES (Quill `list: check`) la progression « k/n faits » dit bien plus que le
+// 1er item. Liste à un seul item = pas de résumé, on montre l'item.
+// ⚠️ Le comptage porte sur TOUT le contenu, pas sur `li.closest('ul')` : Quill scinde une
+// checklist en PLUSIEURS `<ul>` (un par bloc coché/non coché) — « Courses de la semaine »
+// annonçait « 3/3 faits » alors que 3 items non cochés vivaient dans un 2e `<ul>`.
+function _coverListDesc(li, root) {
+  const items = Array.prototype.slice.call((root || li.parentNode).querySelectorAll('li'))
+    .filter(x => (x.textContent || '').trim());
+  if (items.length < 2) return memoLeadText((li.textContent || '').replace(/\s+/g, ' ').trim(), 90);
+  const boxed = items.some(x => { const d = x.getAttribute('data-list'); return d === 'checked' || d === 'unchecked'; });
+  if (boxed) return items.filter(x => x.getAttribute('data-list') === 'checked').length + '/' + items.length + ' faits';
+  return items.length + ' éléments';
+}
+/* 1re ligne de description d'un contenu riche. `skipLead` = la 1re ligne est déjà promue en
+   titre → on prend la suivante ; mais une LISTE reste comptée en ENTIER (le compteur doit dire
+   la vérité même quand son 1er item sert de titre). */
+function _coverDescFromHtml(html, skipLead) {
+  if (!html) return '';
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const frag = tpl.content;
+  const pick = () => {
+    const blocks = frag.querySelectorAll('li, p, h1, h2, h3, h4, h5, h6, blockquote');
+    for (const b of blocks) { if ((b.textContent || '').trim()) return b; }
+    return null;
+  };
+  let first = pick();
+  if (first && skipLead && first.tagName !== 'LI') { first.remove(); first = pick(); }
+  if (!first) {   // aucun bloc textuel (pur inline) : tout était déjà dans l'accroche
+    return skipLead ? '' : memoLeadText((frag.textContent || '').replace(/\s+/g, ' ').trim(), 90);
+  }
+  if (first.tagName === 'LI') return _coverListDesc(first, frag);
+  return memoLeadText((first.textContent || '').replace(/\s+/g, ' ').trim(), 90);
+}
+function memoCoverTexts(memo, strip) {
+  const raw = memo.content || '';
+  if (_COVER_RICH_RE.test(raw)) {
+    if (memo.title) return { title: memo.title, desc: _coverDescFromHtml(raw, false) };
+    const lead = memoLeadText(splitLeadHtml(raw).lead);
+    return { title: lead || MEMO_EMPTY_LABEL, desc: _coverDescFromHtml(raw, true) };
+  }
+  // Texte plein : `memoLeadText`/`memoRestText` découpent déjà sur les sauts de ligne.
+  const plain = (strip(memo.content || '') || '').replace(/\u00a0/g, ' ').trim();
+  if (memo.title) return { title: memo.title, desc: memoLeadText(plain, 90) };
+  const lead = memoLeadText(plain);
+  return { title: lead || MEMO_EMPTY_LABEL, desc: memoLeadText(memoRestText(plain), 90) };
+}
+// Rangée titre + description d'une card immersive (emoji du mémo conservé — c'est une donnée).
+function memoCoverHead(memo, texts) {
+  const wrap = document.createDocumentFragment();
+  const tl = el('div', { class: 'tc-title' });
+  if (memo.emoji) tl.appendChild(el('span', { text: memo.emoji + ' ' }));
+  tl.appendChild(el('span', { text: texts.title }));
+  wrap.appendChild(tl);
+  if (texts.desc) wrap.appendChild(el('div', { class: 'tc-desc', text: texts.desc }));
+  return wrap;
 }
 
 // [MEMO-EDITOR-IMAGES] Section « 📷 Photos » de l'éditeur mémo, partagée owner/invité/hub
@@ -5406,6 +5657,8 @@ const HDR_ICONS = {
   'chevron-left': ['M15 6l-6 6l6 6'],
   'chevron-right': ['M9 6l6 6l-6 6'],
   'player-stop': ['M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z'],
+  // [CARD-COVER] « liste » = affichage Compact de la bascule (l'Immersif réutilise `photo`).
+  list: ['M9 6l11 0', 'M9 12l11 0', 'M9 18l11 0', 'M5 6l0 .01', 'M5 12l0 .01', 'M5 18l0 .01'],
 };
 // Icône trait dimensionnée en une ligne (raccourci du duo hdrIcon + setAttribute × 2).
 function hdrIconAt(name, px) {

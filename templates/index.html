@@ -6870,12 +6870,21 @@ function memoViewCfg() {
   };
 }
 
+// [CARD-COVER] la bascule Immersif/Compact est persistée PAR BOARD (pattern toolsDock) :
+// une vue de 83 concerts reste vivable en compact, un board de voyage devient une galerie.
+function boardCoverKey() { return 'boardCover:' + state.memoProject; }
+function boardCoverOn() { return cardCoverOn(boardCoverKey()); }
+
 function taskEl(memo) {
   const task = el('div', {
     class: 'task' + (memo.done ? ' done-task' : ''),
     attrs: { 'data-memo-id': memo.id, draggable: 'true' },
   });
   const expanded = expandedMemos.has(memo.id);
+  // [CARD-COVER] mode immersif : la 1re photo devient la couverture. Uniquement si le board
+  // est en Immersif, que le mémo A une photo et que la card est REPLIÉE — déplier revient au
+  // rendu classique complet (photo en bandeau de vignettes, checklist, sous-tâches…).
+  const coverName = (boardCoverOn() && !expanded && (memo.images || []).length) ? memo.images[0] : '';
   const prio = prioOf(memo.priority);
   // Bordure gauche = priorité, sinon couleur du projet (rien si done). [CARD-REDESIGN]
   if (!memo.done) {
@@ -6897,7 +6906,11 @@ function taskEl(memo) {
   row.appendChild(check);
 
   const content = el('div', { class: 'task-content' });
-  if (memo.title) {
+  if (coverName) {
+    // [CARD-COVER] carte d'appel : titre + une ligne de description, en TEXTE pur au-dessus
+    // du voile. Le contenu riche (checklist, tableau) n'a pas sa place sur une photo.
+    content.appendChild(memoCoverHead(memo, memoCoverTexts(memo, stripHTML)));
+  } else if (memo.title) {
     const tl = el('div', { class: 'task-title' });
     if (memo.emoji) tl.appendChild(el('span', { class: 'memo-emoji', text: memo.emoji }));
     tl.appendChild(el('span', { text: memo.title }));
@@ -6929,7 +6942,7 @@ function taskEl(memo) {
       if (stripHTML(sp.restHtml).trim()) { const cn = contentNode(sp.restHtml, memo); cn.classList.add('task-clamp'); content.appendChild(cn); }
     }
   }
-  wireChecklist(content, memo);
+  if (!coverName) wireChecklist(content, memo);   // [CARD-COVER] pas de checklist sur une couverture
   // [CARD-PREVIEW] rangée de pictos « signature » sous le titre/extrait (☑/📷/📎/💬), qui absorbe
   // les anciens badges 📎/💬/☑. Clics : 📷 → visionneuse, 📎 → pop-in fichiers, 💬 → déplier.
   const pictos = memoPictosRow({
@@ -7052,8 +7065,21 @@ function taskEl(memo) {
   actions.appendChild(more);
   task.appendChild(row);
 
-  const thumbs = thumbsEl(memo, expanded, !expanded);
+  // [CARD-COVER] en immersif la photo EST la card : pas de bande de vignettes en double.
+  // [CARD-COVER v1.1] en COMPACT replié, la bande cède la place à la vignette carrée posée à
+  // droite de la rangée (helper partagé) ; DÉPLIÉ = bande complète, comme avant.
+  const thumbs = (coverName || !expanded) ? null : thumbsEl(memo, expanded, false);
   if (thumbs) task.appendChild(thumbs);
+  if (!coverName && !expanded && (memo.images || []).length) {
+    applyCardThumb(row, {
+      url: `/uploads/${memo.images[0]}`, count: memo.images.length,
+      onOpen: () => runImageViewer({
+        images: memo.images, startIndex: 0,
+        imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`, exifUrl: (n) => `/api/image-exif/${n}`,
+        canDelete: true, onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
+      }),
+    });
+  }
 
   if (expanded) task.appendChild(taskDetailEl(memo));
 
@@ -7070,6 +7096,19 @@ function taskEl(memo) {
   foot.appendChild(footProj);
   foot.appendChild(actions);
   task.appendChild(foot);
+
+  // [CARD-COVER] habillage en DERNIER : la couche photo + le voile passent sous les rangées
+  // déjà construites (z-index CSS). Clic sur la photo = visionneuse, comme une vignette.
+  if (coverName) {
+    applyCardCover(task, {
+      url: `/uploads/${coverName}`,
+      onOpen: () => runImageViewer({
+        images: memo.images, startIndex: 0,
+        imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`, exifUrl: (n) => `/api/image-exif/${n}`,
+        canDelete: true, onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
+      }),
+    });
+  }
 
   task.addEventListener('drop', (e) => {
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
@@ -7859,6 +7898,17 @@ function renderBoard() {
     go.addEventListener('click', create);
     bar.append(nameIn, opts, go);
     board.appendChild(bar);
+  }
+
+  // [CARD-COVER] bascule « Immersif / Compact » du board (défaut Compact, persistée par board).
+  // Affichée seulement si au moins un mémo du board porte une photo.
+  {
+    const cov = coverToggleBar({
+      storageKey: boardCoverKey(),
+      hasPhotos: allMemos.some(m => (m.images || []).length),
+      onChange: renderBoard,
+    });
+    if (cov.bar) board.appendChild(cov.bar);
   }
 
   // [BOARD-SUBHIDE] / [SUBHIDE-V2] cadre « SOUS-DOSSIERS » collé à la liste (après Fichiers/Vocal,

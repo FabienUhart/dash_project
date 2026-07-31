@@ -126,6 +126,20 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 En regardant la zone sous-tâches/commentaires d'une card : pouvoir rattacher un mémo à un autre sans ouvrir l'éditeur (le picker « Relié à » n'existe que dans la pop-in d'édition). Famille MEMO-LINKS — à cadrer avec la tranche C. **« À voir plus tard »** dixit Fabien — ne pas embarquer dans [COMMENTS-V2].
 
 
+## [CARD-COVER] — la 1re photo du mémo en couverture de card (maquette validée Fabien, 1ᵉʳ août 2026) → **✅ FAIT [V27.21.183]** + correctif textes **[V27.21.184]**
+
+Maquette `docs/design/maquette-card-cover.html` + référence iPhone « Château d'Osaka ». Frontend pur, zéro route, zéro donnée nouvelle, export 27 inchangé.
+
+- **Card immersive** : couverture = `memo.images[0]` en dérivée existante `?size=s` ([IMAGE-THUMBS]) + voile dégradé haut/bas, badges et actions en verre flouté, bordure gauche de priorité conservée. Checklist, sous-tâches, fil de commentaires et bande de vignettes **absents** en immersif (carte d'appel) ; **déplier revient au rendu classique complet**. Mémo **sans photo = card classique** — le board mélange.
+- **Bascule « Immersif / Compact »** par board (icônes trait `photo` / `list`), **défaut Compact partout**, persistée `boardCover:<projet>` / `shareBoardCover:<token>:<focus>` / `hubBoardCover:<focus>` — affichée seulement si un mémo affiché a une photo.
+- **Fiche 👁** : bandeau `photos[0]` au-dessus du titre, clic = visionneuse ; sans photo, fiche inchangée.
+- **v1.1 [V27.22.185]** : le mode **Compact** montre la photo en **vignette 56 px à droite de la rangée** (48 en ≤ 900 px), `?size=t`, pastille « +n », clic = visionneuse — elle **remplace** la bande de vignettes sous la card (l'état **déplié** owner garde la bande complète). Hors flux (absolue + `padding-right` sur `.task-row.has-thumb`) pour ne jamais déranger la ligne des badges. Helper partagé `applyCardThumb` — owner (board + vue Mémos), share, hub ; rail de l'accueil **hors lot**.
+- **Correctif [V27.21.184]** : les textes de couverture ne passent plus par le `strip()` de la page (qui soudait les blocs : « …pour mamie**idée : un châle** », « Lait**Pain complet**Œufs x12 ») mais par `splitLeadHtml` — accroche = 1er bloc seul, description = bloc suivant seul ; une **checklist** rend un résumé chiffré « k/n faits » (cases) ou « n éléments », compté sur **tous** les `<ul>` (Quill en scinde un par état).
+- Socle mutualisé dans `_shared.js.html` (ADR-001) : `_coverStyle`, `cardCoverOn`, `coverToggleBar`, `applyCardCover`, `coverFoot`, `memoCoverTexts`/`memoCoverHead` — 3 pages, glue par page.
+
+_Détail : `REALISATION.md` [V27.21.183]. ⏳ Non déployé — validation Fabien (rendu iPhone = sa référence)._
+
+
 ## Quick wins
 
 - **[TIMELINE-TODAY] Carte/frise voyage : ouverture sur aujourd'hui (demande Fabien)** → **✅ FAIT [V26.4.140]** (frontend pur, export 26 inchangé, partial ; auto-scroll bande des jours + frise sur le jour courant si aujourd'hui ∈ plage, bouton « 📍 Aujourd'hui », sans filtrer ; détail `REALISATION.md`).

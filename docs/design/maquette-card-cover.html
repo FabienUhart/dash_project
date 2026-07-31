@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maquette — [CARD-COVER] la première photo du mémo en couverture</title>
+<style>
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{background:#565f68; font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    min-height:100vh; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:1.1rem; padding:2rem;}
+  .zone{width:min(880px,96vw); border-radius:14px; padding:1.1rem 1.4rem; background:#10141a; color:#c9d4de;}
+  .zone h2{font-size:.85rem; font-weight:600; margin-bottom:.9rem; color:#9aa7b4;}
+  .note{font-size:.74rem; color:#66717e; margin-top:10px; line-height:1.55;}
+
+  /* — bascule d'affichage — */
+  .disp{display:flex; justify-content:flex-end; margin-bottom:10px; gap:.4rem; align-items:center;}
+  .disp .lbl{font-size:.72rem; color:#66717e;}
+  .seg{display:inline-flex; border:1px solid #283340; border-radius:8px; overflow:hidden;}
+  .seg button{height:30px; padding:0 12px; background:transparent; border:none; color:#9aa7b4;
+    font:inherit; font-size:12.5px; cursor:pointer; display:inline-flex; align-items:center; gap:.35rem;}
+  .seg button svg{width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round;}
+  .seg button.on{background:#212b35; color:#4fc3f7;}
+
+  /* — card immersive — */
+  .cardc{position:relative; border-radius:12px; overflow:hidden; border:1px solid #283340;
+    border-left:3px solid #e57373; min-height:230px; margin-bottom:12px;
+    display:flex; flex-direction:column; justify-content:space-between;}
+  .cardc .ph{position:absolute; inset:0; z-index:0;}
+  .cardc .scrim{position:absolute; inset:0; z-index:1;
+    background:linear-gradient(180deg, rgba(10,14,19,.82) 0%, rgba(10,14,19,.25) 38%, rgba(10,14,19,.05) 55%, rgba(10,14,19,.72) 100%);}
+  .cardc .top{position:relative; z-index:2; padding:14px 16px;}
+  .cardc .top b{font-size:1.05rem; text-shadow:0 1px 6px rgba(0,0,0,.6);}
+  .cardc .desc{font-size:.86rem; color:#dbe4ec; margin-top:2px; text-shadow:0 1px 5px rgba(0,0,0,.6);}
+  .cardc .badges{display:flex; gap:.4rem; flex-wrap:wrap; margin-top:8px;}
+  .bdg{border-radius:7px; padding:3px 9px; font-size:.72rem; background:rgba(16,20,26,.72);
+    backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,.08);}
+  .bdg.loc{color:#7fd0ff;}
+  .cardc .bot{position:relative; z-index:2; display:flex; align-items:flex-end;
+    justify-content:space-between; padding:12px 14px;}
+  .cardc .proj{font-size:.78rem; color:#dbe4ec; text-shadow:0 1px 5px rgba(0,0,0,.7);
+    display:flex; align-items:center; gap:.35rem;}
+  .acts{display:flex; gap:.45rem;}
+  .abtn{width:44px; height:40px; border-radius:10px; background:rgba(16,20,26,.66);
+    backdrop-filter:blur(6px); border:1px solid rgba(79,195,247,.45); color:#4fc3f7;
+    cursor:pointer; font-size:1rem; display:inline-flex; align-items:center; justify-content:center;}
+  .abtn.more{border-color:rgba(255,255,255,.14); color:#c9d4de;}
+  .abtn svg{width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:2;
+    stroke-linecap:round; stroke-linejoin:round;}
+
+  /* faux paysages en CSS (à la place des vraies photos) */
+  .ph.osaka{background:
+    radial-gradient(ellipse 60% 38% at 68% 38%, #7a8f6d 0%, transparent 60%),
+    radial-gradient(ellipse 90% 30% at 30% 85%, #e8b7c8 0%, transparent 55%),
+    linear-gradient(180deg, #a8c6de 0%, #cddcE8 35%, #8fa8b8 60%, #5d7486 100%);}
+  .ph.sumiyoshi{background:
+    radial-gradient(ellipse 80% 45% at 50% 100%, #c4472e 0%, #8f2f1e 45%, transparent 75%),
+    linear-gradient(180deg, #7fb2d9 0%, #b8d4e8 45%, #d98d6a 70%, #a34428 100%);}
+
+  /* — card classique (sans photo) pour le mélange — */
+  .task{border:1px solid #283340; border-left:3px solid #4fc3f7; border-radius:10px;
+    background:#161c24; padding:12px 15px; margin-bottom:12px;}
+  .task .meta{font-size:.75rem; color:#9aa7b4; margin-top:6px;}
+
+  .hidden{display:none;}
+</style>
+</head>
+<body>
+
+<div class="zone">
+  <h2>LE BOARD « Activités Osaka » — la 1ʳᵉ photo du mémo devient sa couverture. Bascule l'affichage en haut à droite.</h2>
+
+  <div class="disp"><span class="lbl">Affichage :</span>
+    <span class="seg">
+      <button id="b-imm" class="on"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 14l4-4 4 4 5-5 5 5"/></svg>Immersif</button>
+      <button id="b-cpt"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Compact</button>
+    </span>
+  </div>
+
+  <div id="vue-imm">
+    <div class="cardc">
+      <div class="ph osaka"></div><div class="scrim"></div>
+      <div class="top">
+        <b>🏯 Château d'Osaka</b>
+        <div class="desc">J2 matin.</div>
+        <div class="badges"><span class="bdg">📷 1</span><span class="bdg">📅 4 nov.</span><span class="bdg loc">📍 Château d'Osaka</span></div>
+      </div>
+      <div class="bot">
+        <span class="proj">🏯 🔴 Activités Osaka</span>
+        <span class="acts">
+          <button class="abtn">›</button>
+          <button class="abtn"><svg viewBox="0 0 24 24"><path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6"/></svg></button>
+          <button class="abtn"><svg viewBox="0 0 24 24"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></svg></button>
+          <button class="abtn more">⋯</button>
+        </span>
+      </div>
+    </div>
+
+    <div class="cardc" style="min-height:250px">
+      <div class="ph sumiyoshi"></div><div class="scrim"></div>
+      <div class="top">
+        <b>⛩ Sumiyoshi Taisha</b>
+        <div class="desc">J2 après-midi — sanctuaire.</div>
+        <div class="badges"><span class="bdg">📷 1</span><span class="bdg">📅 4 nov.</span><span class="bdg loc">📍 Sumiyoshi Taisha, Osaka</span></div>
+      </div>
+      <div class="bot">
+        <span class="proj">🏯 🔴 Activités Osaka</span>
+        <span class="acts">
+          <button class="abtn">›</button>
+          <button class="abtn"><svg viewBox="0 0 24 24"><path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6"/></svg></button>
+          <button class="abtn"><svg viewBox="0 0 24 24"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></svg></button>
+          <button class="abtn more">⋯</button>
+        </span>
+      </div>
+    </div>
+
+    <div class="task"><b>Acheter les billets Shinkansen</b>
+      <div class="meta">📅 3 nov. · 📁 🏯 Activités Osaka — <i>mémo SANS photo : il garde la card classique, le board mélange les deux sans heurt</i></div>
+    </div>
+  </div>
+
+  <div id="vue-cpt" class="hidden">
+    <div class="task" style="border-left-color:#e57373"><b>🏯 Château d'Osaka</b>
+      <div class="meta">J2 matin. · 📷 1 · 📅 4 nov. · 📍 Château d'Osaka</div></div>
+    <div class="task" style="border-left-color:#e57373"><b>⛩ Sumiyoshi Taisha</b>
+      <div class="meta">J2 après-midi — sanctuaire. · 📷 1 · 📅 4 nov. · 📍 Sumiyoshi</div></div>
+    <div class="task"><b>Acheter les billets Shinkansen</b>
+      <div class="meta">📅 3 nov. · 📁 🏯 Activités Osaka</div></div>
+  </div>
+
+  <p class="note"><b>Comment ça marche</b> — la couverture = <b>photos[0]</b> du mémo, servie en dérivée
+  existante (?size=s, déjà générée) : zéro donnée nouvelle, zéro upload. Un <b>voile dégradé</b> haut et bas
+  garantit la lisibilité du titre et des actions sur n'importe quelle photo ; badges et boutons passent en
+  verre flouté. Les mémos <b>sans photo gardent leur card actuelle</b>. Et comme les cards deviennent hautes,
+  la <b>bascule Immersif / Compact</b> est persistée <b>par board</b> (pattern toolsDock) — un board de 83
+  concerts reste vivable en compact, un board de voyage devient magnifique en immersif.
+  <br><br><b>Bonus naturel</b> : la fiche de lecture 👁 gagne la même couverture en bandeau au-dessus du titre.
+  Les vraies photos remplaceront mes faux paysages CSS, évidemment.</p>
+</div>
+
+<script>
+  const imm=document.getElementById('b-imm'), cpt=document.getElementById('b-cpt');
+  imm.addEventListener('click',()=>{ imm.classList.add('on'); cpt.classList.remove('on');
+    document.getElementById('vue-imm').classList.remove('hidden'); document.getElementById('vue-cpt').classList.add('hidden'); });
+  cpt.addEventListener('click',()=>{ cpt.classList.add('on'); imm.classList.remove('on');
+    document.getElementById('vue-cpt').classList.remove('hidden'); document.getElementById('vue-imm').classList.add('hidden'); });
+</script>
+</body>
+</html>
