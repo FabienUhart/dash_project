@@ -5233,9 +5233,23 @@ function initFxWidget(cfg) {
       + '.fx-amount{flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);'
       + 'font:inherit;font-size:1rem;padding:0.35rem 0.4rem;text-align:right;font-variant-numeric:tabular-nums}'
       + '.fx-ccy{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.35rem 0.3rem;cursor:pointer}'
-      + '.fx-swap{display:flex;justify-content:center;margin:0.1rem 0}'
+      /* [FX-SWAP-ALIGN] Le ↔ était centré sur la LARGEUR DU PANNEAU, alors que la rangée est
+         asymétrique (montant large + sélecteur étroit) : il tombait sur la couture entre les deux
+         colonnes. Centrage géométrique ≠ centrage optique. On recrée donc la structure de
+         `.fx-row` — colonne souple + sélecteur — et le bouton se centre dans la colonne SOUPLE,
+         celle des montants, sur laquelle l'œil se cale et entre lesquels la permutation se joue.
+         L'espace de droite est tenu par un `<select>` FANTÔME (`visibility:hidden` : invisible
+         mais occupant sa place) plutôt que par une largeur en dur — il se dimensionne comme le
+         vrai, donc l'axe reste juste si la police, la locale ou la liste de devises changent. */
+      /* [FX-LAYOUT-V3] Équidistance verticale : la rangée du haut porte `margin-bottom:0.4rem`
+         et celle du bas rien en haut, donc `margin:0.1rem 0` donnait 0,5 rem au-dessus contre
+         0,1 rem en dessous. Marge haute à 0, marge basse à 0.4rem → 0,4 rem des deux côtés. */
+      + '.fx-swap{display:flex;align-items:center;gap:0.4rem;margin:0 0 0.4rem}'
+      + '.fx-swap-col{flex:1;min-width:0;display:flex;justify-content:center}'
+      + '.fx-ghost{visibility:hidden;pointer-events:none}'
       + '.fx-swap button{background:var(--panel-2);border:1px solid var(--border);color:var(--muted);border-radius:9px;'
-      + 'width:1.9rem;height:1.6rem;cursor:pointer;font-size:0.85rem;line-height:1}'
+      + 'width:1.9rem;height:1.6rem;cursor:pointer;font-size:0.85rem;line-height:1;'
+      + 'padding:0;display:flex;align-items:center;justify-content:center}'  /* [FX-SWAP-CENTER] le padding générique des <button> (13.6px) débordait du bouton de 30px → glyphe ↔ décalé de ~6px ; flex centreur + padding neutralisé (mesuré 0.0/-0.8px, Cowork 6/08) */
       + '.fx-swap button:hover{color:var(--accent);border-color:var(--accent)}'
       /* [FX-CONVERTER V2] `¥€` se coupait en DEUX LIGNES dans le rond ET dans l'onglet : rien ne
          débordait (le flex recentre la boîte) mais le libellé était bel et bien cassé. `nowrap`
@@ -5244,16 +5258,25 @@ function initFxWidget(cfg) {
       /* La mention du taux redevient NEUTRE par défaut : orange en permanence ne signalait rien.
          L'orange est réservé au taux vraiment périmé (> 48 h). `--orange` existe côté owner,
          `--warn` côté invité, d'où la cascade de replis (invariant 9 : tokens de chaque page). */
-      + '.fx-note{font-size:0.72rem;color:var(--muted);margin-top:0.5rem;text-align:center}'
+      /* [FX-LAYOUT-V3] Ligne de PIED : la mention du taux à gauche, « Garder » à droite. « Garder »
+         ne flotte plus seul sous le panneau — la ligne le ferme. */
+      /* [FX-COPY-V4] Deux boutons LIBELLÉS au pied pèsent ~151 px : sur un panneau de 15 rem
+         (~214 px utiles) la mention du taux n'a plus la place et se repliait sur trois lignes.
+         Le pied devient donc souple — une seule ligne quand ça tient, sinon les actions passent
+         dessous, alignées à droite. La mention ne se coupe jamais (`nowrap`), elle reste lisible. */
+      + '.fx-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;'
+      + 'gap:0.35rem 0.5rem;margin-top:0.5rem}'
+      + '.fx-note{font-size:0.72rem;color:var(--muted);flex:1 1 auto;text-align:left;white-space:nowrap}'
+      /* Les deux actions forment UN seul élément flex : au repli elles descendent ensemble,
+         au lieu de se séparer sur deux lignes. */
+      + '.fx-actions{display:flex;align-items:center;gap:0.4rem;flex:0 0 auto;margin-left:auto}'
       + '.fx-note.stale{color:var(--orange,var(--warn,#ef6c00))}'
       /* Historique : lignes compactes, cliquables pour re-remplir les champs. */
-      + '.fx-copy{background:none;border:1px solid transparent;border-radius:6px;color:var(--muted);'
-      + 'cursor:pointer;font-size:0.78rem;line-height:1;padding:0.2rem 0.3rem;flex:none}'
-      + '.fx-copy:hover{color:var(--text);background:var(--panel-2);border-color:var(--border)}'
-      + '.fx-copy.ok{color:var(--green,var(--accent));border-color:currentColor}'
-      + '.fx-keep{display:flex;justify-content:flex-end;margin-top:0.1rem}'
-      + '.fx-keep .mab-btn{min-height:28px;padding:0.18rem 0.55rem;font-size:0.75rem}'
-      + '.fx-keep .mab-btxt{gap:0.3rem}'
+      /* [FX-COPY-V4] Retour de copie : les deux boutons du pied partagent le gabarit Luciole, seul
+         l'état « copié » se teinte. Sélecteur à 3 classes → passe devant `.mab-btn.luc-neutral`. */
+      + '.fx-foot .mab-btn.ok{color:var(--green,var(--accent))}'
+      + '.fx-foot .mab-btn{flex:none;min-height:28px;padding:0.18rem 0.55rem;font-size:0.75rem}'
+      + '.fx-foot .mab-btxt{gap:0.3rem}'
       + '.fx-hist{margin-top:0.5rem;border-top:1px solid var(--border);padding-top:0.4rem}'
       + '.fx-hist[hidden]{display:none}'
       + '.fx-hist-head{display:flex;align-items:center;gap:0.4rem;font-size:0.68rem;color:var(--muted);margin-bottom:0.25rem}'
@@ -5341,7 +5364,7 @@ function initFxWidget(cfg) {
     handle.addEventListener('pointercancel', end);
   }
 
-  let topEl, botEl, topSel, botSel, noteEl, histEl, histListEl, lastEdited = 'top';
+  let topEl, botEl, topSel, botSel, noteEl, histEl, histListEl, ghostSel, lastEdited = 'top';
   /* [FX-CONVERTER V2] Historique des conversions — 100 % LOCAL (`localStorage`, comme la position
      du panneau et la paire de devises) : zéro table, zéro route, export 27 inchangé, et rien
      n'est exposé à personne. Sur les pages invitées il vit dans le navigateur de l'invité, ce qui
@@ -5392,6 +5415,14 @@ function initFxWidget(cfg) {
     sel.innerHTML = '';
     ccyOptions().forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; if (c === val) o.selected = true; sel.appendChild(o); });
     sel.value = val;
+    syncGhost();
+  }
+  // [FX-SWAP-ALIGN] Le fantôme reçoit les MÊMES options que les vrais sélecteurs : un `<select>`
+  // se dimensionne sur son option la plus large, donc c'est la seule façon d'en garantir la
+  // largeur EXACTE. Avec une option unique il était 4 px trop étroit et l'axe dérivait d'autant.
+  function syncGhost() {
+    if (!ghostSel || !topSel) return;
+    ghostSel.innerHTML = topSel.innerHTML;
   }
   function fmt(v, ccy) { return (v == null || !isFinite(v)) ? '' : v.toFixed(decimals(ccy)); }
   function recompute() {
@@ -5414,56 +5445,72 @@ function initFxWidget(cfg) {
     panel.appendChild(head);
     makeDraggable(head);
 
+    /* [FX-COPY-V4] La copie est descendue au PIED (elle cassait la ligne entre montant et devise) :
+       les rangées redeviennent naturellement `[montant][devise]`, symétriques d'elles-mêmes —
+       plus besoin des cales invisibles de [FX-LAYOUT-V3], supprimées. */
     const rowT = el('div', { class: 'fx-row' });
     topEl = el('input', { class: 'fx-amount', attrs: { type: 'number', inputmode: 'decimal', step: 'any', 'aria-label': 'Montant à convertir' } });
     topSel = el('select', { class: 'fx-ccy', attrs: { 'aria-label': 'Devise source' } });
     rowT.appendChild(topEl); rowT.appendChild(topSel); panel.appendChild(rowT);
 
     const sw = el('div', { class: 'fx-swap' });
-    sw.appendChild(el('button', { text: '↔', attrs: { type: 'button', title: 'Inverser les devises' }, on: { click: () => {
+    const swCol = el('div', { class: 'fx-swap-col' });
+    swCol.appendChild(el('button', { text: '↔', attrs: { type: 'button', title: 'Inverser les devises' }, on: { click: () => {
       pair = { from: pair.to, to: pair.from }; savePair();
       fillSelect(topSel, pair.from); fillSelect(botSel, pair.to);
       lastEdited = 'top'; recompute();
     } } }));
+    sw.appendChild(swCol);
+    // [FX-SWAP-ALIGN] fantôme d'alignement : même gabarit que les vrais sélecteurs, invisible mais
+    // occupant sa place, donc la colonne souple ci-dessus tombe pile sur celle des montants. Hors
+    // du parcours clavier et de l'arbre d'accessibilité — il ne porte aucune information.
+    ghostSel = el('select', { class: 'fx-ccy fx-ghost', attrs: { 'aria-hidden': 'true', tabindex: '-1' } });
+    sw.appendChild(ghostSel);
     panel.appendChild(sw);
 
     const rowB = el('div', { class: 'fx-row' });
     botEl = el('input', { class: 'fx-amount', attrs: { type: 'number', inputmode: 'decimal', step: 'any', 'aria-label': 'Montant converti' } });
     botSel = el('select', { class: 'fx-ccy', attrs: { 'aria-label': 'Devise cible' } });
-    // [FX-CONVERTER V2] copie de la VALEUR NUE (sans devise ni espace) — c'est ce qu'on recolle
-    // dans une note ou une calculette. Feedback bref, sans pop-in : le bouton se coche 1,2 s.
-    // Icône Tabler TRAIT en `currentColor` (plus d'emoji coloré — doctrine Luciole, invariant 9) ;
-    // le ✓/✕ du retour reste un glyphe, monochrome lui aussi.
-    const copyBtn = el('button', { class: 'fx-copy',
-      attrs: { type: 'button', title: 'Copier le montant converti', 'aria-label': 'Copier le montant converti' } });
-    const setCopyIcon = () => { copyBtn.textContent = ''; copyBtn.appendChild(hdrIconAt('clipboard', 14)); };
-    setCopyIcon();
+    rowB.appendChild(botEl); rowB.appendChild(botSel); panel.appendChild(rowB);
+
+    /* [FX-LAYOUT-V3] Ligne de PIED : la mention du taux (muted, à gauche) et « Garder » (à droite)
+       partagent la même ligne — « Garder » ne flotte plus seul et la composition ferme le panneau.
+       « Garder » reste le SEUL geste qui alimente l'historique (avec Entrée), en Luciole NEUTRE :
+       le convertisseur n'a pas d'action principale, et le signet dit « je mets de côté ». */
+    const foot = el('div', { class: 'fx-foot' });
+    noteEl = el('div', { class: 'fx-note' });
+    foot.appendChild(noteEl);
+    // Fabrique commune aux deux actions jumelles du pied : même gabarit Luciole neutre, même
+    // taille d'icône trait, même graisse — elles se lisent comme une paire.
+    const footBtn = (icon, label, title, onClick) => {
+      const b = el('button', { attrs: { type: 'button', title: title } });
+      b.appendChild(hdrIconAt(icon, 13));
+      b.appendChild(el('span', { text: label }));
+      if (onClick) b.addEventListener('click', onClick);
+      return lucioleize(b, 'luc-neutral');
+    };
+    /* [FX-COPY-V4] « Copier » rejoint « Garder » au pied : entre le montant et la devise, il
+       cassait la ligne. Copie la VALEUR NUE (sans devise ni espace) — c'est ce qu'on recolle dans
+       une note ou une calculette. Feedback bref sans pop-in : `lucioleize` ayant enveloppé le
+       contenu dans `.mab-btxt`, on remplace ce contenu 1,2 s puis on le restaure tel quel. */
+    const copyBtn = footBtn('clipboard', 'Copier', 'Copier le montant converti');
+    const copyTxt = copyBtn.querySelector('.mab-btxt');
     copyBtn.addEventListener('click', async () => {
       const v = botEl.value;
       if (!v) return;
       let ok = true;
       try { await navigator.clipboard.writeText(v); }
       catch (e) { ok = false; try { botEl.select(); ok = document.execCommand('copy'); } catch (e2) { ok = false; } }
-      copyBtn.textContent = ok ? '✓' : '✕';
+      const prev = copyTxt.innerHTML;
+      copyTxt.textContent = ok ? '✓ Copié' : '✕ Échec';
       copyBtn.classList.toggle('ok', ok);
-      setTimeout(() => { setCopyIcon(); copyBtn.classList.remove('ok'); }, 1200);
+      setTimeout(() => { copyTxt.innerHTML = prev; copyBtn.classList.remove('ok'); }, 1200);
     });
-    rowB.appendChild(botEl); rowB.appendChild(copyBtn); rowB.appendChild(botSel); panel.appendChild(rowB);
-
-    // « Garder » : le SEUL geste qui alimente l'historique (avec Entrée). Luciole NEUTRE — le
-    // convertisseur n'a pas d'action principale, et cette icône signet dit « je mets de côté ».
-    // Rangée propre plutôt qu'inséré dans `rowB` : à 15 rem de large, un 4e élément écraserait
-    // le champ du résultat. Aligné à droite, donc collé au montant converti juste au-dessus.
-    const keepRow = el('div', { class: 'fx-keep' });
-    { const keep = el('button', { attrs: { type: 'button', title: 'Garder cette conversion dans l\'historique' } });
-      keep.appendChild(hdrIconAt('bookmark', 13));
-      keep.appendChild(el('span', { text: 'Garder' }));
-      keep.addEventListener('click', () => record());
-      keepRow.appendChild(lucioleize(keep, 'luc-neutral')); }
-    panel.appendChild(keepRow);
-
-    noteEl = el('div', { class: 'fx-note' });
-    panel.appendChild(noteEl);
+    const actions = el('div', { class: 'fx-actions' });
+    actions.appendChild(copyBtn);
+    actions.appendChild(footBtn('bookmark', 'Garder', 'Garder cette conversion dans l\'historique', () => record()));
+    foot.appendChild(actions);
+    panel.appendChild(foot);
 
     histEl = el('div', { class: 'fx-hist', attrs: { hidden: '' } });
     { const hh = el('div', { class: 'fx-hist-head' });

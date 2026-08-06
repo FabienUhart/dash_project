@@ -67,6 +67,12 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 
 ## [FX-CONVERTER] — Widget convertisseur de devises (JPY↔EUR + sélecteur)
 
+**[FX-COPY-V4] → ✅ CODÉ [V27.25.197]** : « Copier » descend au pied en jumeau de « Garder » (même gabarit Luciole), les cales de 196 disparaissent (rangées `[montant][devise]`, montants à 142 px), ↔ toujours sur l'axe commun (0,0) et désormais à −35 px du centre du panneau au lieu de −51. **À arbitrer** : le pied ne tient pas sur UNE ligne à 15 rem (deux boutons libellés = ~151 px sur ~214 utiles, la mention se repliait sur 3 lignes) → mention en haut, paire d'actions dessous à droite. Pour une ligne unique : élargir le panneau, ou boutons en icône seule.
+
+**[FX-LAYOUT-V3] → ✅ CODÉ [V27.25.196]** (arbitrage : on égalise) : cale invisible dans la rangée du haut → les deux montants font 110 px, un **axe unique** traverse le panneau (↔ à 0,0 px des deux), ↔ équidistant verticalement (9,4/9,4), 📋 recentré, et le pied réunit « Taux BCE du … » (gauche) et « Garder » (droite) sur une ligne. **À arbitrer** : le brief supposait que l'axe commun coïnciderait avec celui du panneau — il reste **51 px à gauche**, car la colonne des montants est bornée par l'icône et le sélecteur. Centrer sur le panneau ramènerait le ↔ sur la couture corrigée en [V27.25.195].
+
+**[FX-SWAP-ALIGN] → ✅ CODÉ [V27.25.195]** : le ↔ suit l'axe de la colonne des montants (sélecteur fantôme invisible), plus l'axe du panneau.
+
 **[FX-CONVERTER V2] → ✅ CODÉ [V27.25.194]** (frontend pur, partial seul, export 27 inchangé, `app.py` intact) : lanceur et onglet **centrés** (`¥€` se coupait en deux lignes), **historique** des 10 dernières conversions en `localStorage` (dédoublonné, cliquable pour reprise, bouton vider), **copie** du résultat, et le **taux périmé** ne vire à l'orange qu'au-delà de 48 h — avant, il était orange en permanence et ne signalait rien. ⚠️ **Le convertisseur n'est PAS owner-only** (contrairement au brief) : il tourne sur les 3 pages via le partial, avec 3 routes serveur — les améliorations profitent donc aussi aux invités. Détail `REALISATION.md`.
 
 **Statut :** ✅ Fait — [V23.2.90] (voir REALISATION.md). Livré : cache `app_state.fx_cache` (pas de table `fx_rates`), routes owner/share/**hub**, `initFxWidget(cfg)` dans `_shared.js.html`, export inchangé v23 (la cible « v22 » ci-dessous était obsolète).
