@@ -90,6 +90,9 @@ DB_PATH = os.environ.get("DB_PATH", "/app/data/dashboard.db")
 UPLOAD_DIR = os.path.join(os.path.dirname(DB_PATH), "uploads")
 BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
 BACKUP_KEEP_DAYS = int(os.environ.get("BACKUP_KEEP_DAYS", "7"))
+# [IMAGE-TRASH] Délai de rétention des images supprimées — DISTINCT de BACKUP_KEEP_DAYS (7 j) :
+# une photo de voyage se regrette plus tard qu'un mémo.
+IMAGE_TRASH_DAYS = int(os.environ.get("IMAGE_TRASH_DAYS", "30"))
 ALLOWED_IMG_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
 SAFE_IMG_NAME = re.compile(r"^[0-9a-f]{32}\.(png|jpg|jpeg|gif|webp)$")
 DUE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -833,6 +836,28 @@ def init_db():
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_memo_links_pair ON memo_links ("
         "CASE WHEN src_memo_id < dst_memo_id THEN src_memo_id ELSE dst_memo_id END, "
         "CASE WHEN src_memo_id < dst_memo_id THEN dst_memo_id ELSE src_memo_id END)"
+    )
+    # [IMAGE-TRASH] Corbeille des IMAGES (invariant 7 transposé aux photos) : supprimer une image
+    # (owner OU invité) retire son nom de `memos.images` mais GARDE le fichier sur le volume
+    # jusqu'à la purge (30 j). Une ligne = une image en attente. `deleted_by` suit le pattern
+    # `created_by` v19 ('' = propriétaire, résolu à l'affichage ; sinon « Nom <email> »).
+    # Table additive, JAMAIS exportée (le nom a déjà quitté memos.images → l'export l'ignore).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS image_trash (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memo_id INTEGER NOT NULL,
+            memo_uid TEXT NOT NULL DEFAULT '',
+            filename TEXT NOT NULL,
+            deleted_by TEXT NOT NULL DEFAULT '',
+            deleted_at TEXT NOT NULL,
+            share_id INTEGER
+        )
+        """
+    )
+    # Un fichier n'appartient qu'à un mémo : une seule ligne par filename (ré-entrée = remplacement).
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_image_trash_filename ON image_trash(filename)"
     )
     # [VOTE-GROUPS] V20.9 : votes NOMMÉS multiples par dossier. vote_id sur memo_votes :
     # NULL = voix du vote du DOSSIER (V1/V2, zéro migration) ; non NULL = voix d'un vote nommé.
@@ -2942,6 +2967,9 @@ def _project_photos(db, memo_ids):
         f"im.has_gps, m.project_id, m.map_groups, m.title, m.emoji "
         f"FROM image_meta im JOIN memos m ON m.id = im.memo_id "
         f"WHERE im.memo_id IN ({placeholders}) AND COALESCE(m.deleted_at, '') = '' "
+        # [IMAGE-TRASH] une image en corbeille disparaît AUSSI du calque photo : le fichier
+        # survit, mais image_meta est conservée telle quelle (restauration sans re-géocodage).
+        f"AND im.filename NOT IN (SELECT filename FROM image_trash) "
         f"ORDER BY im.taken_at, im.filename",
         list(memo_ids),
     ).fetchall()
@@ -3301,6 +3329,67 @@ def _delete_image_files(images_json_str):
             except OSError:
                 pass
             _delete_derived(name)  # [IMAGE-THUMBS] purge t_/s_ avec l'original
+
+
+# ─────────────────────────── [IMAGE-TRASH] corbeille des images ───────────────────────────
+# Doctrine invariant 7 (suppression douce) transposée aux photos : plus AUCUN hard delete au
+# geste — ni owner, ni invité. Le nom quitte `memos.images` (l'image disparaît donc de toutes
+# les vues, export compris) mais le FICHIER reste sur le volume jusqu'à la purge (30 j), avec
+# ses dérivées [IMAGE-THUMBS] (elles servent la miniature de l'aperçu corbeille).
+def _image_trash_put(db, memo_row, names, deleted_by="", share_id=None):
+    """Envoie des images en corbeille. N'écrit RIEN sur le fichier ni sur les dérivées."""
+    if isinstance(names, str):
+        names = [names]
+    now = datetime.now(timezone.utc).isoformat()
+    memo_uid = _row_get(memo_row, "uid", "") if memo_row is not None else ""
+    memo_id = memo_row["id"] if memo_row is not None else 0
+    for n in names or []:
+        n = os.path.basename(str(n))
+        if not SAFE_IMG_NAME.match(n):
+            continue
+        db.execute(
+            "INSERT OR REPLACE INTO image_trash (memo_id, memo_uid, filename, deleted_by, "
+            "deleted_at, share_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (memo_id, memo_uid, n, deleted_by or "", now, share_id),
+        )
+
+
+def _image_trash_forget(db, names):
+    """Retire des lignes de corbeille SANS toucher aux fichiers (restauration)."""
+    if isinstance(names, str):
+        names = [names]
+    names = [os.path.basename(str(n)) for n in (names or [])]
+    if not names:
+        return
+    placeholders = ",".join("?" * len(names))
+    db.execute(f"DELETE FROM image_trash WHERE filename IN ({placeholders})", names)
+
+
+def _image_trash_burn(db, names):
+    """Purge DÉFINITIVE : fichier + dérivées + méta carte + ligne de corbeille."""
+    if isinstance(names, str):
+        names = [names]
+    names = [os.path.basename(str(n)) for n in (names or [])]
+    names = [n for n in names if SAFE_IMG_NAME.match(n)]
+    if not names:
+        return
+    for n in names:
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, n))
+        except OSError:
+            pass
+        _delete_derived(n)  # [IMAGE-THUMBS]
+    _forget_image_meta(db, names)  # [PHOTO-MAP]
+    _image_trash_forget(db, names)
+
+
+def _image_trash_burn_memo(db, memo_id):
+    """Cascade : le mémo est purgé pour de bon → ses images en corbeille partent avec lui
+    (sinon les fichiers deviendraient orphelins, leur nom ayant quitté memos.images)."""
+    rows = db.execute(
+        "SELECT filename FROM image_trash WHERE memo_id = ?", (memo_id,)
+    ).fetchall()
+    _image_trash_burn(db, [r["filename"] for r in rows])
 
 
 def _subtasks_json(value):
@@ -3740,6 +3829,9 @@ def _purge_memo_row(db, memo_id):
     if row:
         _delete_image_files(row["images"])
         _forget_image_meta(db, row["images"])  # [PHOTO-MAP]
+    # [IMAGE-TRASH] les images DÉJÀ en corbeille de ce mémo partent avec lui (leur nom a quitté
+    # memos.images : sans cette cascade, les fichiers resteraient orphelins sur le volume).
+    _image_trash_burn_memo(db, memo_id)
     # [ATTACHMENTS] purge des fichiers joints + lignes (le binaire suit le mémo purgé).
     for a in db.execute("SELECT filename FROM attachments WHERE memo_id = ?", (memo_id,)).fetchall():
         _delete_attachment_file(a["filename"])
@@ -3828,6 +3920,93 @@ def empty_trash():
         _purge_memo_row(db, mid)
     db.commit()
     return jsonify({"purged": len(ids)})
+
+
+# ─────────────────────────── [IMAGE-TRASH] routes owner ───────────────────────────
+# Owner-only (derrière Authelia, invariant 5) : l'invité supprime en douceur mais ne voit
+# jamais la corbeille — c'est le propriétaire qui arbitre restauration / purge définitive.
+def _image_trash_dict(r, owner_name):
+    by = r["deleted_by"] or ""
+    return {
+        "id": r["id"],
+        "memo_id": r["memo_id"],
+        "memo_uid": r["memo_uid"],
+        "filename": r["filename"],
+        "url": "/uploads/" + r["filename"],
+        "deleted_at": r["deleted_at"],
+        "deleted_by": by,
+        # Pattern v19 : '' = le propriétaire, résolu à l'affichage (survit au renommage owner).
+        "deleted_by_display": by or owner_name,
+        "by_guest": bool(by),
+        # Titre TEXTE du mémo porteur (jamais de HTML) ; '' si le mémo a disparu (LEFT JOIN).
+        "memo_title": _memo_link_title(r),
+        "memo_deleted": bool((_row_get(r, "memo_deleted_at", "") or "").strip()),
+    }
+
+
+@app.route("/api/image-trash", methods=["GET"])
+def list_image_trash():
+    db = get_db()
+    rows = db.execute(
+        "SELECT it.*, m.title AS title, m.content AS content, "
+        "m.deleted_at AS memo_deleted_at FROM image_trash it "
+        "LEFT JOIN memos m ON m.id = it.memo_id "
+        "ORDER BY it.deleted_at DESC, it.id DESC"
+    ).fetchall()
+    owner_name = _owner_name(db)
+    return jsonify([_image_trash_dict(r, owner_name) for r in rows])
+
+
+@app.route("/api/image-trash/<int:row_id>/restore", methods=["POST"])
+def restore_image_trash(row_id):
+    db = get_db()
+    r = db.execute("SELECT * FROM image_trash WHERE id = ?", (row_id,)).fetchone()
+    if not r:
+        return jsonify({"error": "not found"}), 404
+    name = r["filename"]
+    # Le fichier a pu disparaître du volume (purge manuelle, restauration partielle) : on ne
+    # remet JAMAIS dans le mémo un nom sans binaire (règle des références orphelines).
+    if not os.path.isfile(os.path.join(UPLOAD_DIR, name)):
+        _image_trash_forget(db, name)
+        db.commit()
+        return jsonify({"error": "fichier introuvable sur le disque"}), 410
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (r["memo_id"],)).fetchone()
+    if not memo:
+        return jsonify({"error": "mémo introuvable"}), 404
+    try:
+        images = json.loads(memo["images"] or "[]")
+    except Exception:
+        images = []
+    if name not in images:
+        images.append(name)  # remise en FIN de liste (l'ordre d'origine n'est pas mémorisé)
+    _image_trash_forget(db, name)
+    db.execute(
+        "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo["id"]),
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo["id"],)).fetchone()
+    return jsonify(_memo_dict(row))
+
+
+@app.route("/api/image-trash/<int:row_id>", methods=["DELETE"])
+def purge_image_trash(row_id):
+    db = get_db()
+    r = db.execute("SELECT filename FROM image_trash WHERE id = ?", (row_id,)).fetchone()
+    if not r:
+        return jsonify({"error": "not found"}), 404
+    _image_trash_burn(db, r["filename"])
+    db.commit()
+    return "", 204
+
+
+@app.route("/api/image-trash", methods=["DELETE"])
+def empty_image_trash():
+    db = get_db()
+    names = [r["filename"] for r in db.execute("SELECT filename FROM image_trash").fetchall()]
+    _image_trash_burn(db, names)
+    db.commit()
+    return jsonify({"purged": len(names)})
 
 
 @app.route("/api/memos/<int:memo_id>/duplicate", methods=["POST"])
@@ -3928,13 +4107,9 @@ def delete_memo_image(memo_id, name):
     if name not in images:
         return jsonify({"error": "image not found"}), 404
     images = [n for n in images if n != name]
-    if SAFE_IMG_NAME.match(name):
-        try:
-            os.remove(os.path.join(UPLOAD_DIR, name))
-        except OSError:
-            pass
-        _delete_derived(name)  # [IMAGE-THUMBS] purge t_/s_ avec l'original
-    _forget_image_meta(db, name)  # [PHOTO-MAP] la méta suit le fichier
+    # [IMAGE-TRASH] suppression DOUCE : le fichier survit 30 j (restaurable), seul son nom
+    # quitte le mémo. deleted_by = '' → le propriétaire (résolu à l'affichage, pattern v19).
+    _image_trash_put(db, existing, name, deleted_by="", share_id=None)
     db.execute(
         "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
         (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
@@ -5781,6 +5956,9 @@ def _data_version(db):
         "SELECT COALESCE(vote_id, -1) AS vid, COUNT(*) FROM memo_votes GROUP BY vid ORDER BY vid",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM memo_history",
         "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM attachments",  # [ATTACHMENTS]
+        # [IMAGE-TRASH] restaurer bump memos.updated_at, mais PURGER ne touche aucun mémo :
+        # sans ce signal, la vue Corbeille d'un autre onglet garderait l'image fantôme.
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM image_trash",
         "SELECT kind, ref, position FROM favorites ORDER BY position, kind, ref",  # [FAVORITES]
         # [FX-CONVERTER] exclut fx_cache (volatile, refresh quotidien) comme activity_seen_at.
         "SELECT key, value FROM app_state WHERE key NOT IN ('activity_seen_at', 'fx_cache') ORDER BY key",
@@ -7218,13 +7396,31 @@ def share_delete_image(token, memo_id, name):
     if name not in images:
         return jsonify({"error": "image not found"}), 404
     images = [n for n in images if n != name]
-    if SAFE_IMG_NAME.match(name):
-        try:
-            os.remove(os.path.join(UPLOAD_DIR, name))
-        except OSError:
-            pass
-        _delete_derived(name)  # [IMAGE-THUMBS] purge t_/s_ avec l'original
-    _forget_image_meta(db, name)  # [PHOTO-MAP] la méta suit le fichier
+    # [IMAGE-TRASH] suppression DOUCE côté invité aussi : rien n'est détruit au geste. Le
+    # propriétaire voit l'image dans sa corbeille pendant 30 j, marquée « supprimée par X »,
+    # avec Restaurer / Supprimer définitivement.
+    editor = guest["name"] or guest["email"]
+    by = f"{editor} <{guest['email']}>"
+    _image_trash_put(db, existing, name, deleted_by=by, share_id=share["id"])
+    # Notification owner : entrée dans le journal d'activité (🔔 + « modifications par invité »
+    # de 🔗 Partages) — même mécanique que les autres actions d'invité, aucune route nouvelle.
+    label = _memo_link_title(existing) or "(mémo)"  # titre ou extrait TEXTE (jamais de HTML)
+    db.execute(
+        "INSERT INTO memo_revisions (memo_id, memo_uid, editor, share_id, before, after, edited_at) "
+        "VALUES (?, ?, ?, ?, NULL, ?, ?)",
+        (
+            memo_id,
+            _row_get(existing, "uid", ""),
+            by,
+            share["id"],
+            json.dumps(
+                {"content": f"🗑 Photo supprimée de « {label} » — restaurable {IMAGE_TRASH_DAYS} jours",
+                 "done": False, "due_date": "", "priority": 0, "subtasks": [], "recurrence": ""},
+                ensure_ascii=False,
+            ),
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
     db.execute(
         "UPDATE memos SET images = ?, updated_at = ? WHERE id = ?",
         (json.dumps(images), datetime.now(timezone.utc).isoformat(), memo_id),
@@ -8408,6 +8604,7 @@ def _purge_trash():
             if r:
                 _delete_image_files(r["images"])
                 _forget_image_meta(conn, r["images"])  # [PHOTO-MAP]
+            _image_trash_burn_memo(conn, mid)  # [IMAGE-TRASH] cascade (fichiers orphelins sinon)
             conn.execute("DELETE FROM memos WHERE id = ?", (mid,))
             conn.execute(
                 "DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (mid,)
@@ -8416,6 +8613,26 @@ def _purge_trash():
             conn.execute("DELETE FROM memo_hearts WHERE memo_id = ?", (mid,))  # [FESTIVAL-VOTE]
             conn.execute("DELETE FROM memo_links WHERE src_memo_id = ? OR dst_memo_id = ?", (mid, mid))  # [MEMO-LINKS]
         conn.commit()
+    finally:
+        conn.close()
+
+
+def _purge_image_trash():
+    # [IMAGE-TRASH] Purge définitive des images en corbeille depuis plus de IMAGE_TRASH_DAYS
+    # jours (30 par défaut, distinct des 7 j des mémos). Même boucle quotidienne que _purge_trash.
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=IMAGE_TRASH_DAYS)).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        names = [
+            r["filename"]
+            for r in conn.execute(
+                "SELECT filename FROM image_trash WHERE deleted_at < ?", (cutoff,)
+            ).fetchall()
+        ]
+        if names:
+            _image_trash_burn(conn, names)
+            conn.commit()
     finally:
         conn.close()
 
@@ -8526,6 +8743,10 @@ def _backup_loop():
             pass
         try:
             _purge_trash()
+        except Exception:
+            pass
+        try:
+            _purge_image_trash()  # [IMAGE-TRASH] rétention propre (30 j), indépendante des mémos
         except Exception:
             pass
         time.sleep(3600)

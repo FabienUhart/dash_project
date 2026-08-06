@@ -1323,9 +1323,11 @@ function runMapDialog(cfg) {
     groupNames(current).forEach(n => dl.appendChild(el('option', { attrs: { value: n } })));
     selbar.appendChild(input);
     selbar.appendChild(dl);
-    selbar.appendChild(el('button', { class: 'primary', text: '✓ Valider', attrs: { type: 'button', style: 'padding:0.2rem 0.6rem' }, on: { click: applyGroupMode } }));
+    // [BUTTONS-AUDIT] « Valider » : Luciole primaire (teinte légère) au lieu de l'aplat accent,
+    // et le glyphe ✓ disparaît — le libellé suffit.
+    selbar.appendChild(lucioleize(el('button', { text: 'Valider', attrs: { type: 'button', style: 'padding:0.2rem 0.6rem' }, on: { click: applyGroupMode } }), 'luc-primary'));
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyGroupMode(); } });
-    selbar.appendChild(el('button', { class: 'prio-btn', text: 'Annuler', attrs: { type: 'button' }, on: { click: exitGroupMode } }));
+    selbar.appendChild(lucioleize(el('button', { text: 'Annuler', attrs: { type: 'button' }, on: { click: exitGroupMode } }), 'luc-neutral'));
   }
 
   // ── [VOTE-MAP] V20.10 : vote sur la carte « par scrutin » ──────────────────────────
@@ -4065,7 +4067,11 @@ function openMemoView(cfg, memoId) {
     actions.appendChild(close);
     lucioleize(close, 'luc-neutral');
     if (d.canEdit && cfg.onEdit) {
-      const edit = el('button', { text: '✎ Modifier', attrs: { type: 'button' } });
+      // [VERSIONS-ICON] même doctrine que le 📜 du pied de l'éditeur : le glyphe ✎ laisse place à
+      // l'icône Tabler `pencil` en trait (`currentColor` → suit la variante Luciole et les 2 thèmes).
+      const edit = el('button', { attrs: { type: 'button', style: 'display:inline-flex;align-items:center;gap:0.35rem' } });
+      edit.appendChild(hdrIconAt('pencil', 15));
+      edit.appendChild(el('span', { text: 'Modifier' }));
       edit.addEventListener('click', () => { const m = d.memo; dlg.close(); setTimeout(() => cfg.onEdit(m), 60); });
       actions.appendChild(edit);
       lucioleize(edit, 'luc-primary');
@@ -4673,6 +4679,13 @@ function initPomodoro() {
       + '.pomo-cfg{display:flex;gap:0.4rem;align-items:center;justify-content:center;flex-wrap:wrap;margin-bottom:0.5rem;font-size:0.78rem;color:var(--muted)}'
       + '.pomo-cfg input{width:3rem;background:var(--bg);border:1px solid var(--border);border-radius:5px;color:var(--text);font:inherit;padding:0.2rem 0.3rem;text-align:center}'
       + '.pomo-ctrl{display:flex;gap:0.4rem;margin-bottom:0.5rem}.pomo-ctrl button{flex:1}'
+      /* [BUTTONS-AUDIT] « Démarrer » quitte l'aplat `button.primary` pour la teinte accent LÉGÈRE
+         du gabarit `.luc-primary`. Classe dédiée (et non `lucioleize`) : ce bouton réécrit son
+         libellé via `textContent` (Démarrer ⇄ Pause), ce qui effacerait la lueur Luciole. */
+      + '.pomo-start{background:color-mix(in srgb, var(--accent) 12%, var(--panel-2));color:var(--accent);border:1px solid var(--accent);font-weight:600}'
+      + '.pomo-start:hover{background:color-mix(in srgb, var(--accent) 24%, var(--panel-2))}'
+      + ':root[data-theme="light"] .pomo-start{background:rgba(79,195,247,0.12);border-color:#4fc3f7;color:#1565c0}'
+      + ':root[data-theme="light"] .pomo-start:hover{background:rgba(79,195,247,0.22)}'
       + '.pomo-alarms{display:flex;gap:0.8rem;justify-content:center;font-size:0.78rem;color:var(--muted)}'
       + '.pomo-alarms label{display:flex;align-items:center;gap:0.25rem;cursor:pointer}';
     document.head.appendChild(st);
@@ -4808,7 +4821,7 @@ function initPomodoro() {
     panel.appendChild(cfgEl);
 
     const ctrl = el('div', { class: 'pomo-ctrl' });
-    startBtn = el('button', { class: 'primary', text: 'Démarrer', attrs: { type: 'button' }, on: { click: toggle } });
+    startBtn = el('button', { class: 'pomo-start', text: 'Démarrer', attrs: { type: 'button' }, on: { click: toggle } });
     ctrl.appendChild(startBtn);
     ctrl.appendChild(el('button', { text: 'Réinitialiser', attrs: { type: 'button' }, on: { click: () => { stop(); render(); } } }));
     panel.appendChild(ctrl);
@@ -4999,6 +5012,10 @@ function _guestSettingsStyle() {
     + '.gs-sec-h{font-size:0.7rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;'
     + 'color:var(--muted);margin-bottom:0.4rem;display:flex;align-items:center;gap:0.35rem}'
     + '.gs-row{display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap}'
+    + '.gs-fav-list{display:flex;flex-direction:column;gap:0.35rem;margin-top:0.45rem}'
+    + '.gs-fav-list [data-favkey]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none;cursor:move}'
+    + '.gs-fav-list [data-favkey].fav-dragging{opacity:0.55;background:var(--panel-2)}'
+    + '.gs-fav-grip{flex:0 0 auto;color:var(--muted);font-size:0.95rem;line-height:1;opacity:0.75;margin-right:0.1rem}'
     + '.gs-hint{font-size:0.75rem;color:var(--muted);margin-top:0.3rem}'
     + '.gs-foot{flex:0 0 auto;display:flex;justify-content:flex-end;gap:0.5rem;padding:0.7rem 1.1rem;'
     + 'border-top:1px solid var(--border);background:var(--panel)}'
@@ -5102,19 +5119,44 @@ function openGuestSettings(cfg) {
 
     // (c) ⭐ FAVORIS — hub seulement (le share est mono-partage).
     if (cfg.favorites) {
-      const n = cfg.favorites.count || 0;
+      const items = (typeof cfg.favorites.items === 'function')
+        ? (cfg.favorites.items() || [])
+        : (Array.isArray(cfg.favorites.items) ? cfg.favorites.items : []);
+      const n = items.length;
       const s = section('⭐ Favoris');
       s.appendChild(el('div', { class: 'gs-hint', attrs: { style: 'margin:0 0 0.4rem' },
         text: n ? (n + ' dossier' + (n > 1 ? 's' : '') + ' épinglé' + (n > 1 ? 's' : '')) : 'Aucun dossier épinglé.' }));
       if (n) {
         const clear = dangerSoftBtn('Vider les favoris', async () => {
           if (!(await confirmPopin('Retirer les ' + n + ' dossier(s) de vos favoris ?\nLes dossiers eux-mêmes ne sont pas touchés.', { okLabel: 'Vider' }))) return;
-          cfg.favorites.onClear();
+          if (typeof cfg.favorites.onClear === 'function') cfg.favorites.onClear();
           draw();
         }, { icon: 'trash' });
         s.appendChild(clear);
       }
-      s.appendChild(el('div', { class: 'gs-hint', text: 'Réordonner les favoris arrivera dans une prochaine version.' }));
+      if (n) {
+        const list = el('div', { class: 'gs-fav-list' });
+        items.forEach((item) => {
+          if (!item) return;
+          const row = el('div', {
+            class: 'cat-item',
+            attrs: { title: (item.name || '') + ' — glisser pour réordonner', 'data-favkey': item.key || '' },
+          });
+          row.appendChild(el('span', { class: 'gs-fav-grip', text: '⋮⋮', attrs: { 'aria-hidden': 'true' } }));
+          if (item.icon) row.appendChild(item.icon);
+          row.appendChild(el('span', { class: 'cat-label', text: item.name || '', attrs: { title: item.name || '' } }));
+          if (item.proj && item.proj.can_edit === false) row.appendChild(el('span', { class: 'ro', text: '👁' }));
+          list.appendChild(row);
+        });
+        s.appendChild(list);
+        if (typeof cfg.favorites.makeSortable === 'function' && n > 1) {
+          cfg.favorites.makeSortable(list, (order) => {
+            if (typeof cfg.favorites.onReorder === 'function') cfg.favorites.onReorder(order);
+            draw();
+          });
+        }
+        s.appendChild(el('div', { class: 'gs-hint', text: n > 1 ? 'Appui long puis glisser pour réordonner.' : 'Un seul favori, rien à trier.' }));
+      }
       body.appendChild(s);
     }
 

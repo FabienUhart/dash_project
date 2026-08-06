@@ -54,7 +54,12 @@ button { font: inherit; cursor: pointer; }
 .btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 8px; padding: 0.4rem 0.7rem; }
 .btn:hover { border-color: var(--accent); }
-.btn.primary { background: var(--accent); color: #06212e; border: none; font-weight: 600; }
+/* [BUTTONS-AUDIT] l'aplat accent plein (réservé aux DONNÉES) laisse place à la teinte LÉGÈRE
+   du gabarit `.luc-primary` — seul usage : le « OK » de la pop-in d'info. */
+.btn.primary { background: color-mix(in srgb, var(--accent) 12%, var(--panel-2)); color: var(--accent); border: 1px solid var(--accent); font-weight: 600; }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 24%, var(--panel-2)); }
+:root[data-theme="light"] .btn.primary { background: rgba(79, 195, 247, 0.12); border-color: #4fc3f7; color: #1565c0; }
+:root[data-theme="light"] .btn.primary:hover { background: rgba(79, 195, 247, 0.22); }
 /* [DANGER-SOFT] danger au repos = monochrome (le rouge n'arrive qu'au survol/focus). */
 .btn.danger { color: var(--muted); border-color: var(--border); display: inline-flex; align-items: center; gap: 0.35rem; }
 .btn.danger:hover, .btn.danger:focus-visible { color: var(--danger); border-color: var(--danger); background: var(--panel-2); }
@@ -400,12 +405,12 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 .iv-btn { min-width: 44px; min-height: 36px; padding: 0.2rem 0.55rem; border-radius: 9px; border: 1px solid var(--border);
   background: var(--panel-2); color: var(--muted); font-size: 1.05rem; line-height: 1; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+/* [DANGER-SOFT] `.iv-del` (aplat rouge permanent) supprimé : mort depuis [EDITOR-FILES-MONO],
+   remplacé par `.iv-danger` — monochrome au repos, rouge au survol seulement. */
 .iv-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 .iv-btn.iv-accent { color: var(--accent); border-color: var(--accent); }
 /* [UI-POLISH-BOARD] danger aligné sur le gabarit iv-btn (fond sombre) : glyphe/bordure danger,
    remplissage rouge au survol seulement. Même taille que les autres boutons de la barre. */
-.iv-del { color: var(--danger); border-color: var(--danger); }
-.iv-del:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
 /* [HUB-CHROME] danger DISCRET : monochrome au repos, rouge seulement au survol
    (les boutons d'action de la pop-in Photos passent en icônes trait). */
 .iv-danger:hover { color: var(--danger); border-color: var(--danger); }
@@ -636,6 +641,7 @@ initThemePref();
   if (_hdr) _hdr.appendChild(guestGearButton('btn', () => openGuestSettings(hubSettingsCfg()))); }
 // cfg de la pop-in : e-mail (route EXISTANTE, destinataire forcé serveur) + favoris locaux.
 function hubSettingsCfg() {
+  const getFavItems = () => hubFavEntries();
   return {
     email: (DATA && DATA.smtp_enabled) ? {
       onSend: async () => {
@@ -646,7 +652,13 @@ function hubSettingsCfg() {
         return { ok: false, msg: d.error || 'Envoi impossible.' };
       },
     } : null,
-    favorites: { count: hubFavsRead().length, onClear: () => { hubFavsWrite([]); render(); } },
+    favorites: {
+      count: getFavItems().length,
+      items: getFavItems,
+      onClear: () => { hubFavsWrite([]); renderSidebar(); },
+      onReorder: (order) => { hubFavsWrite(order); renderSidebar(); },
+      makeSortable: makeFavSortable,
+    },
   };
 }
 
@@ -881,6 +893,78 @@ function hubFavStar(p, on) {
   b.addEventListener('click', (e) => { e.stopPropagation(); hubFavToggle(p); });
   return b;
 }
+function hubFavEntries() {
+  const byId = new Map((DATA.projects || []).map(p => [hubFavId(p), p]));
+  const favIds = hubFavsRead();
+  const alive = favIds.filter(id => byId.has(id));
+  if (alive.length !== favIds.length) hubFavsWrite(alive);   // purge des partages révoqués
+  return alive.map(id => {
+    const p = byId.get(id);
+    return {
+      key: id,
+      proj: p,
+      icon: p.emoji
+        ? el('span', { text: p.emoji })
+        : el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;flex-shrink:0;background:' + (usableProjColor(p.color) || 'var(--gray)') } }),
+      name: p.name,
+    };
+  });
+}
+let favSuppressClickUntil = 0;
+function makeFavSortable(container, onCommit) {
+  let dragEl = null, pid = null, timer = null, dragging = false, sx = 0, sy = 0, touch = false;
+  const rows = () => Array.from(container.children).filter(c => c.dataset.favkey);
+  function cleanup() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (dragEl) dragEl.classList.remove('fav-dragging');
+    container.style.touchAction = '';
+    dragEl = null; pid = null; dragging = false;
+  }
+  function begin() {
+    if (!dragEl) return;
+    dragging = true;
+    dragEl.classList.add('fav-dragging');
+    container.style.touchAction = 'none';
+    try { dragEl.setPointerCapture(pid); } catch (e) {}
+  }
+  container.addEventListener('pointerdown', (e) => {
+    const row = e.target.closest('[data-favkey]');
+    if (!row || !container.contains(row) || (e.button !== undefined && e.button !== 0)) return;
+    dragEl = row; pid = e.pointerId; sx = e.clientX; sy = e.clientY;
+    touch = e.pointerType === 'touch' || e.pointerType === 'pen';
+    if (touch) timer = setTimeout(() => { timer = null; begin(); }, 500);
+  });
+  container.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid || !dragEl) return;
+    const dx = Math.abs(e.clientX - sx), dy = Math.abs(e.clientY - sy);
+    if (!dragging) {
+      if (touch) { if (dx > 8 || dy > 8) cleanup(); return; }
+      if (dx > 4 || dy > 4) begin(); else return;
+    }
+    e.preventDefault();
+    let placed = false;
+    for (const r of rows()) {
+      if (r === dragEl) continue;
+      const rect = r.getBoundingClientRect();
+      if (e.clientY < rect.top + rect.height / 2) { container.insertBefore(dragEl, r); placed = true; break; }
+    }
+    if (!placed) container.appendChild(dragEl);
+  });
+  container.addEventListener('touchmove', (e) => { if (dragging) e.preventDefault(); }, { passive: false });
+  function finalize() {
+    if (dragging) {
+      favSuppressClickUntil = Date.now() + 350;
+      const order = rows().map(r => r.dataset.favkey);
+      cleanup();
+      if (typeof onCommit === 'function') onCommit(order);
+    } else cleanup();
+  }
+  container.addEventListener('pointerup', (e) => { if (e.pointerId !== pid) return; if (dragging) e.preventDefault(); finalize(); });
+  container.addEventListener('pointercancel', (e) => { if (e.pointerId !== pid) return; finalize(); });
+  container.addEventListener('click', (e) => {
+    if (Date.now() < favSuppressClickUntil) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+}
 
 /* [HUB-CHROME] Navigation = retour au BOARD. Avant, cliquer un dossier avec l'Agenda (ou le
    Plan) ouvert laissait l'écran sur la vue : seul le compteur suivait. Toute entrée en focus
@@ -950,22 +1034,22 @@ function renderSidebar() {
   all.addEventListener('click', () => { hubFocusOn(null); });
   nav.appendChild(all);   // « Tout » n'est pas épinglable (ni « Recevoir mon lien par e-mail »)
 
+  // [GUEST-SETTINGS V2 — correctif] `alive` vivait ici avant [V27.20.186] ; sa remontée dans
+  // `hubFavEntries()` a laissé une référence orpheline dans `walk()` (ReferenceError à la 1re
+  // ligne de l'arbre → forEach(roots) mort → « Dossiers partagés » VIDE). L'appartenance aux
+  // favoris se lit maintenant sur un Set local, calculé UNE fois (pas d'appel par ligne).
+  const favIds = new Set(hubFavsRead());
   // [GUEST-FAVS] section ⭐ FAVORIS entre « Tout » et « DOSSIERS PARTAGÉS ».
-  const byId = new Map((DATA.projects || []).map(p => [hubFavId(p), p]));
-  const favIds = hubFavsRead();
-  const alive = favIds.filter(id => byId.has(id));
-  if (alive.length !== favIds.length) hubFavsWrite(alive);   // purge des partages révoqués
-  nav.appendChild(hubSectionHead('Favoris', '⭐ Favoris', alive.length));
+  const favItems = hubFavEntries();
+  nav.appendChild(hubSectionHead('Favoris', '⭐ Favoris', favItems.length));
   if (!hubSecOpen('Favoris')) {
     // section repliée : rien d'autre (le compteur vit dans l'en-tête)
-  } else if (!alive.length) {
+  } else if (!favItems.length) {
     nav.appendChild(el('div', { class: 'fav-hint', text: 'Survole un dossier et clique ☆ pour l\'épingler ici.' }));
   } else {
-    alive.forEach(id => {
-      const p = byId.get(id);
+    favItems.forEach(({ proj: p, icon }) => {
       const row = el('div', { class: 'sitem' + (FOCUS === p.id ? ' active' : ''), attrs: { title: p.name } });
-      if (p.emoji) row.appendChild(el('span', { text: p.emoji }));
-      else row.appendChild(el('span', { attrs: { style: 'width:0.5rem;height:0.5rem;border-radius:50%;flex-shrink:0;background:' + (usableProjColor(p.color) || 'var(--gray)') } }));
+      if (icon) row.appendChild(icon);
       row.appendChild(el('span', { class: 'nm', text: p.name }));
       if (!p.can_edit) row.appendChild(el('span', { class: 'ro', text: '👁' }));
       row.addEventListener('click', () => hubFocusOn(p.id));   // MÊME navigation que la ligne d'origine
@@ -996,7 +1080,7 @@ function renderSidebar() {
     row.appendChild(el('span', { class: 'nm', text: p.name, attrs: { title: p.name } }));
     if (!p.can_edit) row.appendChild(el('span', { class: 'ro', text: '👁' }));
     row.addEventListener('click', () => hubFocusOn(p.id));
-    row.appendChild(hubFavStar(p, alive.indexOf(hubFavId(p)) >= 0));   // [GUEST-FAVS] ★ pleine si épinglé
+    row.appendChild(hubFavStar(p, favIds.has(hubFavId(p))));   // [GUEST-FAVS] ★ pleine si épinglé
     /* [GUEST-TREE] drag-and-drop de dossiers — ÉDITEURS seulement (invariant 5) : on ne propose
        la poignée que si l'invité peut déplacer CE dossier (`can_edit`). Le déplacement passe par
        la route invitée EXISTANTE (celle du « ↗ Déplacer vers… » : PUT /share/<t>/project/<id>
@@ -1276,8 +1360,13 @@ function hubVoteCreateBar(proj) {
   const ev = el('input', { attrs: { type: 'datetime-local', value: hubVoteCreate.eventDate, title: "Date de l'événement (optionnelle) — le gagnant sera planifié à cette date", style: 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font:inherit;padding:0.3rem 0.4rem' } });
   ev.addEventListener('input', () => { hubVoteCreate.eventDate = ev.value; }); bar.appendChild(ev);
   const cnt = el('span', { text: hubVoteCreate.sel.size + ' option(s)', attrs: { id: 'hvc-count', style: 'font-size:0.8rem;color:var(--muted)' } }); bar.appendChild(cnt);
-  const ok = el('button', { class: 'prio-btn', text: '✓ Créer', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' } }); ok.addEventListener('click', submitHubVoteCreate); bar.appendChild(ok);
-  const ca = el('button', { class: 'prio-btn', text: 'Annuler' }); ca.addEventListener('click', () => { hubVoteCreate = null; render(); }); bar.appendChild(ca);
+  // [BUTTONS-AUDIT] l'aplat accent est réservé aux DONNÉES (chip sélectionné) : l'action
+  // « Créer » passe en `.luc-primary` (teinte légère) + icône trait, « Annuler » en neutre.
+  const ok = el('button', { attrs: { type: 'button' } });
+  ok.append(hdrIconAt('plus', 14), el('span', { text: 'Créer' }));
+  ok.addEventListener('click', submitHubVoteCreate); bar.appendChild(lucioleize(ok, 'luc-primary'));
+  const ca = el('button', { attrs: { type: 'button' }, text: 'Annuler' });
+  ca.addEventListener('click', () => { hubVoteCreate = null; render(); }); bar.appendChild(lucioleize(ca, 'luc-neutral'));
   return bar;
 }
 async function submitHubVoteCreate() {
@@ -1319,16 +1408,25 @@ function openHubVoteManage(v) {
   const post = (path, bodyObj) => api(token, '/votes/' + v.id + (path ? '/' + path : ''), { method: path ? 'POST' : 'PUT', body: JSON.stringify(bodyObj || {}) });
   const done = async () => { dlg.close(); await reload(); };
   const actions = el('div', { attrs: { style: 'display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem' } });
-  const abtn = (label, on, style) => { const b = el('button', { class: 'prio-btn', text: label, attrs: style ? { style } : {} }); b.addEventListener('click', on); return b; };
-  if (!closed) actions.appendChild(abtn('🗳 Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
-  else actions.appendChild(abtn('↻ Rouvrir', async () => { const r = await post('reopen', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Réouverture impossible.', { error: true }); }));
-  actions.appendChild(abtn('↺ Reset', async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await post('reset', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Impossible.', { error: true }); }));
+  // [BUTTONS-AUDIT] rangée d'actions en Luciole NEUTRE + icônes trait (fin des glyphes 🗳/↻/↺
+  // et de l'aplat accent) ; l'unique `.luc-primary` de la pop-in est « Enregistrer », en pied.
+  const abtn = (label, on, iconName) => {
+    const b = el('button', { attrs: { type: 'button' } });
+    if (iconName) b.appendChild(hdrIconAt(iconName, 14));
+    b.appendChild(el('span', { text: label }));
+    b.addEventListener('click', on);
+    return lucioleize(b, 'luc-neutral');
+  };
+  if (!closed) actions.appendChild(abtn('Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }, 'trophy'));
+  else actions.appendChild(abtn('Rouvrir', async () => { const r = await post('reopen', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Réouverture impossible.', { error: true }); }, 'rotate'));
+  actions.appendChild(abtn('Remettre à zéro', async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await post('reset', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Impossible.', { error: true }); }, 'rotate'));
   // [DANGER-SOFT] supprimer un vote : bouton discret (icône trait, rouge au survol seulement).
   actions.appendChild(dangerSoftBtn('Supprimer', async () => { if (!(await confirmPopin('Le vote et ses voix seront supprimés — les mémos ne sont pas supprimés.', { title: 'Supprimer ce vote ?', okLabel: 'Supprimer' }))) return; const r = await api(token, '/votes/' + v.id, { method: 'DELETE' }); if (r.ok) { if (hubSelectedVoteId === v.id) hubSelectedVoteId = null; done(); } else notify('Impossible.', { error: true }); }));
   body.appendChild(actions);
   const foot = el('div', { attrs: { style: 'display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.5rem' } });
   foot.appendChild(abtn('Annuler', () => dlg.close()));
-  const save = el('button', { class: 'prio-btn', text: 'Enregistrer', attrs: { style: 'background:var(--accent);border-color:var(--accent);color:#10141a' } });
+  // [BUTTONS-AUDIT] action principale du pied : teinte accent LÉGÈRE, plus d'aplat plein.
+  const save = lucioleize(el('button', { attrs: { type: 'button' }, text: 'Enregistrer' }), 'luc-primary');
   save.addEventListener('click', async () => {
     const name = nameIn.value.trim(); if (!name) { notify('Nom requis.', { error: true }); return; }
     if (!sel.size) { notify('Au moins une option.', { error: true }); return; }

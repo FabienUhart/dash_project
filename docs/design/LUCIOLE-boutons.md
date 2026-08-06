@@ -152,9 +152,18 @@ onClick, opts)` crée un bouton neuf, `dangerSoftize(btn, icon, mode)` convertit
 visionneuse, lignes de pièces jointes), **`.mp-del`** (croix de vignette photo) et le **✕ des
 commentaires**.
 
-**Seule exception assumée** : le bouton de confirmation de la pop-in (`#confirm-yes` /
-`.confirm-danger`) **garde son rouge plein**. C'est la dernière marche : l'intention y est déjà
-déclarée, l'aplat y est un rappel, pas une décoration.
+**Plus aucune exception** (décision Fabien, 2 août 2026, lot [BUTTONS-AUDIT]) : le bouton de
+confirmation de la pop-in (`#confirm-yes` / `.confirm-danger`, les 3 pages) **perd son rouge
+plein**. Il suit la règle commune — fond `var(--panel)`, bordure `var(--border)`, libellé
+`var(--muted)` en `font-weight: 600` au repos ; bordure + texte en `var(--red)` / `var(--danger)`
+sur fond `var(--panel-2)` au survol et au `:focus-visible`. La hiérarchie face à « Annuler » tient
+au **poids** et au **libellé** (règle 3), pas à un aplat. Le garde-fou `confirmPopin` est
+évidemment intact : c'est le style qui s'assouplit, jamais la protection.
+
+**Corollaire — l'action principale d'une pop-in ne porte pas d'aplat non plus** : `button.primary`
+(dégradé accent) est remplacé par la teinte LÉGÈRE `.luc-primary` dans les pop-ins de
+confirmation/information et de gestion des votes (owner, share, hub). L'aplat accent reste
+réservé aux **DONNÉES** : un chip `.prio-btn` **sélectionné** le garde, c'est un état, pas une action.
 
 ## Historique
 
@@ -171,3 +180,13 @@ déclarée, l'aplat y est un rappel, pas une décoration.
   (monochrome au repos, rouge au survol/focus, icône trait, plus aucun emoji 🗑) généralisés
   aux pieds d'éditeur, à la vue Corbeille, à l'aperçu corbeille et à la vue Partages,
   sur les 3 pages. `confirmPopin` inchangé ; `#confirm-yes` garde son rouge plein.
+- V27.23.188 [BUTTONS-DOCTRINE] : rattrapage après le lot [IMAGE-TRASH] — Corbeille (`↩` → icône
+  trait `refresh`), ✕ de la palette de réactions (rouge permanent → muted, rouge au geste), pied
+  de la fiche 👁 (`✎` → icône `pencil`), et suppression du CSS mort `.iv-del` sur les 3 pages.
+- V27.24.189 [BUTTONS-AUDIT] : **l'exception `#confirm-yes` tombe** (3 pages) et l'aplat accent
+  quitte le chrome — pop-ins de gestion des votes (owner/share/hub : Clore, Rouvrir, Remettre à
+  zéro, Créer, Enregistrer, Annuler), « Valider » de la barre de groupes carte, « Démarrer » du
+  Pomodoro (classe `.pomo-start` : son libellé change par `textContent`, incompatible avec
+  `lucioleize`), `notify-ok`. Glyphes 🗳/↻/↺/✓/✎ → icônes trait. Les chips sélectionnés gardent
+  l'accent (état de donnée). Au passage : `dialog label { flex-direction: column }` écrasait la
+  rangée des options de vote (case empilée au-dessus du libellé) — `row` posé explicitement.

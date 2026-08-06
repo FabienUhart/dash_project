@@ -1,5 +1,6 @@
 data/
 backup*.json
+*.tmp.json
 # .claude ignoré SAUF la Memory Bank (versionnée depuis [MEMORY-REFRESH] ;
 # settings.local.json et le reste restent hors dépôt)
 .claude/*
