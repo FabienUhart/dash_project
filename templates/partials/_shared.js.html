@@ -5484,10 +5484,15 @@ function initQuickMemo(cfg) {
       + 'color:var(--text);font:inherit;font-size:0.85rem;padding:0.4rem 0.5rem;margin-bottom:0.45rem}'
       + '.qm-text{resize:vertical;min-height:3.4rem}'
       + '.qm-title:focus,.qm-text:focus,.qm-folder:focus{outline:none;border-color:var(--accent)}'
-      + '.qm-go{width:100%;min-height:2.4rem;background:var(--accent);color:#10141a;border:none;border-radius:8px;'
-      + 'font:inherit;font-weight:700;cursor:pointer}'
+      /* [BUTTONS-AUDIT V2] « Créer » quitte l'aplat accent plein pour la teinte LÉGÈRE du gabarit
+         `.luc-primary`, posé par `lucioleize` à la construction du panneau. C'est le gabarit qui
+         porte fond, bordure, couleur, graisse et survol — sur les 3 pages et les 2 thèmes. Ne
+         restent ici que la mise en page propre au widget (bouton pleine largeur) et l'état
+         désactivé : `.mab-btn:hover` soulève le bouton de 2 px, ce qui n'a aucun sens pendant
+         l'envoi, d'où la neutralisation explicite du lift et de l'ombre. */
+      + '.qm-go{width:100%}'
       + '.qm-go:disabled{opacity:0.5;cursor:default}'
-      + '.qm-go:hover:not(:disabled){filter:brightness(1.05)}';
+      + '.qm-go:disabled:hover{transform:none;box-shadow:none}';
     document.head.appendChild(st);
   }
 
@@ -5604,7 +5609,11 @@ function initQuickMemo(cfg) {
     titleEl = el('input', { class: 'qm-title', attrs: { type: 'text', placeholder: 'Titre (optionnel)', 'aria-label': 'Titre' } });
     textEl = el('textarea', { class: 'qm-text', attrs: { rows: '3', placeholder: 'Note…', 'aria-label': 'Contenu' } });
     folderEl = el('select', { class: 'qm-folder', attrs: { 'aria-label': 'Dossier de destination' } });
-    goEl = el('button', { class: 'qm-go', text: 'Créer', attrs: { type: 'button' } });
+    // [BUTTONS-AUDIT V2] gabarit Luciole (`lucioleize`, pas une classe dédiée comme `.pomo-start`) :
+    // ce bouton ne réécrit JAMAIS son libellé — seul `disabled` bascule pendant l'envoi — la lueur
+    // survit donc au cycle de soumission. `buildPanel()` reconstruit le panneau, chaque bouton neuf
+    // repasse par ici, et `lucioleize` est idempotent de toute façon.
+    goEl = lucioleize(el('button', { class: 'qm-go', text: 'Créer', attrs: { type: 'button' } }), 'luc-primary');
     panel.appendChild(titleEl); panel.appendChild(textEl); panel.appendChild(folderEl); panel.appendChild(goEl);
     fillFolders();
     // Entrée dans le titre = créer ; Échap = replier (pas de raccourci global clavier — [CMD-K] réservé).
