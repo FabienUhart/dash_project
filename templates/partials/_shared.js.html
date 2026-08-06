@@ -3425,14 +3425,20 @@ function _voiceStyle() {
 }
 function voiceExt(mime) { mime = mime || ''; if (mime.indexOf('webm') >= 0) return 'webm'; if (mime.indexOf('mp4') >= 0) return 'm4a'; if (mime.indexOf('ogg') >= 0) return 'ogg'; return 'webm'; }
 function voiceAvailable() { return typeof MediaRecorder !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+// Négociation du conteneur : webm/opus partout, mp4 pour Safari (qui ne sait pas faire de webm).
+// '' = laisser MediaRecorder choisir son défaut. Une seule source de vérité, partagée par la
+// pop-in vocale [VOICE-MESSAGES] et l'enregistreur inline de la Note rapide [QUICK-MEMO V2].
+function voicePickMime() {
+  const cands = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+  return cands.find(m => { try { return MediaRecorder.isTypeSupported(m); } catch (e) { return false; } }) || '';
+}
 
 // Ouvre un enregistreur (<dialog> modal) ; résout { blob, filename } à l'Envoi, ou null (annulé / refusé).
 function recordVoice() {
   return new Promise((resolve) => {
     if (!voiceAvailable()) { notify('Enregistrement audio non disponible sur ce navigateur.'); resolve(null); return; }
     _voiceStyle();
-    const cands = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
-    const mime = cands.find(m => { try { return MediaRecorder.isTypeSupported(m); } catch (e) { return false; } }) || '';
+    const mime = voicePickMime();
     let stream = null, rec = null, chunks = [], startAt = 0, tick = null, timer = null, blob = null, done = false;
     // <dialog> modal : s'empile dans le top-layer AU-DESSUS de la pop-in mémo (le dernier showModal
     // passe devant, insensible aux z-index) ; ouvert = uiBusy() true → le reload différé attend.
@@ -5231,8 +5237,36 @@ function initFxWidget(cfg) {
       + '.fx-swap button{background:var(--panel-2);border:1px solid var(--border);color:var(--muted);border-radius:9px;'
       + 'width:1.9rem;height:1.6rem;cursor:pointer;font-size:0.85rem;line-height:1}'
       + '.fx-swap button:hover{color:var(--accent);border-color:var(--accent)}'
+      /* [FX-CONVERTER V2] `¥€` se coupait en DEUX LIGNES dans le rond ET dans l'onglet : rien ne
+         débordait (le flex recentre la boîte) mais le libellé était bel et bien cassé. `nowrap`
+         + `line-height:1` → une seule ligne centrée, sans toucher aux dimensions. */
+      + '#fx-launch,#fx-reshow{white-space:nowrap;line-height:1}'
+      /* La mention du taux redevient NEUTRE par défaut : orange en permanence ne signalait rien.
+         L'orange est réservé au taux vraiment périmé (> 48 h). `--orange` existe côté owner,
+         `--warn` côté invité, d'où la cascade de replis (invariant 9 : tokens de chaque page). */
       + '.fx-note{font-size:0.72rem;color:var(--muted);margin-top:0.5rem;text-align:center}'
-      + '.fx-note.stale{color:var(--yellow)}';
+      + '.fx-note.stale{color:var(--orange,var(--warn,#ef6c00))}'
+      /* Historique : lignes compactes, cliquables pour re-remplir les champs. */
+      + '.fx-copy{background:none;border:1px solid transparent;border-radius:6px;color:var(--muted);'
+      + 'cursor:pointer;font-size:0.78rem;line-height:1;padding:0.2rem 0.3rem;flex:none}'
+      + '.fx-copy:hover{color:var(--text);background:var(--panel-2);border-color:var(--border)}'
+      + '.fx-copy.ok{color:var(--green,var(--accent));border-color:currentColor}'
+      + '.fx-keep{display:flex;justify-content:flex-end;margin-top:0.1rem}'
+      + '.fx-keep .mab-btn{min-height:28px;padding:0.18rem 0.55rem;font-size:0.75rem}'
+      + '.fx-keep .mab-btxt{gap:0.3rem}'
+      + '.fx-hist{margin-top:0.5rem;border-top:1px solid var(--border);padding-top:0.4rem}'
+      + '.fx-hist[hidden]{display:none}'
+      + '.fx-hist-head{display:flex;align-items:center;gap:0.4rem;font-size:0.68rem;color:var(--muted);margin-bottom:0.25rem}'
+      + '.fx-hist-head span{flex:1}'
+      + '.fx-clear{background:none;border:none;color:var(--muted);cursor:pointer;font:inherit;font-size:0.68rem;'
+      + 'padding:0.1rem 0.25rem;border-radius:5px}'
+      /* vider = destructif : muted au repos, rouge au survol/focus ([DANGER-SOFT]) */
+      + '.fx-clear:hover,.fx-clear:focus-visible{color:var(--red,var(--danger));background:var(--panel-2)}'
+      + '.fx-line{display:block;width:100%;text-align:left;background:none;border:none;cursor:pointer;'
+      + 'color:var(--muted);font:inherit;font-size:0.7rem;padding:0.2rem 0.25rem;border-radius:5px;'
+      + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+      + '.fx-line:hover,.fx-line:focus-visible{background:var(--panel-2);color:var(--text)}'
+      + '.fx-line b{font-weight:600;color:var(--text)}';
     document.head.appendChild(st);
   }
 
@@ -5307,7 +5341,47 @@ function initFxWidget(cfg) {
     handle.addEventListener('pointercancel', end);
   }
 
-  let topEl, botEl, topSel, botSel, noteEl, lastEdited = 'top';
+  let topEl, botEl, topSel, botSel, noteEl, histEl, histListEl, lastEdited = 'top';
+  /* [FX-CONVERTER V2] Historique des conversions — 100 % LOCAL (`localStorage`, comme la position
+     du panneau et la paire de devises) : zéro table, zéro route, export 27 inchangé, et rien
+     n'est exposé à personne. Sur les pages invitées il vit dans le navigateur de l'invité, ce qui
+     n'élargit aucun périmètre (invariant 5). Une entrée = { a, f, t, r, rate, d } — montant,
+     devises, résultat, taux appliqué et date du taux au moment de la conversion. */
+  const FX_HIST_MAX = 10;
+  let hist = [];
+  try { const h = JSON.parse(localStorage.getItem('fxHist') || '[]'); if (Array.isArray(h)) hist = h.slice(0, FX_HIST_MAX); } catch (e) {}
+  const saveHist = () => { try { localStorage.setItem('fxHist', JSON.stringify(hist.slice(0, FX_HIST_MAX))); } catch (e) {} };
+  function pushHist(a, f, t, r) {
+    if (!isFinite(a) || !isFinite(r) || a === 0) return;
+    const h0 = hist[0];
+    // Dédoublonnage des répétitions IMMÉDIATES : re-taper le même montant sur la même paire ne
+    // crée pas trois lignes. Une conversion différente intercalée « rouvre » la répétition.
+    if (h0 && h0.a === a && h0.f === f && h0.t === t) return;
+    hist.unshift({ a: a, f: f, t: t, r: r, rate: (rates && f !== t) ? (r / a) : 1, d: rateDate || null });
+    hist = hist.slice(0, FX_HIST_MAX);
+    saveHist(); renderHist();
+  }
+  function renderHist() {
+    if (!histEl || !histListEl) return;
+    histEl.hidden = hist.length === 0;
+    histListEl.innerHTML = '';
+    hist.forEach((h) => {
+      const line = el('button', { class: 'fx-line', attrs: { type: 'button',
+        title: 'Reprendre cette conversion' } });
+      line.appendChild(el('b', { text: fxNum(h.a, h.f, 0) + ' ' + fxSym(h.f) }));
+      line.appendChild(document.createTextNode(' → '));
+      line.appendChild(el('b', { text: fxNum(h.r, h.t) + ' ' + fxSym(h.t) }));
+      if (h.d) line.appendChild(document.createTextNode(' · taux du ' + fxDateFR(h.d)));
+      // Cliquer une ligne re-remplit montant ET les deux devises, puis recalcule.
+      line.addEventListener('click', () => {
+        pair = { from: h.f, to: h.t }; savePair();
+        fillSelect(topSel, pair.from); fillSelect(botSel, pair.to);
+        topEl.value = String(h.a); lastEdited = 'top'; recompute();
+        topEl.focus();
+      });
+      histListEl.appendChild(line);
+    });
+  }
   function ccyOptions() {
     if (!rates) return TOP.slice();
     const all = Object.keys(rates);
@@ -5356,28 +5430,110 @@ function initFxWidget(cfg) {
     const rowB = el('div', { class: 'fx-row' });
     botEl = el('input', { class: 'fx-amount', attrs: { type: 'number', inputmode: 'decimal', step: 'any', 'aria-label': 'Montant converti' } });
     botSel = el('select', { class: 'fx-ccy', attrs: { 'aria-label': 'Devise cible' } });
-    rowB.appendChild(botEl); rowB.appendChild(botSel); panel.appendChild(rowB);
+    // [FX-CONVERTER V2] copie de la VALEUR NUE (sans devise ni espace) — c'est ce qu'on recolle
+    // dans une note ou une calculette. Feedback bref, sans pop-in : le bouton se coche 1,2 s.
+    // Icône Tabler TRAIT en `currentColor` (plus d'emoji coloré — doctrine Luciole, invariant 9) ;
+    // le ✓/✕ du retour reste un glyphe, monochrome lui aussi.
+    const copyBtn = el('button', { class: 'fx-copy',
+      attrs: { type: 'button', title: 'Copier le montant converti', 'aria-label': 'Copier le montant converti' } });
+    const setCopyIcon = () => { copyBtn.textContent = ''; copyBtn.appendChild(hdrIconAt('clipboard', 14)); };
+    setCopyIcon();
+    copyBtn.addEventListener('click', async () => {
+      const v = botEl.value;
+      if (!v) return;
+      let ok = true;
+      try { await navigator.clipboard.writeText(v); }
+      catch (e) { ok = false; try { botEl.select(); ok = document.execCommand('copy'); } catch (e2) { ok = false; } }
+      copyBtn.textContent = ok ? '✓' : '✕';
+      copyBtn.classList.toggle('ok', ok);
+      setTimeout(() => { setCopyIcon(); copyBtn.classList.remove('ok'); }, 1200);
+    });
+    rowB.appendChild(botEl); rowB.appendChild(copyBtn); rowB.appendChild(botSel); panel.appendChild(rowB);
+
+    // « Garder » : le SEUL geste qui alimente l'historique (avec Entrée). Luciole NEUTRE — le
+    // convertisseur n'a pas d'action principale, et cette icône signet dit « je mets de côté ».
+    // Rangée propre plutôt qu'inséré dans `rowB` : à 15 rem de large, un 4e élément écraserait
+    // le champ du résultat. Aligné à droite, donc collé au montant converti juste au-dessus.
+    const keepRow = el('div', { class: 'fx-keep' });
+    { const keep = el('button', { attrs: { type: 'button', title: 'Garder cette conversion dans l\'historique' } });
+      keep.appendChild(hdrIconAt('bookmark', 13));
+      keep.appendChild(el('span', { text: 'Garder' }));
+      keep.addEventListener('click', () => record());
+      keepRow.appendChild(lucioleize(keep, 'luc-neutral')); }
+    panel.appendChild(keepRow);
 
     noteEl = el('div', { class: 'fx-note' });
     panel.appendChild(noteEl);
 
+    histEl = el('div', { class: 'fx-hist', attrs: { hidden: '' } });
+    { const hh = el('div', { class: 'fx-hist-head' });
+      hh.appendChild(el('span', { text: 'Dernières conversions' }));
+      hh.appendChild(el('button', { class: 'fx-clear', text: 'vider',
+        attrs: { type: 'button', title: 'Vider l\'historique' },
+        on: { click: () => { hist = []; saveHist(); renderHist(); } } }));
+      histEl.appendChild(hh); }
+    histListEl = el('div');
+    histEl.appendChild(histListEl);
+    panel.appendChild(histEl);
+
     fillSelect(topSel, pair.from); fillSelect(botSel, pair.to);
     topEl.addEventListener('input', () => { lastEdited = 'top'; recompute(); });
     botEl.addEventListener('input', () => { lastEdited = 'bot'; recompute(); });
+    /* [FX-CONVERTER V2 — correctif] L'historique ne s'alimente QUE sur geste explicite.
+       Version précédente : enregistrement sur `change`. Insuffisant — un input `number` émet
+       `change` à chaque pas de valeur, donc taper « 102 » écrivait « 1 », « 1,0 », « 1,02 ».
+       Aucun réglage de debounce ne rattrape ça proprement : c'est le déclencheur qui était
+       mauvais, pas sa fréquence. Désormais : bouton « Garder », ou Entrée dans un champ montant
+       (même geste au clavier). Les lignes parasites déjà stockées partent avec « vider ». */
+    const record = () => {
+      if (!rates) return;
+      const a = parseFloat(topEl.value), r = parseFloat(botEl.value);
+      if (isFinite(a) && isFinite(r)) pushHist(a, pair.from, pair.to, r);
+    };
+    const onEnter = (e) => { if (e.key === 'Enter') { e.preventDefault(); record(); } };
+    topEl.addEventListener('keydown', onEnter);
+    botEl.addEventListener('keydown', onEnter);
     topSel.addEventListener('change', () => { pair.from = topSel.value; savePair(); lastEdited = (lastEdited === 'top') ? 'top' : 'bot'; recompute(); });
     botSel.addEventListener('change', () => { pair.to = botSel.value; savePair(); lastEdited = (lastEdited === 'bot') ? 'bot' : 'top'; recompute(); });
     applyNote();
+    renderHist();
     if (topEl.value === '' && botEl.value === '') { topEl.value = '1'; lastEdited = 'top'; }
     recompute();
   }
   function todayISO() { try { return new Date().toISOString().slice(0, 10); } catch (e) { return null; } }
+  /* [FX-CONVERTER V2] Le seuil passe de « pas aujourd'hui » à « plus de 48 h ». La BCE ne publie
+     que les jours ouvrés : avec l'ancien test, la mention était orange tous les week-ends et
+     chaque matin avant publication — donc orange en permanence, donc ne signalant rien. 48 h
+     laisse passer un week-end normal et n'alerte que sur un vrai décrochage (hors-ligne
+     prolongé → conversion approximative). */
+  const STALE_MS = 48 * 60 * 60 * 1000;
+  function rateIsStale() {
+    if (!rateDate) return false;
+    const t = Date.parse(rateDate + 'T00:00:00Z');
+    return isFinite(t) && (Date.now() - t) > STALE_MS;
+  }
   function applyNote() {
     if (!noteEl) return;
     if (!rates) { noteEl.textContent = '⚠ Taux indisponibles'; noteEl.classList.add('stale'); return; }
-    noteEl.textContent = 'Taux BCE du ' + (rateDate || '?');
-    const t = todayISO();
-    noteEl.classList.toggle('stale', !!(t && rateDate && rateDate !== t));
+    noteEl.textContent = 'Taux BCE du ' + (rateDate ? fxDateFR(rateDate) : '?');
+    noteEl.classList.toggle('stale', rateIsStale());
   }
+  // « 2026-08-05 » → « 5 août » (l'année n'apporte rien sur un taux du jour).
+  function fxDateFR(iso) {
+    try {
+      const d = new Date(iso + 'T00:00:00Z');
+      return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+    } catch (e) { return iso; }
+  }
+  const FX_SYM = { EUR: '€', JPY: '¥', USD: '$', GBP: '£' };
+  const fxSym = (c) => FX_SYM[c] || c;
+  // `min = 0` sur le montant SAISI (« 5 000 JPY », pas « 5 000,00 JPY » — la ligne d'historique
+  // doit tenir sans être tronquée) ; `min = decimals` sur le RÉSULTAT, où « 29,10 € » se lit
+  // comme une somme et « 29,1 € » non.
+  const fxNum = (v, ccy, min) => {
+    try { return v.toLocaleString('fr-FR', { minimumFractionDigits: (min == null ? decimals(ccy) : min), maximumFractionDigits: decimals(ccy) }); }
+    catch (e) { return String(fmt(v, ccy)); }
+  };
 
   async function loadRates() {
     try {
@@ -5492,7 +5648,58 @@ function initQuickMemo(cfg) {
          l'envoi, d'où la neutralisation explicite du lift et de l'ombre. */
       + '.qm-go{width:100%}'
       + '.qm-go:disabled{opacity:0.5;cursor:default}'
-      + '.qm-go:disabled:hover{transform:none;box-shadow:none}';
+      + '.qm-go:disabled:hover{transform:none;box-shadow:none}'
+      /* [QUICK-MEMO V2] rangée médias — vocal + photos dans le MÊME mémo. Zéro couleur en dur :
+         tout passe par les variables (invariant 9), et les deux boutons sont des Luciole neutres
+         posés par `lucioleize` (donc fond/bordure/survol viennent du gabarit `.mab-btn`, comme
+         « Créer »). `flex:1` pour qu'ils se partagent la largeur du panneau à parts égales. */
+      + '.qm-media{display:flex;gap:0.4rem;margin-bottom:0.45rem}'
+      + '.qm-media .mab-btn{flex:1;min-height:34px;padding:0.32rem 0.6rem;font-size:0.8rem}'
+      + '.qm-media .mab-btxt{gap:0.3rem}'
+      /* ⚠️ `display:flex` de l'auteur BAT le `display:none` que l'attribut [hidden] tient de la
+         feuille UA — sans ces règles, les panneaux d'état du vocal s'affichent tous en même temps.
+         Même parade que `#qm-panel[hidden]` plus haut. */
+      + '.qm-media[hidden],.qm-shots[hidden],.qm-rec[hidden],.qm-clips[hidden],'
+      + '.qm-media .mab-btn[hidden]{display:none}'
+      /* vignettes photo 44 px (cible tactile du ✕ volontairement petite : geste secondaire,
+         la cible principale reste la vignette elle-même) */
+      + '.qm-shots{display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.45rem}'
+      + '.qm-shot{position:relative;width:44px;height:44px;border-radius:7px;overflow:hidden;'
+      + 'border:1px solid var(--border);background:var(--panel-2)}'
+      + '.qm-shot img{width:100%;height:100%;object-fit:cover;display:block}'
+      + '.qm-shot-x{position:absolute;top:1px;right:1px;width:16px;height:16px;border:none;border-radius:5px;'
+      + 'background:rgba(0,0,0,0.55);color:#fff;font-size:0.62rem;line-height:1;cursor:pointer;'
+      + 'display:flex;align-items:center;justify-content:center;padding:0}'
+      + '.qm-shot-x:hover{background:var(--red)}'
+      /* état ENREGISTREMENT : le point rouge pulse — c'est un ÉTAT en cours, pas une décoration
+         (même doctrine que le ● de la pop-in vocale). Coupé sous prefers-reduced-motion. */
+      + '.qm-rec{display:flex;align-items:center;gap:0.5rem;background:var(--bg);'
+      + 'border:1px solid var(--border);border-radius:8px;padding:0.35rem 0.5rem;margin-bottom:0.45rem}'
+      /* Les clips vivent en CHIPS qui s'accumulent, exactement comme les vignettes photo :
+         plusieurs vocaux par mémo, chacun ré-écoutable et retirable. La progression de lecture
+         est peinte en fond du chip (`.qm-cfill`) — pas de barre séparée, le chip reste compact. */
+      + '.qm-clips{display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.45rem}'
+      + '.qm-clip{position:relative;display:inline-flex;align-items:center;gap:0.35rem;background:var(--bg);'
+      + 'border:1px solid var(--border);border-radius:999px;padding:0.2rem 0.4rem;overflow:hidden}'
+      + '.qm-cfill{position:absolute;left:0;top:0;bottom:0;width:0%;background:var(--accent);opacity:0.16;pointer-events:none}'
+      + '.qm-clip > *{position:relative;z-index:1}'
+      + '.qm-dot{width:9px;height:9px;border-radius:50%;background:var(--red);flex:none;animation:qm-blink 1.1s ease infinite}'
+      + '@keyframes qm-blink{50%{opacity:0.25}}'
+      + '.qm-time{font-variant-numeric:tabular-nums;font-size:0.82rem;min-width:2.6rem}'
+      + '.qm-wave{flex:1;display:flex;align-items:center;gap:2px;height:18px;overflow:hidden}'
+      + '.qm-wave i{width:3px;border-radius:2px;background:var(--accent);opacity:0.75;animation:qm-wv 0.9s ease-in-out infinite}'
+      + '@keyframes qm-wv{0%,100%{height:4px}50%{height:16px}}'
+      + '.qm-rbtn{background:none;border:1px solid var(--border);border-radius:7px;color:var(--muted);'
+      + 'cursor:pointer;padding:0.18rem 0.45rem;font-size:0.78rem;line-height:1.4;display:inline-flex;align-items:center;gap:0.25rem}'
+      + '.qm-rbtn:hover{color:var(--text);background:var(--panel-2)}'
+      + '.qm-rbtn.stop{color:var(--accent);border-color:var(--accent)}'
+      /* jeter un vocal est destructif : [DANGER-SOFT] — muted au repos, rouge au survol/focus */
+      + '.qm-rbtn.qm-drop:hover,.qm-rbtn.qm-drop:focus-visible{color:var(--red);border-color:var(--red);background:var(--panel-2)}'
+      + '.qm-play{width:1.7rem;height:1.7rem;border-radius:50%;flex:none;display:flex;align-items:center;'
+      + 'justify-content:center;background:var(--panel-2);border:1px solid var(--accent);color:var(--accent);'
+      + 'cursor:pointer;font-size:0.7rem;padding:0}'
+      + '.qm-dur{font-size:0.78rem;color:var(--muted);font-variant-numeric:tabular-nums}'
+      + '@media (prefers-reduced-motion:reduce){.qm-dot,.qm-wave i{animation:none}}';
     document.head.appendChild(st);
   }
 
@@ -5567,6 +5774,27 @@ function initQuickMemo(cfg) {
   }
 
   let titleEl, textEl, folderEl, goEl;
+  /* ===== [QUICK-MEMO V2] médias : un mémo peut porter texte + N vocaux + N photos =====
+     État local au widget, jamais persisté : `clips` = [{ blob, url, dur, filename }],
+     `shots` = [{ file, url }]. Les URL sont des objets blob — on les révoque à chaque retrait ET
+     après création, sinon le panneau fuit de la mémoire en mode rafale.
+     Les deux listes suivent EXACTEMENT le même modèle (accumulation + retrait unitaire) : un
+     seul enregistrement à la fois, mais autant de clips qu'on veut dans le mémo. */
+  let clips = [], shots = [];
+  let mediaRow = null, shotsEl = null, recEl = null, clipsEl = null, micBtn = null, fileEl = null;
+  let recStream = null, recorder = null, recChunks = [], recStart = 0, recTick = null, recTimeEl = null;
+  let player = null, playTimer = null, playingIdx = -1;
+  const qmFmt = (sec) => Math.floor(sec / 60) + ':' + String(Math.floor(sec % 60)).padStart(2, '0');
+  // Hors ligne : la file [OFFLINE] ne transporte que du TEXTE (aucun blob en IndexedDB — noté
+  // pour OFFLINE v2). Tant qu'on est hors ligne, la rangée médias disparaît : mieux vaut pas de
+  // bouton qu'un bouton qui trahit au moment d'envoyer.
+  const qmOffline = () => !!(cfg.offline && cfg.offline());
+  function hasMedia() { return clips.length > 0 || shots.length > 0; }
+  function refreshGo() {
+    if (!goEl) return;
+    const txt = (titleEl && titleEl.value.trim()) || (textEl && textEl.value.trim());
+    goEl.disabled = !(txt || hasMedia());
+  }
   function fillFolders() {
     if (!folderEl) return;
     const cur = folderEl.value;
@@ -5588,16 +5816,230 @@ function initQuickMemo(cfg) {
     const has = [].some.call(folderEl.options, o => o.value === want);
     folderEl.value = has ? want : (folderEl.options[0] ? folderEl.options[0].value : '');
   }
+  /* ---- photos : vignettes 44 px, retirables une à une ------------------------------------ */
+  function renderShots() {
+    if (!shotsEl) return;
+    shotsEl.hidden = shots.length === 0;
+    shotsEl.innerHTML = '';
+    shots.forEach((s, i) => {
+      const box = el('div', { class: 'qm-shot' });
+      box.appendChild(el('img', { attrs: { src: s.url, alt: s.file.name || 'photo' } }));
+      box.appendChild(el('button', { class: 'qm-shot-x', text: '✕',
+        attrs: { type: 'button', title: 'Retirer la photo', 'aria-label': 'Retirer la photo' },
+        on: { click: () => { try { URL.revokeObjectURL(s.url); } catch (e) {} shots.splice(i, 1); renderShots(); refreshGo(); } } }));
+      shotsEl.appendChild(box);
+    });
+  }
+  function addShots(files) {
+    for (const f of (files || [])) {
+      if (!f || !(f.type || '').startsWith('image/')) continue;   // le serveur revalide par SIGNATURE
+      shots.push({ file: f, url: URL.createObjectURL(f) });
+    }
+    if (fileEl) fileEl.value = '';   // même fichier re-sélectionnable juste après
+    renderShots(); refreshGo();
+  }
+  /* ---- vocal : repos ⇄ enregistrement, et N clips accumulés en chips ---------------------- */
+  // Le 🎙 reste visible EN PERMANENCE (on enchaîne les enregistrements) — il ne disparaît que si
+  // le navigateur ne sait pas enregistrer. Un seul enregistrement en cours à la fois : pendant
+  // l'enregistrement, toute la rangée médias s'efface au profit du panneau ● / Stop.
+  function setVoiceState(state) {
+    if (mediaRow) mediaRow.hidden = (state === 'rec') || qmOffline();
+    if (micBtn) micBtn.hidden = !voiceAvailable();
+    if (recEl) recEl.hidden = state !== 'rec';
+  }
+  function renderClips() {
+    if (!clipsEl) return;
+    clipsEl.hidden = clips.length === 0;
+    clipsEl.innerHTML = '';
+    clips.forEach((c, i) => {
+      const chip = el('div', { class: 'qm-clip' });
+      chip.appendChild(el('i', { class: 'qm-cfill' }));
+      const play = el('button', { class: 'qm-play', text: playingIdx === i ? '❚❚' : '▶',
+        attrs: { type: 'button', title: 'Écouter le vocal', 'aria-label': 'Écouter le vocal' },
+        on: { click: () => togglePlay(i) } });
+      chip.appendChild(play);
+      chip.appendChild(el('span', { class: 'qm-dur', text: qmFmt(c.dur) }));
+      chip.appendChild(el('button', { class: 'qm-rbtn qm-drop', text: '✕',
+        attrs: { type: 'button', title: 'Jeter ce vocal', 'aria-label': 'Jeter ce vocal' },
+        on: { click: () => discardClip(i) } }));
+      clipsEl.appendChild(chip);
+    });
+  }
+  function stopTracks() {
+    if (recTick) { clearInterval(recTick); recTick = null; }
+    try { (recStream ? recStream.getTracks() : []).forEach(t => t.stop()); } catch (e) {}
+    recStream = null;
+  }
+  async function startRec() {
+    if (!voiceAvailable()) { notify('Enregistrement audio non disponible sur ce navigateur.', { error: true }); return; }
+    const mime = voicePickMime();
+    try { recStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { notify('Micro refusé ou indisponible.', { error: true }); return; }
+    try { recorder = mime ? new MediaRecorder(recStream, { mimeType: mime }) : new MediaRecorder(recStream); }
+    catch (e) { try { recorder = new MediaRecorder(recStream); } catch (e2) { stopTracks(); notify('Enregistrement impossible.', { error: true }); return; } }
+    recChunks = [];
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+    recorder.onstop = () => {
+      // Durée mesurée par NOTRE horloge : les webm produits par MediaRecorder annoncent souvent
+      // `duration: Infinity`, d'où le « 0:00 » connu des bulles de commentaire (backlog). Ici on
+      // ne lit jamais la métadonnée du blob, donc l'aperçu affiche la vraie durée.
+      const dur = recStart ? (Date.now() - recStart) / 1000 : 0;
+      const blob = new Blob(recChunks, { type: (recorder && recorder.mimeType) || mime || 'audio/webm' });
+      stopTracks();
+      setVoiceState('idle');
+      if (!blob.size) { refreshGo(); return; }
+      clips.push({ blob, url: URL.createObjectURL(blob), dur,
+        filename: 'vocal-' + Date.now() + '.' + voiceExt(blob.type || mime) });
+      renderClips(); refreshGo();
+    };
+    recStart = Date.now();
+    // `start()` peut lever (piste morte, périphérique repris par une autre appli) : sans ce
+    // rattrapage le micro resterait ouvert et l'UI figée au repos, sans rien dire.
+    try { recorder.start(); }
+    catch (e) { stopTracks(); recorder = null; notify('Enregistrement impossible (micro indisponible).', { error: true }); setVoiceState('idle'); return; }
+    if (recTimeEl) recTimeEl.textContent = '0:00';
+    recTick = setInterval(() => { if (recTimeEl) recTimeEl.textContent = qmFmt((Date.now() - recStart) / 1000); }, 250);
+    // Même plafond que la pop-in vocale : au-delà, on coupe tout seul plutôt que d'exploser la taille.
+    setTimeout(() => { if (recorder && recorder.state === 'recording') recorder.stop(); }, VOICE_MAX_MS);
+    setVoiceState('rec');
+  }
+  function stopRec() { if (recorder && recorder.state === 'recording') recorder.stop(); }
+  function cancelRec() {
+    if (recorder && recorder.state === 'recording') { recorder.onstop = null; try { recorder.stop(); } catch (e) {} }
+    stopTracks(); recorder = null; recChunks = [];
+    setVoiceState('idle'); refreshGo();
+  }
+  // Un seul clip joue à la fois : relancer sur un autre chip coupe le précédent.
+  function resetPlayer() {
+    if (playTimer) { clearInterval(playTimer); playTimer = null; }
+    if (player) { try { player.pause(); } catch (e) {} player = null; }
+    playingIdx = -1;
+    renderClips();
+  }
+  function togglePlay(i) {
+    const wasPlaying = playingIdx === i;
+    resetPlayer();
+    if (wasPlaying) return;
+    const c = clips[i];
+    if (!c || !c.url) return;
+    player = new Audio(c.url);
+    playingIdx = i;
+    renderClips();
+    const fill = clipsEl && clipsEl.children[i] ? clipsEl.children[i].querySelector('.qm-cfill') : null;
+    player.play().catch(() => resetPlayer());
+    playTimer = setInterval(() => {
+      if (!player) return;
+      if (fill && c.dur) fill.style.width = Math.min(100, (player.currentTime / c.dur) * 100) + '%';
+      if (player.ended) resetPlayer();
+    }, 100);
+  }
+  function discardClip(i) {
+    const c = clips[i];
+    if (playingIdx === i) resetPlayer(); else if (playingIdx > i) playingIdx--;
+    if (c && c.url) { try { URL.revokeObjectURL(c.url); } catch (e) {} }
+    clips.splice(i, 1);
+    renderClips(); refreshGo();
+  }
+  function clearMedia() {
+    resetPlayer();
+    clips.forEach(c => { try { URL.revokeObjectURL(c.url); } catch (e) {} });
+    clips = [];
+    shots.forEach(s => { try { URL.revokeObjectURL(s.url); } catch (e) {} });
+    shots = [];
+    renderClips(); renderShots(); setVoiceState('idle');
+  }
+  // Titre automatique quand le mémo n'a QUE des médias : sans lui, la card serait muette.
+  // Le vocal prime sur la photo (c'est le média « qui parle »), et le pluriel se dit.
+  function autoTitle() {
+    const now = new Date();
+    const jour = now.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+    const heure = String(now.getHours()) + 'h' + String(now.getMinutes()).padStart(2, '0');
+    let quoi;
+    if (clips.length > 1) quoi = '🎙 ' + clips.length + ' vocaux';
+    else if (clips.length === 1) quoi = '🎙 Vocal';
+    else quoi = '📷 Photo';
+    return quoi + ' · ' + jour + ' ' + heure;
+  }
   async function submit() {
-    const title = (titleEl.value || '').trim();
+    let title = (titleEl.value || '').trim();
     const content = (textEl.value || '').trim();
-    if (!title && !content) { titleEl.focus(); return; }
+    if (!title && !content && !hasMedia()) { titleEl.focus(); return; }
+    if (hasMedia() && qmOffline()) {
+      notify('Hors ligne : seules les notes texte partent en file. Retire la photo ou le vocal.', { error: true });
+      return;
+    }
+    if (!title && !content) title = autoTitle();
     goEl.disabled = true;
-    let ok = false;
-    try { ok = await cfg.submit({ title, content, folder: folderEl ? folderEl.value : '' }); } catch (_) { ok = false; }
+    let res = null;
+    try { res = await cfg.submit({ title, content, folder: folderEl ? folderEl.value : '' }); } catch (_) { res = null; }
+    if (!res) { goEl.disabled = false; if (typeof flashSaved === 'function') flashSaved(false); return; }
+    // Le mémo EXISTE désormais. Les médias partent ensuite, sur son id, par les routes scopées
+    // EXISTANTES (images + pièces jointes). Un échec ici ne supprime JAMAIS le mémo : on le dit,
+    // et on GARDE les médias dans le panneau pour que rien ne soit perdu en silence.
+    let failed = 0;
+    if (hasMedia() && typeof res === 'object' && cfg.uploadMedia) {
+      try { failed = (await cfg.uploadMedia(res, { photos: shots.map(s => s.file), voices: clips.slice() })) || 0; }
+      catch (_) { failed = shots.length + clips.length; }
+    }
     goEl.disabled = false;
-    if (typeof flashSaved === 'function') flashSaved(!!ok);
-    if (ok) { titleEl.value = ''; textEl.value = ''; fillFolders(); titleEl.focus(); }  // rafale : panneau reste ouvert
+    if (typeof flashSaved === 'function') flashSaved(failed === 0);
+    titleEl.value = ''; textEl.value = '';
+    if (failed) {
+      notify('Mémo créé, mais ' + failed + ' média' + (failed > 1 ? 's n\'ont' : ' n\'a') +
+        ' pas pu être envoyé' + (failed > 1 ? 's' : '') + ' — ils sont restés dans le panneau.', { error: true });
+    } else {
+      clearMedia();   // rafale : panneau ouvert, tout vidé
+    }
+    refreshGo(); fillFolders(); titleEl.focus();
+  }
+  /* Rangée médias + les deux panneaux d'état du vocal. Construits UNE fois par `buildPanel()`,
+     insérés entre le textarea et le sélecteur de dossier (ordre de la maquette). Les boutons
+     passent par `lucioleize` en NEUTRE : la Note rapide n'a qu'une action principale, « Créer ». */
+  function buildMediaRow() {
+    mediaRow = el('div', { class: 'qm-media' });
+    const mkBtn = (icon, label, title, onClick) => {
+      const b = el('button', { attrs: { type: 'button', title: title, 'aria-label': title }, on: { click: onClick } });
+      b.appendChild(hdrIconAt(icon, 14));
+      b.appendChild(el('span', { text: label }));
+      return lucioleize(b, 'luc-neutral');
+    };
+    micBtn = mkBtn('microphone', 'Vocal', 'Enregistrer un message vocal', startRec);
+    mediaRow.appendChild(micBtn);
+    mediaRow.appendChild(mkBtn('camera', 'Photo', 'Ajouter des photos', () => fileEl && fileEl.click()));
+    // `capture="environment"` = caméra arrière proposée en mobile ; `multiple` garde la galerie.
+    fileEl = el('input', { attrs: { type: 'file', accept: 'image/*', capture: 'environment', multiple: '', hidden: '' },
+      on: { change: (e) => addShots(e.target.files) } });
+    mediaRow.appendChild(fileEl);
+    panel.appendChild(mediaRow);
+
+    shotsEl = el('div', { class: 'qm-shots', attrs: { hidden: '' } });
+    panel.appendChild(shotsEl);
+
+    recEl = el('div', { class: 'qm-rec', attrs: { hidden: '' } });
+    recEl.appendChild(el('span', { class: 'qm-dot' }));
+    recTimeEl = el('span', { class: 'qm-time', text: '0:00' });
+    recEl.appendChild(recTimeEl);
+    const wave = el('span', { class: 'qm-wave', attrs: { 'aria-hidden': 'true' } });
+    for (let i = 0; i < 22; i++) {   // vagues purement décoratives (CSS seul, aucune analyse audio)
+      const bar = el('i');
+      bar.style.animationDelay = (Math.random() * 0.9).toFixed(2) + 's';
+      bar.style.animationDuration = (0.6 + Math.random() * 0.7).toFixed(2) + 's';
+      wave.appendChild(bar);
+    }
+    recEl.appendChild(wave);
+    { const stop = el('button', { class: 'qm-rbtn stop', attrs: { type: 'button', title: 'Arrêter' }, on: { click: stopRec } });
+      stop.appendChild(hdrIconAt('player-stop', 13)); stop.appendChild(el('span', { text: 'Stop' }));
+      recEl.appendChild(stop); }
+    recEl.appendChild(el('button', { class: 'qm-rbtn qm-drop', text: '✕',
+      attrs: { type: 'button', title: 'Jeter l\'enregistrement', 'aria-label': 'Jeter l\'enregistrement' }, on: { click: cancelRec } }));
+    panel.appendChild(recEl);
+
+    // Liste des clips enregistrés — même mécanique que la bande de vignettes photo.
+    clipsEl = el('div', { class: 'qm-clips', attrs: { hidden: '' } });
+    panel.appendChild(clipsEl);
+
+    renderClips();
+    setVoiceState('idle');
   }
   function buildPanel() {
     panel.innerHTML = '';
@@ -5614,13 +6056,19 @@ function initQuickMemo(cfg) {
     // survit donc au cycle de soumission. `buildPanel()` reconstruit le panneau, chaque bouton neuf
     // repasse par ici, et `lucioleize` est idempotent de toute façon.
     goEl = lucioleize(el('button', { class: 'qm-go', text: 'Créer', attrs: { type: 'button' } }), 'luc-primary');
-    panel.appendChild(titleEl); panel.appendChild(textEl); panel.appendChild(folderEl); panel.appendChild(goEl);
+    panel.appendChild(titleEl); panel.appendChild(textEl);
+    buildMediaRow();
+    panel.appendChild(folderEl); panel.appendChild(goEl);
     fillFolders();
     // Entrée dans le titre = créer ; Échap = replier (pas de raccourci global clavier — [CMD-K] réservé).
     titleEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } else if (e.key === 'Escape') { panel.hidden = true; } });
     textEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
     folderEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
+    // « Créer » n'est actif que si le mémo porte QUELQUE CHOSE (titre, texte, vocal ou photo).
+    titleEl.addEventListener('input', refreshGo);
+    textEl.addEventListener('input', refreshGo);
     goEl.addEventListener('click', submit);
+    refreshGo();
   }
 
   (function () {  // lanceur déplaçable (souris + tactile), distinction clic/glisser (>4px = drag)
@@ -5650,7 +6098,9 @@ function initQuickMemo(cfg) {
   launch.addEventListener('click', () => {
     if (Date.now() < launchSuppressClick) return;
     const open = panel.hidden; panel.hidden = !open;
-    if (open) { fillFolders(); applyPanelPos(); if (titleEl) titleEl.focus(); }
+    // À l'ouverture on ré-évalue l'état des médias : `voiceAvailable()` et surtout le mode hors
+    // ligne peuvent avoir changé depuis la construction du panneau (bascule réseau à chaud).
+    if (open) { fillFolders(); setVoiceState('idle'); applyPanelPos(); if (titleEl) titleEl.focus(); }
   });
   window.addEventListener('resize', () => { applyLaunchPos(); if (!panel.hidden) applyPanelPos(); });
   buildPanel();
@@ -5682,6 +6132,10 @@ const HDR_ICONS = {
   eye: ['M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0', 'M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6'],
   // [HUB-CHROME] passage des pop-ins (Photos / Fichiers) aux icônes TRAIT monochromes.
   maximize: ['M4 8v-2a2 2 0 0 1 2 -2h2', 'M4 16v2a2 2 0 0 0 2 2h2', 'M16 4h2a2 2 0 0 1 2 2v2', 'M16 20h2a2 2 0 0 0 2 -2v-2'],
+  // [FX-CONVERTER V2] presse-papier (copie du résultat) et signet (« Garder » dans l'historique) —
+  // Tabler outline, `currentColor`, additifs : ils remplacent les derniers emojis du convertisseur.
+  clipboard: ['M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2', 'M9 3m0 2a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z'],
+  bookmark: ['M18 7v14l-6 -4l-6 4v-14a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4z'],
   // [COMMENTS-V2] avion « send » du composer de commentaires.
   plus: ['M12 5l0 14', 'M5 12l14 0'],
   send: ['M10 14l11 -11', 'M21 3l-6.5 18a.55 .55 0 0 1 -1 0l-3.5 -7l-7 -3.5a.55 .55 0 0 1 0 -1l18 -6.5'],

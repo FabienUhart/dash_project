@@ -843,9 +843,31 @@ function maybeInitQuickMemo() {
       if (content) body.content = content;
       if (pid) body.project_id = pid;
       const r = await api(token, '/memos', { method: 'POST', body: JSON.stringify(body) });
-      if (r.ok) { await reload(); return true; }
-      const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true });
-      return false;
+      if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true }); return null; }
+      const memo = await r.json().catch(() => null);
+      await reload();
+      // Le token du partage choisi voyage AVEC le résultat : dans le hub, chaque dossier a le
+      // sien, et `uploadMedia` en a besoin pour viser la bonne route /share/<token>/….
+      return (memo && memo.id) ? { id: memo.id, token: token } : true;
+    },
+    // [QUICK-MEMO V2] médias posés APRÈS création, par les routes invité EXISTANTES sous /share/…
+    // (invariant 5). `api()` du hub gère déjà le X-Guest-Token par partage et laisse le navigateur
+    // poser le Content-Type multipart quand le corps est un FormData.
+    // ⚠️ PNG/JPEG seulement côté invité (GUEST_IMG_EXT) : un HEIC est refusé et compté en échec.
+    uploadMedia: async (res, { photos, voices }) => {
+      let failed = 0;
+      for (const file of photos) {
+        const fd = new FormData(); fd.append('image', file);
+        const r = await api(res.token, '/memo/' + res.id + '/images', { method: 'POST', body: fd }).catch(() => null);
+        if (!r || !r.ok) failed++;
+      }
+      for (const v of voices) {   // un clip = une PJ ; séquentiel, chaque échec compté à part
+        const fd = new FormData(); fd.append('files', v.blob, v.filename);
+        const r = await api(res.token, '/memo/' + res.id + '/attachments', { method: 'POST', body: fd }).catch(() => null);
+        if (!r || !r.ok) failed++;
+      }
+      await reload();
+      return failed;
     },
   });
 }

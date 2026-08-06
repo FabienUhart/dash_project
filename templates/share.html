@@ -3087,9 +3087,31 @@ function render() {
         headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
         body: JSON.stringify(body),
       });
-      if (r.ok) { await load(); }
-      else { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true }); }
-      return r.ok;
+      if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Création impossible', { error: true }); return null; }
+      const memo = await r.json().catch(() => null);
+      await load();
+      return (memo && memo.id) ? memo : true;   // objet {id,…} → le widget peut y accrocher les médias
+    },
+    // [QUICK-MEMO V2] médias posés APRÈS création, par les routes invité EXISTANTES sous /share/…
+    // (invariant 5 : aucune route nouvelle, scope revalidé serveur, X-Guest-Token obligatoire).
+    // ⚠️ Côté invité le serveur n'accepte que PNG/JPEG (GUEST_IMG_EXT) : un HEIC d'iPhone est
+    // refusé en 400 et compté comme échec — le message le dit, rien n'est perdu en silence.
+    uploadMedia: async (memo, { photos, voices }) => {
+      let failed = 0;
+      for (const file of photos) {
+        const fd = new FormData(); fd.append('image', file);
+        const r = await fetch(API + '/memo/' + memo.id + '/images', {
+          method: 'POST', headers: { 'X-Guest-Token': guestToken() }, body: fd }).catch(() => null);
+        if (!r || !r.ok) failed++;
+      }
+      for (const v of voices) {   // un clip = une PJ ; séquentiel, chaque échec compté à part
+        const fd = new FormData(); fd.append('files', v.blob, v.filename);
+        const r = await fetch(API + '/memo/' + memo.id + '/attachments', {
+          method: 'POST', headers: { 'X-Guest-Token': guestToken() }, body: fd }).catch(() => null);
+        if (!r || !r.ok) failed++;
+      }
+      await load();
+      return failed;
     },
   });
   document.getElementById('title').innerHTML = '';

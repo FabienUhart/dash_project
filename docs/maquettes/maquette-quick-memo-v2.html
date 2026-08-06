@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Note rapide + vocal ([QUICK-MEMO] V2)</title>
+<style>
+  :root {
+    --bg: #0e1217; --panel: #161d25; --panel-2: #212b35; --text: #e8eef5;
+    --muted: #9aa7b4; --accent: #4fc3f7; --red: #f44336; --border: #283340;
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1f5; --panel: #ffffff; --panel-2: #eef2f7; --text: #1b2531;
+    --muted: #5c6b7a; --accent: #0288d1; --red: #d32f2f; --border: #d3dce5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+  .demo-bar { display:flex; align-items:center; gap:0.8rem; padding:0.7rem 1rem;
+    border-bottom:1px solid var(--border); background:var(--panel); font-size:0.85rem; color:var(--muted); }
+  .demo-bar b { color: var(--text); }
+  .demo-bar button { margin-left:auto; background:var(--panel-2); border:1px solid var(--border);
+    color:var(--text); border-radius:8px; padding:0.3rem 0.7rem; cursor:pointer; font:inherit; font-size:0.8rem; }
+
+  .stage { display:flex; gap:2rem; padding:1.2rem; flex-wrap:wrap; }
+  .inbox { flex:1; min-width: 260px; max-width: 380px; margin-left:auto; }
+  .inbox h3 { font-size:0.8rem; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase; margin:0 0 0.6rem; }
+  .inbox .empty { color:var(--muted); font-size:0.82rem; border:1px dashed var(--border); border-radius:10px; padding:0.9rem; }
+
+  .memo-card { background:var(--panel); border:1px solid var(--border); border-left:3px solid #66bb6a;
+    border-radius:10px; padding:0.65rem 0.8rem; margin-bottom:0.6rem; animation: pop .18s ease; }
+  @keyframes pop { from { transform: translateY(6px); opacity:0; } }
+  .memo-card .t { font-weight:600; font-size:0.9rem; }
+  .memo-card .c { color:var(--muted); font-size:0.83rem; margin-top:0.15rem; white-space:pre-wrap; }
+  .memo-card .proj { margin-top:0.45rem; font-size:0.72rem; color:var(--muted); }
+
+  /* ======== le widget, fidèle à #qm-panel ======== */
+  #qm-launch { position:fixed; left:1rem; bottom:7rem; z-index:3500; width:2.6rem; height:2.6rem; border-radius:50%;
+    border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:1.1rem; cursor:pointer;
+    box-shadow:0 4px 16px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; }
+  #qm-panel { position:fixed; left:1rem; bottom:9.9rem; z-index:3500; width:17rem; max-width:calc(100vw - 2rem);
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:0.8rem; color:var(--text);
+    box-shadow:0 8px 30px rgba(0,0,0,0.4); font-size:0.85rem; }
+  #qm-panel[hidden], #qm-launch[hidden] { display:none; }
+  .qm-head { display:flex; align-items:center; gap:0.4rem; margin:-0.2rem -0.2rem 0.5rem; padding:0.15rem 0.2rem; user-select:none; }
+  .qm-grip { flex:1; font-weight:600; font-size:0.8rem; color:var(--muted); }
+  .qm-x { background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.9rem; line-height:1; padding:0.1rem 0.3rem; border-radius:5px; }
+  .qm-x:hover { color:var(--text); background:var(--panel-2); }
+  .qm-title, .qm-text, .qm-folder { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:6px;
+    color:var(--text); font:inherit; font-size:0.85rem; padding:0.4rem 0.5rem; margin-bottom:0.45rem; }
+  .qm-text { resize:vertical; min-height:3.4rem; }
+  .qm-title:focus, .qm-text:focus, .qm-folder:focus { outline:none; border-color:var(--accent); }
+
+  /* Luciole (repris du gabarit mab-btn/luc-primary, simplifié pour la maquette) */
+  .luc { display:inline-flex; align-items:center; justify-content:center; gap:0.35rem; border-radius:9px;
+    border:1px solid var(--border); background:var(--panel-2); color:var(--muted); font:inherit; font-size:0.85rem;
+    padding:0.42rem 0.7rem; cursor:pointer; transition: transform .12s ease, box-shadow .12s ease, color .12s, border-color .12s; }
+  .luc:hover:not(:disabled) { transform: translateY(-2px); box-shadow:0 4px 14px rgba(0,0,0,0.25); color:var(--text); }
+  .luc-primary { background: rgba(79,195,247,0.12); border-color: rgba(79,195,247,0.4); color: var(--accent); font-weight:600; }
+  :root[data-theme="light"] .luc-primary { background: rgba(2,136,209,0.08); border-color: rgba(2,136,209,0.35); color:#1565c0; }
+  .luc-primary:hover:not(:disabled) { color: var(--accent); }
+  :root[data-theme="light"] .luc-primary:hover:not(:disabled) { color:#1565c0; }
+  .qm-go { width:100%; }
+  .qm-go:disabled { opacity:0.5; cursor:default; }
+  .qm-go:disabled:hover { transform:none; box-shadow:none; }
+
+  /* ======== LA NOUVEAUTÉ : rangée médias (vocal + photos) ======== */
+  .qm-voice { margin-bottom:0.45rem; }
+  .qm-media-row { display:flex; gap:0.4rem; }
+  .qm-mic { padding:0.32rem 0.6rem; font-size:0.8rem; flex:1; }
+  .qm-mic svg { width:14px; height:14px; }
+
+  .qm-shots { display:flex; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.45rem; }
+  .shot { position:relative; width:44px; height:44px; border-radius:7px; overflow:hidden;
+    border:1px solid var(--border); background:var(--panel-2); }
+  .shot img { width:100%; height:100%; object-fit:cover; display:block; }
+  .shot .shot-x { position:absolute; top:1px; right:1px; width:16px; height:16px; border:none; border-radius:5px;
+    background:rgba(0,0,0,0.55); color:#fff; font-size:0.62rem; line-height:1; cursor:pointer; display:flex;
+    align-items:center; justify-content:center; padding:0; }
+  .shot .shot-x:hover { background:var(--red); }
+  .memo-card .qm-shots { margin:0.45rem 0 0; }
+  .memo-card .shot { width:52px; height:52px; }
+
+  .qm-rec { display:flex; align-items:center; gap:0.5rem; background:var(--bg); border:1px solid var(--border);
+    border-radius:8px; padding:0.35rem 0.5rem; }
+  .rec-dot { width:9px; height:9px; border-radius:50%; background:var(--red); animation: blink 1.1s ease infinite; flex:none; }
+  @keyframes blink { 50% { opacity:0.25; } }
+  .rec-time { font-variant-numeric: tabular-nums; font-size:0.82rem; min-width:2.6rem; }
+  .rec-wave { flex:1; display:flex; align-items:center; gap:2px; height:18px; overflow:hidden; }
+  .rec-wave i { width:3px; border-radius:2px; background:var(--accent); opacity:0.75; animation: wv 0.9s ease-in-out infinite; }
+  @keyframes wv { 0%,100% { height:4px; } 50% { height:16px; } }
+  .rec-btn { background:none; border:1px solid var(--border); border-radius:7px; color:var(--muted);
+    cursor:pointer; padding:0.18rem 0.45rem; font-size:0.78rem; line-height:1.4; }
+  .rec-btn:hover { color:var(--text); background:var(--panel-2); }
+  .rec-btn.stop { color: var(--accent); border-color: rgba(79,195,247,0.4); }
+  .rec-btn.trash:hover { color: var(--red); border-color: var(--red); background:var(--panel-2); }
+
+  .qm-clip { display:flex; align-items:center; gap:0.5rem; background:var(--bg); border:1px solid var(--border);
+    border-radius:8px; padding:0.35rem 0.5rem; }
+  .clip-play { width:1.7rem; height:1.7rem; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center;
+    background: rgba(79,195,247,0.12); border:1px solid rgba(79,195,247,0.4); color:var(--accent); cursor:pointer; font-size:0.7rem; }
+  .clip-track { flex:1; height:4px; border-radius:2px; background:var(--panel-2); position:relative; overflow:hidden; }
+  .clip-track i { position:absolute; left:0; top:0; bottom:0; width:0%; background:var(--accent); border-radius:2px; }
+  .clip-dur { font-size:0.78rem; color:var(--muted); font-variant-numeric: tabular-nums; }
+
+  .memo-card .qm-clip { margin-top:0.45rem; }
+
+  .hint { position:fixed; left:1rem; bottom:2.2rem; max-width:17rem; font-size:0.75rem; color:var(--muted); }
+</style>
+</head>
+<body>
+  <div class="demo-bar">
+    Maquette <b>[QUICK-MEMO] V2 — texte + vocal + photos dans le même widget</b>
+    <span>· à jouer : 🎙 enregistrer / 📷 ajouter des photos → Créer</span>
+    <button id="theme-btn" type="button">☀️ Thème clair</button>
+  </div>
+
+  <div class="stage">
+    <div class="inbox">
+      <h3>📥 Inbox (résultat simulé)</h3>
+      <div class="empty" id="inbox-empty">Les mémos créés par le widget apparaîtront ici — texte, vocal, photos, ou n'importe quelle combinaison dans le MÊME mémo.</div>
+      <div id="inbox-list"></div>
+    </div>
+  </div>
+
+  <button id="qm-launch" type="button" title="Note rapide" hidden>✏️</button>
+
+  <div id="qm-panel" role="dialog" aria-label="Note rapide">
+    <div class="qm-head">
+      <span class="qm-grip">✏️ Note rapide</span>
+      <button class="qm-x" type="button" title="Masquer" onclick="hidePanel()">✕</button>
+    </div>
+    <input class="qm-title" id="f-title" type="text" placeholder="Titre (optionnel)">
+    <textarea class="qm-text" id="f-text" rows="3" placeholder="Note…"></textarea>
+
+    <!-- rangée médias : vocal (3 états) + photos -->
+    <div class="qm-voice qm-media-row" id="voice-idle">
+      <button class="luc qm-mic" id="mic-btn" type="button" onclick="startRec()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
+        Vocal
+      </button>
+      <button class="luc qm-mic" type="button" onclick="document.getElementById('f-photos').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Photo
+      </button>
+      <input type="file" id="f-photos" accept="image/*" capture="environment" multiple hidden onchange="addPhotos(this.files)">
+    </div>
+    <div class="qm-shots" id="shots" hidden></div>
+    <div class="qm-voice qm-rec" id="voice-rec" hidden>
+      <span class="rec-dot"></span>
+      <span class="rec-time" id="rec-time">0:00</span>
+      <span class="rec-wave" id="rec-wave"></span>
+      <button class="rec-btn stop" type="button" onclick="stopRec()">■ Stop</button>
+      <button class="rec-btn trash" type="button" title="Jeter" onclick="cancelRec()">✕</button>
+    </div>
+    <div class="qm-voice qm-clip" id="voice-clip" hidden>
+      <button class="clip-play" id="clip-play" type="button" onclick="togglePlay()">▶</button>
+      <span class="clip-track"><i id="clip-bar"></i></span>
+      <span class="clip-dur" id="clip-dur">0:00</span>
+      <button class="rec-btn trash" type="button" title="Jeter le vocal" onclick="discardClip()">✕</button>
+    </div>
+
+    <select class="qm-folder" id="f-folder">
+      <option>📥 Inbox</option><option>🌸 Voyage Japon</option><option>🏠 Maison</option>
+    </select>
+    <button class="luc luc-primary qm-go" id="go" type="button" disabled onclick="createMemo()">Créer</button>
+  </div>
+
+  <div class="hint">Le micro est réel si le navigateur l'autorise (tu peux te réécouter) — sinon la maquette simule. Rien n'est envoyé nulle part.</div>
+
+<script>
+  // ---------- thème ----------
+  const themeBtn = document.getElementById('theme-btn');
+  themeBtn.onclick = () => {
+    const r = document.documentElement;
+    const light = r.getAttribute('data-theme') !== 'light';
+    r.setAttribute('data-theme', light ? 'light' : 'dark');
+    themeBtn.textContent = light ? '🌙 Thème sombre' : '☀️ Thème clair';
+  };
+
+  // ---------- widget show/hide ----------
+  const panel = document.getElementById('qm-panel'), launchBtn = document.getElementById('qm-launch');
+  function hidePanel(){ panel.hidden = true; launchBtn.hidden = false; }
+  launchBtn.onclick = () => { panel.hidden = false; launchBtn.hidden = true; };
+
+  // ---------- état formulaire ----------
+  const fTitle = document.getElementById('f-title'), fText = document.getElementById('f-text'),
+        goBtn = document.getElementById('go');
+  let clip = null;            // { url, dur, blob? } | null
+  function refreshGo(){ goBtn.disabled = !(fTitle.value.trim() || fText.value.trim() || clip || (typeof photos !== 'undefined' && photos.length)); }
+  fTitle.addEventListener('input', refreshGo); fText.addEventListener('input', refreshGo);
+  fTitle.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); if(!goBtn.disabled) createMemo(); } });
+
+  // ---------- vagues ----------
+  const wave = document.getElementById('rec-wave');
+  for (let i=0;i<26;i++){ const b=document.createElement('i'); b.style.animationDelay=(Math.random()*0.9).toFixed(2)+'s'; b.style.animationDuration=(0.6+Math.random()*0.7).toFixed(2)+'s'; wave.appendChild(b); }
+
+  // ---------- enregistrement (réel si possible, sinon simulé) ----------
+  const stIdle = document.getElementById('voice-idle'), stRec = document.getElementById('voice-rec'), stClip = document.getElementById('voice-clip');
+  const recTime = document.getElementById('rec-time');
+  let t0 = 0, timer = null, mediaRec = null, chunks = [], stream = null;
+  const fmt = s => Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0');
+  const micBtn = document.getElementById('mic-btn');
+  // la rangée médias reste visible tant qu'on n'enregistre pas ; le 🎙 s'efface si un vocal est déjà pris
+  function show(state){ stIdle.hidden = state==='rec'; micBtn.hidden = state==='clip'; stRec.hidden = state!=='rec'; stClip.hidden = state!=='clip'; }
+
+  // ---------- photos ----------
+  let photos = [];   // { url, name }
+  const shotsEl = document.getElementById('shots');
+  function addPhotos(files){
+    for (const f of files) {
+      if (!f.type.startsWith('image/')) continue;
+      photos.push({ url: URL.createObjectURL(f), name: f.name });
+    }
+    document.getElementById('f-photos').value = '';
+    renderShots(); refreshGo();
+  }
+  function renderShots(){
+    shotsEl.hidden = photos.length === 0;
+    shotsEl.innerHTML = '';
+    photos.forEach((p, i) => {
+      const d = document.createElement('div'); d.className = 'shot';
+      const img = document.createElement('img'); img.src = p.url; img.alt = p.name; d.appendChild(img);
+      const x = document.createElement('button'); x.className = 'shot-x'; x.type = 'button'; x.textContent = '✕';
+      x.title = 'Retirer la photo';
+      x.onclick = () => { URL.revokeObjectURL(p.url); photos.splice(i,1); renderShots(); refreshGo(); };
+      d.appendChild(x);
+      shotsEl.appendChild(d);
+    });
+  }
+
+  async function startRec(){
+    t0 = Date.now(); chunks = []; mediaRec = null;
+    try {
+      if (navigator.mediaDevices && typeof MediaRecorder !== 'undefined') {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRec = new MediaRecorder(stream);
+        mediaRec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        mediaRec.start();
+      }
+    } catch(e) { mediaRec = null; }   // refus/permission → simulation
+    show('rec');
+    recTime.textContent = '0:00';
+    timer = setInterval(() => recTime.textContent = fmt((Date.now()-t0)/1000), 250);
+  }
+  function teardown(){ clearInterval(timer); if (stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; } }
+  function stopRec(){
+    const dur = (Date.now()-t0)/1000;
+    if (mediaRec && mediaRec.state === 'recording') {
+      mediaRec.onstop = () => {
+        const blob = new Blob(chunks, { type: mediaRec.mimeType || 'audio/webm' });
+        setClip({ url: URL.createObjectURL(blob), dur });
+      };
+      mediaRec.stop(); teardown();
+    } else { teardown(); setClip({ url: null, dur }); }
+  }
+  function cancelRec(){ if (mediaRec && mediaRec.state === 'recording') mediaRec.stop(); teardown(); show('idle'); }
+  function setClip(c){ clip = c; document.getElementById('clip-dur').textContent = fmt(c.dur); show('clip'); refreshGo(); }
+  function discardClip(){ if (clip && clip.url) URL.revokeObjectURL(clip.url); clip = null; show('idle'); refreshGo(); resetPlayer(); }
+
+  // ---------- lecture de l'aperçu ----------
+  let audio = null, playing = false, playTimer = null;
+  const clipPlay = document.getElementById('clip-play'), clipBar = document.getElementById('clip-bar');
+  function resetPlayer(){ playing = false; clipPlay.textContent = '▶'; clipBar.style.width = '0%'; clearInterval(playTimer); if (audio){ audio.pause(); audio = null; } }
+  function togglePlay(){
+    if (playing) { resetPlayer(); return; }
+    playing = true; clipPlay.textContent = '❚❚';
+    if (clip.url) {
+      audio = new Audio(clip.url); audio.play();
+      playTimer = setInterval(() => { if (!audio) return; clipBar.style.width = Math.min(100, audio.currentTime/clip.dur*100) + '%'; if (audio.ended) resetPlayer(); }, 100);
+    } else {  // simulation
+      const t = Date.now();
+      playTimer = setInterval(() => { const p = (Date.now()-t)/1000/clip.dur*100; clipBar.style.width = Math.min(100,p)+'%'; if (p>=100) resetPlayer(); }, 100);
+    }
+  }
+
+  // ---------- création (simulée) ----------
+  function createMemo(){
+    const list = document.getElementById('inbox-list');
+    document.getElementById('inbox-empty').style.display = 'none';
+    const card = document.createElement('div'); card.className = 'memo-card';
+    const now = new Date();
+    const stamp = now.toLocaleDateString('fr-FR',{day:'numeric',month:'short'}) + ' ' + now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    const autoTitle = (clip ? '🎙 Vocal' : '📷 Photo') + ' · ' + stamp;
+    const title = fTitle.value.trim() || (!fText.value.trim() && (clip || photos.length) ? autoTitle : '');
+    if (title) { const t = document.createElement('div'); t.className='t'; t.textContent = title; card.appendChild(t); }
+    if (fText.value.trim()) { const c = document.createElement('div'); c.className='c'; c.textContent = fText.value.trim(); card.appendChild(c); }
+    if (clip) {
+      const row = document.createElement('div'); row.className = 'qm-clip';
+      const u = clip.url, d = clip.dur;
+      row.innerHTML = '<button class="clip-play" type="button">▶</button><span class="clip-track"><i></i></span><span class="clip-dur">' + fmt(d) + '</span>';
+      const pb = row.querySelector('.clip-play'), bar = row.querySelector('.clip-track i');
+      let a = null, tm = null;
+      pb.onclick = () => {
+        if (a) { a.pause(); a = null; clearInterval(tm); pb.textContent='▶'; bar.style.width='0%'; return; }
+        pb.textContent='❚❚';
+        if (u) { a = new Audio(u); a.play(); tm = setInterval(()=>{ if(!a) return; bar.style.width = Math.min(100, a.currentTime/d*100)+'%'; if (a.ended){ a=null; clearInterval(tm); pb.textContent='▶'; bar.style.width='0%'; } },100); }
+        else { const t = Date.now(); tm = setInterval(()=>{ const p=(Date.now()-t)/1000/d*100; bar.style.width=Math.min(100,p)+'%'; if(p>=100){ clearInterval(tm); pb.textContent='▶'; bar.style.width='0%'; } },100); }
+      };
+      card.appendChild(row);
+    }
+    if (photos.length) {
+      const strip = document.createElement('div'); strip.className = 'qm-shots';
+      photos.forEach(p => {
+        const d = document.createElement('div'); d.className = 'shot';
+        const img = document.createElement('img'); img.src = p.url; img.alt = p.name;
+        d.appendChild(img); strip.appendChild(d);
+      });
+      card.appendChild(strip);
+    }
+    const proj = document.createElement('div'); proj.className = 'proj'; proj.textContent = document.getElementById('f-folder').value;
+    card.appendChild(proj);
+    list.prepend(card);
+    // rafale : le panneau reste ouvert, tout se vide (comme aujourd'hui)
+    fTitle.value = ''; fText.value = ''; clip = null; photos = []; renderShots(); show('idle'); resetPlayer(); refreshGo(); fTitle.focus();
+  }
+</script>
+</body>
+</html>

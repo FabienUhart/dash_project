@@ -1291,6 +1291,17 @@ aside#memo-panel {
   word-break: break-word;
 }
 .memo-note .mini-due { display: block; font-size: 0.7rem; margin-top: 0.2rem; }
+/* [MEMO-NOTE-PROJECT] badges + étiquette de dossier sur la MÊME ligne, qui se replie si les
+   badges sont longs. Le nom du dossier est ellipsé : `.memo-note` est en `pre-wrap`, d'où le
+   `nowrap` + `min-width: 0` explicites (sans quoi un élément flex refuse de rétrécir et le
+   post-it déborde sur les noms longs). Nom complet dans le `title`. */
+.memo-note .mini-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.15rem 0.4rem; margin-top: 0.2rem; }
+.memo-note .mini-row .mini-due { margin-top: 0; }
+.memo-note .mini-proj {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  font-size: 0.7rem; color: var(--muted); min-width: 0; max-width: 100%;
+}
+.memo-note .mini-proj-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .memo-note .mini-due.due-late { color: var(--danger); }
 .memo-note .mini-due.due-today { color: var(--yellow); }
 .memo-note .mini-due.due-future { color: var(--muted); }
@@ -8258,7 +8269,20 @@ function renderMemos() {
     if (memo.comment_count) extras.push('💬 ' + memo.comment_count);
     if ((memo.assignees || []).length) extras.push('@' + memo.assignees.map(a => a.replace(/@.*$/, '')).join(' @'));
     if (memo.guest_editor) extras.push('👤 ' + memo.guest_editor.replace(/\s*<[^>]*>/, ''));
-    if (extras.length) note.appendChild(el('span', { class: 'mini-due ' + (due ? due.cls : 'due-future'), text: extras.join('  ') }));
+    /* [MEMO-NOTE-PROJECT] La colonne agrège TOUS les mémos : sans étiquette de dossier, impossible
+       de savoir où vit « Vol Paris → Rome » sans l'ouvrir — et depuis [QUICK-MEMO V2] la capture
+       envoie tout dans l'Inbox, donc cette étiquette devient le support du tri. Badges et dossier
+       partagent la même ligne (elle se replie si les badges sont longs).
+       v1 = AFFICHAGE SEUL : aucun clic sur l'étiquette, le post-it entier est déjà la cible —
+       une cible imbriquée volerait le clic. « Ouvrir le board depuis l'étiquette » = lot à part. */
+    const miniRow = el('div', { class: 'mini-row' });
+    if (extras.length) miniRow.appendChild(el('span', { class: 'mini-due ' + (due ? due.cls : 'due-future'), text: extras.join('  ') }));
+    const mproj = memo.project_id ? state.projects.find(p => p.id === memo.project_id) : null;
+    const projTag = el('span', { class: 'mini-proj', attrs: { title: mproj ? mproj.name : 'Inbox' } });
+    projTag.appendChild(mproj ? comboIcon(mproj.emoji, usableProjColor(mproj.color), '📁') : comboIcon('📥', '', null));
+    projTag.appendChild(el('span', { class: 'mini-proj-name', text: mproj ? mproj.name : 'Inbox' }));
+    miniRow.appendChild(projTag);
+    note.appendChild(miniRow);
     // [MEMO-CARD-CLICK] clic = ouvrir DIRECTEMENT l'éditeur, sans changer de vue (fermer = revenir
     // où on était). Repli sur l'ancien comportement si l'éditeur Quill n'est pas prêt.
     note.addEventListener('click', () => {
@@ -8892,25 +8916,44 @@ if (typeof initQuickMemo === 'function') initQuickMemo({
   canUse: () => true,
   folders: () => qmFolderOptions(state.projects || []),
   defaultFolder: () => (Number.isInteger(state.memoProject) ? String(state.memoProject) : ''),
+  offline: () => isOffline,   // [QUICK-MEMO V2] hors ligne → pas de rangée médias (file = texte seul)
   submit: async ({ title, content, folder }) => {
     if (isOffline) {
       enqueueNote([title, content].filter(Boolean).join('\n'));
       renderPendingNotes();
-      return true;
+      return true;   // `true` sans id : le widget n'enchaîne aucun upload
     }
     const body = {};
     if (title) body.title = title;
     if (content) body.content = content;
     if (folder) body.project_id = Number(folder);
     try {
-      await api('/api/memos', { method: 'POST', body: JSON.stringify(body) });
+      const memo = await api('/api/memos', { method: 'POST', body: JSON.stringify(body) });
       await loadAll();
-      return true;
+      return (memo && memo.id) ? memo : true;   // objet {id,…} → le widget peut y accrocher les médias
     } catch (_) {
       enqueueNote([title, content].filter(Boolean).join('\n'));
       setOffline(true); renderPendingNotes();
       return true;  // mis en file (Inbox), rejeu au retour réseau
     }
+  },
+  // [QUICK-MEMO V2] médias posés APRÈS création, sur l'id du mémo, par les routes owner
+  // EXISTANTES (images + pièces jointes). Renvoie le nombre d'échecs — le mémo reste quoi qu'il
+  // arrive, jamais de suppression silencieuse.
+  uploadMedia: async (memo, { photos, voices }) => {
+    let failed = 0;
+    for (const file of photos) {
+      const fd = new FormData(); fd.append('image', file);
+      const r = await fetch(`/api/memos/${memo.id}/images`, { method: 'POST', body: fd }).catch(() => null);
+      if (!r || !r.ok) failed++;
+    }
+    for (const v of voices) {   // un clip = une PJ ; séquentiel, chaque échec compté à part
+      const fd = new FormData(); fd.append('files', v.blob, v.filename);
+      const r = await fetch(`/api/memos/${memo.id}/attachments`, { method: 'POST', body: fd }).catch(() => null);
+      if (!r || !r.ok) failed++;
+    }
+    await loadAll();
+    return failed;
   },
 });
 
