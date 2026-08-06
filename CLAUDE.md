@@ -104,6 +104,13 @@ Thread quotidien (`_backup_loop`, démarré à l'import) : export JSON + copie S
 
 Voir [IDEAS.md](IDEAS.md). Le README documente le modèle de données et l'API complète.
 
+**Rythme de travail** : au début de chaque session, consulte la **FILE D'ATTENTE** en tête d'`IDEAS.md` ; **en l'absence de brief collé, le lot n° 1 est le travail en cours**. Un brief collé par Fabien **prime toujours** sur la file. À chaque fin de lot, retirer l'entrée réalisée pour que la file remonte.
+
+**Journal de session partagé** — `.claude/session-log.md`, **append-only strict** : une ligne datée par événement, jamais d'édition ni de suppression d'une ligne existante (c'est un journal, pas un état). Partagé entre `[CC]` (Claude Code), `[COWORK]` et `[FABIEN]` ; format et emojis décrits dans l'en-tête du fichier. `.claude/` est gitignoré : rien ne part en prod.
+- **Lire** : les ~30 dernières lignes au début de chaque session, en même temps que la FILE D'ATTENTE.
+- **Écrire** : à chaque événement notable — `▶` début de lot, `✅` lot livré (avec `❓` si un arbitrage reste ouvert), `⚠` piège découvert, `🚀` commit/tag/déploiement. **Court** : le détail long reste dans `REALISATION.md`.
+- **Automatisé** : le hook `Stop` (`.claude/hooks/post-stop-rebuild.sh`) appende lui-même la ligne `✅ rebuild local OK` (ou `⚠ rebuild local ECHOUE`) en même temps qu'il écrit `handoff.json`. Le `▶` et les `⚠`/`❓` restent **manuels** — c'est du jugement, pas de l'automatisme.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

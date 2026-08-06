@@ -136,6 +136,11 @@ header h1#home-btn:focus-visible { outline: 2px solid var(--accent); outline-off
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 #search-wrap:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+/* [SEARCH-IN-FOLDER] Le chip consomme de la largeur : sans ces deux garde-fous, le champ de
+   saisie tombait à 5 px (mesuré) et devenait inutilisable. La barre s'élargit quand le chip est
+   présent (l'en-tête a la place), et le champ garde un plancher. Classe posée en JS plutôt que
+   `:has()` — même rendu sur tous les navigateurs, sans dépendre du support du sélecteur. */
+#search-wrap.has-chip { max-width: 500px; }
 #search {
   flex: 1;
   background: none;
@@ -144,8 +149,32 @@ header h1#home-btn:focus-visible { outline: 2px solid var(--accent); outline-off
   color: var(--text);
   font: inherit;
   font-size: 0.9rem;
-  min-width: 0;
+  min-width: 6rem;
 }
+/* [SEARCH-IN-FOLDER] chip de portée « dans : 🗻 Voyage Japon ✕ ». Tokens existants, gabarit des
+   petites pastilles (fond --panel-2, bordure --border, texte --muted) — invariant 9, rien de
+   bespoke. `max-width` + ellipse : un nom long ne pousse jamais le champ de saisie. */
+#search-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: none;
+  max-width: 13rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.15rem 0.1rem 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+#search-chip[hidden] { display: none; }
+#search-chip .sc-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#search-chip .sc-x {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 0.7rem; line-height: 1; padding: 0.15rem 0.3rem; border-radius: 999px;
+}
+#search-chip .sc-x:hover, #search-chip .sc-x:focus-visible { color: var(--text); background: var(--panel); }
 #search-wrap kbd {
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -1904,6 +1933,9 @@ dialog .actions {
   <div id="search-wrap">
     <span style="color:var(--muted)"><svg class="ic"><use href="#ic-search"/></svg></span>
     <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off" aria-label="Rechercher">
+    <!-- [SEARCH-IN-FOLDER] chip de portée : visible seulement quand on cherche DEPUIS un dossier.
+         Le ✕ élargit au global (l'ancien comportement reste donc à un clic). -->
+    <span id="search-chip" hidden></span>
     <select id="search-scope" title="Portée de la recherche (raccourcis : p# l# m#)">
       <option value="all">Tout</option>
       <option value="links">Liens</option>
@@ -2501,6 +2533,49 @@ function parseSearch() {
   return { scope, q: raw.toLowerCase() };
 }
 
+/* ===== [SEARCH-IN-FOLDER] la recherche respecte le dossier où l'on se trouve =====
+   Avant : dès qu'une recherche était active, le board abandonnait le scope du dossier
+   (`if (searchActive) return true`) — chercher « katy » depuis « Voyage Japon » sortait un
+   mémo des Vieilles Charrues SOUS le bandeau Voyage Japon. Désormais, dans un dossier, la
+   recherche est bornée au dossier ET à ses descendants ; un chip « dans : … ✕ » l'annonce et
+   permet d'élargir au global en un clic. Depuis « Tout » et l'Inbox, rien ne change.
+   `searchWide` n'est PAS persisté : il retombe dès qu'on vide la recherche ou qu'on change de
+   dossier — sinon un élargissement ponctuel contaminerait silencieusement les recherches
+   suivantes. */
+let searchWide = false;
+let searchWideProj = null;   // dossier où l'élargissement a été demandé (garde anti-fuite)
+function searchScopeSet() {
+  if (state.memoProject === 'all' || state.memoProject === 'inbox') return null;
+  return new Set([state.memoProject, ...projectDescendants(state.memoProject)]);
+}
+/* Portées JAMAIS bornées au dossier (arbitrage Fabien) : chercher des DOSSIERS ou des LIENS est
+   par nature transversal. `p#char` depuis un dossier ne renvoyait rien, alors que le préfixe
+   exprime justement l'intention inverse ; et un lien n'appartient à aucun dossier, l'y borner
+   n'a simplement pas de sens. `m#` et la portée « Tout » restent scopés — c'est tout l'objet de
+   [SEARCH-IN-FOLDER]. Le test porte sur la PORTÉE EFFECTIVE, pas sur le préfixe : le sélecteur
+   « Projets »/« Liens » exprime la même intention que `p#`/`l#` et mérite le même traitement. */
+const SEARCH_WIDE_SCOPES = ['projects', 'links'];
+function searchIsScoped() {
+  const { q, scope } = parseSearch();
+  if (!q) return false;
+  if (SEARCH_WIDE_SCOPES.indexOf(scope) >= 0) return false;
+  if (state.memoProject === 'all' || state.memoProject === 'inbox') return false;
+  return !(searchWide && searchWideProj === state.memoProject);
+}
+/* Prédicat UNIQUE du périmètre du board. Partagé par la liste, la CARTE et la FRISE : leur
+   commentaire d'origine exige « mêmes mémos que la liste affichée → jamais de point fantôme »,
+   donc scoper la liste seule aurait désynchronisé la carte. Un seul endroit décide. */
+function boardScopeFilter() {
+  const searchActive = !!parseSearch().q;
+  const scoped = searchIsScoped();
+  const scope = searchScopeSet();
+  return (m) => {
+    if (state.memoProject === 'all') return true;
+    if (state.memoProject === 'inbox') return searchActive ? true : !m.project_id;
+    if (searchActive && !scoped) return true;   // ✕ cliqué → recherche élargie au global
+    return scope.has(m.project_id);
+  };
+}
 function matchingProjects(q) {
   const needle = q.startsWith('#') ? q.slice(1) : q;
   if (!needle) return [];
@@ -4153,15 +4228,9 @@ function boardMapPoints() {
   // Mêmes mémos que la liste affichée (recherche + filtre + projet) → la carte
   // reste cohérente avec ce qu'on voit, jamais de point « fantôme ».
   const searchActive = !!parseSearch().q;
-  const scope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
-    ? new Set([state.memoProject, ...projectDescendants(state.memoProject)])
-    : null;
-  const memos = visibleMemos().filter(m => {
-    if (searchActive) return true;
-    if (state.memoProject === 'all') return true;
-    if (state.memoProject === 'inbox') return !m.project_id;
-    return scope.has(m.project_id);
-  });
+  const scoped = searchIsScoped();            // [SEARCH-IN-FOLDER]
+  const scope = searchScopeSet();
+  const memos = visibleMemos().filter(boardScopeFilter());
   const points = [];
   const projById = (id) => state.projects.find(p => p.id === id);
   memos.forEach(m => {
@@ -4184,7 +4253,9 @@ function boardMapPoints() {
       imgUrl: imgSize((m.images && m.images.length) ? '/uploads/' + m.images[0] : '', 't'),
     });
   });
-  if (scope && !searchActive) {
+  // [SEARCH-IN-FOLDER] les points de DOSSIER suivent le même périmètre : on les garde tant qu'on
+  // est borné au dossier (pas de recherche, ou recherche scopée), on les retire en global.
+  if (scope && (!searchActive || scoped)) {
     // [FESTIVAL-MAP-OVERLAY fix] Aligné sur l'invité (shareMapPoints) : ajouter les locations du
     // projet courant ET de ses SOUS-PROJETS descendants (cas festival : les 6 scènes portent la
     // géoloc, pas les mémos) → même carte + overlay owner que les invités.
@@ -4200,18 +4271,9 @@ function boardMapPoints() {
 // [MAP-TIMELINE] Mémos DATÉS du même périmètre que boardMapPoints — GPS OU NON
 // (les sans-GPS apparaissent dans la frise, non centrables).
 function boardDatedPoints() {
-  const searchActive = !!parseSearch().q;
-  const scope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
-    ? new Set([state.memoProject, ...projectDescendants(state.memoProject)])
-    : null;
+  const inScope = boardScopeFilter();          // [SEARCH-IN-FOLDER] même périmètre que la liste
   const projById = (id) => state.projects.find(p => p.id === id);
-  return visibleMemos().filter(m => {
-    if (!m.due_date) return false;
-    if (searchActive) return true;
-    if (state.memoProject === 'all') return true;
-    if (state.memoProject === 'inbox') return !m.project_id;
-    return scope.has(m.project_id);
-  }).map(m => ({
+  return visibleMemos().filter(m => m.due_date && inScope(m)).map(m => ({
     kind: 'memo', id: m.id, project_id: m.project_id || null, groups: m.map_groups || [],
     title: (m.emoji ? m.emoji + ' ' : '') + (m.title || stripHTML(m.content).slice(0, 40) || MEMO_EMPTY_LABEL),
     due_date: m.due_date, due_end: m.due_end || '', due_time: m.due_time || '', end_time: m.end_time || '',  // [MEMO-DATE-RANGE]/[FESTIVAL-VOTE nuit]
@@ -7563,15 +7625,11 @@ function renderBoard() {
   if (voteBoardProj !== state.memoProject) { selectedVoteId = null; voteCreate = null; voteBoardProj = state.memoProject; }
 
   const searchActive = !!parseSearch().q;
-  const projScope = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
-    ? new Set([state.memoProject, ...projectDescendants(state.memoProject)])
-    : null;
-  const allMemos = visibleMemos().filter(m => {
-    if (searchActive) return true;
-    if (state.memoProject === 'all') return true;
-    if (state.memoProject === 'inbox') return !m.project_id;
-    return projScope.has(m.project_id);
-  });
+  const searchScoped = searchIsScoped();       // [SEARCH-IN-FOLDER]
+  const projScope = searchScopeSet();
+  // Changer de dossier passe par renderAll (pas par refreshSearch) : le chip doit suivre.
+  if (typeof renderSearchChip === 'function') renderSearchChip();
+  const allMemos = visibleMemos().filter(boardScopeFilter());
   const todayD = dateStr(new Date());
 
   const title = el('div', { attrs: { id: 'board-title' } });
@@ -7792,7 +7850,9 @@ function renderBoard() {
 
   const { scope: sScope, q: sQ } = parseSearch();
   if (sQ && sScope !== 'links') {
-    const projs = matchingProjects(sQ);
+    // [SEARCH-IN-FOLDER] en recherche scopée, ne proposer que les dossiers DU périmètre —
+    // ouvrir un dossier hors scope depuis un résultat scopé serait incohérent.
+    const projs = matchingProjects(sQ).filter(p => !searchScoped || projScope.has(p.id));
     if (projs.length) {
       const wrap = el('div', { class: 'memo-section' });
       const h = el('h2', { text: 'PROJETS ' });
@@ -8051,7 +8111,11 @@ function renderBoard() {
     projById: (id) => state.projects.find(p => p.id === id) || null,
     onChange: renderBoard,
   });
-  if (subHide.bar) board.appendChild(subHide.bar);
+  // [SEARCH-IN-FOLDER] En recherche GLOBALE, les chips se construisaient sur les résultats et
+  // affichaient donc des dossiers étrangers au bandeau courant (Glenmor sous Voyage Japon) : la
+  // rangée mentait. On la masque dans ce cas. En recherche scopée, `allMemos` est déjà borné au
+  // dossier, donc les chips sont justes et la rangée reste utilisable comme d'habitude.
+  if (subHide.bar && (!searchActive || searchScoped)) board.appendChild(subHide.bar);
 
   // [TOOLS-DOCK] BONUS : glisser un FICHIER au-dessus de la liste déplie automatiquement la
   // drop-zone (le geste réveille l'outil). Garde anti-faux-positif : on ne réagit qu'aux
@@ -8421,10 +8485,38 @@ if (isOffline) setOffline(true); else if (offlineQueue().length) flushOfflineQue
 const searchInput = document.getElementById('search');
 const searchScopeSel = document.getElementById('search-scope');
 
+/* [SEARCH-IN-FOLDER] Chip de portée. Rendu à chaque rafraîchissement de recherche : il n'apparaît
+   que si la recherche est effectivement bornée à un dossier. Le ✕ élargit au global — on mémorise
+   AUSSI le dossier concerné, pour qu'un élargissement ne suive pas l'utilisateur ailleurs. */
+function renderSearchChip() {
+  const chip = document.getElementById('search-chip');
+  if (!chip) return;
+  const wrap = document.getElementById('search-wrap');
+  const off = () => { chip.hidden = true; chip.innerHTML = ''; if (wrap) wrap.classList.remove('has-chip'); };
+  if (!searchIsScoped()) { off(); return; }
+  const proj = state.projects.find(p => p.id === state.memoProject);
+  if (!proj) { off(); return; }
+  chip.innerHTML = '';
+  chip.hidden = false;
+  if (wrap) wrap.classList.add('has-chip');
+  chip.title = 'Recherche limitée à « ' + proj.name +' » et ses sous-dossiers';
+  chip.appendChild(el('span', { text: 'dans :' }));
+  chip.appendChild(comboIcon(proj.emoji, usableProjColor(proj.color), '📁'));
+  chip.appendChild(el('span', { class: 'sc-name', text: proj.name }));
+  chip.appendChild(el('button', {
+    class: 'sc-x', text: '✕',
+    attrs: { type: 'button', title: 'Chercher dans tout le dashboard', 'aria-label': 'Élargir la recherche à tout le dashboard' },
+    on: { click: () => { searchWide = true; searchWideProj = state.memoProject; refreshSearch(); } },
+  }));
+}
 function refreshSearch() {
   const { scope, q } = parseSearch();
   searchScopeSel.value = scope;
   searchScopeSel.classList.toggle('scoped', scope !== 'all');
+  // Vider la recherche remet la portée par défaut : un élargissement ponctuel ne doit pas
+  // contaminer la recherche suivante.
+  if (!q) { searchWide = false; searchWideProj = null; }
+  renderSearchChip();
   if (q && scope === 'projects' && state.view !== 'memos') {
     state.view = 'memos';
     renderAll();

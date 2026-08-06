@@ -6,6 +6,19 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 **Ce fichier = backlog (idées à faire).** Ce qui est **livré** est journalisé dans [`REALISATION.md`](REALISATION.md) (par tag `VX.Y.Z`) ; les specs verrouillées dans `docs/specs/`.
 
+---
+
+## ⏭ FILE D'ATTENTE (ordre de réalisation)
+
+**Ordre ferme, tenu à jour à chaque fin de lot** : le lot terminé est **retiré**, la file remonte d'un cran. En l'absence de brief collé, le **n° 1 est le travail en cours**. Un brief collé par Fabien **prime toujours** sur cette file. Le reste du fichier, en dessous, est le backlog **non ordonné**.
+
+1. **[SEARCH-DESK-UX]** — barre de recherche qui s'élargit au focus + panneau d'aide des raccourcis (owner).
+   _Brief détaillé à venir, après validation de la maquette par Fabien._
+2. **[SEARCH-SHARED]** — composant de recherche **partagé** dans `templates/partials/_shared.js.html` (bottom-sheet mobile + aide), branché owner/share/hub par le pattern `cfg`.
+   _Remplace les anciennes tranches B et C. Zéro route : `share_data` est déjà côté client._
+
+---
+
 ### En cours / prochains lots (à jour 10 juil. 2026)
 
 - ✅ **[FAVORITES]** — favoris owner-only en base, **non exporté** — **LIVRÉ [V21.1.58→60]** : V1 (favoris projets, section ★ desktop) + V1.1 (modèle typé `{kind:'project'|'view'}`, épinglage des vues Plan/Agenda/Mémos, entrée « ⭐ Favoris » mobile ouvrant la liste dans le main) + V1.2 (réordonnancement drag-and-drop, Pointer Events, desk souris + mobile appui long). Détail : `REALISATION.md`.
@@ -190,6 +203,8 @@ Relevé exhaustif après le rattrapage [V27.23.188]. Tout ce qui suit **porte en
 **V2 (backlog)** : [CARD-HOVER-ACTIONS] — barre d'actions au survol de la card pour modifier direct sans passer par la fiche.
 
 ## Quick wins
+
+- **[SEARCH-IN-FOLDER]** — **✅ FAIT [V27.26.198]** (owner seul, `index.html`, export 27 inchangé) : chercher depuis un dossier ne sort plus des résultats d'ailleurs sous le mauvais bandeau ; chip « dans : … ✕ » pour élargir en un clic ; SOUS-DOSSIERS ne ment plus. Les 3 filtres (liste + carte + frise) passent par un prédicat unique. Détail `REALISATION.md`. **Suites** : (1) **tranche C — share/hub** : même bug de conception à traiter côté invités (repris par [SEARCH-SHARED] en file d'attente) ; (2) ~~`p#` scopé~~ → **arbitré et livré dans le même lot** : les portées `projects` et `links` ne sont jamais bornées au dossier (préfixes `p#`/`l#` ET sélecteur), `m#` et « Tout » restent scopés.
 
 - **[MEMO-NOTE-PROJECT]** — **✅ FAIT [V27.25.193]** (frontend pur, `index.html` seul, export 27 inchangé) : le post-it de la colonne MÉMOS porte enfin son dossier (`comboIcon` + nom en muted, sur la ligne des mini-badges, ellipsé, « 📥 Inbox » sans projet). Affichage seul. Détail `REALISATION.md`. **Suite possible** : cliquer l'étiquette pour ouvrir le board du dossier — écarté en v1 (le post-it entier est déjà cliquable, une cible imbriquée lui volerait le clic), à traiter comme un lot à part si le besoin se confirme.
 
