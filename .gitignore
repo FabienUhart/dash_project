@@ -19,3 +19,6 @@ venv/
 # skill tooling (emil-design-eng)
 .agents/
 skills-lock.json
+
+# graphify : sorties du graphe de connaissance (re-générables par /graphify)
+graphify-out/

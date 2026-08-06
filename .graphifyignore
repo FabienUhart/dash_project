@@ -1,0 +1,7 @@
+# Dépendances front auto-hébergées (invariant 6) : code vendorisé/minifié.
+# Elles n'apprennent rien sur le projet et noient le graphe sous des symboles
+# d'une lettre. sw.js et favicon.svg restent : ce sont des fichiers maison.
+*.min.js
+static/quill-table-better.js
+static/leaflet.js
+static/leaflet.markercluster.js
