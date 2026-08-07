@@ -5122,6 +5122,12 @@ def _send_hub_invite(cfg, to_email, name, hub_url, pin):
     msg["From"] = cfg["from"]
     msg["To"] = to_email
     msg.set_content(body)  # set_content gère l'échappement/encodage (pas d'injection d'en-têtes)
+    _smtp_send(cfg, msg)
+
+
+def _smtp_send(cfg, msg):
+    """Transport commun (starttls sur 587). Lève en cas d'échec — l'appelant journalise
+    SANS jamais faire apparaître le secret SMTP ni un code d'accès."""
     with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as s:
         s.ehlo()
         s.starttls(context=ssl.create_default_context())
@@ -5129,6 +5135,64 @@ def _send_hub_invite(cfg, to_email, name, hub_url, pin):
         if cfg["user"]:
             s.login(cfg["user"], cfg["pwd"])
         s.send_message(msg)
+
+
+# ───────────────────────── [GUEST-MAIL] récap d'invitation owner → invité ─────────────────────────
+# Même brique SMTP que [HUB-EMAIL-INVITE], dans l'AUTRE SENS : l'owner envoie à son invité le lien
+# du partage + le code. Owner-only (derrière Authelia) — aucune route publique nouvelle, invariant 5
+# non concerné. Destinataire FORCÉ = l'e-mail enregistré de l'invité (jamais une adresse libre du
+# client → pas de relais ouvert). Le CODE ne doit jamais atterrir dans les logs.
+
+RECAP_DEFAULT_MSG = "Je te partage ça sur mon Dashboard — jettes-y un œil quand tu veux."
+
+
+def _clean_recap_message(value):
+    """Mot d'accueil libre de l'owner. Le corps du mail est du TEXTE BRUT (pas de HTML) : on
+    retire les caractères de contrôle (dont les CR, qui serviraient une injection si le texte
+    passait un jour en en-tête) et on borne la longueur. Vide → phrase par défaut."""
+    txt = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    txt = "".join(c for c in txt if c == "\n" or ord(c) >= 32)
+    return txt.strip()[:600] or RECAP_DEFAULT_MSG
+
+
+def _hdr_safe(value, limit=70):
+    """Valeur destinée à un EN-TÊTE (Subject) : une seule ligne, bornée. Sans ça, un nom de
+    dossier contenant un saut de ligne casserait l'en-tête (injection)."""
+    txt = " ".join(str(value or "").split())
+    return txt[:limit]
+
+
+def _send_share_recap(cfg, to_email, guest_name, owner_name, kind, target, share_url, pin, message):
+    """Récap d'invitation : mot d'accueil + lien du partage (+ code si fourni). Texte simple,
+    aucun HTML — les clients mail font ce qu'ils veulent, le texte passe partout."""
+    what = "le mémo" if kind == "memo" else "le dossier"
+    label = _hdr_safe(target) or ("un mémo" if kind == "memo" else "un dossier")
+    who = _hdr_safe(owner_name, 40) or "Quelqu'un"
+    greeting = (guest_name or "").strip() or "Bonjour"
+    lines = [
+        f"{greeting},",
+        "",
+        message,
+        "",
+        ("Le mémo" if kind == "memo" else "Le dossier") + f" : « {label} »",
+        f"Ton lien : {share_url}",
+        "",
+    ]
+    if pin:
+        lines += [f"Ton code d'accès à 4 chiffres : {pin}", ""]
+    else:
+        lines += ["Le code d'accès à 4 chiffres t'est communiqué séparément.", ""]
+    lines += [
+        "Ouvre le lien, saisis le code une fois, et c'est bon.",
+        "Ce lien est personnel — ne le partage pas.",
+        "",
+    ]
+    msg = EmailMessage()
+    msg["Subject"] = f"{who} te partage {what} « {label} »"
+    msg["From"] = cfg["from"]
+    msg["To"] = to_email
+    msg.set_content("\n".join(lines))  # gère échappement/encodage (pas d'injection d'en-têtes)
+    _smtp_send(cfg, msg)
 
 
 def _share_memo_dict(row, links=None):
@@ -5252,17 +5316,19 @@ def grant_guest_project():
         "SELECT * FROM share_guests WHERE share_id = ? AND email = ?", (share_id, email)
     ).fetchone()
     if existing:
+        guest_id = existing["id"]
         db.execute(
             "UPDATE share_guests SET status = 'approved', approved_at = ?, "
             "name = COALESCE(NULLIF(?, ''), name) WHERE id = ?",
-            (now, name, existing["id"]),
+            (now, name, guest_id),
         )
     else:
-        db.execute(
+        cur = db.execute(
             "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at) "
             "VALUES (?, ?, ?, ?, 'approved', ?, ?)",
             (share_id, email, name, secrets.token_urlsafe(24), now, now),
         )
+        guest_id = cur.lastrowid
     db.commit()
     hub = _ensure_hub(db, email, name)  # [ONE-LINK-MULTI] garantit le hub de l'e-mail
     _ensure_guest_home(db, email, name)  # [GUEST-HOME] octroi owner = invité approuvé → espace perso
@@ -5270,6 +5336,8 @@ def grant_guest_project():
         "share_id": share_id, "token": token, "pin": pin, "can_edit": bool(can_edit), "role": role,
         "project": proj["name"], "reused": reused, "url": f"/share/{token}",
         "hub_token": hub["hub_token"] if hub else "", "hub_pin": hub["pin"] if hub else "",
+        # [GUEST-MAIL] l'accès créé/réactivé, pour proposer « ✉ Envoyer le récap » dans la foulée.
+        "guest_id": guest_id,
     })
 
 
@@ -5704,6 +5772,59 @@ def update_guest(guest_id):
     if status == "approved":  # [GUEST-HOME] approbation manuelle owner → espace perso (idempotent)
         _ensure_guest_home(db, row["email"], row["name"])
     return jsonify({"id": guest_id, "status": status})
+
+
+@app.route("/api/guests/<int:guest_id>/send-recap", methods=["POST"])
+def send_guest_recap(guest_id):
+    """[GUEST-MAIL] Envoie à CET invité le récap de son accès : mot d'accueil + lien du partage
+    (+ code, optionnel). Owner-only (derrière Authelia) : aucune route publique nouvelle,
+    invariant 5 non concerné. Le destinataire est FORCÉ = l'e-mail enregistré de l'invité — le
+    corps de requête ne porte QUE le mot d'accueil et la case « inclure le code » (jamais une
+    adresse → pas de relais ouvert). Rate-limit partagé avec [HUB-EMAIL-INVITE]. Ni le secret
+    SMTP ni le CODE n'apparaissent dans les logs. Export 27 inchangé (rien de persisté)."""
+    cfg = _smtp_config()
+    if not cfg:
+        return jsonify({"error": "SMTP non configuré (renseigner SMTP_* dans .env)"}), 400
+    if _invite_throttled():
+        return jsonify({"error": "trop d'envois, réessaie dans une minute"}), 429
+    db = get_db()
+    row = db.execute(
+        "SELECT g.id, g.email, g.name, g.status, s.kind, s.target_id, s.token, s.pin "
+        "FROM share_guests g JOIN shares s ON s.id = g.share_id WHERE g.id = ?",
+        (guest_id,),
+    ).fetchone()
+    if not row:
+        return jsonify({"error": "invité introuvable"}), 404
+    to_email = parseaddr(row["email"] or "")[1].strip().lower()  # destinataire = e-mail de l'invité, point.
+    if "@" not in to_email:
+        return jsonify({"error": "e-mail de l'invité invalide"}), 400
+    data = request.get_json(silent=True) or {}
+    message = _clean_recap_message(data.get("message"))
+    # Case cochée par défaut (décision Fabien) : lien + code dans le même mail, cercle privé.
+    include_pin = data.get("include_pin", True) is not False
+    pin = (_row_get(row, "pin") or "") if include_pin else ""
+    if row["kind"] == "memo":
+        t = db.execute(
+            "SELECT content, title FROM memos WHERE id = ?", (row["target_id"],)
+        ).fetchone()
+        target = (_row_get(t, "title") or _text_excerpt(t["content"], 60)) if t else ""
+    else:
+        t = db.execute(
+            "SELECT name FROM projects WHERE id = ?", (row["target_id"],)
+        ).fetchone()
+        target = t["name"] if t else ""
+    share_url = request.host_url.rstrip("/") + "/share/" + row["token"]
+    try:
+        _send_share_recap(
+            cfg, to_email, row["name"] or "", _owner_name(db),
+            row["kind"], target, share_url, pin, message,
+        )
+    except Exception:
+        # Ne jamais exposer/loguer le secret SMTP, le détail brut ni le CODE.
+        app.logger.warning("send-recap: échec SMTP pour l'invité %s", guest_id)
+        return jsonify({"error": "échec de l'envoi (voir la configuration SMTP)"}), 502
+    _INVITE_SENT.append(time.time())
+    return jsonify({"ok": True, "email": to_email, "pin_included": bool(pin)})
 
 
 @app.route("/api/guests/rename", methods=["POST"])

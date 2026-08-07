@@ -1200,7 +1200,7 @@ function runMapDialog(cfg) {
   async function deleteGroup(g) {
     const ok = await confirmPopin(
       'Supprimer le groupe « ' + g + ' » ?\nLes points restent — ils ne seront simplement plus étiquetés « ' + g + ' ». Aucun mémo supprimé.',
-      { okLabel: 'Supprimer', danger: true }
+      { title: 'Supprimer ce groupe ?', okLabel: 'Supprimer', danger: true }
     );
     if (!ok) return;
     for (const p of current) {
@@ -2212,7 +2212,7 @@ async function runPhotoView(cfg) {
     if (ph && ph.has_gps) bar.appendChild(obtn('map-pin', 'Localiser cette photo sur la carte', () => cfg.openMap(ph.filename)));
     if (cfg.canEdit && ph) {
       bar.appendChild(obtn('trash', 'Supprimer cette photo', async () => {
-        if (!(await confirmPopin('Supprimer cette photo ?\nElle sera retirée de son mémo.', { okLabel: 'Supprimer' }))) return;
+        if (!(await confirmPopin('Elle sera retirée de son mémo.', { title: 'Supprimer cette photo ?', okLabel: 'Supprimer' }))) return;
         await cfg.deletePhoto(ph); await reload();
       }, 'iv-danger'));
     }
@@ -2991,7 +2991,7 @@ function runImageViewer(cfg) {
   closeBtn.addEventListener('click', () => dlg.close());
   if (delBtn) {
     delBtn.addEventListener('click', async () => {
-      if (!(await confirmPopin('Supprimer cette image ?'))) return;
+      if (!(await confirmPopin('Elle sera retirée du mémo.', { title: 'Supprimer cette image ?' }))) return;
       await cfg.onDelete(images[idx]);
       images.splice(idx, 1);
       if (!images.length) { dlg.close(); return; }
@@ -3353,7 +3353,7 @@ function attachRow(a, cfg) {
     acts.appendChild(d); }
   if (cfg.canEdit) acts.appendChild(ivIconBtn('button', 'trash', 'Supprimer', 'iv-danger', {
     click: async () => {
-      if (typeof confirmPopin === 'function' && !(await confirmPopin('Supprimer « ' + a.orig_name + ' » ?', { okLabel: 'Supprimer' }))) return;
+      if (typeof confirmPopin === 'function' && !(await confirmPopin('« ' + a.orig_name + ' » sera retiré.', { title: 'Supprimer ce fichier ?', okLabel: 'Supprimer' }))) return;
       try { const r = await fetch(a.url, { method: 'DELETE', headers: cfg.headers || {} }); if (!r.ok) throw 0; } catch (e) { notify('Suppression impossible', { error: true }); return; }
       if (cfg.onChange) cfg.onChange();
     },
@@ -4400,7 +4400,7 @@ function renderMemoPhotos(cfg) {
           class: 'mp-del', text: '×', attrs: { type: 'button', title: 'Supprimer la photo' },
           on: { click: async (e) => {
             e.stopPropagation();
-            if (!(await confirmPopin('Supprimer cette photo ?'))) return;
+            if (!(await confirmPopin('Elle sera retirée du mémo.', { title: 'Supprimer cette photo ?' }))) return;
             await cfg.onDelete(name); await cfg.onChange();
           } },
         }));
@@ -5134,7 +5134,7 @@ function openGuestSettings(cfg) {
         text: n ? (n + ' dossier' + (n > 1 ? 's' : '') + ' épinglé' + (n > 1 ? 's' : '')) : 'Aucun dossier épinglé.' }));
       if (n) {
         const clear = dangerSoftBtn('Vider les favoris', async () => {
-          if (!(await confirmPopin('Retirer les ' + n + ' dossier(s) de vos favoris ?\nLes dossiers eux-mêmes ne sont pas touchés.', { okLabel: 'Vider' }))) return;
+          if (!(await confirmPopin('Les ' + n + ' dossier(s) seront dépinglés. Les dossiers eux-mêmes ne sont pas touchés.', { title: 'Vider les favoris ?', okLabel: 'Vider' }))) return;
           if (typeof cfg.favorites.onClear === 'function') cfg.favorites.onClear();
           draw();
         }, { icon: 'trash' });
@@ -6211,6 +6211,8 @@ const HDR_ICONS = {
   'player-stop': ['M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z'],
   // [CARD-COVER] « liste » = affichage Compact de la bascule (l'Immersif réutilise `photo`).
   list: ['M9 6l11 0', 'M9 12l11 0', 'M9 18l11 0', 'M5 6l0 .01', 'M5 12l0 .01', 'M5 18l0 .01'],
+  // [SEARCH-SHARED] loupe — le hub et le share n'ont pas de sprite `ic-search`, ils consomment celle-ci.
+  search: ['M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0', 'M21 21l-6 -6'],
 };
 // Icône trait dimensionnée en une ligne (raccourci du duo hdrIcon + setAttribute × 2).
 function hdrIconAt(name, px) {
@@ -6706,5 +6708,333 @@ function hdrToolbar() {
       return bar;
     },
   };
+}
+
+/* ============ [SEARCH-SHARED] recherche partagée : aide (desktop) + feuille (mobile) ============
+   UN composant pour les 3 pages (ADR-001, pattern `cfg`) : le panneau d'aide des raccourcis et la
+   feuille de recherche mobile, avec portées en chips, aide et RÉSULTATS EN DIRECT.
+
+   Le composant ne lit AUCUNE donnée : il ne connaît ni `state` ni `DATA`, tout passe par `cfg`.
+   C'est ce qui le rend légitime ici — il n'élargit aucun périmètre invité (invariant 5) et ne
+   décide de rien : la page fournit sa requête, ses portées et ses résultats, déjà bornés chez elle.
+   Zéro route : `share_data` / `/data` sont déjà côté client.
+
+   cfg = {
+     input, anchor,                    // champ inline de la page + boîte sous laquelle poser l'aide
+     helpRows: [{k, fill, d}],         // libellés STATIQUES (d = HTML, jamais de donnée utilisateur)
+     helpFoot: [[touche, texte], …],
+     scopeNote: () => 'texte' | '',    // mention contextuelle (dossier courant), '' = pas de mention
+     scopes: () => [{key, label}],     // chips de portée de la feuille ([] = pas de rangée)
+     folderChip: () => ({label, active, onToggle}) | null,   // chip « 📁 Ce dossier »
+     getQuery, setQuery, getScope, setScope,
+     results: (q, scope) => [{emoji, title, sub, onOpen}],   // déjà bornés par la page
+     onChange: () => void,             // la page re-rend
+     placeholder,
+   }
+   Renvoie { refreshHelp, positionHelp, openSheet, closeSheet, sheetOpen }. */
+
+// Parseur PUR des préfixes de portée `p#` / `l#` / `m#` (aussi `p:`), identique aux 3 pages.
+// Rien d'autre n'est interprété : le `#tag` reste dans `q`, chaque page le traite comme avant.
+function parseSearchPrefix(raw, scope) {
+  let q = String(raw == null ? '' : raw).trim();
+  const m = q.match(/^([plm])[#:](.*)$/i);
+  if (m) {
+    scope = { p: 'projects', l: 'links', m: 'memos' }[m[1].toLowerCase()];
+    q = m[2].trim();
+  }
+  return { scope: scope, q: q.toLowerCase() };
+}
+
+// Vrai sur mobile / pointeur grossier : c'est là que la feuille remplace la saisie inline.
+function searchSheetMode() {
+  try { return window.matchMedia('(max-width:900px),(pointer:coarse)').matches; } catch (e) { return false; }
+}
+
+function _searchStyle() {
+  if (document.getElementById('search-shared-style')) return;
+  const st = document.createElement('style'); st.id = 'search-shared-style';
+  st.textContent =
+    // ── panneau d'aide (desktop) ──
+    // ⚠️ `position:fixed` sur le <body>, PAS dans la barre : l'en-tête owner porte
+    // `backdrop-filter:blur()`, ce qui en fait un « backdrop root » — un descendant qui déborde
+    // est composité avec l'arrière-plan flouté et laisse voir les cards au travers, MÊME avec un
+    // fond opaque. Constaté à l'écran en [V27.26.199], la contrainte survit au déménagement ici.
+    '.sh-panel{position:fixed;z-index:60;background:var(--panel);border:1px solid var(--border);'
+    + 'border-radius:12px;box-shadow:0 10px 34px rgba(0,0,0,0.35);padding:0.5rem;display:none;'
+    // Le panneau épouse la largeur de la barre — mais le champ du hub ne fait que ~166 px (mesuré),
+    // et les lignes d'aide s'y repliaient en bouillie. Plancher de lisibilité, jamais de débordement.
+    + 'text-align:left;cursor:default;min-width:min(320px,92vw);box-sizing:border-box}'
+    + '.sh-panel.open{display:block}'
+    + '.sh-panel h5{margin:0.2rem 0.5rem 0.4rem;font-size:0.68rem;letter-spacing:0.07em;'
+    + 'text-transform:uppercase;color:var(--muted);font-weight:600}'
+    + '.sh-panel .sh-row{display:flex;align-items:center;gap:0.7rem;padding:0.4rem 0.5rem;'
+    + 'border-radius:8px;cursor:pointer}'
+    + '.sh-panel .sh-row:hover,.sh-panel .sh-row:focus-visible{background:var(--panel-2);outline:none}'
+    + '.sh-panel kbd{background:var(--panel-2);border:1px solid var(--border);border-bottom-width:2px;'
+    + 'border-radius:5px;padding:0.05rem 0.45rem;font-size:0.78rem;color:var(--accent);'
+    + 'font-family:ui-monospace,Menlo,monospace;min-width:3.2rem;text-align:center;flex:none}'
+    + '.sh-panel .sh-d{color:var(--muted);font-size:0.82rem}'
+    + '.sh-panel .sh-d b{color:var(--text);font-weight:600}'
+    + '.sh-panel .sh-d i{font-style:italic}'
+    + '.sh-panel .sh-foot{display:flex;gap:1rem;flex-wrap:wrap;margin-top:0.3rem;'
+    + 'padding:0.45rem 0.5rem 0.25rem;border-top:1px solid var(--border);color:var(--muted);font-size:0.75rem}'
+    + '.sh-panel .sh-foot kbd{min-width:0;padding:0 0.3rem;font-size:0.7rem;border-radius:4px;color:var(--muted)}'
+    // ── feuille de recherche (mobile) ── même doctrine que [GUEST-SETTINGS] : un <dialog>, deux
+    // présentations. Sur desktop (ouverture forcée) elle reste une pop-in centrée classique.
+    + '#search-sheet{width:min(520px,94vw);max-width:min(520px,94vw);border:1px solid var(--border);'
+    + 'border-radius:14px;background:var(--panel);color:var(--text);padding:0;'
+    + 'box-shadow:0 18px 50px rgba(0,0,0,0.45)}'
+    + '#search-sheet[open]{display:flex;flex-direction:column;max-height:88vh}'
+    + '#search-sheet::backdrop{background:rgba(0,0,0,0.5)}'
+    + '.ss-handle{display:none}'
+    + '.ss-row{flex:0 0 auto;display:flex;align-items:center;gap:0.5rem;margin:0.7rem 0.8rem 0.55rem;'
+    + 'background:var(--bg);border:1px solid var(--accent);border-radius:12px;padding:0.55rem 0.7rem}'
+    + '.ss-row input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--text);'
+    + 'font:inherit;font-size:1rem}'
+    + '.ss-row button{background:none;border:none;color:var(--muted);cursor:pointer;padding:0.2rem;'
+    + 'display:inline-flex;align-items:center;border-radius:8px}'
+    + '.ss-row button:hover{color:var(--text)}'
+    + '.ss-chips{flex:0 0 auto;display:flex;gap:0.4rem;flex-wrap:wrap;padding:0 0.8rem 0.55rem}'
+    // Chip sélectionné = gabarit `.prio-btn` du système (invariant 9), pas un langage à part.
+    + '.ss-chip{background:var(--panel-2);border:1px solid var(--border);color:var(--muted);'
+    + 'border-radius:999px;padding:0.25rem 0.75rem;font-size:0.8rem;cursor:pointer;font:inherit;'
+    + 'font-size:0.8rem;line-height:1.4}'
+    + '.ss-chip.on{background:var(--accent);color:#10141a;border-color:var(--accent);font-weight:600}'
+    + '.ss-help{flex:0 0 auto;padding:0 0.6rem 0.5rem}'
+    + '.ss-help .sh-row{display:flex;align-items:center;gap:0.6rem;padding:0.35rem 0.4rem;'
+    + 'border-radius:8px;cursor:pointer}'
+    + '.ss-help .sh-row:hover{background:var(--panel-2)}'
+    + '.ss-help kbd{background:var(--panel-2);border:1px solid var(--border);border-bottom-width:2px;'
+    + 'border-radius:5px;padding:0.05rem 0.4rem;font-size:0.8rem;color:var(--accent);'
+    + 'font-family:ui-monospace,Menlo,monospace;min-width:2.8rem;text-align:center;flex:none}'
+    + '.ss-help .sh-d{color:var(--muted);font-size:0.8rem}'
+    + '.ss-help .sh-d b{color:var(--text);font-weight:600}'
+    + '.ss-help .sh-d i{font-style:italic}'
+    + '.ss-results{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 0.8rem 0.9rem}'
+    + '.ss-item{display:flex;align-items:flex-start;gap:0.55rem;width:100%;text-align:left;'
+    + 'background:var(--panel-2);border:1px solid var(--border);border-radius:10px;'
+    + 'padding:0.55rem 0.7rem;margin-bottom:0.4rem;color:var(--text);font:inherit;cursor:pointer}'
+    + '.ss-item:hover,.ss-item:focus-visible{border-color:var(--accent);outline:none}'
+    + '.ss-item .ss-t{flex:1;min-width:0;font-size:0.9rem;overflow-wrap:anywhere}'
+    + '.ss-item .ss-s{display:block;color:var(--muted);font-size:0.72rem;margin-top:0.2rem}'
+    + '.ss-empty{color:var(--muted);font-size:0.85rem;text-align:center;padding:1.2rem 0}'
+    + '.ss-more{color:var(--muted);font-size:0.75rem;text-align:center;padding:0.2rem 0 0.4rem}'
+    // ≤900 px / pointeur grossier : MÊME composant, présentation feuille collée en bas.
+    + '@media (max-width:900px),(pointer:coarse){'
+    // `inset:auto 0 0 0` + `width:100%` + `margin:0` : la largeur se déduit des deux bords
+    // (100vw déborderait de la barre de défilement) — même gotcha que [GUEST-SETTINGS].
+    + ' #search-sheet{box-sizing:border-box;width:100%;max-width:100%;inset:auto 0 0 0;margin:0;'
+    + 'position:fixed;border-radius:16px 16px 0 0;border-bottom:none}'
+    // Chaque page anime l'entrée de SES pop-ins (`dialog[open]{animation:dlg-in}` — translate +
+    // scale) : sur une feuille collée en bas, ce transform la décentre et la fait passer sous le
+    // pli. On le neutralise, et l'entrée « qui monte » est rendue par `ss-up`.
+    + ' #search-sheet[open]{height:86vh;max-height:86vh;animation:none;transform:none}'
+    + ' .ss-handle{display:block;width:38px;height:4px;border-radius:2px;background:var(--border);'
+    + 'margin:0.5rem auto 0;cursor:pointer}}'
+    + '@media (prefers-reduced-motion:no-preference){'
+    + '@media (max-width:900px),(pointer:coarse){'
+    + ' #search-sheet[open]{animation:ss-up 0.22s ease}}}'
+    + '@keyframes ss-up{from{transform:translateY(100%)}to{transform:none}}';
+  document.head.appendChild(st);
+}
+
+const SEARCH_SHEET_MAX = 40;   // plafond d'affichage — annoncé sous la liste, jamais silencieux
+
+function attachSearchUI(cfg) {
+  cfg = cfg || {};
+  _searchStyle();
+  const input = cfg.input;
+  const rows = cfg.helpRows || [];
+  const foot = cfg.helpFoot || [];
+  const call = (fn, dflt) => { try { return typeof fn === 'function' ? fn() : dflt; } catch (e) { return dflt; } };
+
+  /* ---------- panneau d'aide (desktop) ----------
+     Les lignes pré-remplissent le champ au clic. `mousedown` + `preventDefault` est OBLIGATOIRE :
+     avec un `click`, le navigateur retire le focus du champ AVANT de tirer le handler, le panneau
+     se ferme sous le curseur et le clic n'aboutit jamais. (Piège constaté en [V27.26.199].) */
+  const panel = el('div', { class: 'sh-panel', attrs: { role: 'group', 'aria-label': 'Raccourcis de recherche' } });
+  const fillFromHelp = (fill) => {
+    if (input) { input.value = fill; input.focus(); try { input.setSelectionRange(fill.length, fill.length); } catch (_) {} }
+    if (cfg.setQuery) cfg.setQuery(fill);
+    if (cfg.onChange) cfg.onChange();
+    refreshHelp();
+  };
+  const helpRowEl = (r, onPick) => {
+    const row = el('div', { class: 'sh-row', attrs: { role: 'button', tabindex: '-1', title: 'Pré-remplir « ' + r.fill + ' »' } });
+    row.appendChild(el('kbd', { text: r.k }));
+    const d = el('span', { class: 'sh-d' });
+    d.innerHTML = r.d;   // libellés STATIQUES fournis par la page, aucune donnée utilisateur
+    row.appendChild(d);
+    row.addEventListener('mousedown', (e) => { e.preventDefault(); onPick(r.fill); });
+    return row;
+  };
+  if (rows.length) {
+    panel.appendChild(el('h5', { text: 'Raccourcis de recherche' }));
+    rows.forEach(r => panel.appendChild(helpRowEl(r, fillFromHelp)));
+  }
+  if (foot.length) {
+    const f = el('div', { class: 'sh-foot' });
+    foot.forEach(([k, txt]) => {
+      const s = el('span');
+      s.appendChild(el('kbd', { text: k }));
+      s.appendChild(document.createTextNode(' ' + txt));
+      f.appendChild(s);
+    });
+    panel.appendChild(f);
+  }
+  // Mention contextuelle (dossier courant) : n'a de sens que parfois → ajoutée/retirée à chaud.
+  const note = el('div', { class: 'sh-foot', attrs: { hidden: '' } });
+  panel.appendChild(note);
+  document.body.appendChild(panel);
+
+  function positionHelp() {
+    const anchor = cfg.anchor || input;
+    if (!anchor || !panel.classList.contains('open')) return;
+    const r = anchor.getBoundingClientRect();
+    panel.style.left = Math.round(r.left) + 'px';
+    panel.style.top = Math.round(r.bottom + 6) + 'px';
+    panel.style.width = Math.round(r.width) + 'px';
+  }
+  function refreshHelp() {
+    // Ouvert seulement si le champ est VIDE et a le focus : dès la première frappe l'aide s'efface
+    // pour laisser voir les résultats, et revient si on vide. Jamais sur mobile (la feuille prend le relais).
+    const open = !!input && (input.value || '').trim() === ''
+      && document.activeElement === input && !searchSheetMode();
+    panel.classList.toggle('open', open);
+    positionHelp();
+    const txt = call(cfg.scopeNote, '') || '';
+    note.hidden = !txt;
+    note.textContent = txt;
+  }
+
+  /* ---------- feuille de recherche (mobile) ---------- */
+  let sheet = null, sInput = null, sChips = null, sHelp = null, sRes = null;
+  function buildSheet() {
+    if (sheet) return sheet;
+    sheet = el('dialog', { attrs: { id: 'search-sheet', 'aria-label': 'Rechercher' } });
+    sheet.appendChild(el('div', { class: 'ss-handle', attrs: { role: 'button', tabindex: '-1', 'aria-label': 'Fermer' },
+      on: { click: () => closeSheet() } }));
+    const row = el('div', { class: 'ss-row' });
+    row.appendChild(hdrIconAt('search', 18));
+    sInput = el('input', { attrs: { type: 'text', autocomplete: 'off', 'aria-label': 'Rechercher',
+      placeholder: cfg.placeholder || 'Rechercher…' } });
+    row.appendChild(sInput);
+    const x = el('button', { attrs: { type: 'button', title: 'Fermer', 'aria-label': 'Fermer' }, on: { click: () => closeSheet() } });
+    x.appendChild(hdrIconAt('x', 17));
+    row.appendChild(x);
+    sheet.appendChild(row);
+    sChips = el('div', { class: 'ss-chips' });   sheet.appendChild(sChips);
+    sHelp = el('div', { class: 'ss-help' });     sheet.appendChild(sHelp);
+    sRes = el('div', { class: 'ss-results' });   sheet.appendChild(sRes);
+    sInput.addEventListener('input', () => {
+      if (input) input.value = sInput.value;
+      if (cfg.setQuery) cfg.setQuery(sInput.value);
+      if (cfg.onChange) cfg.onChange();
+      refreshSheet();
+    });
+    // Échap = vider PUIS fermer (même contrat que la barre inline).
+    sheet.addEventListener('cancel', (e) => { e.preventDefault(); closeSheet(); });
+    document.body.appendChild(sheet);
+    return sheet;
+  }
+  function refreshSheet() {
+    if (!sheet || !sheet.open) return;
+    const q = (sInput.value || '').trim();
+    // portées
+    sChips.innerHTML = '';
+    const scopes = call(cfg.scopes, []) || [];
+    const cur = call(cfg.getScope, 'all');
+    scopes.forEach(s => {
+      const c = el('button', { class: 'ss-chip' + (s.key === cur ? ' on' : ''), text: s.label, attrs: { type: 'button' } });
+      c.addEventListener('click', () => {
+        if (cfg.setScope) cfg.setScope(s.key);
+        if (cfg.onChange) cfg.onChange();
+        refreshSheet(); sInput.focus();
+      });
+      sChips.appendChild(c);
+    });
+    const fc = call(cfg.folderChip, null);
+    if (fc) {
+      const c = el('button', { class: 'ss-chip' + (fc.active ? ' on' : ''), text: fc.label, attrs: { type: 'button' } });
+      c.addEventListener('click', () => { fc.onToggle(); refreshSheet(); sInput.focus(); });
+      sChips.appendChild(c);
+    }
+    sChips.hidden = !sChips.children.length;
+    // aide (champ vide seulement) + résultats
+    sHelp.innerHTML = '';
+    sHelp.hidden = !!q || !rows.length;
+    if (!q) rows.forEach(r => sHelp.appendChild(helpRowEl(r, (fill) => {
+      sInput.value = fill; sInput.focus();
+      try { sInput.setSelectionRange(fill.length, fill.length); } catch (_) {}
+      if (input) input.value = fill;
+      if (cfg.setQuery) cfg.setQuery(fill);
+      if (cfg.onChange) cfg.onChange();
+      refreshSheet();
+    })));
+    sRes.innerHTML = '';
+    if (!q) {
+      sRes.appendChild(el('div', { class: 'ss-empty', text: 'Tape pour chercher — les résultats s\'affichent en direct.' }));
+      return;
+    }
+    const parsed = parseSearchPrefix(q, cur);
+    const hits = call(() => cfg.results(parsed.q, parsed.scope), []) || [];
+    if (!hits.length) {
+      sRes.appendChild(el('div', { class: 'ss-empty', text: 'Aucun résultat pour « ' + q + ' »' }));
+      return;
+    }
+    hits.slice(0, SEARCH_SHEET_MAX).forEach(h => {
+      const b = el('button', { class: 'ss-item', attrs: { type: 'button' } });
+      if (h.emoji) b.appendChild(el('span', { text: h.emoji }));
+      const t = el('span', { class: 'ss-t', text: h.title || '(sans titre)' });
+      if (h.sub) t.appendChild(el('span', { class: 'ss-s', text: h.sub }));
+      b.appendChild(t);
+      b.addEventListener('click', () => { closeSheet(); if (h.onOpen) h.onOpen(); });
+      sRes.appendChild(b);
+    });
+    // Plafond ANNONCÉ : une troncature muette se lirait comme « tout est là ».
+    if (hits.length > SEARCH_SHEET_MAX) {
+      sRes.appendChild(el('div', { class: 'ss-more',
+        text: SEARCH_SHEET_MAX + ' premiers résultats sur ' + hits.length + ' — affine la recherche.' }));
+    }
+  }
+  function openSheet() {
+    buildSheet();
+    if (sheet.open) return;
+    sInput.value = call(cfg.getQuery, '') || '';
+    panel.classList.remove('open');       // l'aide desktop n'a plus lieu d'être
+    sheet.showModal();
+    refreshSheet();
+    // Le focus est posé APRÈS l'animation d'entrée : le poser avant fait sauter la feuille sur iOS
+    // (le clavier monte pendant que la feuille monte).
+    setTimeout(() => { try { sInput.focus(); } catch (_) {} }, 240);
+  }
+  function closeSheet() {
+    if (sheet && sheet.open) sheet.close();
+  }
+
+  /* ---------- branchements ---------- */
+  if (input) {
+    // Sur mobile, entrer dans le champ inline OUVRE la feuille : un seul point d'entrée par page,
+    // aucun dock à inventer. Le champ inline reste la surface desktop.
+    const toSheet = (e) => {
+      if (!searchSheetMode()) return;
+      e.preventDefault();
+      try { input.blur(); } catch (_) {}
+      openSheet();
+    };
+    input.addEventListener('focus', toSheet);
+    input.addEventListener('mousedown', toSheet);
+    input.addEventListener('focus', refreshHelp);
+    input.addEventListener('blur', () => panel.classList.remove('open'));
+    // La barre owner s'élargit en 0.22 s : au focus, sa largeur finale n'est pas connue. On se cale
+    // sur la fin de transition (déterministe) + un rAF pour le cas sans transition (reduced-motion).
+    input.addEventListener('focus', () => requestAnimationFrame(positionHelp));
+    if (cfg.anchor) cfg.anchor.addEventListener('transitionend', (e) => {
+      if (e.propertyName === 'max-width' || e.propertyName === 'width') positionHelp();
+    });
+  }
+  window.addEventListener('resize', positionHelp);
+
+  return { refreshHelp, positionHelp, openSheet, closeSheet, sheetOpen: () => !!(sheet && sheet.open) };
 }
 </script>

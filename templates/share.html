@@ -93,6 +93,16 @@ header {
 header h1 { margin: 0; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
 header .mode { font-size: 0.75rem; color: var(--muted); background: var(--panel-2); padding: 0.2rem 0.6rem; border-radius: 4px; }
 header .gs-gear { margin-left: auto; }   /* [GUEST-SETTINGS] l'engrenage prend la place de la lune */
+/* [SEARCH-SHARED] la page partagée n'avait AUCUNE recherche. Barre au gabarit de l'owner (mêmes
+   tokens, invariant 9) ; sur mobile / pointeur grossier, entrer dedans ouvre la feuille du partial. */
+#search-wrap {
+  display: flex; align-items: center; gap: 0.4rem; flex: 1;
+  max-width: 340px; min-width: 130px; margin-left: 0.6rem;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.35rem 0.7rem; transition: max-width 0.22s ease, border-color 0.2s, box-shadow 0.2s;
+}
+#search-wrap:focus-within { max-width: 520px; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,195,247,0.15); }
+#search { flex: 1; min-width: 5rem; background: none; border: none; outline: none; color: var(--text); font: inherit; font-size: 0.88rem; }
 button.icon { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s var(--ease), transform 0.1s var(--ease); }
 button.icon:hover { background: var(--bg-elev); }
 button.icon:active { transform: scale(0.94); }
@@ -920,6 +930,10 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 <div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
   <h1 id="title">…</h1>
+  <!-- [SEARCH-SHARED] barre de recherche du partage (la loupe vient du jeu d'icônes du partial). -->
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Rechercher…" autocomplete="off" aria-label="Rechercher">
+  </div>
   <!-- [GUEST-SETTINGS] la lune a disparu : le thème vit dans la pop-in Paramètres, ouverte
        par l'engrenage posé ici au boot (icône Tabler du partial). -->
   <span class="mode" id="mode"></span>
@@ -2081,7 +2095,7 @@ function openShareVoteManage(v) {
     b.addEventListener('click', onClick);
     return lucioleize(b, 'luc-neutral');
   };
-  if (!closed) actions.appendChild(svBtn('trophy', 'Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await svPost('close'); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
+  if (!closed) actions.appendChild(svBtn('trophy', 'Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return; const r = await svPost('close'); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
   else actions.appendChild(svBtn('rotate', 'Rouvrir', async () => { const r = await svPost('reopen', { vote_deadline: dl.value || '' }); if (r.ok) reloadClose(); else notify('Réouverture impossible.', { error: true }); }));
   actions.appendChild(svBtn('rotate', 'Remettre à zéro', async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await svPost('reset', { vote_deadline: dl.value || '' }); if (r.ok) reloadClose(); else notify('Impossible.', { error: true }); }));
   // [DANGER-SOFT] supprimer un vote : icône trait, monochrome au repos, rouge au survol.
@@ -2098,7 +2112,7 @@ function openShareVoteManage(v) {
     if (!sel.size) { notify('Au moins une option.', { error: true }); return; }
     const removed = (v.options || []).some(o => !sel.has(o.memo_id) && (o.vote_count || 0) > 0);
     const downgrade = v.vote_mode === 'multi' && mode === 'single';
-    if ((removed || downgrade) && !(await confirmPopin(downgrade ? 'Passer en « un seul » : chaque votant garde sa voix la plus récente.' : 'Retirer une option supprimera ses voix.', { title: 'Confirmer', okLabel: 'Confirmer' }))) return;
+    if ((removed || downgrade) && !(await confirmPopin(downgrade ? 'Passer en « un seul » : chaque votant garde sa voix la plus récente.' : 'Retirer une option supprimera ses voix.', { title: 'Modifier ce vote ?', okLabel: 'Enregistrer' }))) return;
     const r = await svPost('', { name, vote_mode: mode, vote_deadline: dl.value || '', event_date: evd.value || '', memo_ids: [...sel] });
     if (r.ok) reloadClose(); else { const e = await r.json().catch(() => ({})); notify(e.error || 'Impossible.', { error: true }); }
   });
@@ -2139,10 +2153,35 @@ function projDescendants(pid) {
   return out;
 }
 
+/* ===== [SEARCH-SHARED] recherche du partage =====
+   Le filtre de recherche est posé DANS `scopedMemos()`, le passage obligé du board, de la carte et
+   de la frise : une seule décision de périmètre, donc jamais un point de carte sans sa card (même
+   exigence que le prédicat unique de l'owner, [SEARCH-IN-FOLDER]). `shareSearchWide` n'est pas
+   persisté : il retombe dès que la recherche est vidée. */
+let shareSearchScope = 'all';
+let shareSearchWide = false;
+function shareSearchRaw() { const i = document.getElementById('search'); return i ? i.value : ''; }
+function shareSearch() { return parseSearchPrefix(shareSearchRaw(), shareSearchScope); }
+function shareMatchingProjects(q) {
+  if (!q) return [];
+  const n = q.charAt(0) === '#' ? q.slice(1) : q;
+  return (DATA.projects || []).filter(p => (p.name || '').toLowerCase().includes(n));
+}
+function shareSearchScoped() { return PFILTER !== 'all' && !!shareSearch().q && !shareSearchWide; }
 function scopedMemos() {
-  if (PFILTER === 'all') return DATA.memos;
-  const set = new Set([PFILTER, ...projDescendants(PFILTER)]);
-  return DATA.memos.filter(m => set.has(m.project_id));
+  const { scope, q } = shareSearch();
+  let ms = DATA.memos || [];
+  // Dossier courant : borné au dossier + descendants, sauf si le chip a été éteint (recherche large).
+  if (PFILTER !== 'all' && !(q && shareSearchWide)) {
+    const set = new Set([PFILTER, ...projDescendants(PFILTER)]);
+    ms = ms.filter(m => set.has(m.project_id));
+  }
+  if (!q) return ms;
+  if (scope === 'projects') {
+    const ids = new Set(shareMatchingProjects(q).map(p => p.id));
+    return ms.filter(m => ids.has(m.project_id));
+  }
+  return ms.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
 }
 
 // [PHOTO-BATCH-DOWNLOAD] Fichiers d'un dossier partagé (+ sous-dossiers) — scope borné à
@@ -3537,7 +3576,7 @@ function render() {
             // SERVEUR (match par e-mail) : la page ne fait qu'afficher — viser le message d'un
             // autre reste refusé côté serveur (403), invariant 5.
             c.can_delete && { label: '✕', title: 'Supprimer mon message', danger: true, onClick: async () => {
-              if (!(await confirmPopin('Supprimer ton message ? Il laissera une trace « Message supprimé » et les réponses resteront.'))) return;
+              if (!(await confirmPopin('Il laissera une trace « Message supprimé » et les réponses resteront.', { title: 'Supprimer ton message ?' }))) return;
               const resp = await fetch(API + '/comment/' + c.id, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } });
               if (resp.ok) await load(); else notify('Suppression impossible.', { error: true });
             } },
@@ -3730,6 +3769,58 @@ projBtn.addEventListener('click', (e) => withBusy(e.currentTarget, addSubProject
 ].forEach(([id, variant]) => lucioleize(document.getElementById(id), variant));
 
 _dangerSoftStyle();   // [DANGER-SOFT] feuille du danger discret posée dès le boot (helper partagé)
+/* [SEARCH-SHARED] recherche du partage : le composant du partial (aide desktop + feuille mobile).
+   Les résultats sont EXACTEMENT ce que la page affiche déjà (`scopedMemos`) — le composant ne lit
+   pas les données, il ne peut donc rien montrer hors du partage (invariant 5 : le serveur borne
+   déjà `share_data`, on ne fait que présenter ce qui est là). Zéro route nouvelle. */
+function shareRefreshSearch() {
+  if (!shareSearch().q) shareSearchWide = false;   // vider remet la portée par défaut
+  if (shareSearchUI) shareSearchUI.refreshHelp();
+  render();
+}
+const shareSearchUI = attachSearchUI({
+  input: document.getElementById('search'),
+  anchor: document.getElementById('search-wrap'),
+  placeholder: 'Rechercher… (p# dossiers)',
+  helpRows: [
+    { k: 'p#', fill: 'p#', d: 'Chercher un <b>dossier</b> — <i>p#hôtels</i>' },
+    { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#train</i>' },
+  ],
+  helpFoot: [['Échap', 'efface et ferme']],
+  scopeNote: () => {
+    const p = PFILTER !== 'all' ? (DATA.projects || []).find(x => x.id === PFILTER) : null;
+    return p ? 'Dans « ' + p.name + ' », la recherche y reste bornée — le chip du dossier élargit à tout le partage.' : '';
+  },
+  scopes: () => ([{ key: 'all', label: 'Tout' }, { key: 'memos', label: 'Mémos' }, { key: 'projects', label: 'Dossiers' }]),
+  folderChip: () => {
+    const p = PFILTER !== 'all' ? (DATA.projects || []).find(x => x.id === PFILTER) : null;
+    if (!p) return null;
+    return { label: (p.emoji || '📁') + ' ' + p.name, active: shareSearchScoped(),
+      onToggle: () => { shareSearchWide = !shareSearchWide; shareRefreshSearch(); } };
+  },
+  getQuery: () => shareSearchRaw(),
+  setQuery: () => {},   // la valeur vit dans le champ inline, tenu à jour par le composant
+  getScope: () => shareSearchScope,
+  setScope: (v) => { shareSearchScope = v; },
+  results: () => {
+    const { scope, q } = shareSearch();
+    if (!q) return [];
+    const label = (id) => { const p = (DATA.projects || []).find(x => x.id === id); return p ? ((p.emoji ? p.emoji + ' ' : '') + p.name) : ''; };
+    if (scope === 'projects') {
+      return shareMatchingProjects(q).map(p => ({ emoji: p.emoji || '📁', title: p.name, sub: 'Dossier',
+        onOpen: () => { PFILTER = p.id; render(); } }));
+    }
+    return scopedMemos().map(m => ({ emoji: m.emoji || '📝',
+      title: m.title || stripTags(m.content).slice(0, 80) || '(sans titre)',
+      sub: label(m.project_id), onOpen: () => openEditor(m) }));
+  },
+  onChange: () => shareRefreshSearch(),
+});
+{ const _si = document.getElementById('search');
+  // Loupe : le sprite de cette page n'a pas `ic-search`, on prend celle du jeu d'icônes partagé.
+  { const _ic = hdrIconAt('search', 16); _ic.style.color = 'var(--muted)'; _si.parentElement.insertBefore(_ic, _si); }
+  _si.addEventListener('input', shareRefreshSearch);
+  _si.addEventListener('keydown', (e) => { if (e.key === 'Escape') { _si.value = ''; shareRefreshSearch(); _si.blur(); } }); }
 load();
 setInterval(load, 15000);
 

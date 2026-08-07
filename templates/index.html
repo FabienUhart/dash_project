@@ -122,9 +122,18 @@ header h1 { margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.
 header h1#home-btn { transition: opacity 0.15s; border-radius: 6px; }
 header h1#home-btn:hover { opacity: 0.72; }
 header h1#home-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* [SEARCH-DESK-UX] Largeurs de la barre — les 3 valeurs à retoucher sont ICI, en variables :
+   repos / chip seul / focus. Le focus PRIME sur le chip (règle écrite en dernier, avec les deux
+   sélecteurs), donc entrer dans la barre l'ouvre toujours en grand, chip ou pas. */
+:root {
+  --search-w: 340px;         /* au repos */
+  --search-w-chip: 500px;    /* chip [SEARCH-IN-FOLDER] visible, hors focus */
+  --search-w-focus: 620px;   /* barre active — prime sur tout */
+}
 #search-wrap {
+  position: relative;         /* ancre du panneau d'aide (absolu) */
   flex: 1;
-  max-width: 340px;
+  max-width: var(--search-w);
   min-width: 140px;
   display: flex;
   align-items: center;
@@ -133,14 +142,24 @@ header h1#home-btn:focus-visible { outline: 2px solid var(--accent); outline-off
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.4rem 0.75rem;
-  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  transition: max-width 0.22s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 #search-wrap:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
 /* [SEARCH-IN-FOLDER] Le chip consomme de la largeur : sans ces deux garde-fous, le champ de
    saisie tombait à 5 px (mesuré) et devenait inutilisable. La barre s'élargit quand le chip est
    présent (l'en-tête a la place), et le champ garde un plancher. Classe posée en JS plutôt que
    `:has()` — même rendu sur tous les navigateurs, sans dépendre du support du sélecteur. */
-#search-wrap.has-chip { max-width: 500px; }
+#search-wrap.has-chip { max-width: var(--search-w-chip); }
+/* [SEARCH-DESK-UX] Écrite APRÈS `.has-chip` et couvrant les deux cas : à spécificité égale, la
+   dernière règle gagne → le focus l'emporte toujours. */
+#search-wrap:focus-within,
+#search-wrap.has-chip:focus-within { max-width: var(--search-w-focus); }
+
+/* [SEARCH-SHARED] Le panneau d'aide des raccourcis (ex-`#search-help`) et sa feuille mobile
+   vivent maintenant dans `templates/partials/_shared.js.html` (classe `.sh-panel`, feuille
+   `#search-sheet`) : une seule source pour owner/share/hub, CSS injectée par `_searchStyle()`.
+   Les commentaires de conception (portage sur le <body> à cause du `backdrop-filter` du header,
+   `mousedown` + `preventDefault` sur les lignes) ont suivi le code — ils sont dans le partial. */
 #search {
   flex: 1;
   background: none;
@@ -1924,6 +1943,7 @@ dialog .actions {
   <symbol id="ic-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
   <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
   <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="ic-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
 </defs></svg>
 <div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
@@ -1943,6 +1963,8 @@ dialog .actions {
       <option value="projects">Projets</option>
     </select>
     <kbd>/</kbd>
+    <!-- [SEARCH-SHARED] le panneau d'aide n'est plus dans ce markup : il est créé et posé sur le
+         <body> par `attachSearchUI()` (partial), comme sur share et hub. -->
   </div>
   <div class="spacer"></div>
   <div id="clock-wrap">
@@ -2135,6 +2157,23 @@ dialog .actions {
     <div class="actions">
       <button type="button" id="guest-edit-cancel">Annuler</button>
       <button type="submit" id="guest-edit-save">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- [GUEST-MAIL] Récap d'invitation : l'owner envoie à SON invité le lien du partage + le code.
+     Le destinataire n'est PAS saisissable : il est forcé côté serveur (e-mail enregistré). -->
+<dialog id="recap-dialog">
+  <h3>Envoyer le récap</h3>
+  <form id="recap-form">
+    <p id="recap-to" style="margin:0;font-size:0.85rem"></p>
+    <label>Mot d'accueil<textarea name="message" rows="3" maxlength="600" placeholder="Un mot pour la personne…"></textarea></label>
+    <label style="flex-direction:row;align-items:center;gap:0.45rem"><input type="checkbox" name="include_pin" checked style="width:auto;flex:none"> Inclure le code d'accès dans l'e-mail</label>
+    <p id="recap-pinhint" style="margin:0;color:var(--muted);font-size:0.78rem"></p>
+    <p id="recap-error" style="margin:0;color:var(--red);font-size:0.82rem;display:none"></p>
+    <div class="actions">
+      <button type="button" id="recap-cancel">Annuler</button>
+      <button type="submit" id="recap-send">Envoyer</button>
     </div>
   </form>
 </dialog>
@@ -2521,17 +2560,9 @@ const state = {
   tagFilter: null,  // [TAG-NAV] étiquette affichée dans la vue dédiée
 };
 
-function parseSearch() {
-  let raw = state.search.trim();
-  let scope = state.searchScope;
-  const m = raw.match(/^([plm])[#:](.*)$/i);
-  if (m) {
-    scope = { p: 'projects', l: 'links', m: 'memos' }[m[1].toLowerCase()];
-    raw = m[2].trim();
-    if (scope === 'projects' || raw.startsWith('#')) { /* tag ou texte, géré plus bas */ }
-  }
-  return { scope, q: raw.toLowerCase() };
-}
+// [SEARCH-SHARED] le parseur de préfixes (`p#`/`l#`/`m#`) vit désormais dans le partial —
+// même corps pour les 3 pages. Ici on ne garde que la liaison à l'état de la page.
+function parseSearch() { return parseSearchPrefix(state.search, state.searchScope); }
 
 /* ===== [SEARCH-IN-FOLDER] la recherche respecte le dossier où l'on se trouve =====
    Avant : dès qu'une recherche était active, le board abandonnait le scope du dossier
@@ -3693,7 +3724,10 @@ document.getElementById('create-delete').addEventListener('click', async () => {
     category: `Supprimer la catégorie « ${editingItem.name} » ?\nLes liens ne seront pas supprimés.`,
     priority: `Supprimer la priorité « ${editingItem.name} » ?\nLes mémos concernés repassent sans priorité.`,
   };
-  if (!(await confirmPopin(messages[createKind]))) return;
+  // [CONFIRM-TITLES] un titre par nature d'objet — sans lui les trois cas partageaient
+  // le « Confirmer la suppression » générique.
+  const titles = { project: 'Supprimer ce dossier ?', category: 'Supprimer cette catégorie ?', priority: 'Supprimer cette priorité ?' };
+  if (!(await confirmPopin(messages[createKind], { title: titles[createKind] || 'Confirmer la suppression' }))) return;
   const bases = { project: '/api/projects', category: '/api/categories', priority: '/api/priorities' };
   await api(`${bases[createKind]}/${editingItem.id}`, { method: 'DELETE' });
   createDialog.close();
@@ -4499,7 +4533,7 @@ async function onLinksDrop(e) {
 
 async function deleteLink(id) {
   const link = state.links.find(l => l.id === id);
-  if (!(await confirmPopin(`Supprimer le lien « ${link ? link.name : '?'} » ?`))) return;
+  if (!(await confirmPopin(`Supprimer le lien « ${link ? link.name : '?'} » ?`, { title: 'Supprimer ce lien ?' }))) return;
   await api(`/api/links/${id}`, { method: 'DELETE' });
   await loadAll();
 }
@@ -4951,7 +4985,7 @@ function renderTrash() {
       class: 'danger-soft', icon: 'trash', text: 'Vider la corbeille',   // [DANGER-SOFT]
       attrs: { style: 'margin-bottom:0.8rem' },
       on: { click: async () => {
-        if (!(await confirmPopin(`Supprimer définitivement les ${items.length} mémo(s) de la corbeille ?\nCette action est irréversible.`, { okLabel: 'Vider' }))) return;
+        if (!(await confirmPopin(`Supprimer définitivement les ${items.length} mémo(s) de la corbeille ?\nCette action est irréversible.`, { title: 'Vider la corbeille ?', okLabel: 'Vider' }))) return;
         await api('/api/trash', { method: 'DELETE' });
         await openTrashView();
         renderSidebar();
@@ -5005,7 +5039,7 @@ function renderImageTrash(board, photos) {
     class: 'danger-soft', icon: 'trash', text: 'Vider les photos',   // [DANGER-SOFT]
     attrs: { style: 'margin-bottom:0.8rem' },
     on: { click: async () => {
-      if (!(await confirmPopin(`Supprimer définitivement les ${photos.length} photo(s) ?\nCette action est irréversible.`, { okLabel: 'Vider' }))) return;
+      if (!(await confirmPopin(`Supprimer définitivement les ${photos.length} photo(s) ?\nCette action est irréversible.`, { title: 'Vider la corbeille d\'images ?', okLabel: 'Vider' }))) return;
       await api('/api/image-trash', { method: 'DELETE' });
       await openTrashView();
     } },
@@ -5049,7 +5083,7 @@ function renderImageTrash(board, photos) {
     row.appendChild(el('button', {
       class: 'danger-soft', icon: 'trash', text: 'Supprimer',   // [DANGER-SOFT]
       on: { click: async () => {
-        if (!(await confirmPopin('Supprimer définitivement cette photo ?\nCette action est irréversible.', { okLabel: 'Supprimer' }))) return;
+        if (!(await confirmPopin('Cette photo sera effacée du disque. Cette action est irréversible.', { title: 'Supprimer définitivement ?', okLabel: 'Supprimer' }))) return;
         await api(`/api/image-trash/${p.id}`, { method: 'DELETE' });
         await openTrashView();
       } },
@@ -5065,7 +5099,7 @@ async function trashRestore(id) {
   renderSidebar();
 }
 async function trashPurge(id) {
-  if (!(await confirmPopin('Supprimer définitivement ce mémo ?\nCette action est irréversible.', { okLabel: 'Supprimer' }))) return false;
+  if (!(await confirmPopin('Ce mémo et ses fichiers seront effacés. Cette action est irréversible.', { title: 'Supprimer définitivement ?', okLabel: 'Supprimer' }))) return false;
   await api(`/api/trash/${id}`, { method: 'DELETE' });
   await openTrashView();
   renderSidebar();
@@ -5335,7 +5369,7 @@ function renderTreeView() {
   });
 }
 
-function guestRowEl(g, onChange) {
+function guestRowEl(g, onChange, share) {
   const row = el('div', { class: 'guest-row' });
   const info = el('span', { class: 'grow' });
   info.appendChild(el('span', { text: (g.name ? g.name + ' — ' : '') + g.email }));
@@ -5347,6 +5381,14 @@ function guestRowEl(g, onChange) {
   // s'enregistre (PIN du lien) est actif d'office. Restent la pastille de statut, la RÉVOCATION
   // (« ✕ Révoquer ») et, pour un invité révoqué, la réactivation.
   row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { approved: 'actif', rejected: 'révoqué' }[g.status] || g.status }));
+  // [GUEST-MAIL] récap par e-mail — seulement quand la cible est connue (appel depuis un partage)
+  // et l'invité actif : renvoyer un lien à quelqu'un de révoqué n'aurait aucun sens.
+  if (share && g.status !== 'rejected') {
+    row.appendChild(recapBtn({
+      id: g.id, email: g.email, name: g.name || '',
+      kind: share.kind, target: share.target, pin: share.pin || '',
+    }));
+  }
   if (g.status === 'rejected') {
     row.appendChild(el('button', {
       class: 'g-approve', text: '↩ Réactiver',
@@ -5363,7 +5405,7 @@ function guestRowEl(g, onChange) {
   row.appendChild(el('button', {
     text: '×', attrs: { title: 'Supprimer cet invité' },
     on: { click: async () => {
-      if (!(await confirmPopin(`Supprimer l'invité ${g.email} ?`))) return;
+      if (!(await confirmPopin(`${g.email} perdra cet accès.`, { title: 'Supprimer cet invité ?', okLabel: 'Supprimer' }))) return;
       await api(`/api/guests/${g.id}`, { method: 'DELETE' });
       await onChange();
     } },
@@ -5395,7 +5437,7 @@ function revRowEl(r, onChange) {
         attrs: { title: 'Restaurer l\'état d\'avant cette modification' },
         on: { click: async (e) => {
           e.stopPropagation();
-          if (!(await confirmPopin('Annuler la modification de ' + r.editor + ' et revenir à l\'état d\'avant ?', { okLabel: 'Restaurer', danger: false }))) return;
+          if (!(await confirmPopin('La modification de ' + r.editor + ' sera annulée et le mémo reviendra à son état d\'avant.', { title: 'Restaurer la version d\'avant ?', okLabel: 'Restaurer', danger: false }))) return;
           await api(`/api/memos/${r.memo_id}/restore`, { method: 'POST', body: JSON.stringify({ revision_id: r.id, which: 'before' }) });
           await loadAll();
           await onChange();
@@ -5472,6 +5514,73 @@ function guestOpenBtn(url) {
   });
 }
 
+// [GUEST-MAIL] Récap d'invitation owner → invité : mot d'accueil + lien du partage + code, par
+// e-mail (même brique SMTP que « Recevoir mon lien » du hub, dans l'autre sens). Owner-only :
+// /api/guests/<id>/send-recap est derrière Authelia — aucune route publique nouvelle (invariant 5).
+// Le destinataire n'est JAMAIS envoyé par le client : le serveur le lit en base (pas de relais
+// ouvert). Le corps ne porte que le mot d'accueil et la case « inclure le code ».
+const RECAP_SMTP_HINT = 'Envoi par e-mail non configuré — renseigne SMTP_HOST, SMTP_PORT, SMTP_USER, '
+  + 'SMTP_PASS et SMTP_FROM dans .env, puis relance le conteneur (docker compose up -d --build).';
+
+function openRecapDialog(g) {
+  const dlg = document.getElementById('recap-dialog');
+  const form = document.getElementById('recap-form');
+  const err = document.getElementById('recap-error');
+  const hint = document.getElementById('recap-pinhint');
+  const what = g.kind === 'memo' ? 'le mémo' : 'le dossier';
+  const label = stripHTML(g.target || '?').slice(0, 60);
+  document.getElementById('recap-to').textContent =
+    'À ' + (g.name ? g.name + ' — ' : '') + g.email + ' · ' + what + ' « ' + label + ' »';
+  form.message.value = '';
+  form.message.placeholder = 'Je te partage ça sur mon Dashboard — jettes-y un œil quand tu veux.';
+  form.include_pin.checked = true;
+  form.include_pin.disabled = !g.pin;
+  err.style.display = 'none';
+  const syncHint = () => {
+    if (!g.pin) { hint.textContent = 'Ce lien n\'a pas de code enregistré — l\'e-mail partira sans code.'; return; }
+    hint.textContent = form.include_pin.checked
+      ? 'Le code ' + g.pin + ' sera écrit dans l\'e-mail.'
+      : 'L\'e-mail ne contiendra que le lien : à toi de dicter le code ' + g.pin + ' par un autre canal.';
+  };
+  syncHint();
+  form.include_pin.onchange = syncHint;
+  document.getElementById('recap-cancel').onclick = () => dlg.close();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('recap-send');
+    btn.disabled = true;
+    err.style.display = 'none';
+    try {
+      const r = await api('/api/guests/' + g.id + '/send-recap', {
+        method: 'POST',
+        body: JSON.stringify({ message: form.message.value, include_pin: !!form.include_pin.checked }),
+      });
+      dlg.close();
+      // Pas d'échec silencieux : l'owner doit savoir si l'invité a reçu (ou non).
+      notify('Récap envoyé à ' + (r.email || g.email) + (r.pin_included ? ' (code inclus).' : ' — sans le code.'));
+    } catch (ex) {
+      err.textContent = '⚠ ' + (ex.message || 'échec de l\'envoi');
+      err.style.display = 'block';  // pop-in maintenue ouverte : la saisie est conservée
+    } finally { btn.disabled = false; }
+  };
+  dlg.showModal();
+}
+
+// g = { id, email, name, kind, target, pin }. SMTP absent → le bouton reste VISIBLE et explique
+// quoi configurer (il ne disparaît pas : sinon la fonctionnalité serait invisible).
+function recapBtn(g) {
+  if (!state.smtpEnabled) {
+    return el('button', {
+      icon: 'mail', attrs: { title: 'Envoi par e-mail non configuré (cliquer pour savoir quoi faire)', 'aria-label': 'Envoyer le récap' },
+      on: { click: () => notify(RECAP_SMTP_HINT, { error: true }) },
+    });
+  }
+  return el('button', {
+    icon: 'mail', attrs: { title: 'Envoyer le récap (lien + code) à ' + g.email, 'aria-label': 'Envoyer le récap' },
+    on: { click: () => openRecapDialog(g) },
+  });
+}
+
 async function renderShares() {
   const board = document.getElementById('shares-board');
   board.innerHTML = '';
@@ -5542,7 +5651,7 @@ async function renderShares() {
           : { disabled: '', title: 'SMTP non configuré — renseigner SMTP_* dans .env' },
       });
       if (state.smtpEnabled) sendBtn.addEventListener('click', async () => {
-        if (!(await confirmPopin('Envoyer le lien et le code à ' + email + ' par e-mail ?', { okLabel: 'Envoyer' }))) return;
+        if (!(await confirmPopin('Le lien unique et le code partiront à ' + email + '.', { title: 'Envoyer le lien par e-mail ?', okLabel: 'Envoyer', danger: false }))) return;
         try {
           const r = await api('/api/hubs/' + hub.hub_token + '/send-invite', { method: 'POST' });
           notify('Envoyé à ' + (r.email || email) + '.');
@@ -5552,7 +5661,7 @@ async function renderShares() {
       hubRow.appendChild(el('button', {
         text: '↻ lien', attrs: { title: 'Régénérer le lien (nouvelle URL, accès et code conservés)' },
         on: { click: async () => {
-          if (!(await confirmPopin('Régénérer le LIEN de ' + dispName + ' ?\nL\'ancienne URL cessera de marcher ; les accès et le code restent. Il faudra renvoyer la nouvelle URL.', { okLabel: 'Régénérer le lien' }))) return;
+          if (!(await confirmPopin('L\'ancienne URL de ' + dispName + ' cessera de marcher ; les accès et le code restent. Il faudra lui renvoyer la nouvelle URL.', { title: 'Régénérer le lien ?', okLabel: 'Régénérer le lien', danger: false }))) return;
           await api('/api/hubs/' + hub.hub_token + '/rotate', { method: 'POST' });
           rerender(); notify('Lien régénéré — renvoie la nouvelle URL.');
         } },
@@ -5560,7 +5669,7 @@ async function renderShares() {
       hubRow.appendChild(el('button', {
         text: '↻ code', attrs: { title: 'Régénérer le code (nouveau PIN, lien et accès conservés)' },
         on: { click: async () => {
-          if (!(await confirmPopin('Régénérer le CODE de ' + dispName + ' ?\nLe lien reste le même ; il faudra renvoyer le nouveau code.', { okLabel: 'Régénérer le code' }))) return;
+          if (!(await confirmPopin('Le lien de ' + dispName + ' reste le même ; il faudra lui renvoyer le nouveau code.', { title: 'Régénérer le code ?', okLabel: 'Régénérer le code', danger: false }))) return;
           const r = await api('/api/hubs/' + hub.hub_token + '/rotate-pin', { method: 'POST' });
           rerender(); notify('Nouveau code : ' + r.pin);
         } },
@@ -5568,7 +5677,7 @@ async function renderShares() {
       hubRow.appendChild(el('button', {
         class: 'g-reject', text: '⏏ Retirer', attrs: { title: 'Retirer l\'invité : coupe TOUS ses accès, le lien meurt' },
         on: { click: async () => {
-          if (!(await confirmPopin('Retirer complètement ' + dispName + ' ?\nTous ses accès sont coupés et son lien meurt. Re-partager créera un nouveau lien + code.', { okLabel: 'Tout couper', danger: true }))) return;
+          if (!(await confirmPopin('Tous les accès de ' + dispName + ' sont coupés et son lien meurt. Re-partager créera un nouveau lien + code.', { title: 'Retirer cet invité ?', okLabel: 'Tout couper', danger: true }))) return;
           await api('/api/hubs/' + hub.hub_token, { method: 'DELETE' });
           await loadAll(); rerender(); notify('Invité retiré.');
         } },
@@ -5619,6 +5728,11 @@ async function renderShares() {
             : { kind: g.kind, target: g.target, can_edit: g.can_edit });
         } },
       }));
+      // [GUEST-MAIL] récap par e-mail de CET accès (le code vient du partage porteur du jeton).
+      row.appendChild(recapBtn({
+        id: g.id, email, name: g.name || '', kind: g.kind, target: g.target,
+        pin: ((shares.find(x => x.token === g.token) || {}).pin) || '',
+      }));
       if (g.status === 'pending') {
         row.appendChild(el('button', {
           class: 'g-approve', text: '✓',  attrs: { title: 'Valider' },
@@ -5634,7 +5748,7 @@ async function renderShares() {
       row.appendChild(el('button', {
         text: '×', attrs: { title: 'Supprimer cet accès' },
         on: { click: async () => {
-          if (!(await confirmPopin(`Retirer l'accès de ${email} à « ${stripHTML(g.target || '?').slice(0, 40)} » ?`))) return;
+          if (!(await confirmPopin(`${email} n'aura plus accès à « ${stripHTML(g.target || '?').slice(0, 40)} ».`, { title: 'Retirer cet accès ?', okLabel: 'Retirer' }))) return;
           await api(`/api/guests/${g.id}`, { method: 'DELETE' });
           rerender();
         } },
@@ -5666,7 +5780,13 @@ async function renderShares() {
           const url = location.origin + r.url;
           let copied = '';
           try { await navigator.clipboard.writeText(url); copied = ' · lien copié'; } catch (_) {}
-          result.textContent = `✓ ${r.project} ouvert à ${dispName} (${ROLE_LABELS[r.role] || r.role}, PIN ${r.pin})${copied} — ${url}`;
+          result.textContent = `✓ ${r.project} ouvert à ${dispName} (${ROLE_LABELS[r.role] || r.role}, PIN ${r.pin})${copied} — ${url} `;
+          // [GUEST-MAIL] à la CRÉATION du partage : proposer l'envoi du récap dans la foulée.
+          if (r.guest_id) {
+            const b = recapBtn({ id: r.guest_id, email, name: realName, kind: 'project', target: r.project, pin: r.pin || '' });
+            b.appendChild(document.createTextNode(' Envoyer le récap'));
+            result.appendChild(b);
+          }
           projSel.value = '';
         } catch (e) { result.textContent = '⚠ ' + (e.message || 'échec'); }
       } },
@@ -5713,7 +5833,7 @@ async function renderShares() {
     r1.appendChild(el('button', {
       text: '×', attrs: { title: 'Révoquer ce lien' },
       on: { click: async () => {
-        if (!(await confirmPopin('Révoquer ce lien de partage ?\nSes invités perdront l\'accès.', { okLabel: 'Révoquer' }))) return;
+        if (!(await confirmPopin('Ses invités perdront l\'accès.', { title: 'Révoquer ce lien ?', okLabel: 'Révoquer' }))) return;
         await api(`/api/shares/${s.id}`, { method: 'DELETE' });
         rerender();
       } },
@@ -5723,7 +5843,7 @@ async function renderShares() {
     urlRow.value = url;
     urlRow.addEventListener('focus', () => urlRow.select());
     card.appendChild(urlRow);
-    (s.guests || []).forEach(g => card.appendChild(guestRowEl(g, rerender)));
+    (s.guests || []).forEach(g => card.appendChild(guestRowEl(g, rerender, s)));
     secL.appendChild(card);
   });
   board.appendChild(secL);
@@ -5784,7 +5904,7 @@ async function openRevisions(memo) {
     wrap.appendChild(el('div', { class: 'empty', text: 'Aucune modification enregistrée pour ce mémo.' }));
   }
   const restore = async (revisionId, which, label) => {
-    if (!(await confirmPopin(`Restaurer ${label} ?\nL'état actuel sera lui-même conservé dans les versions.`, { okLabel: 'Restaurer', danger: false }))) return;
+    if (!(await confirmPopin(`${label} — l'état actuel sera lui-même conservé dans les versions.`, { title: 'Restaurer cette version ?', okLabel: 'Restaurer', danger: false }))) return;
     await api(`/api/memos/${memo.id}/restore`, { method: 'POST', body: JSON.stringify({ revision_id: revisionId, which }) });
     revisionsDialog.close();
     await loadAll();
@@ -5910,7 +6030,7 @@ async function renderShareList() {
     row.appendChild(el('button', {
       text: '×', attrs: { title: 'Révoquer ce lien' },
       on: { click: async () => {
-        if (!(await confirmPopin('Révoquer ce lien de partage ?\nLes personnes qui l\'ont ne pourront plus accéder.', { okLabel: 'Révoquer' }))) return;
+        if (!(await confirmPopin('Les personnes qui l\'ont ne pourront plus accéder.', { title: 'Révoquer ce lien ?', okLabel: 'Révoquer' }))) return;
         await api(`/api/shares/${s.id}`, { method: 'DELETE' });
         await renderShareList();
       } },
@@ -6601,7 +6721,7 @@ function thumbsEl(memo, editable, collapsed = false) {
         class: 'thumb-del', text: '×', attrs: { title: "Supprimer l'image" },
         on: { click: async (e) => {
           e.stopPropagation();
-          if (!(await confirmPopin('Supprimer cette image ?'))) return;
+          if (!(await confirmPopin('Elle sera retirée du mémo.', { title: 'Supprimer cette image ?' }))) return;
           await fetch(`/api/memos/${memo.id}/images/${name}`, { method: 'DELETE' });
           await loadAll();
         } },
@@ -6617,7 +6737,7 @@ async function deleteMemo(id, skipConfirm = false) {
   const full = memo ? (memo.title || stripHTML(memo.content)) : '';
   if (!skipConfirm) {
     const ex60 = full.slice(0, 60);
-    if (!(await confirmPopin(`Déplacer le mémo « ${ex60}${full.length > 60 ? '…' : ''} » dans la corbeille ?\nTu pourras le restaurer pendant 7 jours.`, { okLabel: 'Mettre à la corbeille' }))) return;
+    if (!(await confirmPopin(`« ${ex60}${full.length > 60 ? '…' : ''} » part à la corbeille — tu pourras le restaurer pendant 7 jours.`, { title: 'Mettre à la corbeille ?', okLabel: 'Mettre à la corbeille' }))) return;
   }
   await api(`/api/memos/${id}`, { method: 'DELETE' });
   await loadAll();
@@ -7002,7 +7122,7 @@ function openVoteManage(v) {
     const downgrade = v.vote_mode === 'multi' && mode === 'single';
     if ((removed || downgrade) && !(await confirmPopin(
       downgrade ? 'Passer en « un seul » : chaque votant ne gardera que sa voix la plus récente.' : 'Retirer une option supprimera ses voix.',
-      { title: 'Confirmer', okLabel: 'Confirmer', danger: true }))) return;
+      { title: 'Modifier ce vote ?', okLabel: 'Enregistrer', danger: true }))) return;
     try { await put({ name, vote_mode: mode, vote_deadline: dl.value || '', event_date: evd.value || '', memo_ids: [...sel] }); await reloadClose(); }
     catch (e) { await notify('Enregistrement impossible : ' + e.message, { error: true }); }
   } } }), 'luc-primary'));
@@ -7481,7 +7601,7 @@ function commentsBlockEl(memo) {
           } },
           // L'owner modère tout ; le serveur reste seul juge (can_delete).
           (c.can_delete !== false) && { label: '✕', title: 'Supprimer ce message', danger: true, onClick: async () => {
-            if (!(await confirmPopin('Supprimer ce message ? Il laissera une trace « Message supprimé » et les réponses resteront.'))) return;
+            if (!(await confirmPopin('Il laissera une trace « Message supprimé » et les réponses resteront.', { title: 'Supprimer ce message ?' }))) return;
             await api(`/api/comments/${c.id}`, { method: 'DELETE' });
             loadComments();
           } },
@@ -8168,7 +8288,7 @@ function renderBoard() {
         attrs: { id: 'clear-done', title: 'Supprimer tous les mémos terminés' },
         text: 'Tout effacer',
         on: { click: async () => {
-          if (!(await confirmPopin(`Supprimer définitivement ${done.length} mémo(s) terminé(s) ?`, { okLabel: 'Tout effacer' }))) return;
+          if (!(await confirmPopin(`${done.length} mémo(s) terminé(s) seront effacés définitivement.`, { title: 'Effacer les mémos terminés ?', okLabel: 'Tout effacer' }))) return;
           for (const m of done) await api(`/api/memos/${m.id}`, { method: 'DELETE' });
           await loadAll();
         } },
@@ -8216,7 +8336,7 @@ function renderBoard() {
       on: { click: async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!(await confirmPopin(`Supprimer définitivement ${done.length} mémo(s) terminé(s) ?`, { okLabel: 'Tout effacer' }))) return;
+        if (!(await confirmPopin(`${done.length} mémo(s) terminé(s) seront effacés définitivement.`, { title: 'Effacer les mémos terminés ?', okLabel: 'Tout effacer' }))) return;
         for (const m of done) await api(`/api/memos/${m.id}`, { method: 'DELETE' });
         await loadAll();
       } },
@@ -8509,6 +8629,94 @@ function renderSearchChip() {
     on: { click: () => { searchWide = true; searchWideProj = state.memoProject; refreshSearch(); } },
   }));
 }
+/* ===== [SEARCH-SHARED] aide desktop + feuille mobile = composant du partial =====
+   Le panneau d'aide (ex-[SEARCH-DESK-UX], qui vivait ici) et la feuille de recherche mobile sont
+   désormais fournis par `attachSearchUI()` — MÊME composant sur owner/share/hub. Cette page
+   n'apporte plus que ses libellés, ses portées et ses RÉSULTATS ; le composant ne lit ni `state`
+   ni le DOM du board (il ne peut donc rien élargir, invariant 5).
+
+   ⚠️ `ownerSearchResults` ignore volontairement ses arguments (q, scope) : la feuille a DÉJÀ écrit
+   `state.search` / `state.searchScope` avant d'appeler, donc on repasse par les fonctions du board
+   (`visibleMemos`, `visibleLinks`, `boardScopeFilter`). C'est ce qui garantit que la feuille et le
+   board montrent exactement les mêmes mémos — jamais un résultat fantôme, même exigence que la
+   carte et la frise ([SEARCH-IN-FOLDER]). */
+function ownerSearchResults() {
+  const { scope, q } = parseSearch();
+  if (!q) return [];
+  const projLabel = (id) => {
+    const p = state.projects.find(x => x.id === id);
+    return p ? ((p.emoji ? p.emoji + ' ' : '') + p.name) : '📥 Inbox';
+  };
+  const out = [];
+  if (scope === 'projects') {
+    matchingProjects(q).forEach(p => out.push({
+      emoji: p.emoji || '📁', title: p.name, sub: 'Dossier',
+      onOpen: () => { state.view = 'memos'; state.memoProject = p.id; renderAll(); },
+    }));
+    return out;
+  }
+  if (scope !== 'links') {
+    visibleMemos().filter(boardScopeFilter()).forEach(m => out.push({
+      emoji: m.emoji || '📝',
+      title: m.title || stripHTML(m.content).slice(0, 80) || '(sans titre)',
+      sub: projLabel(m.project_id),
+      onOpen: () => openMemoEditor(m),
+    }));
+  }
+  if (scope === 'links' || scope === 'all') {
+    visibleLinks().forEach(l => out.push({
+      emoji: '🔗', title: l.name, sub: l.descr || l.url_public || l.url_local || '',
+      onOpen: () => { const u = l.url_public || l.url_local; if (u) window.open(u, '_blank', 'noopener'); },
+    }));
+  }
+  return out;
+}
+const searchUI = attachSearchUI({
+  input: searchInput,
+  anchor: document.getElementById('search-wrap'),
+  placeholder: 'Rechercher… (#tag, p# dossiers)',
+  helpRows: [
+    { k: 'p#', fill: 'p#', d: 'Chercher un <b>dossier</b> — <i>p#japon</i>' },
+    { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#hôtel</i>' },
+    { k: 'l#', fill: 'l#', d: 'Chercher un <b>lien</b> — <i>l#navidrome</i>' },
+    { k: '#…', fill: '#',  d: 'Par <b>étiquette</b> — <i>#japon</i>, <i>#notes</i>' },
+  ],
+  helpFoot: [['/', 'ouvre la recherche'], ['Entrée', 'ouvre le premier lien'], ['Échap', 'efface et ferme']],
+  scopeNote: () => {
+    const proj = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
+      ? state.projects.find(p => p.id === state.memoProject) : null;
+    return proj
+      ? 'Dans un dossier, la recherche y reste bornée — le ✕ du chip « dans : ' + proj.name + ' » élargit à tout le dashboard.'
+      : '';
+  },
+  scopes: () => ([
+    { key: 'all', label: 'Tout' }, { key: 'links', label: 'Liens' },
+    { key: 'memos', label: 'Mémos' }, { key: 'projects', label: 'Dossiers' },
+  ]),
+  // Même bascule que le chip « dans : … ✕ » de la barre : allumé = recherche bornée au dossier.
+  folderChip: () => {
+    const proj = (state.memoProject !== 'all' && state.memoProject !== 'inbox')
+      ? state.projects.find(p => p.id === state.memoProject) : null;
+    if (!proj) return null;
+    return {
+      label: (proj.emoji || '📁') + ' ' + proj.name,
+      active: searchIsScoped(),
+      onToggle: () => {
+        if (searchIsScoped()) { searchWide = true; searchWideProj = state.memoProject; }
+        else { searchWide = false; searchWideProj = null; }
+        refreshSearch();
+      },
+    };
+  },
+  getQuery: () => state.search,
+  setQuery: (v) => { state.search = v; },
+  getScope: () => state.searchScope,
+  setScope: (v) => { state.searchScope = v; if (searchScopeSel) searchScopeSel.value = v; },
+  results: ownerSearchResults,
+  onChange: () => refreshSearch(),
+});
+// Conservé sous son nom d'origine : `refreshSearch()` l'appelle déjà, la ligne ne bouge pas.
+function refreshSearchHelp() { searchUI.refreshHelp(); }
 function refreshSearch() {
   const { scope, q } = parseSearch();
   searchScopeSel.value = scope;
@@ -8517,6 +8725,7 @@ function refreshSearch() {
   // contaminer la recherche suivante.
   if (!q) { searchWide = false; searchWideProj = null; }
   renderSearchChip();
+  refreshSearchHelp();   // [SEARCH-DESK-UX]
   if (q && scope === 'projects' && state.view !== 'memos') {
     state.view = 'memos';
     renderAll();
@@ -8537,6 +8746,9 @@ searchInput.addEventListener('input', () => {
   state.search = searchInput.value;
   refreshSearch();
 });
+// [SEARCH-SHARED] focus/blur, resize, `transitionend` sur la barre (elle s'élargit en 0,22 s, donc
+// sa largeur finale n'est pas connue au focus) : tout ça est branché par `attachSearchUI()`, une
+// fois pour les 3 pages. Il ne reste ici que ce qui est PROPRE à l'owner (Entrée, Échap, « / »).
 searchScopeSel.addEventListener('change', () => {
   state.searchScope = searchScopeSel.value;
   refreshSearch();
@@ -9179,7 +9391,7 @@ tzSelect.addEventListener('change', () => {
 });
 document.getElementById('purge-history').addEventListener('click', async () => {
   if (!state.history.length) { await notify("L'historique est déjà vide."); return; }
-  if (!(await confirmPopin(`Vider l'historique (${state.history.length} entrée${state.history.length > 1 ? 's' : ''}) ?\nCette action est définitive.`, { okLabel: 'Vider' }))) return;
+  if (!(await confirmPopin(`${state.history.length} entrée${state.history.length > 1 ? 's' : ''} seront effacées. Cette action est définitive.`, { title: 'Vider l\'historique ?', okLabel: 'Vider' }))) return;
   await api('/api/history', { method: 'DELETE' });
   await loadAll();
 });
@@ -9208,7 +9420,7 @@ function renderCatManage() {
     row.appendChild(el('button', {
       text: '×', attrs: { title: 'Supprimer (les liens deviennent sans catégorie)' },
       on: { click: async () => {
-        if (!(await confirmPopin(`Supprimer la catégorie « ${cat.name} » ?\nLes liens ne seront pas supprimés.`))) return;
+        if (!(await confirmPopin(`« ${cat.name} » — les liens ne seront pas supprimés.`, { title: 'Supprimer cette catégorie ?' }))) return;
         await api(`/api/categories/${cat.id}`, { method: 'DELETE' });
         await loadAll();
         renderCatManage();
@@ -9243,7 +9455,7 @@ function renderProjManage() {
     row.appendChild(el('button', {
       text: '×', attrs: { title: "Supprimer (les mémos retournent dans l'Inbox)" },
       on: { click: async () => {
-        if (!(await confirmPopin(`Supprimer le projet « ${proj.name} » ?\nLes mémos retournent dans l'Inbox.`))) return;
+        if (!(await confirmPopin(`« ${proj.name} » — les mémos retournent dans l'Inbox.`, { title: 'Supprimer ce dossier ?' }))) return;
         await api(`/api/projects/${proj.id}`, { method: 'DELETE' });
         await loadAll();
         renderProjManage();
@@ -9278,7 +9490,7 @@ function renderPrioManage() {
     row.appendChild(el('button', {
       text: '×', attrs: { title: 'Supprimer (les mémos repassent sans priorité)' },
       on: { click: async () => {
-        if (!(await confirmPopin(`Supprimer la priorité « ${prio.name} » ?\nLes mémos concernés repassent sans priorité.`))) return;
+        if (!(await confirmPopin(`« ${prio.name} » — les mémos concernés repassent sans priorité.`, { title: 'Supprimer cette priorité ?' }))) return;
         await api(`/api/priorities/${prio.id}`, { method: 'DELETE' });
         await loadAll();
         renderPrioManage();

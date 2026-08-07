@@ -605,9 +605,16 @@ document.getElementById('notify-ok').addEventListener('click', () => notifyDialo
 function notify(msg, opts) { document.getElementById('notify-title').textContent = (opts && opts.error) ? 'Erreur' : 'Info';
   document.getElementById('notify-msg').textContent = msg; notifyDialog.showModal(); }
 const confirmDialog = document.getElementById('confirm-dialog');
-function confirmPopin(msg, opts) { return new Promise(res => {
+// [CONFIRM-TITLES] le hub ignorait `title` ET `danger` : tous les appels (y compris ceux du
+// partial, partagés avec owner/share) retombaient sur le titre statique « Confirmer » et sur un
+// bouton rouge, même pour une action anodine. Signature alignée sur index/share — mêmes options,
+// même comportement sur les 3 pages. Défauts identiques (suppression) : les appels existants
+// qui ne passent rien gardent leur rendu.
+function confirmPopin(msg, { title = 'Confirmer la suppression', okLabel = 'Supprimer', danger = true } = {}) { return new Promise(res => {
+  document.getElementById('confirm-title').textContent = title;
   document.getElementById('confirm-msg').textContent = msg;
-  document.getElementById('confirm-yes').textContent = (opts && opts.okLabel) || 'Confirmer';
+  document.getElementById('confirm-yes').textContent = okLabel;
+  document.getElementById('confirm-yes').className = 'btn ' + (danger ? 'danger' : 'primary');
   const yes = () => { cleanup(); res(true); }, no = () => { cleanup(); res(false); };
   function cleanup() { confirmDialog.close(); by.removeEventListener('click', yes); bn.removeEventListener('click', no); }
   const by = document.getElementById('confirm-yes'), bn = document.getElementById('confirm-no');
@@ -783,12 +790,42 @@ function openHubFiles(proj) {
            buildUrl: (scope, subs) => '/share/' + proj.share_token + '/project/' + proj.id + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0) },
   });
 }
+/* ===== [SEARCH-SHARED] recherche du hub =====
+   Le hub n'avait qu'un champ nu : aucune portée, aucune aide, aucun moyen d'élargir hors du
+   dossier focalisé. Il reçoit ici le composant partagé (aide + feuille mobile) et, avec lui, les
+   préfixes `p#`/`m#` du parseur commun. ⚠️ Constat à noter : contrairement à l'owner d'avant
+   [SEARCH-IN-FOLDER], le hub était DÉJÀ borné au dossier (le filtre FOCUS s'appliquait avant la
+   recherche) — la « tranche C » n'y trouvait donc pas de bug à corriger ; ce qui manquait, c'était
+   l'INVERSE : pouvoir sortir du dossier. D'où `hubSearchWide`, jumeau de `searchWide` côté owner
+   (non persisté : il retombe dès que la recherche est vidée). */
+let hubSearchScope = 'all';
+let hubSearchWide = false;
+function hubSearchRaw() { const i = document.getElementById('search'); return i ? i.value : ''; }
+function hubSearch() { return parseSearchPrefix(hubSearchRaw(), hubSearchScope); }
+function hubMatchingProjects(q) {
+  if (!q) return [];
+  const n = q.charAt(0) === '#' ? q.slice(1) : q;
+  return (DATA.projects || []).filter(p => (p.name || '').toLowerCase().includes(n));
+}
+// Filtre de recherche appliqué aux mémos — UN seul endroit, réutilisé par le board ET l'agenda
+// (sinon la grille et la liste ne montreraient pas les mêmes mémos).
+function hubMemoFilter(ms) {
+  const { scope, q } = hubSearch();
+  if (!q) return ms;
+  if (scope === 'projects') {
+    const ids = new Set(hubMatchingProjects(q).map(p => p.id));
+    return ms.filter(m => ids.has(m.project_id));
+  }
+  return ms.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
+}
+function hubSearchScoped() {   // vrai quand la recherche est effectivement bornée au dossier focalisé
+  return FOCUS != null && !!hubSearch().q && !hubSearchWide;
+}
 function focusedMemos() {
   let ms = DATA.memos || [];
-  if (FOCUS != null) { const set = new Set([FOCUS, ...projDescendants(FOCUS)]); ms = ms.filter(m => set.has(m.project_id)); }
-  const q = (document.getElementById('search').value || '').trim().toLowerCase();
-  if (q) ms = ms.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
-  return ms;
+  const wide = !!hubSearch().q && hubSearchWide;   // chip « ce dossier » éteint → on cherche partout
+  if (FOCUS != null && !wide) { const set = new Set([FOCUS, ...projDescendants(FOCUS)]); ms = ms.filter(m => set.has(m.project_id)); }
+  return hubMemoFilter(ms);
 }
 function prioOf(id) { return (DATA.priorities || []).find(p => p.id === id) || null; }
 function projById(id) { return (DATA.projects || []).find(p => p.id === id) || null; }
@@ -1439,7 +1476,7 @@ function openHubVoteManage(v) {
     b.addEventListener('click', on);
     return lucioleize(b, 'luc-neutral');
   };
-  if (!closed) actions.appendChild(abtn('Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore' }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }, 'trophy'));
+  if (!closed) actions.appendChild(abtn('Clore', async () => { const evL = fmtVoteDeadline(evd.value || ''); if (!(await confirmPopin('Le gagnant sera figé.' + (evL ? '\n📅 Le gagnant (s\'il est unique) sera planifié le ' + evL + '.' : ''), { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return; const r = await post('close'); if (r.ok) done(); else notify('Impossible.', { error: true }); }, 'trophy'));
   else actions.appendChild(abtn('Rouvrir', async () => { const r = await post('reopen', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Réouverture impossible.', { error: true }); }, 'rotate'));
   actions.appendChild(abtn('Remettre à zéro', async () => { if (!(await confirmPopin('Toutes les voix de ce vote seront supprimées.', { title: 'Remettre à zéro ?', okLabel: 'Remettre à zéro' }))) return; const r = await post('reset', { vote_deadline: dl.value || '' }); if (r.ok) done(); else notify('Impossible.', { error: true }); }, 'rotate'));
   // [DANGER-SOFT] supprimer un vote : bouton discret (icône trait, rouge au survol seulement).
@@ -1454,7 +1491,7 @@ function openHubVoteManage(v) {
     if (!sel.size) { notify('Au moins une option.', { error: true }); return; }
     const removed = (v.options || []).some(o => !sel.has(o.memo_id) && (o.vote_count || 0) > 0);
     const downgrade = v.vote_mode === 'multi' && mode === 'single';
-    if ((removed || downgrade) && !(await confirmPopin(downgrade ? 'Passer en « un seul » : chaque votant garde sa voix la plus récente.' : 'Retirer une option supprimera ses voix.', { title: 'Confirmer', okLabel: 'Confirmer' }))) return;
+    if ((removed || downgrade) && !(await confirmPopin(downgrade ? 'Passer en « un seul » : chaque votant garde sa voix la plus récente.' : 'Retirer une option supprimera ses voix.', { title: 'Modifier ce vote ?', okLabel: 'Enregistrer' }))) return;
     const r = await post('', { name, vote_mode: mode, vote_deadline: dl.value || '', event_date: evd.value || '', memo_ids: [...sel] });
     if (r.ok) done(); else { const e = await r.json().catch(() => ({})); notify(e.error || 'Impossible.', { error: true }); }
   });
@@ -1785,8 +1822,7 @@ let agendaDropGuard = 0;  // [AGENDA-DAY-POPIN] anti clic-fantôme après un dro
 // Périmètre courant de l'agenda hub (source unique grille + pop-in jour ; inclut la recherche).
 function hubAgendaSrc() {
   let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
-  const q = (document.getElementById('search').value || '').trim().toLowerCase();
-  if (q) src = src.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
+  src = hubMemoFilter(src);   // [SEARCH-SHARED] même filtre que le board (portées incluses)
   if (hubAgendaFilter != null) {
     const fp = projById(hubAgendaFilter);
     if (fp) { const set = new Set([hubAgendaFilter, ...projDescendants(hubAgendaFilter)]); src = src.filter(m => set.has(m.project_id)); }
@@ -1852,8 +1888,7 @@ function renderAgendaHub() {
   // [AGENDA-PROJECT] base = UNION des dossiers (pas FOCUS) + recherche ; le filtre
   // dossier explicite (bouton 📆 du board) restreint à dossier + descendants.
   let src = (DATA.memos || []).filter(m => !m.done && m.due_date);
-  const q = (document.getElementById('search').value || '').trim().toLowerCase();
-  if (q) src = src.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
+  src = hubMemoFilter(src);   // [SEARCH-SHARED] même filtre que le board (portées incluses)
   let filterProj = null;
   if (hubAgendaFilter != null) {
     filterProj = projById(hubAgendaFilter);
@@ -2230,7 +2265,7 @@ function renderEdComments(m, ro) {
       // (match par e-mail) : la page affiche, le serveur tranche (403 sinon) — invariant 5.
       actions: [
         c.can_delete && { label: '✕', title: 'Supprimer mon message', danger: true, onClick: async () => {
-          if (!(await confirmPopin('Supprimer ton message ? Il laissera une trace « Message supprimé » et les réponses resteront.'))) return;
+          if (!(await confirmPopin('Il laissera une trace « Message supprimé » et les réponses resteront.', { title: 'Supprimer ton message ?' }))) return;
           const resp = await api(m.share_token, '/comment/' + c.id, { method: 'DELETE' });
           if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
           else notify('Suppression impossible.', { error: true });
@@ -2299,7 +2334,7 @@ document.getElementById('ed-save').addEventListener('click', async () => {
 });
 document.getElementById('ed-del').addEventListener('click', async () => {
   if (!edMemo || !edMemo.can_edit) return;
-  if (!(await confirmPopin('Mettre ce mémo à la corbeille ?', { okLabel: 'Corbeille' }))) return;
+  if (!(await confirmPopin('Tu pourras le restaurer depuis la corbeille.', { title: 'Mettre à la corbeille ?', okLabel: 'Corbeille' }))) return;
   await api(edMemo.share_token, '/memo/' + edMemo.id, { method: 'DELETE' }); edDialog.close(); await reload();
 });
 
@@ -2398,7 +2433,56 @@ document.getElementById('btn-plan').addEventListener('click', () => { VIEW = VIE
 // [AGENDA-PROJECT] le bouton header = agenda GLOBAL (union) : efface le filtre dossier
 // et [AGENDA-SMART-MONTH] ouvre toujours sur le mois courant.
 document.getElementById('btn-agenda').addEventListener('click', () => { hubAgendaFilter = null; agendaYM = null; agendaSelDay = null; VIEW = VIEW === 'agenda' ? 'board' : 'agenda'; syncViewBtns(); render(); });
-document.getElementById('search').addEventListener('input', () => { if (VIEW === 'plan') renderPlan(); else if (VIEW === 'agenda') renderAgendaHub(); else renderBoard(); });
+function hubRefreshSearch() {
+  if (!hubSearch().q) hubSearchWide = false;   // vider la recherche remet la portée par défaut
+  if (hubSearchUI) hubSearchUI.refreshHelp();
+  if (VIEW === 'plan') renderPlan(); else if (VIEW === 'agenda') renderAgendaHub(); else renderBoard();
+}
+document.getElementById('search').addEventListener('input', hubRefreshSearch);
+document.getElementById('search').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.target.value = ''; hubRefreshSearch(); e.target.blur(); }
+});
+// [SEARCH-SHARED] composant partagé : aide des raccourcis (desktop) + feuille de recherche
+// (mobile) avec portées, aide et résultats en direct. Les résultats sont ceux que la page
+// affiche déjà — jamais un mémo hors du périmètre du hub (invariant 5, le serveur borne /data).
+const hubSearchUI = attachSearchUI({
+  input: document.getElementById('search'),
+  anchor: document.getElementById('search'),
+  placeholder: 'Rechercher… (p# dossiers)',
+  helpRows: [
+    { k: 'p#', fill: 'p#', d: 'Chercher un <b>dossier</b> — <i>p#japon</i>' },
+    { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#hôtel</i>' },
+  ],
+  helpFoot: [['Échap', 'efface et ferme']],
+  scopeNote: () => {
+    const p = FOCUS != null ? projById(FOCUS) : null;
+    return p ? 'Dans « ' + p.name +' », la recherche y reste bornée — le chip du dossier élargit à tous tes dossiers.' : '';
+  },
+  scopes: () => ([{ key: 'all', label: 'Tout' }, { key: 'memos', label: 'Mémos' }, { key: 'projects', label: 'Dossiers' }]),
+  folderChip: () => {
+    const p = FOCUS != null ? projById(FOCUS) : null;
+    if (!p) return null;
+    return { label: (p.emoji || '📁') + ' ' + p.name, active: hubSearchScoped(),
+      onToggle: () => { hubSearchWide = !hubSearchWide; hubRefreshSearch(); } };
+  },
+  getQuery: () => hubSearchRaw(),
+  setQuery: () => {},   // la valeur vit dans le champ inline, que le composant tient à jour
+  getScope: () => hubSearchScope,
+  setScope: (v) => { hubSearchScope = v; },
+  results: () => {
+    const { scope, q } = hubSearch();
+    if (!q) return [];
+    const label = (id) => { const p = projById(id); return p ? ((p.emoji ? p.emoji + ' ' : '') + p.name) : ''; };
+    if (scope === 'projects') {
+      return hubMatchingProjects(q).map(p => ({ emoji: p.emoji || '📁', title: p.name, sub: 'Dossier',
+        onOpen: () => { FOCUS = p.id; VIEW = 'board'; syncViewBtns(); render(); } }));
+    }
+    return focusedMemos().map(m => ({ emoji: m.emoji || '📝',
+      title: m.title || stripTags(m.content).slice(0, 80) || '(sans titre)',
+      sub: label(m.project_id), onOpen: () => openEditor(m) }));
+  },
+  onChange: () => hubRefreshSearch(),
+});
 
 // ── init : toujours tenter /data — cookie de session HttpOnly OU header localStorage
 // ([HUB-SESSION]) ; loadDash affiche l'écran code sur 403 (comportement inchangé sans session).
