@@ -7536,12 +7536,14 @@ function commentInputEl(memo, parentId, onPosted) {
                          : 'Écrire un commentaire… (@ pour mentionner)');
   const input = el('input', { attrs: { type: 'text', placeholder: ph, maxlength: '2000' } });
   attachInputMention(input, () => assigneeSuggestions());
+  attachCmdHint(input);   // [COMMENT-VOTE] aide « / » (même composant que celle de la recherche)
   // [COMMENT-PRIO-CONFIG] le menu rend LA liste configurée (le serveur accepte tout id présent
   // dans `priorities` — source de vérité unique, plus de 1-3 câblé de part et d'autre).
   const prioSel = cmtPrioSelect(state.priorities || []);
   input.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter' || !input.value.trim()) return;
     e.preventDefault();
+    if (cmdGuardBlocks(input)) return;   // [COMMENT-VOTE] commande inconnue : rien n'est posté
     const body = { body: input.value.trim(), priority: parseInt(prioSel.value, 10) || 0 };
     if (parentId) body.parent_id = parentId;
     await api(`/api/memos/${memo.id}/comments`, { method: 'POST', body: JSON.stringify(body) });
@@ -7601,7 +7603,20 @@ function commentsBlockEl(memo) {
       const author = (c.author || '').replace(/\s*<[^>]*>/, '');
       // [VOICE-MESSAGES] corps avec marqueur [audio:...] → bulle vocale ; sinon texte (+ liens).
       const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));
-      const bodyNode = vf || commentBodyNode(c.body);   // [COMMENT-LINKIFY]
+      // [COMMENT-VOTE] un commentaire porteur de scrutin remplace son corps par la bulle de vote.
+      // Le serveur reste juge : on renvoie simplement son verdict à `loadComments()`.
+      const pollNode = c.poll ? cmtPollNode(c.poll, {
+        onVote: async (optionId) => {
+          try { await api(`/api/comment-polls/${c.id}/vote`, { method: 'POST', body: JSON.stringify({ option_id: optionId }) }); loadComments(); }
+          catch (e) { await notify('Vote impossible : ' + e.message, { error: true }); }
+        },
+        onClose: async () => {
+          if (!(await confirmPopin('Le gagnant sera figé et plus personne ne pourra voter.', { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
+          try { await api(`/api/comment-polls/${c.id}/close`, { method: 'POST' }); loadComments(); }
+          catch (e) { await notify('Clôture impossible : ' + e.message, { error: true }); }
+        },
+      }) : null;
+      const bodyNode = pollNode || vf || commentBodyNode(c.body);   // [COMMENT-LINKIFY]
       const others = (c.seen || []).filter(v => v && v !== author && v !== (state.ownerName || 'Fabien'));
       const _sys = cmtSystemInfo(c.body);   // [SYSTEM-LINES-MONO]
       const row = cmtRow({

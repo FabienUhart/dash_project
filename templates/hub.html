@@ -2273,7 +2273,27 @@ function renderEdComments(m, ro) {
   const prioPal = cmtPrioPalette(DATA.priorities || []);
   cmtHideVoiceLogs(m.comments || []).forEach(c => {
     const vf = renderVoiceBody(c.body, voiceUrlFor(m.attachments));   // [VOICE-MESSAGES]
-    const bodyNode = vf || commentBodyNode(c.body);                   // [COMMENT-LINKIFY]
+    // [COMMENT-VOTE] scrutin → bulle de vote à la place du corps ; routes invité sous /share/…
+    // (le helper `api(share_token, …)` du hub y poste déjà avec le bon jeton).
+    const refreshEd = async () => {
+      await reload();
+      const fresh = (DATA.memos || []).find(x => x.id === m.id);
+      if (fresh) renderEdComments(fresh, ro);
+    };
+    const pollNode = c.poll ? cmtPollNode(c.poll, {
+      onVote: async (optionId) => {
+        const r = await api(m.share_token, '/comment-poll/' + c.id + '/vote', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ option_id: optionId }) });
+        if (r.ok) await refreshEd(); else notify('Vote impossible.', { error: true });
+      },
+      onClose: async () => {
+        if (!(await confirmPopin('Le gagnant sera figé et plus personne ne pourra voter.', { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
+        const r = await api(m.share_token, '/comment-poll/' + c.id + '/close', { method: 'POST' });
+        if (r.ok) await refreshEd(); else notify('Clôture impossible.', { error: true });
+      },
+    }) : null;
+    const bodyNode = pollNode || vf || commentBodyNode(c.body);       // [COMMENT-LINKIFY]
     const when = c.created_at ? new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '';
     const _sys = cmtSystemInfo(c.body);   // [SYSTEM-LINES-MONO]
     cw.appendChild(cmtRow({
@@ -2310,7 +2330,8 @@ function renderEdComments(m, ro) {
     const inp = el('input', { attrs: { type: 'text',
       placeholder: _solo.length === 1 ? ('Écrire à ' + _solo[0].split(/\s+/)[0] + '… (@ pour mentionner)') : 'Écrire un commentaire… (@ pour mentionner)' } });
     const prioSel = cmtPrioSelect(DATA.priorities || []);
-    inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b, priority: parseInt(prioSel.value, 10) || 0 }) }); inp.value = ''; prioSel.value = '0'; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); });
+    attachCmdHint(inp);   // [COMMENT-VOTE] aide « / »
+    inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; if (cmdGuardBlocks(inp)) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b, priority: parseInt(prioSel.value, 10) || 0 }) }); inp.value = ''; prioSel.value = '0'; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); });
     const composer = el('div', { class: 'cmt-composer' });
     composer.appendChild(cmtAvatar(_me, true));
     const field = el('div', { class: 'cmt-field' });

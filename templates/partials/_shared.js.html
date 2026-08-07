@@ -715,6 +715,202 @@ function cmtRow(cfg) {
   row.appendChild(main);
   return row;
 }
+/* [COMMENT-VOTE] Aide des commandes du composeur, déclenchée par « / ».
+   Volontairement le MÊME composant visuel que l'aide de la recherche (`.sh-panel`, feuille
+   `_searchStyle`) — le brief demande la cohérence, et deux panneaux d'aide qui ne se ressemblent
+   pas se lisent comme deux mécaniques différentes. Seule la POSITION change : le composeur vit en
+   bas d'une pop-in, donc le panneau s'ouvre AU-DESSUS du champ.
+   `mousedown` + `preventDefault` comme dans la recherche : un `click` ferait perdre le focus au
+   champ avant le handler, et le panneau se refermerait sous le curseur. */
+const CMT_COMMANDS = [
+  { k: '/vote_choix', fill: '/vote_choix ',
+    d: 'Crée un <b>vote à choix unique</b> dans le fil — sépare les options par « <i>;</i> »',
+    ex: 'ramen ; sushi ; okonomiyaki' },
+];
+function attachCmdHint(input) {
+  if (!input || input.dataset.cmdHint) return;
+  input.dataset.cmdHint = '1';
+  _searchStyle();
+  const panel = el('div', { class: 'sh-panel', attrs: { role: 'group', 'aria-label': 'Commandes' } });
+  panel.appendChild(el('h5', { text: 'Commandes' }));
+  CMT_COMMANDS.forEach((c) => {
+    const row = el('div', { class: 'sh-row', attrs: { role: 'button', tabindex: '-1', title: 'Insérer « ' + c.fill.trim() + ' »' } });
+    row.appendChild(el('kbd', { text: c.k }));
+    const d = el('span', { class: 'sh-d' });
+    d.innerHTML = c.d + (c.ex ? ' — <i>' + c.ex + '</i>' : '');   // libellés STATIQUES, aucune donnée utilisateur
+    row.appendChild(d);
+    row.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      input.value = c.fill;
+      input.focus();
+      try { input.setSelectionRange(c.fill.length, c.fill.length); } catch (_) {}
+      sync();
+    });
+    panel.appendChild(row);
+  });
+  document.body.appendChild(panel);
+  function place() {
+    const r = input.getBoundingClientRect();
+    panel.style.left = Math.round(r.left) + 'px';
+    panel.style.width = Math.round(Math.max(r.width, 280)) + 'px';
+    // Au-dessus du champ ; si ça sortait par le haut, on retombe dessous.
+    const h = panel.offsetHeight || 90;
+    const above = r.top - h - 6;
+    panel.style.top = Math.round(above > 4 ? above : r.bottom + 6) + 'px';
+  }
+  function sync() {
+    const v = (input.value || '').trim();
+    // Ouvert tant qu'on tape une commande : dès que les options commencent, l'aide s'efface.
+    const open = document.activeElement === input && v.charAt(0) === '/'
+      && !CMT_COMMANDS.some(c => v.toLowerCase().startsWith(c.fill.toLowerCase()) && v.length > c.fill.length);
+    panel.classList.toggle('open', open);
+    if (open) place();
+  }
+  /* ── Commande INCONNUE ≠ message ────────────────────────────────────────────────────────
+     Constat Fabien : `/vote_multi …` partait en bulle de texte, comme si la commande avait
+     marché. Un corps qui commence par « / » suivi d'un mot et ne correspond à AUCUNE commande
+     connue est donc retenu : rien n'est posté, le composeur le dit sur place.
+     ⚠️ Échappatoire OBLIGATOIRE : « /moi aussi » est un message légitime. Un SECOND Entrée
+     immédiat l'envoie tel quel — et l'avertissement l'annonce, sinon le garde-fou deviendrait
+     une censure. Toute frappe réarme le garde (on ne veut pas d'un laissez-passer qui traîne). */
+  const warn = el('div', { class: 'sh-panel sh-warn', attrs: { role: 'status' } });
+  warn.appendChild(el('span', { class: 'sh-warn-t', text: 'Commande inconnue — tape / pour voir les commandes disponibles.' }));
+  warn.appendChild(el('span', { class: 'sh-warn-s', text: 'Entrée à nouveau pour envoyer comme message.' }));
+  document.body.appendChild(warn);
+  function placeWarn() {
+    const r = input.getBoundingClientRect();
+    warn.style.left = Math.round(r.left) + 'px';
+    warn.style.width = Math.round(Math.max(r.width, 280)) + 'px';
+    const h = warn.offsetHeight || 60;
+    const above = r.top - h - 6;
+    warn.style.top = Math.round(above > 4 ? above : r.bottom + 6) + 'px';
+  }
+  function clearWarn() { warn.classList.remove('open'); input.dataset.cmdWarned = ''; }
+  // `^/\w+` = « / » suivi d'un caractère de mot (lettre, CHIFFRE ou _), la règle du brief.
+  // « / » seul passe sans rien demander. « /2 fois par jour », lui, est retenu une fois : c'est
+  // assumé — le second Entrée l'envoie, et c'est précisément à ça que sert l'échappatoire.
+  const UNKNOWN_RE = /^\/\w+/;
+  input._cmdApi = {
+    blocks() {
+      const v = (input.value || '').trim();
+      if (!UNKNOWN_RE.test(v)) { clearWarn(); return false; }
+      if (CMT_COMMANDS.some(c => v.toLowerCase().startsWith(c.fill.trim().toLowerCase()))) { clearWarn(); return false; }
+      if (input.dataset.cmdWarned === '1') { clearWarn(); return false; }   // 2e Entrée : on envoie
+      input.dataset.cmdWarned = '1';
+      panel.classList.remove('open');
+      warn.classList.add('open');
+      placeWarn();
+      return true;
+    },
+  };
+  input.addEventListener('input', () => { clearWarn(); sync(); });
+  input.addEventListener('focus', sync);
+  input.addEventListener('blur', () => { panel.classList.remove('open'); warn.classList.remove('open'); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { panel.classList.remove('open'); clearWarn(); } });
+  window.addEventListener('resize', () => { if (panel.classList.contains('open')) place(); if (warn.classList.contains('open')) placeWarn(); });
+}
+/* Appelé par les 3 pages AVANT d'envoyer : true = on retient l'envoi (commande inconnue, 1er
+   Entrée). Sans composeur outillé (`attachCmdHint` non appelé), ne bloque jamais rien. */
+function cmdGuardBlocks(input) {
+  return !!(input && input._cmdApi && input._cmdApi.blocks());
+}
+/* ════════ [COMMENT-VOTE] la bulle SCRUTIN ════════════════════════════════════════════════
+   Rendu conforme à la maquette validée `docs/maquettes/maquette-comment-vote.html`. C'est un
+   `bodyNode` comme un autre : `cmtRow` ne change pas d'un octet, et les 3 pages n'ont qu'une
+   ligne à écrire. Helper PUR (règle du partial) : ni `state`/`DATA` ni réseau — la page fournit
+   les callbacks, le SERVEUR reste seul juge du droit de voter et de clore (invariant 5).
+   `poll` = le payload serveur { closed, total, can_close, mine, options:[{id,label,count,
+   winner,voters[]}] }. cfg = { canVote, onVote(optionId), onClose() }. */
+function _pollStyle() {
+  if (document.getElementById('poll-style')) return;
+  const st = document.createElement('style'); st.id = 'poll-style';
+  st.textContent =
+    '.cmt-poll{min-width:min(270px,68vw)}'
+    + '.cmt-poll-head{display:flex;align-items:center;gap:0.4rem;font-weight:600;font-size:0.85rem;margin:0.15rem 0 0.45rem}'
+    + '.cmt-poll-head .cmt-poll-mode{font-weight:400;color:var(--muted);font-size:0.72rem;margin-left:auto}'
+    // Une option est un BOUTON : cible tactile franche, focus clavier gratuit, rôle explicite.
+    + '.cmt-poll-opt{position:relative;display:block;width:100%;text-align:left;background:none;'
+    + 'border:1px solid var(--border);border-radius:9px;padding:0.42rem 0.6rem;margin-bottom:0.4rem;'
+    + 'overflow:hidden;color:var(--text);font:inherit;font-size:0.85rem;cursor:pointer;transition:border-color .15s}'
+    + '.cmt-poll-opt[disabled]{cursor:default}'
+    + '.cmt-poll-opt:not([disabled]):hover,.cmt-poll-opt:focus-visible{border-color:var(--accent);outline:none}'
+    // La barre est peinte DANS la bulle, en teinte accent légère — jamais un aplat plein (Luciole).
+    + '.cmt-poll-fill{position:absolute;inset:0;width:0;background:color-mix(in srgb, var(--accent) 13%, transparent);transition:width .45s ease}'
+    + '.cmt-poll-line{position:relative;display:flex;align-items:center;gap:0.5rem}'
+    + '.cmt-poll-radio{width:15px;height:15px;border-radius:50%;border:2px solid var(--muted);flex:none}'
+    + '.cmt-poll-opt.mine .cmt-poll-radio{border-color:var(--accent);'
+    + 'background:radial-gradient(circle at center, var(--accent) 0 45%, transparent 50%)}'
+    + '.cmt-poll-label{flex:1;min-width:0;overflow-wrap:anywhere}'
+    + '.cmt-poll-count{font-size:0.75rem;color:var(--muted);font-variant-numeric:tabular-nums}'
+    + '.cmt-poll-voters{display:flex;gap:2px;flex:none}'
+    // ⚠️ `white-space:nowrap` + `line-height:1` : une pastille fait 16 px, et sans ça les deux
+    // initiales se coupaient en DEUX LIGNES (« M » au-dessus de « A »), constaté à l'écran.
+    + '.cmt-poll-voters i{width:16px;height:16px;border-radius:50%;background:var(--panel-2);'
+    + 'border:1px solid var(--border);font-style:normal;font-size:0.52rem;line-height:1;'
+    + 'white-space:nowrap;display:flex;align-items:center;justify-content:center;color:var(--muted)}'
+    + '.cmt-poll-voters i.guest{color:var(--violet,#b39ddb)}'
+    + '.cmt-poll-foot{display:flex;align-items:center;gap:0.6rem;font-size:0.75rem;color:var(--muted);margin-top:0.45rem}'
+    + '.cmt-poll-win{display:inline-flex;align-items:center;gap:0.3rem;color:var(--accent);font-size:0.72rem}'
+    + '.cmt-poll.closed .cmt-poll-opt.winner{border-color:var(--accent)}'
+    + '.cmt-poll.closed .cmt-poll-opt.winner .cmt-poll-label{font-weight:600}';
+  document.head.appendChild(st);
+}
+function cmtPollNode(poll, cfg) {
+  _pollStyle();
+  cfg = cfg || {};
+  const wrap = el('div', { class: 'cmt-poll' + (poll.closed ? ' closed' : '') });
+  const head = el('div', { class: 'cmt-poll-head' });
+  const ic = hdrIcon('ballot'); ic.setAttribute('width', '15'); ic.setAttribute('height', '15');
+  head.appendChild(ic);
+  head.appendChild(el('span', { text: 'Vote' }));
+  head.appendChild(el('span', { class: 'cmt-poll-mode', text: poll.closed ? 'clos' : 'choix unique' }));
+  wrap.appendChild(head);
+  // Voter est possible tant que le scrutin est ouvert ET que la page dit que ce lecteur le peut.
+  // Le clic part quand même vers le serveur, qui retranche (403/409) : le front n'est pas l'arbitre.
+  const votable = !poll.closed && cfg.canVote !== false && typeof cfg.onVote === 'function';
+  (poll.options || []).forEach((o) => {
+    const b = el('button', {
+      class: 'cmt-poll-opt' + (poll.mine === o.id ? ' mine' : '') + (o.winner ? ' winner' : ''),
+      attrs: { type: 'button', title: votable ? (poll.mine === o.id ? 'Retirer ma voix' : 'Voter « ' + o.label + ' »') : o.label },
+    });
+    if (!votable) b.setAttribute('disabled', '');
+    const fill = el('span', { class: 'cmt-poll-fill' });
+    fill.style.width = poll.total ? Math.round((o.count / poll.total) * 100) + '%' : '0';
+    b.appendChild(fill);
+    const line = el('div', { class: 'cmt-poll-line' });
+    line.appendChild(el('span', { class: 'cmt-poll-radio' }));
+    line.appendChild(el('span', { class: 'cmt-poll-label', text: o.label }));
+    const vs = el('span', { class: 'cmt-poll-voters' });
+    // 4 pastilles max : au-delà, le compteur porte l'information (une rangée de 12 initiales
+    // déborderait de la bulle sur mobile). Le titre liste TOUS les votants.
+    (o.voters || []).slice(0, 4).forEach((v) => vs.appendChild(el('i', { text: cmtInitials(v), attrs: { title: v } })));
+    if ((o.voters || []).length) vs.title = (o.voters || []).join(', ');
+    line.appendChild(vs);
+    line.appendChild(el('span', { class: 'cmt-poll-count', text: o.count ? String(o.count) : '' }));
+    b.appendChild(line);
+    if (votable) b.addEventListener('click', (e) => { e.stopPropagation(); cfg.onVote(o.id); });
+    wrap.appendChild(b);
+  });
+  const foot = el('div', { class: 'cmt-poll-foot' });
+  foot.appendChild(el('span', { text: poll.total + (poll.total > 1 ? ' votes' : ' vote') }));
+  if (poll.closed) {
+    const winners = (poll.options || []).filter(o => o.winner).map(o => o.label);
+    const w = el('span', { class: 'cmt-poll-win', attrs: { style: 'margin-left:auto' } });
+    const tr = hdrIcon('trophy'); tr.setAttribute('width', '13'); tr.setAttribute('height', '13');
+    w.appendChild(tr);
+    w.appendChild(el('span', { text: winners.length ? winners.join(' + ') : 'aucun vote' }));
+    foot.appendChild(w);
+  } else if (poll.can_close && typeof cfg.onClose === 'function') {
+    // Luciole neutre : clore n'est pas une destruction, et le chrome ne prend jamais l'aplat accent.
+    const b = el('button', { attrs: { type: 'button', style: 'margin-left:auto', title: 'Clore le vote et couronner le gagnant' } });
+    const tr = hdrIcon('trophy'); tr.setAttribute('width', '13'); tr.setAttribute('height', '13');
+    b.appendChild(tr); b.appendChild(document.createTextNode(' Clore'));
+    b.addEventListener('click', (e) => { e.stopPropagation(); cfg.onClose(); });
+    foot.appendChild(typeof lucioleize === 'function' ? lucioleize(b, 'luc-neutral') : b);
+  }
+  wrap.appendChild(foot);
+  return wrap;
+}
 // Bouton « ▾ Voir n réponses de plus » / « ▴ Masquer » (état de SESSION, rien de persisté).
 function cmtMoreToggle(n, onToggle) {
   const b = el('button', { class: 'cmt-more', attrs: { type: 'button' } });
@@ -6219,6 +6415,8 @@ const HDR_ICONS = {
   'player-stop': ['M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z'],
   // [CARD-COVER] « liste » = affichage Compact de la bascule (l'Immersif réutilise `photo`).
   list: ['M9 6l11 0', 'M9 12l11 0', 'M9 18l11 0', 'M5 6l0 .01', 'M5 12l0 .01', 'M5 18l0 .01'],
+  // [COMMENT-VOTE] urne du scrutin dans une bulle de commentaire (Tabler outline, inline).
+  ballot: ['M5 12h14', 'M5 12a2 2 0 0 0 -2 2v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2 -2v-4a2 2 0 0 0 -2 -2', 'M9 12v-5a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v5'],
   // [SEARCH-SHARED] loupe — le hub et le share n'ont pas de sprite `ic-search`, ils consomment celle-ci.
   search: ['M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0', 'M21 21l-6 -6'],
 };
@@ -6787,6 +6985,11 @@ function _searchStyle() {
     + '.sh-panel .sh-foot{display:flex;gap:1rem;flex-wrap:wrap;margin-top:0.3rem;'
     + 'padding:0.45rem 0.5rem 0.25rem;border-top:1px solid var(--border);color:var(--muted);font-size:0.75rem}'
     + '.sh-panel .sh-foot kbd{min-width:0;padding:0 0.3rem;font-size:0.7rem;border-radius:4px;color:var(--muted)}'
+    // [COMMENT-VOTE] Le composeur réutilise CE panneau pour son aide « / » et pour son
+    // avertissement de commande inconnue — même boîte, même placement, donc rien à re-styler.
+    + '.sh-panel.sh-warn{border-color:color-mix(in srgb, var(--red,#f44336) 45%, var(--border))}'
+    + '.sh-panel .sh-warn-t{display:block;font-size:0.82rem;color:var(--text);padding:0.15rem 0.5rem}'
+    + '.sh-panel .sh-warn-s{display:block;font-size:0.75rem;color:var(--muted);padding:0.1rem 0.5rem 0.2rem}'
     // ── feuille de recherche (mobile) ── même doctrine que [GUEST-SETTINGS] : un <dialog>, deux
     // présentations. Sur desktop (ouverture forcée) elle reste une pop-in centrée classique.
     + '#search-sheet{width:min(520px,94vw);max-width:min(520px,94vw);border:1px solid var(--border);'

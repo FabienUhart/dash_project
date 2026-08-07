@@ -1436,9 +1436,11 @@ function shareCommentInput(memo, parentId) {
                           : 'Écrire un commentaire… (@ pour mentionner)');
   ci.maxLength = 2000;
   attachInputMention(ci, () => shareSuggestions());
+  attachCmdHint(ci);   // [COMMENT-VOTE] aide « / »
   ci.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter' || !ci.value.trim()) return;
     e.preventDefault();
+    if (cmdGuardBlocks(ci)) return;   // [COMMENT-VOTE] commande inconnue : rien n'est posté
     const body = { body: ci.value.trim(), priority: parseInt(prioSel.value, 10) || 0 };
     if (parentId) body.parent_id = parentId;
     const r = await fetch(API + '/memo/' + memo.id + '/comments', {
@@ -3559,7 +3561,25 @@ function render() {
       const buildC = (c, isReply) => {
         const author = (c.author || '').replace(/\s*<[^>]*>/, '');
         const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));   // [VOICE-MESSAGES]
-        const bodyNode = vf || commentBodyNode(c.body);                      // [COMMENT-LINKIFY]
+        // [COMMENT-VOTE] scrutin → la bulle de vote remplace le corps. Voter exige la capacité
+        // `comment` (voter, c'est prendre la parole) ; le SERVEUR revalide périmètre et rôle à
+        // chaque appel — la page ne fait qu'afficher ce qu'il autorise (invariant 5).
+        const pollNode = c.poll ? cmtPollNode(c.poll, {
+          canVote: canCommentMemo(memo),
+          onVote: async (optionId) => {
+            const r = await fetch(API + '/comment-poll/' + c.id + '/vote', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+              body: JSON.stringify({ option_id: optionId }) });
+            if (r.ok) await load(); else notify('Vote impossible.', { error: true });
+          },
+          onClose: async () => {
+            if (!(await confirmPopin('Le gagnant sera figé et plus personne ne pourra voter.', { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
+            const r = await fetch(API + '/comment-poll/' + c.id + '/close', {
+              method: 'POST', headers: { 'X-Guest-Token': guestToken() } });
+            if (r.ok) await load(); else notify('Clôture impossible.', { error: true });
+          },
+        }) : null;
+        const bodyNode = pollNode || vf || commentBodyNode(c.body);           // [COMMENT-LINKIFY]
         const self = (GUEST && (GUEST.name || GUEST.email)) || '';
         const others = (c.seen || []).filter(v => v && v !== author && v !== self);
         const when = new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
@@ -3830,8 +3850,51 @@ const shareSearchUI = attachSearchUI({
   { const _ic = hdrIconAt('search', 16); _ic.style.color = 'var(--muted)'; _si.parentElement.insertBefore(_ic, _si); }
   _si.addEventListener('input', shareRefreshSearch);
   _si.addEventListener('keydown', (e) => { if (e.key === 'Escape') { _si.value = ''; shareRefreshSearch(); _si.blur(); } }); }
+/* ═══ [SHARE-REFRESH-GUARD] le tick de 15 s ne détruit plus une saisie en cours ═══════════
+   Bug PRÉ-EXISTANT prouvé par Cowork en session invitée réelle : `setInterval(load, 15000)` →
+   `load()` → `render()` reconstruit toutes les cards, donc TOUT texte en train d'être tapé dans
+   un composeur de fil disparaît au tick suivant. Le « ; » et les frappes n'y étaient pour rien ;
+   c'est ce qui expliquait aussi les impressions de « ça se ferme tout seul » côté invité. La
+   frappe longue des commandes `/vote_choix …` l'a simplement rendu systématique.
+
+   La garde est posée sur le TICK, jamais sur `load()` : les rafraîchissements EXPLICITES (après
+   avoir posté, voté, clos…) doivent toujours rendre — c'est le rafraîchissement AUTOMATIQUE, et
+   lui seul, qui doit savoir attendre. Même doctrine que les deux gardes déjà en place sur cette
+   page (le formulaire d'identification et la barre d'ajout mémo) : on ne reconstruit pas ce dans
+   quoi l'invité est en train d'écrire.
+
+   Conséquence assumée : tant qu'un brouillon non envoyé traîne dans un composeur, la page reste
+   sur ses données. C'est le bon compromis — des données d'il y a 30 s se rattrapent, une phrase
+   effacée ne se rattrape pas. Pour ne pas faire attendre 15 s de plus après coup, un tick sauté
+   arme une reprise courte déclenchée à la sortie du champ. */
+let _refreshPending = false, _refreshTimer = null;
+function shareRefreshBlocked() {
+  // Une pop-in ouverte : le tick reconstruirait le board DERRIÈRE elle.
+  if (document.querySelector('dialog[open]')) return 'pop-in ouverte';
+  const a = document.activeElement;
+  if (a && a !== document.body
+      && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable)) {
+    return 'saisie en cours';
+  }
+  // Texte non envoyé, MÊME sans focus : l'invité a pu cliquer ailleurs sans valider.
+  const dirty = [...document.querySelectorAll('.cmt-composer input, #add-bar input, #add-bar textarea')]
+    .some(i => (i.value || '').trim());
+  return dirty ? 'brouillon non envoyé' : '';
+}
+function shareAutoRefresh() {
+  if (shareRefreshBlocked()) { _refreshPending = true; return; }
+  _refreshPending = false;
+  load();
+}
 load();
-setInterval(load, 15000);
+setInterval(shareAutoRefresh, 15000);
+// Reprise courte : à la sortie d'un champ, si un tick a été sauté et que plus rien ne bloque,
+// on rattrape sans attendre les 15 s suivantes.
+document.addEventListener('focusout', () => {
+  if (!_refreshPending) return;
+  clearTimeout(_refreshTimer);
+  _refreshTimer = setTimeout(() => { if (_refreshPending) shareAutoRefresh(); }, 1200);
+});
 
 /* ------------------------------------------------ animations GSAP
    Dégrade proprement si gsap.min.js est absent.

@@ -717,6 +717,39 @@ def init_db():
         )
         """
     )
+    # ───────────────────────── [COMMENT-VOTE] mini-scrutin dans une bulle ─────────────────────────
+    # Le scrutin EST un commentaire (`memo_comments.kind = 'poll'`, colonne posée en
+    # [V27.28.205]) : il hérite gratuitement du fil, des réponses, du tri, de la suppression
+    # douce et du badge 💬 — un scrutin ouvert par quelqu'un EST un message, contrairement aux
+    # lignes système. Deux tables additives portent le reste. Jamais destructives.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS comment_poll_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            comment_id INTEGER NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            label TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS comment_poll_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            comment_id INTEGER NOT NULL,
+            option_id INTEGER NOT NULL,
+            -- Pattern `created_by` v19 : '' = le propriétaire, sinon « Nom <email> ».
+            voter TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            -- CHOIX UNIQUE porté par le SCHÉMA : une seule voix par personne et par scrutin.
+            -- Changer d'avis = un UPDATE de cette ligne, jamais une seconde.
+            UNIQUE(comment_id, voter)
+        )
+        """
+    )
+    # Clôture : posée sur le commentaire porteur (une colonne de plus, pas une table de plus).
+    if "poll_closed_at" not in ccols:
+        conn.execute("ALTER TABLE memo_comments ADD COLUMN poll_closed_at TEXT DEFAULT ''")
     # [FAVORITES] Projets/vues épinglés en tête de la sidebar. OWNER-ONLY, additif, JAMAIS
     # exporté/importé (pas de bump de format — reste v21) : donnée de confort locale, comme
     # les accusés de lecture. Ordre = date d'ajout (position). Purge en cascade à la
@@ -3859,6 +3892,9 @@ def _purge_memo_row(db, memo_id):
     db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
     # [COMMENT-REACTIONS] purge des réactions AVANT les commentaires (comment_id → orphelin sinon).
     db.execute("DELETE FROM comment_reactions WHERE comment_id IN (SELECT id FROM memo_comments WHERE memo_id = ?)", (memo_id,))
+    # [COMMENT-VOTE] scrutins du mémo : options et voix AVANT les commentaires porteurs.
+    db.execute("DELETE FROM comment_poll_votes WHERE comment_id IN (SELECT id FROM memo_comments WHERE memo_id = ?)", (memo_id,))
+    db.execute("DELETE FROM comment_poll_options WHERE comment_id IN (SELECT id FROM memo_comments WHERE memo_id = ?)", (memo_id,))
     db.execute("DELETE FROM memo_comments WHERE memo_id = ?", (memo_id,))
     db.execute("DELETE FROM memo_votes WHERE memo_id = ?", (memo_id,))  # [VOTE-DECISION] voix dossier + nommées
     db.execute("DELETE FROM vote_options WHERE memo_id = ?", (memo_id,))  # [VOTE-GROUPS] retire des options nommées
@@ -6405,7 +6441,7 @@ def _toggle_reaction(db, comment_id, emoji, voter):
 
 
 def _comment_dict(r, seen_map=None, reactions_map=None, me=None, owner_name="", palette=None,
-                  can_delete=None):
+                  can_delete=None, poll=None):
     # [COMMENTS-V2 addendum] `deleted` = pierre tombale : la ligne reste (le fil garde son contexte)
     # mais le corps est déjà vide en base — auteur et heure sont conservés, rien d'autre ne sort.
     # `can_delete` : le serveur tranche (invariant 5). None ⇒ règle « l'auteur supprime son message »,
@@ -6433,6 +6469,9 @@ def _comment_dict(r, seen_map=None, reactions_map=None, me=None, owner_name="", 
         # JAMAIS exporté (comme `created_by_display`) : au réimport, le rattrapage d'`init_db()`
         # re-pose la valeur — donc aucun champ nouveau dans le format, aucun bump.
         "kind": _row_get(r, "kind", "") or "",
+        # [COMMENT-VOTE] état du scrutin porté par CE commentaire (None pour un message ordinaire,
+        # None aussi sur une tombale : les voix sont purgées avec le corps). Runtime-only.
+        "poll": None if deleted else poll,
     }
 
 
@@ -6545,6 +6584,7 @@ def _soft_delete_comment(db, row):
         )
     db.execute("DELETE FROM comment_reactions WHERE comment_id = ?", (row["id"],))
     db.execute("DELETE FROM comment_seen WHERE comment_id = ?", (row["id"],))
+    _purge_poll(db, row["id"])   # [COMMENT-VOTE] une tombale n'a plus d'actions : options et voix partent
     db.execute(
         "UPDATE memo_comments SET body = '', deleted_at = ? WHERE id = ?",
         (datetime.now(timezone.utc).isoformat(), row["id"]),
@@ -6570,6 +6610,155 @@ def _attach_log_comment(db, memo_row, added, names, author, share_id):
     _insert_comment(db, memo_row, body, author, share_id, kind="log")
 
 
+# ───────────────────────── [COMMENT-VOTE] scrutin dans une bulle de commentaire ─────────────────
+# Commande `/vote_choix option 1 ; option 2 ; option 3` tapée dans le composeur. Le scrutin n'a
+# PAS de route de création : il naît de la route de commentaire EXISTANTE (owner et invité), donc
+# les gardes de périmètre et de rôle déjà en place s'appliquent telles quelles — rien à revalider
+# ailleurs (invariant 5). Créer un scrutin = commenter : la capacité requise est `comment`.
+
+POLL_CMD_RE = re.compile(r"^\s*/vote_choix\b(.*)$", re.I | re.S)
+POLL_MAX_OPTIONS = 10
+POLL_OPTION_MAX = 80
+
+
+def _parse_poll_command(body):
+    """`/vote_choix a ; b ; c` → ['a','b','c'], sinon None (ce n'est pas une commande).
+    Séparateur « ; », minimum 2 options — un scrutin à une seule option n'est pas un choix.
+    Renvoie [] si la commande est reconnue mais mal formée : l'appelant tranche (400 explicite),
+    on ne poste JAMAIS silencieusement « /vote_choix ramen » comme message ordinaire."""
+    # Le corps peut arriver en HTML (Quill) : on parse le TEXTE. `_text_excerpt` retire les
+    # balises ET désescape ([V27.28.203]) — sans ça, « d&#39;Osaka » deviendrait une option.
+    m = POLL_CMD_RE.match(_text_excerpt(body, 2000))
+    if not m:
+        return None
+    seen, opts = set(), []
+    for raw in m.group(1).split(";"):
+        label = " ".join(raw.split())[:POLL_OPTION_MAX]
+        if not label or label.lower() in seen:
+            continue                      # doublons écartés : deux options identiques ne se votent pas
+        seen.add(label.lower())
+        opts.append(label)
+    return opts[:POLL_MAX_OPTIONS] if len(opts) >= 2 else []
+
+
+def _poll_body(labels):
+    """Corps du commentaire PORTEUR. Il doit rester lisible tout seul : les tables du scrutin ne
+    sont PAS exportées (limitation assumée, même doctrine que les tombales), donc après un cycle
+    export/import il ne reste que ce texte — un relevé du scrutin plutôt qu'une bulle vide."""
+    return "🗳 Vote : " + " · ".join(labels)
+
+
+def _create_poll(db, comment_row, labels, created_by):
+    now = datetime.now(timezone.utc).isoformat()
+    for i, label in enumerate(labels):
+        db.execute(
+            "INSERT INTO comment_poll_options (comment_id, position, label) VALUES (?, ?, ?)",
+            (comment_row["id"], i, label),
+        )
+    return now
+
+
+def _poll_payload(db, comment_row, me="", owner_name="", is_owner=False):
+    """État complet d'un scrutin pour l'appelant. `me` = identité du LECTEUR (pattern voter :
+    '' = propriétaire). Les votants sortent en NOM AFFICHABLE seulement — jamais l'e-mail brut
+    (owner-only, invariant 5), même règle que les réactions."""
+    cid = comment_row["id"]
+    options = db.execute(
+        "SELECT id, label FROM comment_poll_options WHERE comment_id = ? ORDER BY position, id", (cid,)
+    ).fetchall()
+    if not options:
+        return None
+    votes = db.execute(
+        "SELECT option_id, voter FROM comment_poll_votes WHERE comment_id = ? ORDER BY created_at, id", (cid,)
+    ).fetchall()
+    by_opt = {}
+    mine = None
+    for v in votes:
+        by_opt.setdefault(v["option_id"], []).append(v["voter"])
+        if _voter_key(v["voter"]) == _voter_key(me):
+            mine = v["option_id"]
+    closed = bool((_row_get(comment_row, "poll_closed_at", "") or "").strip())
+    counts = {o["id"]: len(by_opt.get(o["id"], [])) for o in options}
+    top = max(counts.values()) if counts else 0
+    return {
+        "closed": closed,
+        "total": sum(counts.values()),
+        # Clore : le CRÉATEUR ou le propriétaire (le serveur tranche, invariant 5).
+        "can_close": bool(is_owner or (_voter_key(comment_row["author"]) == _voter_key(me) and _voter_key(me))),
+        "mine": mine,
+        "options": [
+            {
+                "id": o["id"],
+                "label": o["label"],
+                "count": counts[o["id"]],
+                # Gagnant(s) : seulement une fois CLOS, et seulement s'il y a eu des voix.
+                "winner": bool(closed and top > 0 and counts[o["id"]] == top),
+                "voters": [_vote_display_name(v, owner_name) for v in by_opt.get(o["id"], [])],
+            }
+            for o in options
+        ],
+    }
+
+
+def _polls_map(db, comment_rows, me="", owner_name="", is_owner=False):
+    """{comment_id: payload} pour les commentaires porteurs seulement (une requête par scrutin,
+    et il y en a très peu par fil — pas de N+1 à l'échelle d'un mémo)."""
+    out = {}
+    for r in comment_rows:
+        if (_row_get(r, "kind", "") or "") == "poll":
+            p = _poll_payload(db, r, me=me, owner_name=owner_name, is_owner=is_owner)
+            if p:
+                out[r["id"]] = p
+    return out
+
+
+def _purge_poll(db, comment_id):
+    """Options + voix d'un scrutin. Appelé par la suppression douce (tombale) et par la purge
+    définitive du mémo : une tombale n'a plus d'actions, donc plus de voix à porter."""
+    db.execute("DELETE FROM comment_poll_votes WHERE comment_id = ?", (comment_id,))
+    db.execute("DELETE FROM comment_poll_options WHERE comment_id = ?", (comment_id,))
+
+
+def _poll_comment(db, comment_id):
+    """Commentaire porteur d'un scrutin VIVANT (jamais une tombale), sinon None."""
+    row = db.execute(
+        "SELECT * FROM memo_comments WHERE id = ? AND COALESCE(kind,'') = 'poll' "
+        "AND COALESCE(deleted_at,'') = ''",
+        (comment_id,),
+    ).fetchone()
+    return row
+
+
+def _cast_poll_vote(db, comment_row, option_id, voter):
+    """Vote au toucher : (payload_erreur, status) ou (None, None) si c'est passé.
+    Toucher une AUTRE option = changer d'avis (une seule ligne, remplacée) ; re-toucher la SIENNE
+    = retirer sa voix. Le choix unique est garanti par `UNIQUE(comment_id, voter)`, pas par le
+    front — un double envoi ne peut pas fabriquer deux voix."""
+    if (_row_get(comment_row, "poll_closed_at", "") or "").strip():
+        return {"error": "ce vote est clos"}, 409
+    opt = db.execute(
+        "SELECT id FROM comment_poll_options WHERE id = ? AND comment_id = ?",
+        (option_id, comment_row["id"]),
+    ).fetchone()
+    if not opt:
+        return {"error": "option inconnue"}, 404
+    cur = db.execute(
+        "SELECT id, option_id FROM comment_poll_votes WHERE comment_id = ? AND voter = ?",
+        (comment_row["id"], voter),
+    ).fetchone()
+    if cur and cur["option_id"] == option_id:
+        db.execute("DELETE FROM comment_poll_votes WHERE id = ?", (cur["id"],))   # retrait
+    elif cur:
+        db.execute("UPDATE comment_poll_votes SET option_id = ?, created_at = ? WHERE id = ?",
+                   (option_id, datetime.now(timezone.utc).isoformat(), cur["id"]))
+    else:
+        db.execute(
+            "INSERT INTO comment_poll_votes (comment_id, option_id, voter, created_at) VALUES (?, ?, ?, ?)",
+            (comment_row["id"], option_id, voter, datetime.now(timezone.utc).isoformat()),
+        )
+    return None, None
+
+
 @app.route("/api/memos/<int:memo_id>/comments", methods=["GET"])
 def list_comments(memo_id):
     db = get_db()
@@ -6582,9 +6771,10 @@ def list_comments(memo_id):
     reacts = _comment_reactions_map(db, ids)  # [COMMENT-REACTIONS]
     owner_name = _owner_name(db)
     palette = _reaction_palette(db)  # [REACTION-PALETTE]
+    polls = _polls_map(db, rows, me="", owner_name=owner_name, is_owner=True)  # [COMMENT-VOTE]
     # can_delete=True : l'owner modère tout (y compris les messages d'invités).
     return jsonify([_comment_dict(r, seen, reacts, me="", owner_name=owner_name, palette=palette,
-                                  can_delete=True) for r in rows])
+                                  can_delete=True, poll=polls.get(r["id"])) for r in rows])
 
 
 @app.route("/api/memos/<int:memo_id>/comments", methods=["POST"])
@@ -6599,9 +6789,56 @@ def add_comment(memo_id):
         return jsonify({"error": "body required"}), 400
     parent_id = _valid_parent_comment(db, memo_id, data.get("parent_id")) if data.get("parent_id") else None
     priority = _valid_comment_priority(db, data.get("priority"))
+    # [COMMENT-VOTE] `/vote_choix a ; b ; c` → commentaire PORTEUR (kind='poll') + ses options.
+    # Commande reconnue mais mal formée ⇒ 400 explicite : on ne poste jamais « /vote_choix ramen »
+    # comme un message ordinaire, l'utilisateur croirait avoir créé un vote.
+    labels = _parse_poll_command(body)
+    if labels is not None:
+        if not labels:
+            return jsonify({"error": "Il faut au moins deux options, séparées par « ; »."}), 400
+        row = _insert_comment(db, memo, _poll_body(labels), "moi", parent_id=parent_id,
+                              priority=priority, kind="poll")
+        _create_poll(db, row, labels, "")
+        db.commit()
+        return jsonify(_comment_dict(row, can_delete=True, poll=_poll_payload(
+            db, row, me="", owner_name=_owner_name(db), is_owner=True))), 201
     row = _insert_comment(db, memo, body, "moi", parent_id=parent_id, priority=priority)
     db.commit()
     return jsonify(_comment_dict(row, can_delete=True)), 201
+
+
+# ───────────────────────── [COMMENT-VOTE] voter / clore — côté propriétaire ─────────────────────
+# Derrière Authelia (aucune route publique nouvelle ici : le pendant invité vit sous /share/*).
+
+@app.route("/api/comment-polls/<int:comment_id>/vote", methods=["POST"])
+def poll_vote_owner(comment_id):
+    db = get_db()
+    row = _poll_comment(db, comment_id)
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    try:
+        option_id = int((request.get_json(silent=True) or {}).get("option_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "option_id requis"}), 400
+    err, status = _cast_poll_vote(db, row, option_id, "")   # propriétaire = voter ''
+    if err:
+        return jsonify(err), status
+    db.commit()
+    return jsonify(_poll_payload(db, row, me="", owner_name=_owner_name(db), is_owner=True))
+
+
+@app.route("/api/comment-polls/<int:comment_id>/close", methods=["POST"])
+def poll_close_owner(comment_id):
+    db = get_db()
+    row = _poll_comment(db, comment_id)
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    if not (_row_get(row, "poll_closed_at", "") or "").strip():
+        db.execute("UPDATE memo_comments SET poll_closed_at = ? WHERE id = ?",
+                   (datetime.now(timezone.utc).isoformat(), comment_id))
+        db.commit()
+        row = _poll_comment(db, comment_id) or row
+    return jsonify(_poll_payload(db, row, me="", owner_name=_owner_name(db), is_owner=True))
 
 
 @app.route("/api/memos/<int:memo_id>/comments/seen", methods=["POST"])
@@ -6933,8 +7170,11 @@ def hub_data(hub_token):
         _cname = _owner_name(db)
         _cpalette = _reaction_palette(db)  # [REACTION-PALETTE]
         _cme = f"{hub['name'] or hub['email']} <{hub['email']}>"
+        _cpolls = _polls_map(db, crows, me=_cme, owner_name=_cname)  # [COMMENT-VOTE]
         for c in crows:
-            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen, creacts, me=_cme, owner_name=_cname, palette=_cpalette))
+            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(
+                c, cseen, creacts, me=_cme, owner_name=_cname, palette=_cpalette,
+                poll=_cpolls.get(c["id"])))
     # [VOTE-DECISION] contexte vote de l'union hub (gel paresseux inclus). Identité du
     # votant = e-mail du hub (le match des voix est par e-mail → robuste au renommage).
     vote_owner_name = _owner_name(db)
@@ -7203,8 +7443,11 @@ def share_data(token):
         creacts = _comment_reactions_map(db, [c["id"] for c in crows])  # [COMMENT-REACTIONS]
         _cname = _owner_name(db)
         _cpalette = _reaction_palette(db)  # [REACTION-PALETTE]
+        _cpolls = _polls_map(db, crows, me=me, owner_name=_cname)  # [COMMENT-VOTE]
         for c in crows:
-            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(c, cseen, creacts, me=me, owner_name=_cname, palette=_cpalette))
+            comments_by_memo.setdefault(c["memo_id"], []).append(_comment_dict(
+                c, cseen, creacts, me=me, owner_name=_cname, palette=_cpalette,
+                poll=_cpolls.get(c["id"])))
     # [VOTE-DECISION] contexte vote des dossiers du périmètre (gel paresseux inclus).
     vote_owner_name = _owner_name(db)
     vote_pids = {r["project_id"] for r in rows if r["project_id"]}
@@ -8033,7 +8276,21 @@ def share_add_comment(token, memo_id):
     parent_id = _valid_parent_comment(db, memo_id, data.get("parent_id")) if data.get("parent_id") else None
     priority = _valid_comment_priority(db, data.get("priority"))
     author = guest["name"] or guest["email"]
-    row = _insert_comment(db, memo, body, f"{author} <{guest['email']}>", share["id"], parent_id=parent_id, priority=priority)
+    me = f"{author} <{guest['email']}>"
+    # [COMMENT-VOTE] même commande côté invité : aucune route nouvelle, donc aucun périmètre
+    # nouveau — les gardes ci-dessus (invité approuvé, mémo dans le scope, capacité `comment`)
+    # sont exactement celles d'un message. Créer un scrutin = commenter.
+    labels = _parse_poll_command(body)
+    if labels is not None:
+        if not labels:
+            return jsonify({"error": "Il faut au moins deux options, séparées par « ; »."}), 400
+        row = _insert_comment(db, memo, _poll_body(labels), me, share["id"],
+                              parent_id=parent_id, priority=priority, kind="poll")
+        _create_poll(db, row, labels, me)
+        db.commit()
+        return jsonify(_comment_dict(row, can_delete=True, poll=_poll_payload(
+            db, row, me=me, owner_name=_owner_name(db)))), 201
+    row = _insert_comment(db, memo, body, me, share["id"], parent_id=parent_id, priority=priority)
     db.commit()
     return jsonify(_comment_dict(row, can_delete=True)), 201
 
@@ -8124,6 +8381,67 @@ def share_delete_comment(token, comment_id):
     _soft_delete_comment(db, row)
     db.commit()
     return "", 204
+
+
+# ───────────────────────── [COMMENT-VOTE] voter / clore — côté invité ─────────────────────────
+# Sous /share/* (bypass Authelia EXISTANT — invariant 5, jamais de préfixe de premier niveau).
+# Voter exige un invité APPROUVÉ et la capacité `comment` : voter n'est pas éditer, mais ce n'est
+# pas non plus une lecture — c'est prendre la parole. Le périmètre est revalidé serveur à chaque
+# appel (le mémo porteur doit être dans le scope de CE partage), jamais déduit du front.
+
+def _share_poll_guard(db, token, comment_id):
+    """(share, guest, comment, me, erreur). Erreur = (payload, status)."""
+    share = _share_by_token(db, token)
+    if not share:
+        return None, None, None, None, ({"error": "invalid"}, 404)
+    guest = _guest_from_request(db, share)
+    if not guest or guest["status"] != "approved":
+        return None, None, None, None, ({"error": "guest_required"}, 403)
+    row = _poll_comment(db, comment_id)
+    if not row:
+        return None, None, None, None, ({"error": "not found"}, 404)
+    allowed_ids = {r["id"] for r in _share_scope_memos(db, share)}
+    if row["memo_id"] not in allowed_ids:
+        return None, None, None, None, ({"error": "not found"}, 404)
+    memo = db.execute("SELECT * FROM memos WHERE id = ?", (row["memo_id"],)).fetchone()
+    if not _role_allows(db, share, "comment", guest=guest, memo_row=memo):
+        return None, None, None, None, ({"error": "non autorisé"}, 403)
+    name = guest["name"] or guest["email"]
+    return share, guest, row, f"{name} <{guest['email']}>", None
+
+
+@app.route("/share/<token>/comment-poll/<int:comment_id>/vote", methods=["POST"])
+def poll_vote_guest(token, comment_id):
+    db = get_db()
+    share, guest, row, me, err = _share_poll_guard(db, token, comment_id)
+    if err:
+        return jsonify(err[0]), err[1]
+    try:
+        option_id = int((request.get_json(silent=True) or {}).get("option_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "option_id requis"}), 400
+    verr, status = _cast_poll_vote(db, row, option_id, me)
+    if verr:
+        return jsonify(verr), status
+    db.commit()
+    return jsonify(_poll_payload(db, row, me=me, owner_name=_owner_name(db)))
+
+
+@app.route("/share/<token>/comment-poll/<int:comment_id>/close", methods=["POST"])
+def poll_close_guest(token, comment_id):
+    db = get_db()
+    share, guest, row, me, err = _share_poll_guard(db, token, comment_id)
+    if err:
+        return jsonify(err[0]), err[1]
+    # Clore n'appartient qu'au CRÉATEUR (côté invité) — l'owner, lui, passe par sa propre route.
+    if _voter_key(row["author"]) != _voter_key(me):
+        return jsonify({"error": "seul l'auteur du vote peut le clore"}), 403
+    if not (_row_get(row, "poll_closed_at", "") or "").strip():
+        db.execute("UPDATE memo_comments SET poll_closed_at = ? WHERE id = ?",
+                   (datetime.now(timezone.utc).isoformat(), comment_id))
+        db.commit()
+        row = _poll_comment(db, comment_id) or row
+    return jsonify(_poll_payload(db, row, me=me, owner_name=_owner_name(db)))
 
 
 @app.route("/share/<token>/comment/<int:comment_id>/react", methods=["POST"])
