@@ -12,9 +12,9 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 **Ordre ferme, tenu à jour à chaque fin de lot** : le lot terminé est **retiré**, la file remonte d'un cran. En l'absence de brief collé, le **n° 1 est le travail en cours**. Un brief collé par Fabien **prime toujours** sur cette file. Le reste du fichier, en dessous, est le backlog **non ordonné**.
 
-_(Le n° 1 [COMMENT-VOTE] a été livré en [V27.29.207] — voir la ligne ✅ plus bas. La file remonte.)_
+_(À jour au 8 août 2026, après le déploiement du tag **V27.29.209**. [COMMENT-VOTE] et [SHARE-REFRESH-GUARD] sont livrés — lignes ✅ plus bas.)_
 
-1. **[GUEST-ROLES V2]** — **BLOQUÉ, ne pas démarrer** : spec Cowork à venir, puis validation Fabien. Capacités atomiques, rôles = préréglages, surcharges par invité ; rôle d'accueil par dossier, message d'accueil, flux de demande de rôle.
+1. **[GUEST-ROLES V2]** — **BLOQUÉ, ne pas démarrer** : la spec est écrite (**`docs/specs/GUEST-ROLES-V2.md`**, dans le dépôt depuis V27.29.209) et attend la **validation de Fabien** ; elle dit elle-même « aucun code avant validation ». Capacités atomiques, rôles = préréglages, surcharges par invité ; rôle d'accueil par dossier, message d'accueil, flux de demande de rôle.
 2. **[GUEST-PROFILE]** — **après** les rôles : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
 
 ---
