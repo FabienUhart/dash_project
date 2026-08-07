@@ -80,6 +80,12 @@ header h1 { font-size: 1.05rem; margin: 0; flex-shrink: 0; }
 header .spacer { flex: 1; }
 #search { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   color: var(--text); padding: 0.4rem 0.6rem; min-width: 8rem; }
+/* [SEARCH-MOBILE-HEADER] Le hub n'a ni sélecteur inline ni « / », mais son champ portait un
+   plancher de 8rem qui, avec le titre du hub, débordait du bandeau sur petit écran. Borné ; la
+   feuille de recherche (ouverte au focus) reste la vraie surface de saisie sur mobile. */
+@media (max-width: 900px), (pointer: coarse) {
+  #search { flex: 1 1 6rem; min-width: 0; max-width: 12rem; }
+}
 .layout { display: flex; align-items: flex-start; gap: 0; }
 #sidebar { width: 240px; flex-shrink: 0; padding: 0.8rem 0.6rem; border-right: 1px solid var(--border);
   min-height: calc(100vh - 52px); }
@@ -96,6 +102,12 @@ header .spacer { flex: 1; }
 #sidebar .sitem:hover .fav-star, #sidebar .fav-star:focus-visible { opacity: 0.8; }
 #sidebar .fav-star.on { opacity: 1; color: var(--accent); }
 #sidebar .fav-hint { color: var(--muted); font-size: 0.72rem; font-style: italic; padding: 0.1rem 0.5rem 0.3rem; }
+/* [HUB-FAV-SIDEBAR-DRAG] Réordonnancement des ⭐ favoris DANS la sidebar, comme côté owner : le
+   geste que Fabien a tenté d'instinct ne marchait pas (il ne vivait que dans la pop-in Paramètres).
+   Mêmes règles que `.fav-sortable` de l'owner — le `touch-action` du drag tactile est posé en JS
+   sur le conteneur, le temps du geste seulement, pour que la sidebar reste scrollable au repos. */
+#sidebar .fav-sortable [data-favkey] { -webkit-user-select: none; user-select: none; }
+#sidebar .fav-sortable [data-favkey].fav-dragging { opacity: 0.55; background: var(--panel-2); }
 @media (max-width: 900px), (pointer: coarse) { #sidebar .fav-star { opacity: 0.55; } }
 #sidebar .sitem .ro { font-size: 0.66rem; color: var(--muted); flex-shrink: 0; }
 /* [SIDEBAR-TREE] enfants dans un conteneur : indentation fixe ~17px/niveau + ligne
@@ -1106,15 +1118,24 @@ function renderSidebar() {
   } else if (!favItems.length) {
     nav.appendChild(el('div', { class: 'fav-hint', text: 'Survole un dossier et clique ☆ pour l\'épingler ici.' }));
   } else {
-    favItems.forEach(({ proj: p, icon }) => {
-      const row = el('div', { class: 'sitem' + (FOCUS === p.id ? ' active' : ''), attrs: { title: p.name } });
+    // [HUB-FAV-SIDEBAR-DRAG] Les favoris vivent dans leur PROPRE conteneur : `makeFavSortable`
+    // réordonne les enfants directs de la boîte qu'on lui donne. Sans lui, les lignes étaient des
+    // enfants de `nav` mêlées aux sections, et le drag aurait promené « Tout » ou un en-tête.
+    const favBox = el('div', { class: 'fav-sortable' });
+    favItems.forEach(({ key, proj: p, icon }) => {
+      const row = el('div', { class: 'sitem' + (FOCUS === p.id ? ' active' : ''),
+        attrs: { title: p.name + ' — glisser pour réordonner', 'data-favkey': key } });
       if (icon) row.appendChild(icon);
       row.appendChild(el('span', { class: 'nm', text: p.name }));
       if (!p.can_edit) row.appendChild(el('span', { class: 'ro', text: '👁' }));
       row.addEventListener('click', () => hubFocusOn(p.id));   // MÊME navigation que la ligne d'origine
       row.appendChild(hubFavStar(p, true));
-      nav.appendChild(row);
+      favBox.appendChild(row);
     });
+    nav.appendChild(favBox);
+    // Même helper (et donc même garde anti clic-fantôme après un drop) que la pop-in Paramètres :
+    // les deux surfaces écrivent le MÊME ordre, il n'y a qu'une liste.
+    makeFavSortable(favBox, (order) => { hubFavsWrite(order); renderSidebar(); });
   }
   nav.appendChild(hubSectionHead('Dossiers', '📂 Dossiers partagés'));
   const _dossiersOpen = hubSecOpen('Dossiers');
@@ -1247,13 +1268,13 @@ function memoCard(m) {
     subtasks: m.subtasks,
     images: (m.images || []).length,
     attachments: (m.attachments || []).length,
-    comments: (m.comments || []).length,
+    comments: cmtHumanCount(m.comments),   // [SYSTEM-LINES-COUNT] messages seuls (ni journaux ni tombales)
     onImages: (m.images || []).length ? () => runImageViewer({
       images: m.images, startIndex: 0,
       imageUrl: (n) => '/share/' + m.share_token + '/image/' + n, downloadUrl: (n) => '/share/' + m.share_token + '/image/' + n, exifUrl: (n) => '/share/' + m.share_token + '/image-exif/' + n,
     }) : null,
     onAttach: (m.attachments || []).length ? () => openHubMemoAttachments(m) : null,
-    onComments: (m.comments || []).length ? () => openEditor(m) : null,
+    onComments: cmtHumanCount(m.comments) ? () => openEditor(m) : null,
   });
   if (_pic) content.appendChild(_pic);
   // [MEMO-LINKS] D3 : chips des deux côtés ; clic = éditeur du relié (stopPropagation dans le helper).
@@ -2462,7 +2483,8 @@ const hubSearchUI = attachSearchUI({
   folderChip: () => {
     const p = FOCUS != null ? projById(FOCUS) : null;
     if (!p) return null;
-    return { label: (p.emoji || '📁') + ' ' + p.name, active: hubSearchScoped(),
+    // [SEARCH-MOBILE-HEADER] allumé dès l'ouverture (indépendant de la requête) — cf. owner.
+    return { label: (p.emoji || '📁') + ' ' + p.name, active: !hubSearchWide,
       onToggle: () => { hubSearchWide = !hubSearchWide; hubRefreshSearch(); } };
   },
   getQuery: () => hubSearchRaw(),

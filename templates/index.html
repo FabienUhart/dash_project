@@ -264,6 +264,26 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   /* (Les overrides de mise en page des mémos mobile sont plus bas, après les règles
      de base, pour gagner la cascade — voir le bloc « Overrides mémos mobile ».) */
 }
+/* [SEARCH-MOBILE-HEADER] Sur iPhone réel, le sélecteur de portée RECOUVRAIT l'heure (constat
+   Fabien, capture à l'appui). Le bandeau est en `flex-wrap`, mais `#search-wrap` gardait ses
+   largeurs de bureau (jusqu'à 620 px au focus, 500 px avec le chip) et poussait l'horloge dessous
+   ou dessus. Sur mobile ces trois éléments sont REDONDANTS : la feuille de recherche porte déjà
+   les portées en chips et le chip de dossier, et « / » n'existe pas au tactile. Le champ inline
+   reste — c'est lui la porte d'entrée de la feuille (un focus dessus l'ouvre).
+   ⚠️ Les quatre sélecteurs de largeur sont réécrits ensemble : `.has-chip` (classe) et
+   `:focus-within` (pseudo-classe) sont PLUS spécifiques que `#search-wrap` seul, une seule règle
+   ne suffirait pas — au premier focus la barre repartirait à 620 px et recouvrirait l'heure. */
+@media (max-width: 900px), (pointer: coarse) {
+  #search-scope, #search-wrap kbd, #search-chip { display: none; }
+  #search-wrap,
+  #search-wrap.has-chip,
+  #search-wrap:focus-within,
+  #search-wrap.has-chip:focus-within { flex: 1 1 8rem; max-width: 13rem; min-width: 0; }
+  #search { min-width: 0; }          /* le plancher de 6rem du bureau ferait déborder le bandeau */
+}
+/* `header .spacer` est laissé tel quel : c'est lui qui pousse l'horloge contre le bord droit, et
+   le bandeau est déjà en `flex-wrap`. Le chevauchement venait de la LARGEUR de la barre, pas de
+   l'espaceur — le toucher aurait tassé l'horloge contre la recherche sans rien régler. */
 /* Finitions : chiffres alignés, retour d'appui, GPU au survol */
 #clock-time, #clock-date, #clock-extra, .count, .mf-count, .mf-num, .pin-input, .c-when { font-variant-numeric: tabular-nums; }
 .cat-item:active, .mfilter:active, .tile:active, .tag:active, .prio-btn:active { transform: scale(0.97); }
@@ -8700,9 +8720,16 @@ const searchUI = attachSearchUI({
     if (!proj) return null;
     return {
       label: (proj.emoji || '📁') + ' ' + proj.name,
-      active: searchIsScoped(),
+      // [SEARCH-MOBILE-HEADER] Allumé = « la recherche restera bornée à ce dossier », PAS
+      // « elle l'est en ce moment » : `searchIsScoped()` dépend de la requête et rendait donc le
+      // chip ÉTEINT tant qu'on n'avait rien tapé — or c'est précisément à l'ouverture de la
+      // feuille, avant de taper, que l'information doit se lire (le chip de la barre a disparu
+      // en mobile). Le clic, lui, garde le même effet qu'avant.
+      active: !(searchWide && searchWideProj === state.memoProject),
       onToggle: () => {
-        if (searchIsScoped()) { searchWide = true; searchWideProj = state.memoProject; }
+        // Même prédicat que l'état allumé ci-dessus (sinon, requête vide, le chip allumé aurait
+        // rétréci au lieu d'élargir : l'ancien test dépendait de la requête, plus l'affichage).
+        if (!(searchWide && searchWideProj === state.memoProject)) { searchWide = true; searchWideProj = state.memoProject; }
         else { searchWide = false; searchWideProj = null; }
         refreshSearch();
       },

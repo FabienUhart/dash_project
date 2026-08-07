@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — /vote_choix dans les commentaires ([COMMENT-VOTE])</title>
+<style>
+  :root { --bg:#0e1217; --panel:#161d25; --panel-2:#212b35; --text:#e8eef5;
+    --muted:#9aa7b4; --accent:#4fc3f7; --border:#283340; --violet:#b39ddb; }
+  :root[data-theme="light"] { --bg:#eef1f5; --panel:#ffffff; --panel-2:#eef2f7; --text:#1b2531;
+    --muted:#5c6b7a; --accent:#0288d1; --border:#d3dce5; --violet:#7e57c2; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:15px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif; min-height:100vh; }
+  .demo-bar { display:flex; align-items:center; gap:0.8rem; padding:0.7rem 1rem;
+    border-bottom:1px solid var(--border); background:var(--panel); font-size:0.85rem; color:var(--muted); }
+  .demo-bar b { color:var(--text); }
+  .demo-bar button { margin-left:auto; background:var(--panel-2); border:1px solid var(--border);
+    color:var(--text); border-radius:8px; padding:0.3rem 0.7rem; cursor:pointer; font:inherit; font-size:0.8rem; }
+  .hintline { color:var(--muted); font-size:0.8rem; margin:0.9rem auto 0; max-width:640px; padding:0 1rem; }
+  .hintline code { background:var(--panel-2); border:1px solid var(--border); border-radius:5px; padding:0 0.3rem; }
+
+  .thread { max-width:640px; margin:1rem auto 0; padding:0 1rem 2rem; }
+  .memo-head { background:var(--panel); border:1px solid var(--border); border-left:3px solid #ef6c00;
+    border-radius:10px; padding:0.6rem 0.9rem; margin-bottom:0.9rem; }
+  .memo-head .p { color:var(--muted); font-size:0.75rem; margin-top:0.2rem; }
+
+  .row { display:flex; gap:0.55rem; margin-bottom:0.7rem; align-items:flex-end; }
+  .row.me { flex-direction:row-reverse; }
+  .avatar { width:30px; height:30px; border-radius:50%; background:var(--panel-2); border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; font-size:0.7rem; font-weight:700; color:var(--muted); flex:none; }
+  .row.guest .avatar { color:var(--violet); }
+  .bubble { background:var(--panel); border:1px solid var(--border); border-radius:14px 14px 14px 4px;
+    padding:0.5rem 0.8rem; max-width:78%; font-size:0.9rem; }
+  .row.me .bubble { border-radius:14px 14px 4px 14px; background:var(--panel-2); }
+  .bubble .who { font-size:0.72rem; font-weight:600; color:var(--muted); margin-bottom:0.1rem; }
+  .row.guest .bubble .who { color:var(--violet); }
+  .bubble .when { font-size:0.68rem; color:var(--muted); margin-top:0.2rem; text-align:right; }
+
+  /* ---- la bulle scrutin ---- */
+  .poll { min-width:270px; }
+  .poll-head { display:flex; align-items:center; gap:0.45rem; font-weight:600; font-size:0.85rem; margin-bottom:0.45rem; }
+  .poll-head svg { width:15px; height:15px; }
+  .poll-head .mode { font-weight:400; color:var(--muted); font-size:0.72rem; margin-left:auto; }
+  .opt { position:relative; border:1px solid var(--border); border-radius:9px; padding:0.42rem 0.6rem;
+    margin-bottom:0.4rem; cursor:pointer; overflow:hidden; transition:border-color .15s; }
+  .opt:hover { border-color:var(--accent); }
+  .opt .fill { position:absolute; inset:0; width:0%; background:rgba(79,195,247,0.13); transition:width .5s ease; }
+  :root[data-theme="light"] .opt .fill { background:rgba(2,136,209,0.10); }
+  .opt .line { position:relative; display:flex; align-items:center; gap:0.5rem; }
+  .opt .radio { width:15px; height:15px; border-radius:50%; border:2px solid var(--muted); flex:none; }
+  .opt.mine .radio { border-color:var(--accent); background:radial-gradient(circle at center, var(--accent) 0 45%, transparent 50%); }
+  .opt .label { flex:1; }
+  .opt .count { font-size:0.75rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .opt .voters { display:flex; gap:2px; }
+  .opt .voters i { width:16px; height:16px; border-radius:50%; background:var(--panel-2); border:1px solid var(--border);
+    font-style:normal; font-size:0.55rem; display:flex; align-items:center; justify-content:center; color:var(--muted); }
+  .poll-foot { display:flex; align-items:center; gap:0.6rem; font-size:0.75rem; color:var(--muted); margin-top:0.45rem; }
+  .poll-foot .close-btn { margin-left:auto; background:var(--panel-2); border:1px solid var(--border); color:var(--muted);
+    border-radius:8px; padding:0.2rem 0.6rem; cursor:pointer; font:inherit; font-size:0.75rem;
+    display:inline-flex; align-items:center; gap:0.3rem; }
+  .poll-foot .close-btn:hover { color:var(--text); }
+  .poll-foot .close-btn svg { width:13px; height:13px; }
+  .poll.closed .opt { cursor:default; }
+  .poll.closed .opt:hover { border-color:var(--border); }
+  .poll.closed .opt.winner { border-color:var(--accent); }
+  .poll.closed .opt.winner .label { font-weight:600; }
+  .winner-tag { display:inline-flex; align-items:center; gap:0.3rem; color:var(--accent); font-size:0.72rem; }
+  .winner-tag svg { width:13px; height:13px; }
+
+  /* ---- composer ---- */
+  .composer { position:sticky; bottom:0; background:var(--bg); padding:0.7rem 0 1rem; }
+  .c-wrap { position:relative; display:flex; gap:0.5rem; align-items:center;
+    background:var(--panel); border:1px solid var(--border); border-radius:22px; padding:0.45rem 0.7rem; }
+  .c-wrap:focus-within { border-color:var(--accent); }
+  .c-wrap input { flex:1; background:none; border:none; outline:none; color:var(--text); font:inherit; font-size:0.9rem; }
+  .c-wrap button { background:none; border:none; color:var(--accent); font-size:1.05rem; cursor:pointer; padding:0.1rem 0.3rem; }
+  .cmd-hint { position:absolute; left:0; right:0; bottom:calc(100% + 6px); background:var(--panel);
+    border:1px solid var(--border); border-radius:10px; padding:0.5rem 0.7rem; font-size:0.8rem;
+    box-shadow:0 8px 26px rgba(0,0,0,0.35); display:none; }
+  .cmd-hint.show { display:block; }
+  .cmd-hint kbd { background:var(--panel-2); border:1px solid var(--border); border-bottom-width:2px;
+    border-radius:5px; padding:0 0.35rem; font-family:ui-monospace,Menlo,monospace; font-size:0.75rem; color:var(--accent); }
+  .cmd-hint .d { color:var(--muted); margin-top:0.15rem; }
+  .cmd-hint .ex { color:var(--muted); font-style:italic; }
+</style>
+</head>
+<body>
+  <div class="demo-bar">
+    Maquette <b>[COMMENT-VOTE] — /vote_choix dans un fil de commentaires</b>
+    <button id="theme-btn" type="button">☀️ Clair</button>
+  </div>
+  <p class="hintline">Tape <code>/</code> dans le champ du bas pour voir l'aide, puis essaie
+  <code>/vote_choix ramen ; sushi ; okonomiyaki</code> et Entrée. Vote en touchant une option (re-toucher une autre = changer d'avis) —
+  les autres « votent » après toi. « Clore » fige le scrutin et couronne le gagnant.</p>
+
+  <div class="thread" id="thread">
+    <div class="memo-head">🍜 <b>Restos Osaka</b><div class="p">📁 Voyage Japon · fil de discussion du mémo</div></div>
+
+    <div class="row guest"><span class="avatar">AL</span>
+      <div class="bubble"><div class="who">Alexia</div>On mange où le premier soir ?<div class="when">21:02</div></div></div>
+    <div class="row guest"><span class="avatar">TH</span>
+      <div class="bubble"><div class="who">Thomas</div>Moi je suis chaud ramen 🍜<div class="when">21:04</div></div></div>
+  </div>
+
+  <div class="thread composer">
+    <div class="c-wrap">
+      <div class="cmd-hint" id="cmd-hint">
+        <div><kbd>/vote_choix</kbd> <span class="ex">option 1 ; option 2 ; option 3</span></div>
+        <div class="d">Crée un vote à <b>choix unique</b> dans le fil — sépare les options par « ; »</div>
+      </div>
+      <input id="c-input" type="text" placeholder="Écrire un commentaire… (« / » pour les commandes)" autocomplete="off">
+      <button id="c-send" type="button" title="Envoyer">➤</button>
+    </div>
+  </div>
+
+<script>
+  const themeBtn = document.getElementById('theme-btn');
+  themeBtn.onclick = () => { const r=document.documentElement, l=r.getAttribute('data-theme')!=='light';
+    r.setAttribute('data-theme', l?'light':'dark'); themeBtn.textContent = l?'🌙 Sombre':'☀️ Clair'; };
+
+  const ICONS = {
+    ballot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M5 12a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2"/><path d="M9 12V7a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v5"/></svg>',
+    trophy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>'
+  };
+  const OTHERS = [ {ini:'MA', name:'Marie'}, {ini:'TH', name:'Thomas'}, {ini:'AL', name:'Alexia'} ];
+  const thread = document.getElementById('thread');
+  const input = document.getElementById('c-input');
+  const hint = document.getElementById('cmd-hint');
+  let pollN = 0;
+
+  input.addEventListener('input', () => {
+    hint.classList.toggle('show', input.value.trim().startsWith('/') && !input.value.includes('_choix '));
+  });
+  document.getElementById('c-send').onclick = submit;
+  input.addEventListener('keydown', e => { if (e.key==='Enter') submit(); });
+
+  function submit() {
+    const v = input.value.trim();
+    if (!v) return;
+    hint.classList.remove('show');
+    if (v.toLowerCase().startsWith('/vote_choix')) {
+      const opts = v.slice(11).split(';').map(s=>s.trim()).filter(Boolean);
+      if (opts.length >= 2) { addPoll(opts); input.value=''; return; }
+    }
+    addBubble(v); input.value='';
+  }
+
+  function now(){ const d=new Date(); return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
+
+  function addBubble(text) {
+    const row = document.createElement('div'); row.className='row me';
+    row.innerHTML = '<span class="avatar">FA</span><div class="bubble"><div class="who">Fabien</div></div>';
+    const b = row.querySelector('.bubble');
+    const t = document.createElement('div'); t.textContent = text; b.appendChild(t);
+    b.insertAdjacentHTML('beforeend', '<div class="when">'+now()+'</div>');
+    thread.appendChild(row); row.scrollIntoView({behavior:'smooth'});
+  }
+
+  function addPoll(options) {
+    pollN++;
+    const row = document.createElement('div'); row.className='row me';
+    const votes = options.map(()=>[]);   // listes d'initiales par option
+    let mine = -1, closed = false;
+    row.innerHTML = '<span class="avatar">FA</span><div class="bubble poll"><div class="who">Fabien</div>'
+      + '<div class="poll-head">'+ICONS.ballot+' Vote <span class="mode">choix unique</span></div>'
+      + options.map((o,i)=>'<div class="opt" data-i="'+i+'"><div class="fill"></div><div class="line">'
+        + '<span class="radio"></span><span class="label"></span><span class="voters"></span><span class="count">0</span></div></div>').join('')
+      + '<div class="poll-foot"><span class="total">0 vote</span>'
+      + '<button class="close-btn" type="button">'+ICONS.trophy+' Clore</button></div>'
+      + '<div class="when">'+now()+'</div></div>';
+    row.querySelectorAll('.label').forEach((el,i)=>el.textContent = options[i]);
+    thread.appendChild(row); row.scrollIntoView({behavior:'smooth'});
+    const poll = row.querySelector('.poll');
+
+    function render() {
+      const total = votes.reduce((a,v)=>a+v.length,0);
+      poll.querySelectorAll('.opt').forEach((opt,i)=>{
+        opt.classList.toggle('mine', i===mine);
+        opt.querySelector('.count').textContent = votes[i].length || '';
+        opt.querySelector('.fill').style.width = total ? Math.round(votes[i].length/total*100)+'%' : '0%';
+        opt.querySelector('.voters').innerHTML = votes[i].slice(0,4).map(x=>'<i>'+x+'</i>').join('');
+      });
+      poll.querySelector('.total').textContent = total + (total>1?' votes':' vote');
+    }
+    poll.querySelectorAll('.opt').forEach(opt=>{
+      opt.addEventListener('click', ()=>{
+        if (closed) return;
+        const i = +opt.dataset.i;
+        votes.forEach(v=>{ const k=v.indexOf('FA'); if(k>=0) v.splice(k,1); });
+        if (mine === i) { mine = -1; } else { mine = i; votes[i].push('FA'); }
+        render();
+        if (mine >= 0 && !poll.dataset.sim) { poll.dataset.sim = '1'; simulate(); }
+      });
+    });
+    function simulate() {   // les autres votent après toi, en décalé
+      OTHERS.forEach((p,k)=>{
+        setTimeout(()=>{ if (closed) return;
+          votes[Math.floor(Math.random()*options.length)].push(p.ini); render();
+        }, 700 + k*900);
+      });
+    }
+    poll.querySelector('.close-btn').addEventListener('click', ()=>{
+      if (closed) return;
+      closed = true; poll.classList.add('closed');
+      const counts = votes.map(v=>v.length), max = Math.max(...counts);
+      poll.querySelectorAll('.opt').forEach((opt,i)=>{ if (counts[i]===max && max>0) opt.classList.add('winner'); });
+      const foot = poll.querySelector('.poll-foot');
+      foot.querySelector('.close-btn').remove();
+      const w = document.createElement('span'); w.className='winner-tag';
+      const winners = options.filter((o,i)=>counts[i]===max && max>0);
+      w.innerHTML = ICONS.trophy + ' ' + (winners.length ? winners.join(' + ') : 'aucun vote');
+      foot.appendChild(w);
+    });
+    render();
+  }
+</script>
+</body>
+</html>

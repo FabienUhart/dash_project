@@ -675,6 +675,22 @@ def init_db():
     # Colonne additive, jamais destructive (invariant 1). Vide = message vivant.
     if "deleted_at" not in ccols:
         conn.execute("ALTER TABLE memo_comments ADD COLUMN deleted_at TEXT DEFAULT ''")
+    # [SYSTEM-LINES-COUNT] Nature d'une ligne du fil : '' = message d'humain, 'log' = ligne écrite
+    # par l'app (« 📎 a ajouté … », « 🗑 a supprimé … »). Colonne additive, jamais destructive.
+    # Elle existe pour ne PAS inférer un type sur du TEXTE au moment de compter : le badge 💬
+    # annonce des messages, pas des journaux (mesuré : 7 pour 3 messages + 4 journaux).
+    if "kind" not in ccols:
+        conn.execute("ALTER TABLE memo_comments ADD COLUMN kind TEXT DEFAULT ''")
+    # Rattrapage des lignes ANTÉRIEURES à la colonne : elles n'ont aucun marqueur, leur corps est
+    # la seule trace. C'est le SEUL endroit où l'on devine à partir du texte, et c'est assumé.
+    # Idempotent (`kind = ''` + motifs ancrés) → sûr à chaque démarrage. Il tourne aussi APRÈS un
+    # import : les commentaires restaurés retrouvent leur `kind` tout seuls, ce qui permet de NE PAS
+    # exporter le champ (aucun bump de format, invariant 1 intact).
+    conn.execute(
+        "UPDATE memo_comments SET kind = 'log' WHERE COALESCE(kind, '') = '' AND ("
+        "body LIKE '📎 a ajouté le fichier %' OR body LIKE '📎 a ajouté % fichiers : %' "
+        "OR body LIKE '🗑 a supprimé le fichier %')"
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS comment_seen (
@@ -3484,8 +3500,11 @@ def list_memos():
         for r in db.execute(
             # [COMMENTS-V2 addendum] Les pierres tombales ne comptent pas dans le badge 💬 :
             # le compteur annonce des messages, un message retiré n'en est plus un.
+            # [SYSTEM-LINES-COUNT] Idem pour les lignes système (« 📎 a ajouté … ») : ce sont des
+            # journaux de l'app, pas des messages. Filtrées sur la COLONNE `kind`, jamais sur le
+            # motif du texte — un humain a le droit d'écrire « 📎 a ajouté … » à la main.
             "SELECT memo_id, COUNT(*) AS n FROM memo_comments "
-            "WHERE COALESCE(deleted_at, '') = '' GROUP BY memo_id"
+            "WHERE COALESCE(deleted_at, '') = '' AND COALESCE(kind, '') <> 'log' GROUP BY memo_id"
         ).fetchall()
     }
     owner_name = _owner_name(db)
@@ -4620,8 +4639,16 @@ def links_status():
 # ---------------------------------------------------------------- shares
 
 
-def _text_excerpt(html, n=80):
-    text = re.sub(r"<[^>]+>", " ", html or "")
+def _text_excerpt(raw, n=80):
+    """Extrait TEXTE d'un contenu de mémo (titres dérivés : vue Fichiers, noms de zip, libellés
+    de partage…). ⚠️ Le paramètre s'appelait `html` et masquait le MODULE `html` — d'où l'absence
+    de `unescape` ici alors que `_memo_link_title` en fait un : une apostrophe tapée dans Quill
+    ressortait en « &#39; » jusque dans les noms de fichiers du zip. Même ordre que
+    `_memo_link_title` : on retire les balises D'ABORD, on désescape ENSUITE (sinon un
+    « &lt;b&gt; » écrit par l'utilisateur redeviendrait une balise avant d'être retiré).
+    Sortie = texte pur, consommée en `textContent` côté client — jamais en `innerHTML`."""
+    text = re.sub(r"<[^>]+>", " ", raw or "")
+    text = html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:n]
 
@@ -6402,6 +6429,10 @@ def _comment_dict(r, seen_map=None, reactions_map=None, me=None, owner_name="", 
         "seen": [] if deleted else (seen_map or {}).get(r["id"], []),
         # [COMMENT-REACTIONS] agrégées pour l'appelant (me) ; voters = noms affichables seuls.
         "reactions": [] if deleted else _aggregate_reactions((reactions_map or {}).get(r["id"]), me, owner_name, palette),
+        # [SYSTEM-LINES-COUNT] '' = message d'humain, 'log' = ligne écrite par l'app. Runtime-only,
+        # JAMAIS exporté (comme `created_by_display`) : au réimport, le rattrapage d'`init_db()`
+        # re-pose la valeur — donc aucun champ nouveau dans le format, aucun bump.
+        "kind": _row_get(r, "kind", "") or "",
     }
 
 
@@ -6469,12 +6500,13 @@ def _clean_comment_body(value):
     return re.sub(r"[<>]", "", str(value or "")).strip()[:2000]
 
 
-def _insert_comment(db, memo_row, body, author, share_id=None, parent_id=None, priority=0):
+def _insert_comment(db, memo_row, body, author, share_id=None, parent_id=None, priority=0, kind=""):
+    # [SYSTEM-LINES-COUNT] `kind` : '' = message d'humain (défaut), 'log' = ligne écrite par l'app.
     now = datetime.now(timezone.utc).isoformat()
     cur = db.execute(
-        "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at, parent_id, priority) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (memo_row["id"], memo_row["uid"] or "", author, share_id, body, now, parent_id, priority),
+        "INSERT INTO memo_comments (memo_id, memo_uid, author, share_id, body, created_at, parent_id, priority, kind) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (memo_row["id"], memo_row["uid"] or "", author, share_id, body, now, parent_id, priority, kind or ""),
     )
     return db.execute(
         "SELECT * FROM memo_comments WHERE id = ?", (cur.lastrowid,)
@@ -6520,9 +6552,13 @@ def _soft_delete_comment(db, row):
 
 
 def _attach_log_comment(db, memo_row, added, names, author, share_id):
-    """[ATTACHMENTS-COMMENT] Commentaire automatique d'ajout/suppression de fichier. Commentaire
-    NORMAL (compte dans 💬, déclenche 🔔 si invité via share_id) attribué à l'auteur de l'action.
-    Le « par qui » vient de l'attribution du commentaire (author) — pas répété dans le corps."""
+    """[ATTACHMENTS-COMMENT] Commentaire automatique d'ajout/suppression de fichier, attribué à
+    l'auteur de l'action. Le « par qui » vient de l'attribution du commentaire (author) — pas
+    répété dans le corps.
+    [SYSTEM-LINES-COUNT] Posé en `kind='log'` : la ligne s'affiche toujours dans le fil (ligne
+    plate [SYSTEM-LINES-MONO]) mais ne compte PLUS dans le badge 💬. Elle continue en revanche de
+    déclencher 🔔 quand elle vient d'un invité (share_id) — savoir qu'un invité a déposé un fichier
+    reste une notification légitime ; c'est le COMPTEUR de messages qui mentait, pas l'alerte."""
     names = [n for n in (names or []) if n]
     if not names:
         return
@@ -6531,7 +6567,7 @@ def _attach_log_comment(db, memo_row, added, names, author, share_id):
             "📎 a ajouté %d fichiers : %s" % (len(names), ", ".join(names)))
     else:
         body = "🗑 a supprimé le fichier « %s »" % names[0]
-    _insert_comment(db, memo_row, body, author, share_id)
+    _insert_comment(db, memo_row, body, author, share_id, kind="log")
 
 
 @app.route("/api/memos/<int:memo_id>/comments", methods=["GET"])

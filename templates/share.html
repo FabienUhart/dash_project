@@ -103,6 +103,14 @@ header .gs-gear { margin-left: auto; }   /* [GUEST-SETTINGS] l'engrenage prend l
 }
 #search-wrap:focus-within { max-width: 520px; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,195,247,0.15); }
 #search { flex: 1; min-width: 5rem; background: none; border: none; outline: none; color: var(--text); font: inherit; font-size: 0.88rem; }
+/* [SEARCH-MOBILE-HEADER] Même traitement qu'à l'owner : pas de sélecteur inline ici (les portées
+   vivent dans la feuille), mais la barre gardait ses largeurs de bureau et bousculait le titre et
+   le badge de mode. Bornée, et l'élargissement au focus neutralisé — sur mobile le focus ouvre la
+   feuille, élargir la barre derrière n'a aucun sens. */
+@media (max-width: 900px), (pointer: coarse) {
+  #search-wrap, #search-wrap:focus-within { flex: 1 1 7rem; max-width: 12rem; min-width: 0; margin-left: 0.4rem; }
+  #search { min-width: 0; }
+}
 button.icon { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s var(--ease), transform 0.1s var(--ease); }
 button.icon:hover { background: var(--bg-elev); }
 button.icon:active { transform: scale(0.94); }
@@ -3795,7 +3803,8 @@ const shareSearchUI = attachSearchUI({
   folderChip: () => {
     const p = PFILTER !== 'all' ? (DATA.projects || []).find(x => x.id === PFILTER) : null;
     if (!p) return null;
-    return { label: (p.emoji || '📁') + ' ' + p.name, active: shareSearchScoped(),
+    // [SEARCH-MOBILE-HEADER] allumé dès l'ouverture (indépendant de la requête) — cf. owner.
+    return { label: (p.emoji || '📁') + ' ' + p.name, active: !shareSearchWide,
       onToggle: () => { shareSearchWide = !shareSearchWide; shareRefreshSearch(); } };
   },
   getQuery: () => shareSearchRaw(),

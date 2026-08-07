@@ -740,6 +740,14 @@ function cmtSystemInfo(body) {
   return { icon: m[1] === '🗑' ? 'trash' : 'paperclip', text: t.replace(/^(📎|🗑)\s+/, '') };
 }
 const CMT_VOICE_LOG_RE = /^📎 a ajouté le fichier « *vocal-\d+\.[a-z0-9]+ *»$/i;
+/* [SYSTEM-LINES-COUNT] Nombre de MESSAGES d'humains dans un fil — c'est ce que le badge 💬
+   annonce. Sont exclues : les lignes écrites par l'app (`kind === 'log'` : « 📎 a ajouté … »,
+   « 🗑 a supprimé … ») et les pierres tombales (`deleted`), qui ne sont plus un message.
+   On lit le `kind` POSÉ PAR LE SERVEUR, jamais le motif du texte : un humain a parfaitement le
+   droit d'écrire « 📎 a ajouté … » à la main, et il serait alors décompté à tort. */
+function cmtHumanCount(comments) {
+  return (comments || []).filter(c => c && c.kind !== 'log' && !c.deleted).length;
+}
 function cmtHideVoiceLogs(comments) {
   const list = comments || [];
   const hasVoice = list.some(c => VOICE_MARKER_RE.test(c.body || '') && (VOICE_MARKER_RE.lastIndex = 0, true));
