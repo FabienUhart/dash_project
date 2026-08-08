@@ -363,8 +363,16 @@ button.icon { padding: 0.45rem 0.6rem; }
 #comments-dialog { width: min(640px, calc(100vw - 2rem)); max-height: min(86vh, 780px);
   padding: 0; display: flex; flex-direction: column; overflow: hidden; }
 #comments-dialog[open] { display: flex; }
+/* [MOBILE-POPIN-CLOSE-FIX] L'en-tête porte la croix : il ne doit jamais partir hors d'atteinte.
+   `sticky` le maintient en tête même si la feuille se retrouve plus haute que prévu (barre d'URL
+   qui revient, rotation), et son fond opaque l'empêche d'être traversé par le fil qui défile. */
 .cp-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--border); flex: none; }
+  border-bottom: 1px solid var(--border); flex: none;
+  position: sticky; top: 0; z-index: 2; background: var(--panel); }
+/* Cible tactile franche pour la croix : 24 px de pictogramme, ce n'est pas un doigt. */
+@media (max-width: 700px) {
+  .cp-head .cp-x { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+}
 .cp-head h3 { margin: 0; font-size: 0.9rem; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
 .cp-head .cp-x { margin-left: auto; background: none; border: none; color: var(--muted);
@@ -5552,11 +5560,22 @@ function attachKeyboardInset(dlg, afterApply) {
   const clear = () => { dlg.style.marginBottom = ''; dlg.style.maxHeight = ''; };
   const apply = () => {
     if (!isTouchUI() || !dlg.open) { clear(); return; }
-    // Ce que le clavier (et les barres du navigateur) mangent en bas de l'écran.
+    // [MOBILE-POPIN-CLOSE-FIX] On ne remonte la feuille QUE pour un vrai clavier, c'est-à-dire
+    // quand un champ DE CETTE FEUILLE a le focus. Sans cette garde, les barres Safari qui se
+    // rétractent au scroll rétrécissent `visualViewport` exactement comme un clavier : la feuille
+    // remontait toute seule et son en-tête — donc la croix ✕ — passait sous la barre d'URL.
+    const a = document.activeElement;
+    const typing = !!a && dlg.contains(a)
+      && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
+    // Ce que le clavier mange en bas de l'écran. Seuil relevé à 120 px : une barre d'outils
+    // Safari fait ~50-90 px, un clavier iOS jamais moins de ~200 px — l'ancien seuil de 80
+    // confondait les deux.
     const hidden = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    if (hidden < 80) { clear(); return; }   // pas de clavier : on ne touche à rien
+    if (!typing || hidden < 120) { clear(); return; }
     dlg.style.marginBottom = hidden + 'px';
-    dlg.style.maxHeight = Math.max(160, vv.height - 16) + 'px';
+    // La feuille ne doit JAMAIS dépasser la zone visible : `- 24` garde une lisière en haut pour
+    // que l'en-tête (et sa croix) reste sous la barre d'URL, pas derrière.
+    dlg.style.maxHeight = Math.max(160, vv.height - 24) + 'px';
     // La feuille vient de RÉTRÉCIR : ce qui était en bas de sa zone défilable (le composeur, très
     // exactement) est sorti de vue. Remonter la feuille sans recoller le fil reviendrait à écrire
     // à l'aveugle une seconde fois — c'est le défaut qu'on corrige.
@@ -5564,8 +5583,33 @@ function attachKeyboardInset(dlg, afterApply) {
   };
   vv.addEventListener('resize', apply);
   vv.addEventListener('scroll', apply);
+  // Le focus décide désormais : il faut donc recalculer quand il bouge, sinon un `blur` laisserait
+  // la feuille remontée dans le vide (et la croix hors d'atteinte, exactement le défaut de 218).
+  dlg.addEventListener('focusin', apply);
+  dlg.addEventListener('focusout', () => setTimeout(apply, 60));   // laisse le focus se poser
   apply();
-  return () => { vv.removeEventListener('resize', apply); vv.removeEventListener('scroll', apply); clear(); };
+  return () => {
+    vv.removeEventListener('resize', apply);
+    vv.removeEventListener('scroll', apply);
+    dlg.removeEventListener('focusin', apply);
+    clear();
+  };
+}
+
+/* [MOBILE-POPIN-CLOSE-FIX] Filet de sécurité tactile : un tap sur le fond ferme la pop-in. Un
+   <dialog> modal sans clavier physique n'a pas d'Échap — sans cette sortie, une feuille dont la
+   croix serait masquée (barre d'URL, orientation surprise) piégerait l'utilisateur. Le clic sur le
+   ::backdrop a pour cible le dialog LUI-MÊME : on le reconnaît en comparant aux coordonnées de sa
+   boîte. Les clics à l'intérieur ne sont donc jamais confondus avec le fond. */
+function closeOnBackdropTap(dlg) {
+  const onClick = (e) => {
+    if (e.target !== dlg) return;                 // un clic sur un enfant n'est pas le fond
+    const r = dlg.getBoundingClientRect();
+    const out = e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+    if (out) dlg.close();
+  };
+  dlg.addEventListener('click', onClick);
+  return () => dlg.removeEventListener('click', onClick);
 }
 
 /* ═══════ [COMMENTS-POPIN] Ouvrir le fil en pop-in ═══════
@@ -5615,13 +5659,24 @@ function openCommentsPopin(memo, onCount) {
   body.addEventListener('scroll', () => {
     pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
   });
-  const obs = new MutationObserver(() => { if (pinned) stick(); });
+  const obs = new MutationObserver(() => {
+    if (pinned) stick();
+    // [MOBILE-POPIN-CLOSE-FIX] Sur mobile, on rend la main APRÈS un envoi réussi : le composeur est
+    // vidé par le composant, on lui retire alors le focus → le clavier se referme, la feuille
+    // redescend, la croix ✕ redevient atteignable. C'était le déclencheur nominal du défaut : on
+    // postait, et on restait piégé le clavier ouvert. Sur desktop on ne touche à rien — enchaîner
+    // deux messages au clavier physique doit rester fluide.
+    if (!isTouchUI()) return;
+    const inp = body.querySelector('.cmt-composer input');
+    if (inp && document.activeElement === inp && !inp.value) inp.blur();
+  });
   obs.observe(body, { childList: true, subtree: true });
   // [MOBILE-POPIN-POLISH] La feuille remonte au-dessus du clavier tant qu'elle est ouverte, et le
   // fil se recolle en bas dans la foulée — sinon le composeur reste sous le bord de la feuille
   // rétrécie, et on tape de nouveau sans se voir.
   const detachKb = attachKeyboardInset(dlg, () => { if (pinned) stick(); });
-  dlg.addEventListener('close', () => { obs.disconnect(); detachKb(); }, { once: true });
+  const detachTap = closeOnBackdropTap(dlg);   // [MOBILE-POPIN-CLOSE-FIX] sortie au doigt
+  dlg.addEventListener('close', () => { obs.disconnect(); detachKb(); detachTap(); }, { once: true });
   // Focus du composeur : posé deux fois (leçon de [POPIN-COMMENTS-BTN] 213) — tout de suite, puis
   // après la frame, le temps que le contenu du dialog soit rendu et focusable.
   // [MOBILE-POPIN-POLISH] …mais JAMAIS sur mobile : le clavier masquerait le fil qu'on vient
@@ -7195,8 +7250,13 @@ function openMemoEditor(memo) {
   // contenu reste le bon réflexe (comportement d'origine, inchangé).
   if (!isTouchUI()) q.focus();
   // La fiche est elle aussi une bottom-sheet en mobile : elle doit remonter quand on tape.
+  // [MOBILE-POPIN-CLOSE-FIX] Elle partage le risque de la pop-in commentaires — son pied porte
+  // « Annuler », qui peut se retrouver hors d'atteinte si la feuille reste remontée. Même garde
+  // (inset seulement quand on tape vraiment) et même filet : un tap sur le fond referme.
+  // Rien n'est perdu : fermer la fiche sans sauver a toujours été « Annuler ».
   const _detachKb = attachKeyboardInset(memoEditDialog);
-  memoEditDialog.addEventListener('close', _detachKb, { once: true });
+  const _detachTap = closeOnBackdropTap(memoEditDialog);
+  memoEditDialog.addEventListener('close', () => { _detachKb(); _detachTap(); }, { once: true });
   return true;
 }
 
