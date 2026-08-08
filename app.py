@@ -931,6 +931,34 @@ def init_db():
     conn.execute(
         "CREATE INDEX IF NOT EXISTS ix_role_requests_guest ON role_requests(guest_id, project_id)"
     )
+    # ───────── [GUEST-ROLES V2 · T4] journal des actes d'administration (spec §4) ─────────
+    # Décision Fabien : NOTIFICATION, pas d'approbation préalable. Un Admin invité agit tout de
+    # suite ; l'owner voit passer chaque acte et peut le révoquer d'un clic. La table garde donc de
+    # quoi ANNULER : qui a fait quoi, sur qui, où, et surtout `prev_role`/`prev_caps` — l'état
+    # d'avant. Sans cette mémoire, « révoquer » ne saurait pas quoi restaurer.
+    # Additive, non exportée (les partages/invités ne le sont pas — `APP_VERSION` reste 27).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor TEXT NOT NULL DEFAULT '',
+            actor_guest_id INTEGER,
+            target_guest_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            action TEXT NOT NULL DEFAULT 'set_role',
+            role TEXT NOT NULL DEFAULT '',
+            prev_role TEXT NOT NULL DEFAULT '',
+            prev_caps_add TEXT NOT NULL DEFAULT '[]',
+            prev_caps_remove TEXT NOT NULL DEFAULT '[]',
+            had_row INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT '',
+            revoked_at TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_admin_actions_created ON admin_actions(created_at DESC)"
+    )
     # [IMAGE-TRASH] Corbeille des IMAGES (invariant 7 transposé aux photos) : supprimer une image
     # (owner OU invité) retire son nom de `memos.images` mais GARDE le fichier sur le volume
     # jusqu'à la purge (30 j). Une ligne = une image en attente. `deleted_by` suit le pattern
@@ -2536,6 +2564,9 @@ def _purge_shares_for(conn, kind, target_id):
     for g in rows:
         conn.execute("DELETE FROM guest_roles WHERE guest_id = ?", (g[0],))
         conn.execute("DELETE FROM role_requests WHERE guest_id = ?", (g[0],))
+        # [T4] Le journal d'un invité disparu n'a plus de sens : ses lignes s'afficheraient
+        # « (invité retiré) » et encombreraient la file d'actes de l'owner.
+        conn.execute("DELETE FROM admin_actions WHERE target_guest_id = ? OR actor_guest_id = ?", (g[0], g[0]))
     conn.execute(
         "DELETE FROM share_guests WHERE share_id IN "
         "(SELECT id FROM shares WHERE kind = ? AND target_id = ?)", (kind, target_id),
@@ -4806,6 +4837,10 @@ def _share_by_token(db, token):
 # c'est leur TRADUCTION EN CAPACITÉS qui porte désormais la vérité.
 
 SHARE_ROLES = ("viewer", "commenter", "contributor", "editor")
+# [GUEST-ROLES V2 · T4] Rôles attribuables à une PERSONNE sur un dossier (surcharge `guest_roles`).
+# `shares.role` reste borné aux quatre historiques — un LIEN ne fabrique pas des administrateurs à
+# la chaîne ; Modérateur et Administrateur se confient à quelqu'un, nommément (spec §4).
+ASSIGNABLE_ROLES = SHARE_ROLES + ("moderator", "admin")
 # Rangs : ne servent plus à autoriser (c'est `_can`), seulement à ORDONNER (hub : « rôle le plus
 # haut gagne ») et à afficher. `moderator`/`admin` sont réservés (leurs capacités arrivent en T3/T4).
 _ROLE_RANK = {"viewer": 0, "commenter": 1, "contributor": 2, "editor": 3,
@@ -4864,9 +4899,19 @@ _ACTION_CAP = {
 
 def _clean_role(value):
     v = (str(value or "")).strip()
-    # [GUEST-ROLES V2 · T1] Volontairement borné aux 4 rôles LIVRÉS : `moderator`/`admin` ont
-    # déjà leurs capacités (`_ROLE_CAPS`) mais restent inacceptés tant que T3/T4 n'ont pas livré
-    # leurs routes et leurs tests. Une valeur inconnue → '' (repli sur `can_edit`), jamais un 500.
+    # [GUEST-ROLES V2 · T4] `moderator` et `admin` sont désormais LIVRÉS : leurs capacités
+    # s'exercent (modération des fils, délégation bornée au sous-arbre) et sont testées. Une valeur
+    # inconnue → '' (repli sur `can_edit`), jamais un 500.
+    return v if v in ASSIGNABLE_ROLES else ""
+
+
+def _clean_link_role(value):
+    """Rôle d'un LIEN (`shares.role`, `welcome_role`) — borné aux quatre rôles historiques.
+
+    [GUEST-ROLES V2 · T4] Un lien ne fabrique pas des administrateurs à la chaîne : Modérateur et
+    Administrateur se confient à quelqu'un, nommément, par une surcharge `guest_roles` (spec §4).
+    Coller un lien dans un groupe ne doit jamais distribuer le pouvoir de nommer."""
+    v = (str(value or "")).strip()
     return v if v in SHARE_ROLES else ""
 
 
@@ -5165,7 +5210,12 @@ def _guest_caps(db, share, guest=None, project_id=None, memo_row=None):
             elevations |= _ROLE_CAPS.get(fl, frozenset())
         ge = ((guest["email"] if guest else "") or "").strip().lower()
         if ge and _owns_guest_space_folder(db, ge, project_id):
-            elevations |= _ROLE_CAPS["editor"]
+            # [GUEST-ROLES V2 · T4] « Créateur = Admin de naissance » (spec §4) : qui a créé un
+            # dossier l'administre, lui et ses descendants — c'est ce qui lui permet d'y inviter et
+            # d'y nommer sans passer par l'owner. Vaut aussi pour l'espace perso [GUEST-HOME], et
+            # c'est cohérent : chez soi, on est chez soi. Le pré-requis (`created_by` posé à la
+            # création invitée) a été livré en T3.
+            elevations |= _ROLE_CAPS["admin"]
         gid = _row_get(guest, "id", None) if guest is not None else None
         if gid:
             grole, add, remove = _resolve_guest_overrides(db, gid, project_id)
@@ -5843,7 +5893,7 @@ def grant_guest_project():
     email = (data.get("email") or "").strip().lower()
     name = (data.get("name") or "").strip()[:60]
     # [GUEST-ROLES] role prioritaire ; repli can_edit pour compat API.
-    role = _clean_role(data.get("role")) or ("editor" if data.get("can_edit") else "viewer")
+    role = _clean_link_role(data.get("role")) or ("editor" if data.get("can_edit") else "viewer")
     can_edit = 1 if role == "editor" else 0
     try:
         project_id = int(data.get("project_id"))
@@ -5922,12 +5972,12 @@ def create_share():
     pin = f"{secrets.randbelow(10000):04d}"
     # [GUEST-ROLES] `role` (4 niveaux) est la source de vérité ; `can_edit` en dérive (= editor)
     # pour rester cohérent avec le code historique. Repli sur can_edit si role absent (compat API).
-    role = _clean_role(data.get("role")) or ("editor" if data.get("can_edit") else "viewer")
+    role = _clean_link_role(data.get("role")) or ("editor" if data.get("can_edit") else "viewer")
     can_edit = 1 if role == "editor" else 0
     # [GUEST-ROLES V2 · T2] Rôle d'ACCUEIL du nouveau lien (§5) : celui que l'owner vient de
     # choisir. Le défaut « Lecteur » de la spec ne s'applique donc qu'à un partage créé SANS rôle
     # explicite — sinon créer un lien « Éditeur » ferait entrer ses invités en lecture seule.
-    welcome_role = _clean_role(data.get("welcome_role")) or role
+    welcome_role = _clean_link_role(data.get("welcome_role")) or role
     wmsg = _clean_welcome_message(data.get("welcome_message"))
     cur = db.execute(
         "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin, "
@@ -5974,8 +6024,8 @@ def update_share(share_id):
     if not re.match(r"^\d{4}$", pin):
         return jsonify({"error": "le code doit faire 4 chiffres"}), 400
     # [GUEST-ROLES] `role` prioritaire (repli can_edit pour compat) ; can_edit = (role==editor).
-    if "role" in data or _clean_role(data.get("role")):
-        role = _clean_role(data.get("role")) or _share_role(existing)
+    if "role" in data or _clean_link_role(data.get("role")):
+        role = _clean_link_role(data.get("role")) or _share_role(existing)
     elif "can_edit" in data:
         role = "editor" if data.get("can_edit") else "viewer"
     else:
@@ -5985,7 +6035,7 @@ def update_share(share_id):
     # valent que pour les FUTURS arrivants — les personnes déjà entrées portent leur propre rôle et
     # ne bougent pas. Champs OPTIONNELS : absents = inchangés (la saisie arrive avec la page
     # Partages V2 en T3 ; ici, seule l'API existe).
-    welcome_role = _clean_role(data.get("welcome_role")) if "welcome_role" in data else ""
+    welcome_role = _clean_link_role(data.get("welcome_role")) if "welcome_role" in data else ""
     if not welcome_role:
         welcome_role = _welcome_role(existing)
     wmsg = existing["welcome_message"] if "welcome_message" not in data else _clean_welcome_message(
@@ -6025,6 +6075,7 @@ def delete_share(share_id):
     for g in db.execute("SELECT id FROM share_guests WHERE share_id = ?", (share_id,)).fetchall():
         db.execute("DELETE FROM guest_roles WHERE guest_id = ?", (g["id"],))
         db.execute("DELETE FROM role_requests WHERE guest_id = ?", (g["id"],))
+        db.execute("DELETE FROM admin_actions WHERE target_guest_id = ? OR actor_guest_id = ?", (g["id"], g["id"]))
     db.execute("DELETE FROM share_guests WHERE share_id = ?", (share_id,))
     db.execute("DELETE FROM shares WHERE id = ?", (share_id,))
     db.commit()
@@ -6400,6 +6451,100 @@ def update_guest(guest_id):
 
 # ───────────── [GUEST-ROLES V2 · T3] fiche invité : rôle et ajustements par dossier ─────────────
 
+# ───────────── [GUEST-ROLES V2 · T4] délégation : poser un rôle et le JOURNALISER ─────────────
+
+def _apply_guest_role(db, guest_id, project_id, role, add, rem, actor, actor_guest_id=None,
+                      journal=True):
+    """Pose (ou retire) la surcharge d'une personne sur un dossier, en gardant l'état d'AVANT.
+
+    Un seul chemin d'écriture pour l'owner et pour un Admin invité : même effet, même trace. Le
+    journal enregistre `prev_*` parce que « révoquer d'un clic » (spec §4) doit savoir quoi
+    restaurer — annuler une nomination, ce n'est pas retirer tout rôle, c'est remettre celui d'avant.
+    `journal=False` sert aux actes de l'owner qu'on ne veut pas voir remonter comme « actes
+    d'administration à surveiller » : c'est lui le point de référence, pas un délégué."""
+    prev = db.execute(
+        "SELECT role, caps_add, caps_remove FROM guest_roles WHERE guest_id = ? AND project_id = ?",
+        (guest_id, project_id),
+    ).fetchone()
+    now = datetime.now(timezone.utc).isoformat()
+    if not role and not add and not rem:
+        db.execute("DELETE FROM guest_roles WHERE guest_id = ? AND project_id = ?", (guest_id, project_id))
+    else:
+        db.execute(
+            "INSERT INTO guest_roles (guest_id, project_id, role, caps_add, caps_remove, granted_by, granted_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(guest_id, project_id) DO UPDATE SET role = excluded.role, "
+            "caps_add = excluded.caps_add, caps_remove = excluded.caps_remove, "
+            "granted_by = excluded.granted_by, granted_at = excluded.granted_at",
+            (guest_id, project_id, role, json.dumps(sorted(add)), json.dumps(sorted(rem)), actor, now),
+        )
+    if journal:
+        db.execute(
+            "INSERT INTO admin_actions (actor, actor_guest_id, target_guest_id, project_id, action, "
+            "role, prev_role, prev_caps_add, prev_caps_remove, had_row, created_at) "
+            "VALUES (?, ?, ?, ?, 'set_role', ?, ?, ?, ?, ?, ?)",
+            (actor, actor_guest_id, guest_id, project_id, role,
+             (_row_get(prev, "role", "") if prev else ""),
+             (_row_get(prev, "caps_add", "[]") if prev else "[]"),
+             (_row_get(prev, "caps_remove", "[]") if prev else "[]"),
+             1 if prev else 0, now),
+        )
+
+
+def _admin_scope_ok(db, share, guest, project_id):
+    """Cet invité peut-il ADMINISTRER ce dossier ? `administrer` est résolu sur le dossier VISÉ, ce
+    qui borne mécaniquement la délégation à son sous-arbre : la capacité vient soit d'une surcharge
+    posée sur un ancêtre, soit de la propriété du dossier (créateur = admin de naissance). Remonter
+    la chaîne, c'est exactement ce que fait `_guest_caps` (spec §4)."""
+    return _can(db, share, CAP_ADMINISTRER, guest=guest, project_id=project_id)
+
+
+@app.route("/share/<token>/guests/<int:target_id>/role", methods=["PUT"])
+def share_set_guest_role(token, target_id):
+    """[GUEST-ROLES V2 · T4] Un Admin INVITÉ nomme quelqu'un, dans son sous-arbre (spec §4).
+
+    Route publique sous /share/* (bypass Authelia existant — invariant 5). Les gardes, dans l'ordre
+    où elles comptent :
+      · invité APPROUVÉ, et `administrer` sur le dossier VISÉ (donc dans son sous-arbre) ;
+      · la cible doit être un invité DU MÊME LIEN — on ne redistribue pas les droits d'autrui ;
+      · on ne se nomme pas soi-même (un Admin ne s'élève pas, il élève les autres) ;
+      · le rôle accordé ne dépasse JAMAIS `admin` — « délègue jusqu'à Administrateur, comme eux » ;
+      · l'owner est hors d'atteinte : il n'est pas un `share_guest`, aucune cible ne le désigne.
+    Chaque acte est journalisé et remonte à l'owner (🔔), qui peut le révoquer d'un clic."""
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    pid = data.get("project_id") or _share_request_project(db, share)
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return jsonify({"error": "project_id invalide"}), 400
+    scope = set(_project_descendants(db, share["target_id"])) if share["kind"] == "project" else {pid}
+    if pid not in scope:
+        return jsonify({"error": "ce dossier n'est pas dans le périmètre de ce partage"}), 400
+    if not _admin_scope_ok(db, share, guest, pid):
+        return jsonify({"error": "non autorisé"}), 403
+    if target_id == guest["id"]:
+        return jsonify({"error": "on ne change pas son propre rôle"}), 403
+    target = db.execute("SELECT * FROM share_guests WHERE id = ?", (target_id,)).fetchone()
+    if not target or target["share_id"] != share["id"]:
+        return jsonify({"error": "not found"}), 404
+    role = _clean_role(data.get("role"))
+    add = _clean_caps(data.get("caps_add") or [])
+    rem = _clean_caps(data.get("caps_remove") or [])
+    actor = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    _apply_guest_role(db, target_id, pid, role, add, rem, actor, actor_guest_id=guest["id"])
+    db.commit()
+    return jsonify({"guest_id": target_id, "project_id": pid, "role": role,
+                    "caps_add": sorted(add), "caps_remove": sorted(rem),
+                    "source": "override" if (role or add or rem) else "link"})
+
+
 @app.route("/api/guests/<int:guest_id>/role", methods=["PUT"])
 def set_guest_role(guest_id):
     """Rôle et ajustements fins d'UNE personne sur UN dossier (surcharge `guest_roles`).
@@ -6434,22 +6579,73 @@ def set_guest_role(guest_id):
     role = _clean_role(data.get("role"))
     add = _clean_caps(data.get("caps_add") or [])
     rem = _clean_caps(data.get("caps_remove") or [])
-    now = datetime.now(timezone.utc).isoformat()
-    if not role and not add and not rem:
-        db.execute("DELETE FROM guest_roles WHERE guest_id = ? AND project_id = ?", (guest_id, pid))
-        db.commit()
-        return jsonify({"guest_id": guest_id, "project_id": pid, "role": "",
-                        "caps_add": [], "caps_remove": [], "source": "link"})
-    db.execute(
-        "INSERT INTO guest_roles (guest_id, project_id, role, caps_add, caps_remove, granted_by, granted_at) "
-        "VALUES (?, ?, ?, ?, ?, '', ?) "
-        "ON CONFLICT(guest_id, project_id) DO UPDATE SET role = excluded.role, "
-        "caps_add = excluded.caps_add, caps_remove = excluded.caps_remove, granted_at = excluded.granted_at",
-        (guest_id, pid, role, json.dumps(sorted(add)), json.dumps(sorted(rem)), now),
-    )
+    # [T4] Même chemin d'écriture que la délégation invitée, mais SANS entrée au journal : le
+    # journal sert à surveiller ce que les délégués font, pas à se surveiller soi-même.
+    _apply_guest_role(db, guest_id, pid, role, add, rem, "", journal=False)
     db.commit()
     return jsonify({"guest_id": guest_id, "project_id": pid, "role": role,
-                    "caps_add": sorted(add), "caps_remove": sorted(rem), "source": "override"})
+                    "caps_add": sorted(add), "caps_remove": sorted(rem),
+                    "source": "override" if (role or add or rem) else "link"})
+
+
+def _admin_actions_payload(db, limit=30):
+    """Actes d'administration des DÉLÉGUÉS, du plus récent au plus ancien, avec de quoi les lire
+    en une phrase (« Phiphi a nommé Zack Éditeur sur Voyage eclipse ») et les révoquer."""
+    out = []
+    for r in db.execute(
+        "SELECT a.*, t.name AS target_name, t.email AS target_email, p.name AS project_name "
+        "FROM admin_actions a "
+        "LEFT JOIN share_guests t ON t.id = a.target_guest_id "
+        "LEFT JOIN projects p ON p.id = a.project_id "
+        "ORDER BY a.created_at DESC, a.id DESC LIMIT ?", (limit,),
+    ).fetchall():
+        out.append({
+            "id": r["id"],
+            "actor": (r["actor"] or "").replace("<", "").split(" ")[0] or "Un admin",
+            "actor_full": r["actor"],
+            "target": r["target_name"] or r["target_email"] or "(invité retiré)",
+            "project": r["project_name"] or "(dossier supprimé)",
+            "role": r["role"],
+            "prev_role": r["prev_role"],
+            "created_at": r["created_at"],
+            "revoked": bool((r["revoked_at"] or "").strip()),
+        })
+    return out
+
+
+@app.route("/api/admin-actions", methods=["GET"])
+def list_admin_actions():
+    return jsonify(_admin_actions_payload(get_db()))
+
+
+@app.route("/api/admin-actions/<int:action_id>/revoke", methods=["POST"])
+def revoke_admin_action(action_id):
+    """Révoque un acte d'un délégué : REMET L'ÉTAT D'AVANT (spec §4, « l'owner révoque tout d'un
+    clic »). Ce n'est pas « retirer le rôle » — si la personne était déjà Commentatrice avant d'être
+    nommée Éditrice, elle redevient Commentatrice, pas rien. Un acte déjà révoqué ne l'est pas deux
+    fois (404) : rejouer une révocation écraserait un réglage posé entre-temps."""
+    db = get_db()
+    a = db.execute("SELECT * FROM admin_actions WHERE id = ?", (action_id,)).fetchone()
+    if not a or (a["revoked_at"] or "").strip():
+        return jsonify({"error": "not found"}), 404
+    now = datetime.now(timezone.utc).isoformat()
+    if a["had_row"]:
+        db.execute(
+            "INSERT INTO guest_roles (guest_id, project_id, role, caps_add, caps_remove, granted_by, granted_at) "
+            "VALUES (?, ?, ?, ?, ?, '', ?) "
+            "ON CONFLICT(guest_id, project_id) DO UPDATE SET role = excluded.role, "
+            "caps_add = excluded.caps_add, caps_remove = excluded.caps_remove, granted_at = excluded.granted_at",
+            (a["target_guest_id"], a["project_id"], a["prev_role"],
+             a["prev_caps_add"], a["prev_caps_remove"], now),
+        )
+    else:
+        # Il n'y avait aucune surcharge avant l'acte : la révocation la fait disparaître, et la
+        # personne retombe sur le rôle de son lien.
+        db.execute("DELETE FROM guest_roles WHERE guest_id = ? AND project_id = ?",
+                   (a["target_guest_id"], a["project_id"]))
+    db.execute("UPDATE admin_actions SET revoked_at = ? WHERE id = ?", (now, action_id))
+    db.commit()
+    return jsonify({"id": action_id, "revoked": True, "restored_role": a["prev_role"]})
 
 
 @app.route("/api/shares/<int:share_id>/propagate", methods=["POST"])
@@ -6631,6 +6827,7 @@ def delete_guest(guest_id):
     # invité de T3 les relirait. On nettoie à la source plutôt que d'apprendre à vivre avec.
     db.execute("DELETE FROM guest_roles WHERE guest_id = ?", (guest_id,))
     db.execute("DELETE FROM role_requests WHERE guest_id = ?", (guest_id,))
+    db.execute("DELETE FROM admin_actions WHERE target_guest_id = ? OR actor_guest_id = ?", (guest_id, guest_id))
     db.execute("DELETE FROM share_guests WHERE id = ?", (guest_id,))
     db.commit()
     return "", 204
@@ -6840,11 +7037,17 @@ def activity():
     # [GUEST-ROLES V2 · T2] Les demandes de rôle voyagent avec l'activité : l'owner les voit là où
     # il voit déjà « ce que les invités ont fait », et décide sans second appel ni second écran.
     role_reqs = _pending_role_requests(db)
+    # [GUEST-ROLES V2 · T4] Les actes des délégués remontent avec l'activité : décision Fabien =
+    # notification, PAS d'approbation préalable (spec §4). Un acte non révoqué et postérieur au
+    # dernier « vu » compte dans le 🔔 — l'owner apprend qu'on a nommé quelqu'un chez lui.
+    admin_acts = _admin_actions_payload(db)
+    unseen += sum(1 for a in admin_acts if not a["revoked"] and (a["created_at"] or "") > seen_at)
     return jsonify(
         {
             "pending_guests": pending,
             "unseen": unseen,
             "role_requests": role_reqs,
+            "admin_actions": admin_acts,
             "revisions": out_rev,
             "data_version": _data_version(db),
             "build_version": BUILD_VERSION,  # [UPDATE-PROMPT] invite si ≠ version embarquée au rendu
@@ -9332,7 +9535,16 @@ def share_delete_comment(token, comment_id):
     if not row or row["memo_id"] not in {r["id"] for r in _share_scope_memos(db, share)}:
         return jsonify({"error": "not found"}), 404
     me = f"{guest['name'] or guest['email']} <{guest['email']}>"
-    if not _voter_email(row["author"]) or _voter_key(row["author"]) != _voter_key(me):
+    mine = bool(_voter_email(row["author"])) and _voter_key(row["author"]) == _voter_key(me)
+    # [GUEST-ROLES V2 · T4] `moderer` prend corps : un Modérateur pose une tombale sur le message
+    # d'un AUTRE (spec §2). La doctrine de la tombale ne bouge pas (invariant 7 : le corps est vidé,
+    # la ligne survit pour que les réponses gardent leur contexte) — c'est seulement QUI a le droit
+    # de la poser qui s'élargit. Le message de l'owner reste hors d'atteinte : modérer les invités
+    # n'est pas modérer le propriétaire.
+    memo_row = db.execute("SELECT * FROM memos WHERE id = ?", (row["memo_id"],)).fetchone()
+    can_moderate = _can(db, share, CAP_MODERER, guest=guest, memo_row=memo_row) \
+        and bool(_voter_email(row["author"]))
+    if not mine and not can_moderate:
         return jsonify({"error": "Seul l'auteur peut supprimer son message."}), 403
     _soft_delete_comment(db, row)
     db.commit()
@@ -9394,8 +9606,11 @@ def poll_close_guest(token, comment_id):
     share, guest, row, me, err = _share_poll_guard(db, token, comment_id)
     if err:
         return jsonify(err[0]), err[1]
-    # Clore n'appartient qu'au CRÉATEUR (côté invité) — l'owner, lui, passe par sa propre route.
-    if _voter_key(row["author"]) != _voter_key(me):
+    # Clore appartient au CRÉATEUR — et, depuis T4, au MODÉRATEUR : « clore tout scrutin » est
+    # l'une des deux prérogatives de `moderer` (spec §2). L'owner, lui, passe par sa propre route.
+    memo_row = db.execute("SELECT * FROM memos WHERE id = ?", (row["memo_id"],)).fetchone()
+    if _voter_key(row["author"]) != _voter_key(me) \
+       and not _can(db, share, CAP_MODERER, guest=guest, memo_row=memo_row):
         return jsonify({"error": "seul l'auteur du vote peut le clore"}), 403
     if not (_row_get(row, "poll_closed_at", "") or "").strip():
         db.execute("UPDATE memo_comments SET poll_closed_at = ? WHERE id = ?",

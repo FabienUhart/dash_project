@@ -748,8 +748,37 @@ function attachCmdHint(input) {
     });
     panel.appendChild(row);
   });
-  document.body.appendChild(panel);
+  /* [CMD-HINT-TOPLAYER] Où poser le panneau ? Le composeur vit désormais aussi dans un <dialog>
+     MODAL (pop-in commentaires, fiche d'édition), et le top-layer peint au-dessus de TOUT le DOM
+     normal — aucun `z-index` ne rattrape ça (même leçon que le panneau de recherche). Le panneau
+     restait donc derrière la pop-in : créé, ouvert, mesurable… et invisible. La commande partait
+     quand même à l'envoi, sans aide ni avertissement : « ça n'a pas fonctionné ».
+     Un enfant du dialog est peint AVEC lui dans le top-layer — d'où l'hôte = le dialog quand il y
+     en a un, `<body>` sinon (cards owner, share, hub : inchangés).
+     ⚠️ L'hôte se résout PARESSEUSEMENT, à chaque affichage : `attachCmdHint` est appelé pendant la
+     construction du composeur, AVANT son insertion — à cet instant `closest('dialog')` répondrait
+     `null` et on retomberait sur `<body>`, c'est-à-dire sur le défaut qu'on corrige.
+     Le panneau reste en `position: fixed` : il échappe donc à l'`overflow: hidden` de la pop-in
+     (aucun ancêtre ne crée de containing block — un `transform` sur un dialog est proscrit par
+     l'invariant 8), et ses coordonnées de viewport restent valides telles quelles. */
+  function mount(node) {
+    const host = (input.closest && input.closest('dialog')) || document.body;
+    if (node.parentNode !== host) host.appendChild(node);
+    /* Le fil se re-rend après chaque envoi : le composeur est remplacé, un nouveau panneau
+       s'attache, et l'ancien resterait là (le `<body>` n'a jamais eu ce souci — il n'était vidé
+       par personne, mais le dialog non plus entre deux re-rendus du fil). On balaie donc les
+       panneaux dont le champ a quitté le document : ils ne servent plus rien ni personne. */
+    host.querySelectorAll('.sh-panel[data-cmd-hint]').forEach((old) => {
+      if (old !== node && old._cmdInput && !old._cmdInput.isConnected) old.remove();
+    });
+  }
+  /* Rien n'entre dans le DOM avant de servir : un montage à la construction atterrirait dans le
+     `<body>` (le composeur n'est pas encore inséré, cf. la note sur la résolution paresseuse) et
+     y resterait pour tout composeur dont on n'ouvre jamais l'aide. `place()`/`placeWarn()`
+     montent d'abord, mesurent ensuite — l'ordre compte, `offsetHeight` vaut 0 hors document. */
+  panel.dataset.cmdHint = '1'; panel._cmdInput = input;
   function place() {
+    mount(panel);
     const r = input.getBoundingClientRect();
     panel.style.left = Math.round(r.left) + 'px';
     panel.style.width = Math.round(Math.max(r.width, 280)) + 'px';
@@ -776,8 +805,9 @@ function attachCmdHint(input) {
   const warn = el('div', { class: 'sh-panel sh-warn', attrs: { role: 'status' } });
   warn.appendChild(el('span', { class: 'sh-warn-t', text: 'Commande inconnue — tape / pour voir les commandes disponibles.' }));
   warn.appendChild(el('span', { class: 'sh-warn-s', text: 'Entrée à nouveau pour envoyer comme message.' }));
-  document.body.appendChild(warn);
+  warn.dataset.cmdHint = '1'; warn._cmdInput = input;   // [CMD-HINT-TOPLAYER] monté par `placeWarn`
   function placeWarn() {
+    mount(warn);
     const r = input.getBoundingClientRect();
     warn.style.left = Math.round(r.left) + 'px';
     warn.style.width = Math.round(Math.max(r.width, 280)) + 'px';

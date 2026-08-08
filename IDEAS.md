@@ -12,10 +12,11 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 **Ordre ferme, tenu à jour à chaque fin de lot** : le lot terminé est **retiré**, la file remonte d'un cran. En l'absence de brief collé, le **n° 1 est le travail en cours**. Un brief collé par Fabien **prime toujours** sur cette file. Le reste du fichier, en dessous, est le backlog **non ordonné**.
 
-_(À jour au 8 août 2026, après le déploiement du tag **V27.29.209**. [COMMENT-VOTE] et [SHARE-REFRESH-GUARD] sont livrés — lignes ✅ plus bas.)_
+_(À jour au 8 août 2026, après le déploiement du tag **V27.36.227**. [COMMENT-VOTE] et [SHARE-REFRESH-GUARD] sont livrés — lignes ✅ plus bas.)_
 
-1. **[GUEST-ROLES V2 — T2] Accueil & demandes** — la spec est **validée** (§11 = arbitrages Fabien du 8/08) et **T1 est livré** ([V27.30.210] : capacités atomiques, `can()`, tables `guest_roles`/`role_requests`, 5 trous de sécurité fermés — voir `REALISATION.md` et `docs/specs/ROUTE-CAPS.md` §9). Reste pour T2 : `welcome_role` par dossier (**≠** `role_floor`, cf. S8), message d'accueil, demande de rôle + 🔔. Puis **T3** page 🔗 Partages V2 (maquette Cowork d'abord — c'est elle qui rendra les surcharges `guest_roles` *octroyables*, T1 n'a livré que le moteur de lecture), **T4** délégation Admin (`moderer`/`administrer` = code neuf), **T5** magic-link.
+1. **[GUEST-ROLES V2 — T4b] Écran invité de nomination** — **T1 → T4a sont livrés** ([V27.30.210] capacités atomiques + `can()` + 5 trous fermés ; [V27.31.211] T2 accueil & demandes ; [V27.33.216] T3 page 🔗 Partages V2 ; [V27.34.217] T3bis interrupteurs ; [V27.35.220] T4a `moderer`/`administrer`, délégation et journal des actes). Reste **T4b** : l'écran **côté invité** par lequel un Admin déclenche une nomination — la route serveur (`PUT /share/<token>/guests/<id>/role`) existe et est éprouvée, mais **aucune maquette ne dit à quoi cet écran ressemble** ; le précédent T3 impose « maquette Cowork avant la tranche UI » → **bloqué là-dessus**. Puis **T5** magic-link.
 2. **[GUEST-PROFILE]** — **après** les rôles : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
+3. **[DEBUG-RECORDER]** — enregistreur de diagnostic **intégré à l'app** (idée Fabien, reco Cowork du 8/08) : mode OFF par défaut, journalise clics + ouverture/fermeture des `<dialog>` **avec leur état** (`open`/`:modal`/`display`) + erreurs console + contexte (viewport, version, navigateur), bouton « Copier le log », **tout local, aucun envoi réseau**. Motif : c'est exactement l'état interne qui aurait montré le fantôme de [POPIN-GHOST-FIX] du premier coup. Utile **avant** de reprendre la chasse aux bugs mobiles.
 
 ---
 

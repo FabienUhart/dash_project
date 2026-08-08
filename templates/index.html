@@ -360,8 +360,14 @@ button.icon { padding: 0.45rem 0.6rem; }
    Le fil vivait dans un <details> replié, coincé sous `max-height:9rem` : illisible dès qu'une
    conversation dépassait trois messages. Ici il prend TOUTE la hauteur disponible. Desktop :
    centrée. Mobile : bottom-sheet, comme le reste de l'app. */
+/* [POPIN-GHOST-FIX] Le `display` ne vit QUE dans la règle `[open]`. Un <dialog> compte sur la
+   feuille de style du navigateur (`dialog:not([open]) { display: none }`) pour disparaître ; un
+   `display: flex` posé dans la règle de base la neutralise, et la pop-in restait affichée après
+   `close()` — mais NON MODALE, hors top-layer : sans voile, les clics la traversaient et rien ne
+   pouvait plus la fermer. Toutes les autres propriétés restent ici : elles sont inertes tant que
+   l'élément n'est pas affiché. */
 #comments-dialog { width: min(640px, calc(100vw - 2rem)); max-height: min(86vh, 780px);
-  padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+  padding: 0; flex-direction: column; overflow: hidden; }
 #comments-dialog[open] { display: flex; }
 /* [MOBILE-POPIN-CLOSE-FIX] L'en-tête porte la croix : il ne doit jamais partir hors d'atteinte.
    `sticky` le maintient en tête même si la feuille se retrouve plus haute que prévu (barre d'URL
@@ -1219,11 +1225,14 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 /* Déplier et modifier = actions principales, mises en avant en bleu d'accent. */
 .task .task-actions .texp, .task .task-actions .tedit, .task .task-actions .tview { color: var(--accent); border-color: var(--accent); }  /* [MEMO-VIEW] 👁 même famille */
 /* [COMMENTS-POPIN] 💬 de la rangée d'actions : même gabarit rond que ses voisins, mais discret au
-   repos (c'est une lecture, pas une action principale). Le compte suit l'icône, pas de pastille
-   pleine — la couleur reste aux données. */
+   repos (c'est une lecture, pas une action principale).
+   [CARD-COMMENT-BADGE] Le compte porte la MÊME pastille `.badge` que le picto 💬 du haut de card —
+   c'est le même chiffre, il doit se lire pareil. Le style vient de `.badge`, on ne règle ici que
+   l'espacement ; inventer une seconde façon d'écrire « 7 messages » aurait fait deux vocabulaires
+   pour une seule information. */
 .task .task-actions .tcomments { color: var(--muted); }
 .task .task-actions .tcomments:hover { color: var(--text); }
-.task .task-actions .tcomments span { font-size: 0.74rem; margin-left: 0.1rem; }
+.task .task-actions .tcomments .badge { margin-left: 0.25rem; }
 /* === [CARD-REDESIGN] cards mémo resserrées === */
 /* Extrait tronqué à 3 lignes sur la card (contenu complet dans l'éditeur / au déplier). */
 .task .task-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }  /* [CARD-PREVIEW] extrait 2 lignes */
@@ -5530,20 +5539,28 @@ function renderTreeView() {
    Trois constats d'usage sur iPhone réel. Le fil conducteur : sur un téléphone, une pop-in qui
    s'ouvre avec le clavier déjà levé cache ce qu'on venait lire. */
 
-/* Y a-t-il un clavier VIRTUEL derrière ce pointeur ? `pointer: coarse` répond à la vraie question
-   (doigt = clavier logiciel), la largeur rattrape les cas où la détection de pointeur ment. Un
-   desktop tactile piloté à la souris reste `fine` : son auto-focus est conservé tel quel. */
-function isTouchUI() {
-  try {
-    return window.matchMedia('(pointer: coarse)').matches
-        || window.matchMedia('(max-width: 700px)').matches;
-  } catch (_) { return false; }
+/* [POPIN-POS-FIX] Sommes-nous sur un écran ÉTROIT ? — c'est-à-dire : la pop-in est-elle rendue en
+   bottom-sheet ?
+
+   ⚠ Ce test portait d'abord sur `pointer: coarse`, au motif qu'un doigt implique un clavier
+   logiciel. C'était faux, et ça a cassé le desktop : le **trackpad d'un Mac rapporte `coarse`**.
+   Un grand écran se retrouvait classé « mobile », le JS lui appliquait l'inset de bottom-sheet
+   pendant que le CSS le centrait toujours — d'où la pop-in commentaires décalée en haut à gauche,
+   à cheval sur la card (régression 218/219, cause trouvée par la passe Cowork).
+
+   La règle qu'on en tire : **JS et CSS doivent partager le MÊME critère**. La présentation est
+   décidée par la media query `max-width: 700px` ; ce test la recopie, à l'octet près. Un desktop
+   large et tactile reste donc un modal centré, avec son auto-focus. */
+const NARROW_MQ = '(max-width: 700px)';
+function isNarrowUI() {
+  try { return window.matchMedia(NARROW_MQ).matches; } catch (_) { return false; }
 }
 
-/* Focus d'ouverture : on ne le pose QUE là où il ne coûte rien. Sur mobile, il ferait monter le
-   clavier avant même qu'on ait lu — on ouvre, on lit, on tape si on veut. */
-function focusUnlessTouch(node) {
-  if (!node || isTouchUI()) return false;
+
+/* Focus d'ouverture : on ne le pose QUE là où il ne coûte rien. Sur un écran étroit, il ferait
+   monter le clavier avant même qu'on ait lu — on ouvre, on lit, on tape si on veut. */
+function focusUnlessNarrow(node) {
+  if (!node || isNarrowUI()) return false;
   node.focus({ preventScroll: true });
   return true;
 }
@@ -5559,7 +5576,7 @@ function attachKeyboardInset(dlg, afterApply) {
   if (!vv || !dlg) return () => {};
   const clear = () => { dlg.style.marginBottom = ''; dlg.style.maxHeight = ''; };
   const apply = () => {
-    if (!isTouchUI() || !dlg.open) { clear(); return; }
+    if (!isNarrowUI() || !dlg.open) { clear(); return; }
     // [MOBILE-POPIN-CLOSE-FIX] On ne remonte la feuille QUE pour un vrai clavier, c'est-à-dire
     // quand un champ DE CETTE FEUILLE a le focus. Sans cette garde, les barres Safari qui se
     // rétractent au scroll rétrécissent `visualViewport` exactement comme un clavier : la feuille
@@ -5612,6 +5629,22 @@ function closeOnBackdropTap(dlg) {
   return () => dlg.removeEventListener('click', onClick);
 }
 
+/* [POPIN-STACK-FIX] Une ligne pour nommer un mémo : son titre, ou la PREMIÈRE ligne de son
+   contenu. Les fins de bloc deviennent des sauts, puis on découpe AVANT de détaguer : `stripHTML`
+   normalise les blancs et ramènerait les sauts à des espaces, ce qui recollait les paragraphes
+   (« Acheter un cadeau pour mamie idée : un châle » au lieu de la seule première ligne). */
+function memoHeadline(memo, max) {
+  const t = (memo.title || '').trim();
+  if (t) return t.slice(0, max || 70);
+  const line = String(memo.content || '')
+    .replace(/<\/(p|div|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .split('\n')
+    .map(part => (stripHTML(part) || '').trim())
+    .find(Boolean) || '';
+  return line.slice(0, max || 70) || 'Mémo';
+}
+
 /* ═══════ [COMMENTS-POPIN] Ouvrir le fil en pop-in ═══════
    Un seul composant (`commentsBlockEl`), deux chemins d'entrée : le pied de la fiche d'édition et
    l'icône 💬 des cards. La pop-in s'ouvre AU-DESSUS de la fiche sans la fermer — un <dialog>
@@ -5625,8 +5658,11 @@ function openCommentsPopin(memo, onCount) {
   const head = el('div', { class: 'cp-head' });
   const ic = hdrIcon('message'); ic.setAttribute('width', '16'); ic.setAttribute('height', '16');
   head.appendChild(ic);
-  const title = stripHTML(memo.title || memo.content || '').trim().slice(0, 70) || 'Mémo';
-  head.appendChild(el('h3', { text: title }));
+  // [POPIN-STACK-FIX] Le titre du mémo, pas son mémo entier. `stripHTML` recolle les blocs sans
+  // séparateur : « <p>…pour mamie</p><p>idée : un châle</p> » devenait « …pour mamieidée : un
+  // châle ». On prend le titre quand il existe ; sinon la PREMIÈRE ligne du contenu, en fermant
+  // les blocs par un saut avant de retirer les balises.
+  head.appendChild(el('h3', { text: memoHeadline(memo) }));
   const x = el('button', { class: 'cp-x', text: '✕', attrs: { type: 'button', title: 'Fermer (Échap)' } });
   x.addEventListener('click', () => dlg.close());
   head.appendChild(x);
@@ -5666,7 +5702,7 @@ function openCommentsPopin(memo, onCount) {
     // redescend, la croix ✕ redevient atteignable. C'était le déclencheur nominal du défaut : on
     // postait, et on restait piégé le clavier ouvert. Sur desktop on ne touche à rien — enchaîner
     // deux messages au clavier physique doit rester fluide.
-    if (!isTouchUI()) return;
+    if (!isNarrowUI()) return;
     const inp = body.querySelector('.cmt-composer input');
     if (inp && document.activeElement === inp && !inp.value) inp.blur();
   });
@@ -5676,16 +5712,30 @@ function openCommentsPopin(memo, onCount) {
   // rétrécie, et on tape de nouveau sans se voir.
   const detachKb = attachKeyboardInset(dlg, () => { if (pinned) stick(); });
   const detachTap = closeOnBackdropTap(dlg);   // [MOBILE-POPIN-CLOSE-FIX] sortie au doigt
-  dlg.addEventListener('close', () => { obs.disconnect(); detachKb(); detachTap(); }, { once: true });
+  // [POPIN-STACK-FIX] UN SEUL modal visible à la fois. Deux <dialog> modaux empilés, c'est le
+  // navigateur qui arbitre — et sur un écran large la barre d'outils de la fiche traversait la
+  // pop-in. Pire : le clic « hors pop-in » atterrissait sur ce débordement, donc ni le voile ni le
+  // light-dismiss ne répondaient, d'où l'impression d'être coincé. On masque la fiche le temps de
+  // la conversation ; elle garde TOUT son état (Quill, titre en cours) puisqu'on ne fait que la
+  // cacher. Correctif cause-agnostique : plus de bleed-through possible, quels que soient la
+  // largeur ou le navigateur.
+  const under = document.getElementById('memo-edit-dialog');
+  const hidUnder = !!(under && under.open);
+  if (hidUnder) { under.style.visibility = 'hidden'; under.style.pointerEvents = 'none'; }
+  dlg.addEventListener('close', () => {
+    obs.disconnect(); detachKb(); detachTap();
+    // On ne rallume que ce qu'on a éteint, et seulement si la fiche est toujours là.
+    if (hidUnder && under) { under.style.visibility = ''; under.style.pointerEvents = ''; }
+  }, { once: true });
   // Focus du composeur : posé deux fois (leçon de [POPIN-COMMENTS-BTN] 213) — tout de suite, puis
   // après la frame, le temps que le contenu du dialog soit rendu et focusable.
   // [MOBILE-POPIN-POLISH] …mais JAMAIS sur mobile : le clavier masquerait le fil qu'on vient
   // d'ouvrir. Quand l'utilisateur touche le champ, `attachKeyboardInset` fait remonter la feuille.
   const composer = () => body.querySelector('.cmt-composer input');
-  focusUnlessTouch(composer());
+  focusUnlessNarrow(composer());
   requestAnimationFrame(() => {
     stick();
-    focusUnlessTouch(composer());
+    focusUnlessNarrow(composer());
   });
 }
 
@@ -5695,14 +5745,19 @@ function openCommentsPopin(memo, onCount) {
    ② le popover demande le PÉRIMÈTRE avant le rôle : régler une personne et régler tout un lien
       ne sont pas le même geste, et l'un des deux touche des gens qu'on ne regarde pas.
    Les capacités ont trois états (neutre → accordé → retiré), le retrait étant ABSOLU (§11.6).
-   Rôles proposés : ceux que le serveur applique aujourd'hui. Modérateur et Administrateur
-   existent dans la spec mais aucune route ne les honore encore (T4) — les proposer serait
-   promettre un droit qui ne s'exerce pas. */
-const T3_ROLES = ['viewer', 'commenter', 'contributor', 'editor'];
+   [T4] Modérateur et Administrateur rejoignent la liste : leurs capacités s'exercent désormais
+   (modérer les fils, nommer dans son sous-arbre). Ils ne sont proposés QUE sur la fiche d'une
+   personne — un LIEN ne peut pas les porter, on ne distribue pas le pouvoir de nommer à qui colle
+   une URL dans un groupe. */
+const T3_ROLES = ['viewer', 'commenter', 'contributor', 'editor', 'moderator', 'admin'];
 const T3_ROLE_DESC = {
   viewer: 'voit', commenter: '+ commente, vote', contributor: '+ ajoute (et édite SES ajouts)',
   editor: '+ édite tout, coche, déplace',
+  moderator: '+ modère les fils', admin: '+ nomme, dans son dossier',
 };
+/* Les rôles qu'un LIEN peut porter (étage lien) — bornés aux quatre historiques, miroir exact de
+   `_clean_link_role` côté serveur. */
+const T3_LINK_ROLES = ['viewer', 'commenter', 'contributor', 'editor'];
 const T3_CAPS = ['commenter', 'voter', 'cocher', 'creer', 'editer', 'creer-vote'];
 
 function rolePillEl(g, onChange) {
@@ -5756,11 +5811,20 @@ function openRoleDialog(g, onChange) {
       ? 'ajustement individuel — n\'affecte que ' + who
       : '⚠ change le rôle d\'accueil du lien (' + (g.link_guests || 1) + ' pers. déjà entrées : à propager ou non)';
     capsBox.style.display = person ? '' : 'none';   // les ajustements fins sont par personne
+    // [T4] Modérateur/Administrateur disparaissent quand on vise le LIEN.
+    body.querySelectorAll('.roleopt[data-person-only]').forEach((o) => {
+      o.style.display = person ? '' : 'none';
+    });
   };
 
   const currentRole = g.role_effective || g.role_link || 'viewer';
   T3_ROLES.forEach((r) => {
+    // [T4] Modérateur et Administrateur ne se posent que sur une PERSONNE : sur l'onglet « le
+    // lien », la liste se réduit aux quatre rôles qu'un lien peut porter (le serveur refuse les
+    // autres — l'UI ne doit pas proposer ce qui sera rejeté).
+    const linkOnly = !T3_LINK_ROLES.includes(r);
     const opt = el('div', { class: 'roleopt' + (r === currentRole ? ' sel' : ''), attrs: { role: 'button', tabindex: '0' } });
+    if (linkOnly) opt.dataset.personOnly = '1';
     opt.appendChild(el('span', { class: 'dot' }));
     opt.appendChild(el('span', { text: roleLabel(r) }));
     opt.appendChild(el('span', { class: 'desc', text: T3_ROLE_DESC[r] || '' }));
@@ -5868,7 +5932,9 @@ function linkWelcomeEl(s, onChange) {
   const c1 = el('div', { class: 'setting' });
   c1.appendChild(el('div', { class: 'lab', text: 'Rôle d\'accueil' }));
   const sel = el('select');
-  T3_ROLES.forEach(r => sel.appendChild(el('option', { attrs: { value: r }, text: roleLabel(r) })));
+  // [T4] Le rôle d'ACCUEIL d'un lien reste borné aux quatre rôles historiques : on n'accueille
+  // personne en Modérateur ou Administrateur — ces rôles se confient nommément.
+  T3_LINK_ROLES.forEach(r => sel.appendChild(el('option', { attrs: { value: r }, text: roleLabel(r) })));
   sel.value = s.welcome_role || _shareRole(s);
   c1.appendChild(sel);
   c1.appendChild(el('div', { class: 'hint', text: 'Copié à chaque nouvel arrivant. Les personnes déjà entrées gardent leur rôle.' }));
@@ -6487,6 +6553,44 @@ async function renderShares() {
       secR.appendChild(card);
     });
     board.appendChild(secR);
+  }
+
+  // [GUEST-ROLES V2 · T4] Journal des actes d'administration (spec §4, maquette « .adm »).
+  // Décision Fabien : notification, PAS d'approbation préalable — le délégué agit tout de suite,
+  // l'owner voit passer et révoque d'un clic. « Révoquer » REMET L'ÉTAT D'AVANT, ce n'est pas
+  // « retirer le rôle » : le libellé le dit pour qu'on ne s'attende pas à autre chose.
+  const acts = (activity.admin_actions || []).filter(a => !a.revoked);
+  if (acts.length) {
+    const secAd = el('div', { class: 'memo-section' });
+    secAd.appendChild(el('h2', { text: `ACTES D'ADMINISTRATION (${acts.length})` }));
+    acts.forEach(a => {
+      const card = el('div', { class: 'share-card' });
+      const row = el('div', { class: 'share-row' });
+      row.appendChild(el('span', { icon: 'user' }));
+      row.appendChild(el('span', {
+        class: 'grow',
+        text: `${a.actor} a nommé ${a.target} ${roleLabel(a.role) || '(rôle retiré)'}`
+              + (a.project ? ` sur « ${a.project} »` : ''),
+      }));
+      row.appendChild(el('span', { class: 'rev-meta', text: fmtWhen(a.created_at) }));
+      row.appendChild(el('button', {
+        class: 'g-reject',
+        text: 'Révoquer',
+        attrs: { title: a.prev_role
+          ? `Remettre ${a.target} ${roleLabel(a.prev_role)}, son rôle d'avant`
+          : `Retirer ce réglage — ${a.target} suivra de nouveau son lien` },
+        on: { click: async () => {
+          await api(`/api/admin-actions/${a.id}/revoke`, { method: 'POST', body: JSON.stringify({}) });
+          await loadAll(); rerender();
+          notify(a.prev_role
+            ? `${a.target} retrouve son rôle : ${roleLabel(a.prev_role)}.`
+            : `${a.target} suit de nouveau le rôle de son lien.`);
+        } },
+      }));
+      card.appendChild(row);
+      secAd.appendChild(card);
+    });
+    board.appendChild(secAd);
   }
 
   const byEditor = new Map();
@@ -7248,7 +7352,7 @@ function openMemoEditor(memo) {
   // [MOBILE-POPIN-POLISH] Pas d'auto-focus sur mobile : le clavier monterait aussitôt et
   // masquerait la moitié de la fiche qu'on vient d'ouvrir. Sur desktop, le curseur dans le
   // contenu reste le bon réflexe (comportement d'origine, inchangé).
-  if (!isTouchUI()) q.focus();
+  if (!isNarrowUI()) q.focus();
   // La fiche est elle aussi une bottom-sheet en mobile : elle doit remonter quand on tape.
   // [MOBILE-POPIN-CLOSE-FIX] Elle partage le risque de la pop-in commentaires — son pied porte
   // « Annuler », qui peut se retrouver hors d'atteinte si la feuille reste remontée. Même garde
@@ -7919,7 +8023,14 @@ function taskEl(memo) {
   }
   if (!coverName) wireChecklist(content, memo);   // [CARD-COVER] pas de checklist sur une couverture
   // [CARD-PREVIEW] rangée de pictos « signature » sous le titre/extrait (☑/📷/📎/💬), qui absorbe
-  // les anciens badges 📎/💬/☑. Clics : 📷 → visionneuse, 📎 → pop-in fichiers, 💬 → déplier.
+  // les anciens badges 📎/💬/☑. Clics : 📷 → visionneuse, 📎 → pop-in fichiers, 💬 → le fil.
+  // [CARD-BADGE-CLICKABLE] Le 💬 dépliait le fil DANS la card — le comportement d'avant
+  // [COMMENTS-POPIN], resté en place quand le fil a déménagé en pop-in. Deux chemins vers la même
+  // conversation ne doivent pas mener à deux endroits : le badge appelle désormais le MÊME
+  // `openCommentsPopin(memo, () => renderAll())` que l'icône 💬 de la rangée d'actions — un seul
+  // handler, pas un second écrit à côté. Le `stopPropagation` et l'état de survol viennent de
+  // `memoPictosRow` (partial), qui pose déjà `.badge.clickable` sur tout chip muni d'un `on`.
+  // Un mémo sans message n'a pas de badge (`comment_count` à 0 → chip absent) : rien à cliquer.
   const pictos = memoPictosRow({
     subtasks: memo.subtasks,
     images: (memo.images || []).length,
@@ -7931,7 +8042,7 @@ function taskEl(memo) {
       canDelete: true, onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
     }) : null,
     onAttach: (memo.attachments || []).length ? () => openMemoAttachments(memo) : null,
-    onComments: memo.comment_count ? () => { expandedMemos.add(memo.id); renderBoard(); } : null,
+    onComments: memo.comment_count ? () => openCommentsPopin(memo, () => renderAll()) : null,
   });
   if (pictos) content.appendChild(pictos);
   // [MEMO-LINKS] D3 : chips des DEUX côtés (pleine = posé ici, pointillée « ⤺ » = référencé par).
@@ -7997,7 +8108,10 @@ function taskEl(memo) {
   const actions = el('div', { class: 'task-actions' });
   actions.appendChild(el('button', {
     class: 'texp', icon: expandedMemos.has(memo.id) ? 'chevron-down' : 'chevron-right',
-    attrs: { title: 'Date, priorité, sous-tâches' },
+    // [CARD-EXPAND-NOCOMMENTS] L'infobulle annonçait « Date, priorité, sous-tâches » — deux
+    // promesses sur trois que le déplié n'a jamais tenues (date et priorité se règlent dans la
+    // fiche). Elle dit maintenant ce qu'on y trouve vraiment.
+    attrs: { title: 'Sous-tâches' },
     on: { click: () => {
       if (expandedMemos.has(memo.id)) expandedMemos.delete(memo.id);
       else expandedMemos.add(memo.id);
@@ -8020,7 +8134,9 @@ function taskEl(memo) {
     class: 'tcomments', icon: 'message',
     attrs: { title: memo.comment_count ? memo.comment_count + ' message(s) — ouvrir le fil' : 'Ouvrir le fil de commentaires' },
   });
-  if (memo.comment_count) cbtn.appendChild(el('span', { text: ' ' + memo.comment_count }));
+  // [CARD-COMMENT-BADGE] Même pastille que le picto 💬 du haut de card (`.badge`), pas un compte
+  // en texte nu : un seul chiffre, une seule façon de l'écrire.
+  if (memo.comment_count) cbtn.appendChild(el('span', { class: 'badge', text: String(memo.comment_count) }));
   cbtn.addEventListener('click', () => openCommentsPopin(memo, () => renderAll()));
   actions.appendChild(cbtn);
   // Actions secondaires (Dupliquer) dans un menu ⋯ — seuls déplier/modifier restent visibles. [CARD-REDESIGN]
@@ -8380,7 +8496,16 @@ function taskDetailEl(memo) {
   stWrap.appendChild(stAdd);
   detail.appendChild(stWrap);
 
-  detail.appendChild(commentsBlockEl(memo));
+  /* [CARD-EXPAND-NOCOMMENTS] Le fil et son composeur ont quitté la card dépliée. Depuis
+     [COMMENTS-POPIN] la conversation a une maison — la pop-in, atteinte par le badge 💬 comme par
+     l'icône de la rangée d'actions ([CARD-BADGE-CLICKABLE]) ; la garder ici en plus donnait deux
+     endroits pour la même chose, dans deux mises en page différentes. Déplier ne sert plus qu'à
+     l'ÉDITION DE TÂCHE : date, priorité, sous-tâches.
+     Effet de bord bienvenu : `commentsBlockEl` postait `/comments/seen` à chaque ouverture —
+     déplier une card pour changer sa date marquait donc ses messages comme lus, et le badge 🔔
+     tombait sans que personne n'ait rien lu. Ce n'est plus le cas : seule la pop-in acquitte.
+     Le composant lui-même reste vivant et intact, appelé par la pop-in (aucun code mort) ;
+     `share.html` et `hub.html` gardent leurs fils à ciel ouvert — ils n'ont pas de pop-in. */
 
   return detail;
 }

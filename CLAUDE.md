@@ -86,7 +86,25 @@ Après **chaque réalisation** (un lot livré et testé — pas à chaque tour d
 1. **Tester** : `python3 -m py_compile app.py` + les scénarios critiques (voir « Comment tester »), toujours sur une **copie** de la base (`cp data/dashboard.db /tmp/test.db`), jamais sur `data/dashboard.db`.
 2. **Journaliser** : ajouter l'entrée taggée `[VX.Y.Z]` dans `REALISATION.md` (Z = dernier + 1) et basculer l'item correspondant d'`IDEAS.md` en « Fait » (cf. § Versionnage).
 3. **Rebuild local** : lancer **`docker compose up -d --build`** pour que la nouvelle version tourne sur `http://localhost:8099/` et soit immédiatement testable (par Fabien et par l'agent Cowork). Le rebuild local utilise la vraie base (`./data`) : la migration doit donc rester additive et non destructive (invariant 1).
-4. **Ne pas déployer en prod automatiquement** : le déploiement sur le Zimaboard reste **manuel** (`git pull` + `docker compose up -d --build` côté serveur). Ne **pas** committer ni pousser sans demande explicite de Fabien.
+4. **Mettre à jour le journal et le handoff** : la ligne `✅` dans `.claude/session-log.md` et `.claude/handoff.json` (statut `ready`, pas `deployed`).
+5. **S'ARRÊTER LÀ.** Fin du lot.
+
+### ⛔ Règle permanente : CC ne déploie pas (actée par Fabien le 8 août 2026)
+
+**Le lot s'arrête au rebuild local.** Pas de `git commit`, pas de `git tag`, pas de `git push`, donc pas de
+**Deploy Zimaboard** — le workflow de déploiement se déclenche sur le push d'un tag, pousser *c'est* déployer.
+
+L'ordre est : **coder → rebuild local → journal + handoff → STOP → passe Cowork → feu vert EXPLICITE de
+Fabien → alors seulement commit + tag + push.**
+
+**Pourquoi** : le 8 août 2026, un bug mobile ([MOBILE-POPIN-POLISH] V27.34.218 — croix de la pop-in
+commentaires inatteignable) est parti en prod *avant* la passe Cowork ; les vrais invités auraient pu le
+voir. La prod ne reçoit que du validé. Cette règle **révoque** la tolérance « deploy à la fin du lot »
+qui s'était installée, et rétablit le workflow d'origine.
+
+**Ce qui compte comme feu vert** : une demande explicite de Fabien dans la conversation (« commit »,
+« déploie », « le train part », « GO »). Ni une passe Cowork verte, ni des tests verts, ni « le lot est
+fini » ne valent autorisation. Dans le doute : proposer, ne pas pousser.
 
 (Option « dure » équivalente : un hook `Stop` dans `.claude/settings.local.json` qui lance le rebuild automatiquement — voir le script fourni hors dépôt. Le présent process reste la source de vérité même si le hook n'est pas activé.)
 
