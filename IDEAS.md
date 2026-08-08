@@ -14,7 +14,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 _(À jour au 8 août 2026, après le déploiement du tag **V27.29.209**. [COMMENT-VOTE] et [SHARE-REFRESH-GUARD] sont livrés — lignes ✅ plus bas.)_
 
-1. **[GUEST-ROLES V2]** — **BLOQUÉ, ne pas démarrer** : la spec est écrite (**`docs/specs/GUEST-ROLES-V2.md`**, dans le dépôt depuis V27.29.209) et attend la **validation de Fabien** ; elle dit elle-même « aucun code avant validation ». Capacités atomiques, rôles = préréglages, surcharges par invité ; rôle d'accueil par dossier, message d'accueil, flux de demande de rôle.
+1. **[GUEST-ROLES V2 — T2] Accueil & demandes** — la spec est **validée** (§11 = arbitrages Fabien du 8/08) et **T1 est livré** ([V27.30.210] : capacités atomiques, `can()`, tables `guest_roles`/`role_requests`, 5 trous de sécurité fermés — voir `REALISATION.md` et `docs/specs/ROUTE-CAPS.md` §9). Reste pour T2 : `welcome_role` par dossier (**≠** `role_floor`, cf. S8), message d'accueil, demande de rôle + 🔔. Puis **T3** page 🔗 Partages V2 (maquette Cowork d'abord — c'est elle qui rendra les surcharges `guest_roles` *octroyables*, T1 n'a livré que le moteur de lecture), **T4** délégation Admin (`moderer`/`administrer` = code neuf), **T5** magic-link.
 2. **[GUEST-PROFILE]** — **après** les rôles : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
 
 ---

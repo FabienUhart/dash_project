@@ -32,6 +32,7 @@
 - **Rôle d'accueil par dossier** (défaut Lecteur, réglable par l'owner/Admin du dossier).
 - **Message d'accueil paramétrable** affiché au nouvel approuvé : « Bienvenue — tu es Lecteur ; ton rôle sera défini, tu peux en faire la demande. »
 - **Demande de rôle** : bouton côté invité (« demander : Commentateur / Éditeur… ») → 🔔 aux Admins du dossier + owner → accord en 1 clic. Réutilise le circuit d'approbation existant (PIN → approved), un étage au-dessus.
+- **Deux étages de commande (ajout Fabien 8/08, scénario « lien collé dans WhatsApp »)** : le LIEN se modifie après coup (rôle d'accueil, message) — par défaut ça ne vaut que pour les FUTURS arrivants, puisque le rôle descend du lien vers l'invité à l'arrivée. Une action explicite « appliquer aussi aux invités déjà entrés par ce lien » propage le nouveau rôle d'accueil à tous ceux du lien, **en préservant les surcharges individuelles** (une personne ajustée à la main n'est jamais écrasée par une action de masse). Révoquer le lien reste possible sans toucher les invités déjà approuvés.
 - **Magic-link (piste actée, tranche finale)** : le mail [GUEST-MAIL] évolue — lien signé à expiration qui identifie ET approuve d'office (zéro PIN à saisir, toujours zéro mot de passe : l'invariant « pas d'auth dans l'app » tient).
 
 ## 6. Trois interrupteurs par partage
@@ -51,8 +52,8 @@ Mapping au déploiement, **aucune perte de droits** : partage `role=editor`/`can
 - **Export : invités/partages n'y sont pas aujourd'hui → pas de bump attendu** ; CC contre-vérifie (règle : aucune clef nouvelle dans le JSON v27).
 
 ## 9. Impacts & risques
-- **Audit COMPLET des routes `/share/*`** : chaque route écrit sa capacité requise (tableau route→capacité à produire en tranche 1 — c'est le vrai chantier).
-- Page **🔗 Partages V2** (fiche invité : rôle, surcharges, demandes, journal des actes d'admin) — **maquette Cowork avant la tranche UI**.
+- **Audit COMPLET des routes `/share/*`** : chaque route écrit sa capacité requise (tableau route→capacité à produire en tranche 1 — c'est le vrai chantier). **➜ FAIT (analyse seule, 8/08) : [`ROUTE-CAPS.md`](ROUTE-CAPS.md)** — les 49 routes `/share/*` et hub, leur garde actuelle, la capacité requise et 9 écarts (`E1`→`E9`) ; trace d'une écriture invitée à travers les 3 couches : [`GUEST-ROLES-T1-TRACE.md`](GUEST-ROLES-T1-TRACE.md). **10 surprises (`S1`→`S10`) y attendent un arbitrage AVANT le code** — notamment `S1` (le rôle `contributor` existant n'a pas d'équivalent dans les 5 rôles ci-dessus), `S4` (§4 « créateur = Admin de naissance » est inopérant : `share_add_project` n'écrit pas `created_by`) et `S5` (`/vote_choix` ne coûte aujourd'hui que `commenter`).
+- Page **🔗 Partages V2** à DEUX ÉTAGES : fiche du LIEN (rôle d'accueil, message, propagation « pour tous », révocation) et fiche de l'INVITÉ (rôle, surcharges, demandes, journal des actes d'admin) — avec le **geste rapide** demandé par Fabien : depuis la fiche d'un invité, changer son rôle sur UN dossier en deux clics (dossier → rôle), sans passer par le lien. **Maquette Cowork avant la tranche UI**.
 - [GUEST-PROFILE] (fiche, avatar, bandeau) s'appuie sur la même fiche invité — lot suivant de la file.
 - Perfs : `can()` doit être O(1)-ish (cache par requête de la chaîne d'ancêtres).
 
@@ -63,4 +64,37 @@ Mapping au déploiement, **aucune perte de droits** : partage `role=editor`/`can
 4. **T4 — Délégation Admin** (créateur de naissance, nomination, journal des actes).
 5. **T5 — Magic-link** (évolution GUEST-MAIL).
 
-*Fil rouge des passes : Marie (Lectrice résidente, jamais d'écriture), les copains VC (Commentateurs votants), les co-voyageurs Japon (Éditeurs), Phiphi (Admin de « Voyage eclipse »).*
+*Fil rouge des passes : Marie (Éditrice résidente sur « Maison » — arbitrage Fabien 8/08 : la base disait vrai, cette phrase était fausse ; mes sessions de VALIDATION continuent de ne jamais écrire sous son identité), les copains VC (Commentateurs votants), les co-voyageurs Japon (Éditeurs), Phiphi (Admin de « Voyage eclipse »).*
+## 11. Arbitrages de relecture — Fabien, 8/08/2026 (la spec est VALIDÉE avec ces amendements)
+
+Rendus un à un après l'audit [GUEST-ROLES-T1-AUDIT] (`ROUTE-CAPS.md` §7-8). Ils PRIMENT sur les
+sections précédentes en cas de contradiction.
+
+1. **Trous de sécurité E3 · E5 · E8 · E9 · E10 → intégrés à T1** (pas de hotfix séparé). E10, trouvé
+   par la contre-passe Cowork : `share_register` ré-approuve un invité RÉVOQUÉ qui connaît le PIN
+   (`app.py:7595`, aucun test de `rejected`) — T1 le ferme (un `rejected` ne se ré-inscrit pas ; un
+   message clair l'informe). E9 : `_hub_folders` filtre les statuts non approuvés. E8 : les 5 routes
+   de vote nommé revérifient la capacité À L'USAGE (créateur ≥ rang courant), plus de droit
+   survivant à la rétrogradation. E3 : throttle + `hmac.compare_digest` sur le PIN de partage
+   (parité hub). E5 : contrôle de droit AVANT le test d'unicité (fin de la sonde de noms).
+2. **E1 → les interrupteurs §6 ne s'appliquent qu'aux invités IDENTIFIÉS.** La lecture anonyme par
+   jeton reste ce qu'elle est (zéro rupture) ; un anonyme voit ce que le lien montre.
+3. **S1 → capacités atomiques.** `creer` et `editer` sont deux capacités séparées ; « éditer les
+   siens » reste une propriété de la ressource (mécanique `own` existante). Le rôle `contributor`
+   actuel migre en **Commentateur + surcharge `creer`** : aucune perte, aucun 6e rôle.
+4. **S5 → `/vote_choix` reste au prix de `commenter`** (acté V27.29.207, zéro régression) ; la
+   capacité `creer-vote` ne gouverne que les scrutins de DOSSIER. L'interrupteur Votes §6 coupe tout.
+5. **S3 → le micro fait partie de `commenter`.** Exception explicite : la PJ « audio de
+   commentaire » relève de `commenter`, pas de `creer`.
+6. **S7/S8 → le PLUS PERMISSIF gagne** entre élévations par-ressource (`role_floor`, overrides
+   `perm_* = 'all'`, dossier perso — les trois mécanismes SURVIVENT tels quels) et surcharges
+   par-personne (`caps_add`) ; **exception : `caps_remove` est un retrait ciblé ABSOLU** qui tient
+   même en zone élevée. Le rôle d'accueil est nommé **`welcome_role`** (valeur copiée à l'arrivée),
+   distinct du plancher permanent `role_floor`.
+7. **Défauts confirmés** : S2 — la séparation `cocher`/`editer` se vérifie PAR CHAMP dans
+   `_perform_memo_update` (même PUT, la spec l'assume) ; S4 — T1 pose `created_by` à la création
+   invitée AVANT tout §4 (pré-requis ; l'existant est irrattrapable, assumé ; champ v26 existant →
+   pas de bump) ; S6 — `moderer` = code neuf, déplacé en T3/T4 ; S9 — la checklist de migration se
+   fait sur `shares.role` ET les trois axes d'élévation, pas sur `can_edit` ; S10 — aucun bump
+   d'export, `APP_VERSION` reste 27. Dette annexe : `_share_guest_or_403` (mort) supprimé en T1,
+   `_role_gate` devient LE préambule unique des 25 routes d'écriture.
