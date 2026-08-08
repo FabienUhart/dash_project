@@ -2227,9 +2227,7 @@ def delete_project(project_id):
         _delete_attachment_file(a["filename"])
     db.execute("DELETE FROM attachments WHERE project_id = ?", (project_id,))
     db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-    db.execute(
-        "DELETE FROM shares WHERE kind = 'project' AND target_id = ?", (project_id,)
-    )
+    _purge_shares_for(db, "project", project_id)   # [CASCADE-SHARES] partages ET leurs invités
     db.commit()
     return "", 204
 
@@ -2506,6 +2504,33 @@ def _vote_options_payload(db, project_id, me, owner_name, pv):
         voters = vmap.get(r["id"], [])
         opts.append({"memo_id": r["id"], **_memo_vote_fields(voters, me, owner_name, pv, r["id"])})
     return opts
+
+
+def _purge_shares_for(conn, kind, target_id):
+    """Supprime les partages qui visent CETTE cible, ET tout ce qui pendait à leurs invités.
+
+    [CASCADE-SHARES] Constat de la passe Cowork (8/08) : supprimer un dossier ou purger un mémo
+    effaçait bien les `shares`, mais laissait leurs `share_guests` derrière — invisibles de l'API,
+    donc insupprimables autrement qu'en SQL. Dix rangées s'étaient accumulées depuis des mois.
+    Les trois portes (suppression de dossier, purge d'un mémo, purge automatique de la corbeille)
+    passent maintenant par ici. Même doctrine que la cascade de `DELETE /api/guests` (V27.31.212) :
+    on nettoie à la source plutôt que d'apprendre à vivre avec des orphelins.
+
+    Les `guest_hubs` ne sont PAS touchés : un hub appartient à une PERSONNE (son lien, son code),
+    pas à un partage — la personne peut avoir d'autres accès, et lui recréer un hub lui changerait
+    son lien. Un hub sans accès est inerte."""
+    rows = conn.execute(
+        "SELECT id FROM share_guests WHERE share_id IN "
+        "(SELECT id FROM shares WHERE kind = ? AND target_id = ?)", (kind, target_id),
+    ).fetchall()
+    for g in rows:
+        conn.execute("DELETE FROM guest_roles WHERE guest_id = ?", (g[0],))
+        conn.execute("DELETE FROM role_requests WHERE guest_id = ?", (g[0],))
+    conn.execute(
+        "DELETE FROM share_guests WHERE share_id IN "
+        "(SELECT id FROM shares WHERE kind = ? AND target_id = ?)", (kind, target_id),
+    )
+    conn.execute("DELETE FROM shares WHERE kind = ? AND target_id = ?", (kind, target_id))
 
 
 def _share_scope_project_ids(db, share):
@@ -3957,7 +3982,7 @@ def _purge_memo_row(db, memo_id):
         _delete_attachment_file(a["filename"])
     db.execute("DELETE FROM attachments WHERE memo_id = ?", (memo_id,))
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
-    db.execute("DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (memo_id,))
+    _purge_shares_for(db, "memo", memo_id)   # [CASCADE-SHARES] partages ET leurs invités
     # [COMMENT-REACTIONS] purge des réactions AVANT les commentaires (comment_id → orphelin sinon).
     db.execute("DELETE FROM comment_reactions WHERE comment_id IN (SELECT id FROM memo_comments WHERE memo_id = ?)", (memo_id,))
     # [COMMENT-VOTE] scrutins du mémo : options et voix AVANT les commentaires porteurs.
@@ -5898,6 +5923,12 @@ def delete_share(share_id):
         ).fetchall():
             _delete_votes_for_email(db, g["email"], scope)
             _delete_hearts_for_email(db, g["email"], scope)  # [FESTIVAL-VOTE]
+    # [CASCADE-SHARES] Cette route supprimait déjà ses `share_guests`, mais pas ce qui pendait à
+    # eux : rôles et demandes restaient, inertes mais accumulés (même défaut que les trois autres
+    # portes, corrigé dans le même lot).
+    for g in db.execute("SELECT id FROM share_guests WHERE share_id = ?", (share_id,)).fetchall():
+        db.execute("DELETE FROM guest_roles WHERE guest_id = ?", (g["id"],))
+        db.execute("DELETE FROM role_requests WHERE guest_id = ?", (g["id"],))
     db.execute("DELETE FROM share_guests WHERE share_id = ?", (share_id,))
     db.execute("DELETE FROM shares WHERE id = ?", (share_id,))
     db.commit()
@@ -9906,9 +9937,7 @@ def _purge_trash():
                 _forget_image_meta(conn, r["images"])  # [PHOTO-MAP]
             _image_trash_burn_memo(conn, mid)  # [IMAGE-TRASH] cascade (fichiers orphelins sinon)
             conn.execute("DELETE FROM memos WHERE id = ?", (mid,))
-            conn.execute(
-                "DELETE FROM shares WHERE kind = 'memo' AND target_id = ?", (mid,)
-            )
+            _purge_shares_for(conn, "memo", mid)   # [CASCADE-SHARES] partages ET leurs invités
             conn.execute("DELETE FROM memo_comments WHERE memo_id = ?", (mid,))
             conn.execute("DELETE FROM memo_hearts WHERE memo_id = ?", (mid,))  # [FESTIVAL-VOTE]
             conn.execute("DELETE FROM memo_links WHERE src_memo_id = ? OR dst_memo_id = ?", (mid, mid))  # [MEMO-LINKS]
