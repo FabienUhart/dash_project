@@ -452,6 +452,17 @@ button.icon { padding: 0.45rem 0.6rem; }
   #role-dialog { width: 100vw; max-width: none; margin: auto auto 0; border-radius: 12px 12px 0 0;
     padding-bottom: env(safe-area-inset-bottom); }
   .roleopt { padding: 0.55rem 0.45rem; }   /* cibles tactiles plus hautes */
+  /* [MOBILE-POPIN-POLISH] Le pied de « Éditer le mémo » à quatre boutons ne tient pas sur une
+     rangée de téléphone : les libellés étaient tronqués en « Commentaire: » et « Voir les
+     version ». Deux rangées de deux, cibles tactiles franches, et Sauver reste en bas à droite —
+     sous le pouce, dernier de l'ordre de lecture. Desktop inchangé (hors de cette media query). */
+  #memo-edit-dialog .actions { flex-wrap: wrap; gap: 0.4rem; padding: 0.6rem 0.9rem;
+    padding-bottom: calc(0.6rem + env(safe-area-inset-bottom)); }
+  #memo-edit-dialog .actions button { flex: 1 1 calc(50% - 0.2rem); min-height: 42px;
+    justify-content: center; white-space: nowrap; }
+  /* `lucioleize` enveloppe le libellé dans .mab-btxt : c'est LUI qu'il faut laisser respirer,
+     sinon le texte se coupe alors que le bouton, lui, a la place. */
+  #memo-edit-dialog .actions .mab-btxt { overflow: visible; text-overflow: clip; }
 }
 .rev-row.expandable { cursor: pointer; }
 .rev-row.expandable:hover { background: var(--panel-2); }
@@ -5507,6 +5518,56 @@ function renderTreeView() {
   });
 }
 
+/* ═══════ [MOBILE-POPIN-POLISH] Le clavier virtuel, ce voisin encombrant ═══════
+   Trois constats d'usage sur iPhone réel. Le fil conducteur : sur un téléphone, une pop-in qui
+   s'ouvre avec le clavier déjà levé cache ce qu'on venait lire. */
+
+/* Y a-t-il un clavier VIRTUEL derrière ce pointeur ? `pointer: coarse` répond à la vraie question
+   (doigt = clavier logiciel), la largeur rattrape les cas où la détection de pointeur ment. Un
+   desktop tactile piloté à la souris reste `fine` : son auto-focus est conservé tel quel. */
+function isTouchUI() {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches
+        || window.matchMedia('(max-width: 700px)').matches;
+  } catch (_) { return false; }
+}
+
+/* Focus d'ouverture : on ne le pose QUE là où il ne coûte rien. Sur mobile, il ferait monter le
+   clavier avant même qu'on ait lu — on ouvre, on lit, on tape si on veut. */
+function focusUnlessTouch(node) {
+  if (!node || isTouchUI()) return false;
+  node.focus({ preventScroll: true });
+  return true;
+}
+
+/* Remonte une bottom-sheet au-dessus du clavier. `visualViewport` est la seule source qui sache où
+   le clavier s'arrête ; `window.innerHeight` l'ignore, d'où l'impression d'écrire à l'aveugle.
+   ⚠ On agit sur `margin-bottom` et `max-height`, JAMAIS sur `transform` : un transform sur un
+   <dialog> le sort du top-layer (invariant 8, leçon gsap-dialog du repo).
+   Renvoie une fonction de détachement — un écouteur de viewport qui survit à la pop-in ferait
+   bouger la suivante. */
+function attachKeyboardInset(dlg, afterApply) {
+  const vv = window.visualViewport;
+  if (!vv || !dlg) return () => {};
+  const clear = () => { dlg.style.marginBottom = ''; dlg.style.maxHeight = ''; };
+  const apply = () => {
+    if (!isTouchUI() || !dlg.open) { clear(); return; }
+    // Ce que le clavier (et les barres du navigateur) mangent en bas de l'écran.
+    const hidden = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    if (hidden < 80) { clear(); return; }   // pas de clavier : on ne touche à rien
+    dlg.style.marginBottom = hidden + 'px';
+    dlg.style.maxHeight = Math.max(160, vv.height - 16) + 'px';
+    // La feuille vient de RÉTRÉCIR : ce qui était en bas de sa zone défilable (le composeur, très
+    // exactement) est sorti de vue. Remonter la feuille sans recoller le fil reviendrait à écrire
+    // à l'aveugle une seconde fois — c'est le défaut qu'on corrige.
+    if (afterApply) requestAnimationFrame(afterApply);
+  };
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  apply();
+  return () => { vv.removeEventListener('resize', apply); vv.removeEventListener('scroll', apply); clear(); };
+}
+
 /* ═══════ [COMMENTS-POPIN] Ouvrir le fil en pop-in ═══════
    Un seul composant (`commentsBlockEl`), deux chemins d'entrée : le pied de la fiche d'édition et
    l'icône 💬 des cards. La pop-in s'ouvre AU-DESSUS de la fiche sans la fermer — un <dialog>
@@ -5556,16 +5617,20 @@ function openCommentsPopin(memo, onCount) {
   });
   const obs = new MutationObserver(() => { if (pinned) stick(); });
   obs.observe(body, { childList: true, subtree: true });
-  dlg.addEventListener('close', () => obs.disconnect(), { once: true });
+  // [MOBILE-POPIN-POLISH] La feuille remonte au-dessus du clavier tant qu'elle est ouverte, et le
+  // fil se recolle en bas dans la foulée — sinon le composeur reste sous le bord de la feuille
+  // rétrécie, et on tape de nouveau sans se voir.
+  const detachKb = attachKeyboardInset(dlg, () => { if (pinned) stick(); });
+  dlg.addEventListener('close', () => { obs.disconnect(); detachKb(); }, { once: true });
   // Focus du composeur : posé deux fois (leçon de [POPIN-COMMENTS-BTN] 213) — tout de suite, puis
   // après la frame, le temps que le contenu du dialog soit rendu et focusable.
+  // [MOBILE-POPIN-POLISH] …mais JAMAIS sur mobile : le clavier masquerait le fil qu'on vient
+  // d'ouvrir. Quand l'utilisateur touche le champ, `attachKeyboardInset` fait remonter la feuille.
   const composer = () => body.querySelector('.cmt-composer input');
-  const early = composer();
-  if (early) early.focus({ preventScroll: true });
+  focusUnlessTouch(composer());
   requestAnimationFrame(() => {
     stick();
-    const input = composer();
-    if (input) input.focus({ preventScroll: true });
+    focusUnlessTouch(composer());
   });
 }
 
@@ -7125,7 +7190,13 @@ function openMemoEditor(memo) {
   document.getElementById('memo-menu').hidden = true;
   memoEditDialog.showModal();
   applyEditorHeight(document.querySelector('#quill-wrap .ql-container'));  // [EDITOR-RESIZE]
-  q.focus();
+  // [MOBILE-POPIN-POLISH] Pas d'auto-focus sur mobile : le clavier monterait aussitôt et
+  // masquerait la moitié de la fiche qu'on vient d'ouvrir. Sur desktop, le curseur dans le
+  // contenu reste le bon réflexe (comportement d'origine, inchangé).
+  if (!isTouchUI()) q.focus();
+  // La fiche est elle aussi une bottom-sheet en mobile : elle doit remonter quand on tape.
+  const _detachKb = attachKeyboardInset(memoEditDialog);
+  memoEditDialog.addEventListener('close', _detachKb, { once: true });
   return true;
 }
 
