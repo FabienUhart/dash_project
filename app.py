@@ -1043,6 +1043,16 @@ def init_db():
     # Message d'accueil affiché au nouvel approuvé (§5). Vide = aucun bandeau : zéro rupture.
     if "welcome_message" not in scols:
         conn.execute("ALTER TABLE shares ADD COLUMN welcome_message TEXT DEFAULT ''")
+    # ───────── [GUEST-SWITCHES · T3bis] les trois interrupteurs du partage (spec §6) ─────────
+    # Tous à 1 = comportement d'AVANT le lot, à l'octet près : un partage existant ne change pas de
+    # visage. Ils ne gouvernent que les invités IDENTIFIÉS (§11.2) — la lecture anonyme par jeton
+    # reste ce qu'elle est, et ces réglages ne peuvent rien lui cacher puisqu'on ignore qui c'est.
+    if "sw_history" not in scols:      # historique antérieur à l'arrivée de la personne
+        conn.execute("ALTER TABLE shares ADD COLUMN sw_history INTEGER DEFAULT 1")
+    if "sw_cross" not in scols:        # fils des AUTRES invités (OFF = les siens + ceux de l'owner)
+        conn.execute("ALTER TABLE shares ADD COLUMN sw_cross INTEGER DEFAULT 1")
+    if "sw_votes" not in scols:        # voter et créer des scrutins (OFF = coupe tout, §11.4)
+        conn.execute("ALTER TABLE shares ADD COLUMN sw_votes INTEGER DEFAULT 1")
     # Rôle porté par L'INVITÉ (§5 « le rôle descend du lien vers l'invité à l'arrivée »). '' = hérite
     # du lien, ce qui est l'état de TOUS les invités existants → comportement strictement identique.
     # C'est ce qui rend les « deux étages » possibles : modifier le lien ne touche plus les personnes
@@ -4880,6 +4890,77 @@ def _guest_link_role(share, guest=None):
     return r or _share_role(share)
 
 
+# ───────────── [GUEST-SWITCHES · T3bis] les trois interrupteurs (spec §6) ─────────────
+# Ils ne valent QUE pour les invités identifiés (§11.2). Absents d'un partage restauré d'un vieil
+# export → ON, donc rendu identique : c'est la compat ascendante de l'invariant 1 transposée aux
+# réglages. `sw_votes` s'applique par les CAPACITÉS (`_guest_caps`), ce qui couvre d'un coup toutes
+# les routes de vote sans en instrumenter aucune ; les deux autres filtrent ce qu'on SERT.
+
+def _sw_on(share, col):
+    """Interrupteur d'un partage : absent ou NULL = ON (comportement d'avant le lot)."""
+    v = _row_get(share, col, 1)
+    return True if v is None or v == "" else bool(v)
+
+
+def _share_switches(share):
+    return {
+        "history": _sw_on(share, "sw_history"),
+        "cross": _sw_on(share, "sw_cross"),
+        "votes": _sw_on(share, "sw_votes"),
+    }
+
+
+def _comment_visible(c, share, guest):
+    """Ce commentaire est-il visible par CET invité identifié, vu les interrupteurs du partage ?
+
+    ① `sw_history` OFF → rien de ce qui précède son `approved_at` (il arrive dans une conversation
+       en cours, il n'en lit pas l'avant).
+    ② `sw_cross` OFF → seulement SES fils et ceux de l'owner. On raisonne par FIL, pas par message :
+       une réponse suit le sort de son message racine, sinon on servirait des réponses sans la
+       question. Le paramètre `roots` porte l'auteur de chaque racine.
+    Un invité voit TOUJOURS ce qu'il a écrit lui-même."""
+    sw = _share_switches(share)
+    if sw["history"] and sw["cross"]:
+        return True
+    mine = _voter_key(_row_get(c, "author", "")) == _voter_key(
+        f"{guest['name'] or guest['email']} <{guest['email']}>") if guest else False
+    if not sw["history"] and not mine:
+        appr = (_row_get(guest, "approved_at", "") or "") if guest else ""
+        if appr and (_row_get(c, "created_at", "") or "") < appr:
+            return False
+    return True
+
+
+def _visible_comments(db, share, guest, crows):
+    """Filtre un lot de commentaires pour un invité identifié (interrupteurs ① et ②).
+    Anonyme (`guest` None) → aucun filtrage : les interrupteurs ne le concernent pas (§11.2)."""
+    sw = _share_switches(share)
+    if guest is None or (sw["history"] and sw["cross"]):
+        return crows
+    me_key = _voter_key(f"{guest['name'] or guest['email']} <{guest['email']}>")
+    # L'owner se reconnaît à l'ABSENCE d'e-mail dans l'auteur, jamais à son nom : ses messages sont
+    # stockés « moi » (pattern `created_by` v19, résolu à l'affichage) et son nom peut changer.
+    # Comparer au nom faisait disparaître ses fils dès que l'affichage différait du stockage.
+    is_owner = lambda a: not _voter_email(a or "")
+    root_author, root_owner = {}, {}
+    for c in crows:
+        if not _row_get(c, "parent_id", None):
+            root_author[c["id"]] = _voter_key(_row_get(c, "author", ""))
+            root_owner[c["id"]] = is_owner(_row_get(c, "author", ""))
+    out = []
+    for c in crows:
+        rid = _row_get(c, "parent_id", None) or c["id"]
+        rauth = root_author.get(rid)
+        if not sw["cross"] and rauth is not None:
+            # Fil d'un AUTRE invité (ni le mien, ni celui de l'owner) → caché en entier.
+            if rauth != me_key and not root_owner.get(rid):
+                continue
+        if not _comment_visible(c, share, guest):
+            continue
+        out.append(c)
+    return out
+
+
 def _clean_welcome_message(value):
     """Mot d'accueil : TEXTE PUR, jamais de HTML (il est rendu en `textContent` côté invité, comme
     les extraits). 400 caractères suffisent à dire bonjour."""
@@ -5095,7 +5176,14 @@ def _guest_caps(db, share, guest=None, project_id=None, memo_row=None):
             elevations.add(CAP_COMMENTER)
         if _resolve_memo_perm(db, memo_row, "vote") == "all":
             elevations.add(CAP_VOTER)
-    return (base | elevations | add) - remove
+    caps = (base | elevations | add) - remove
+    # [GUEST-SWITCHES · T3bis] L'interrupteur « Votes » du partage coupe TOUT (§11.4) : voter,
+    # coup de cœur, scrutins de dossier. Il agit ici, sur la capacité — donc d'un seul coup sur
+    # toutes les routes de vote, sans en instrumenter aucune. Il ne vise que les invités
+    # identifiés : un anonyme n'a de toute façon aucune capacité d'écriture (§11.2).
+    if guest is not None and not _sw_on(share, "sw_votes"):
+        caps -= {CAP_VOTER, CAP_CREER_VOTE}
+    return caps
 
 
 def _can(db, share, cap, guest=None, memo_row=None, project_id=None):
@@ -5902,14 +5990,22 @@ def update_share(share_id):
         welcome_role = _welcome_role(existing)
     wmsg = existing["welcome_message"] if "welcome_message" not in data else _clean_welcome_message(
         data.get("welcome_message"))
+    # [GUEST-SWITCHES · T3bis] Les trois interrupteurs (§6). Champs OPTIONNELS : absents = inchangés,
+    # ce qui permet d'écrire l'un sans réécrire les autres depuis n'importe quel appelant.
+    sw = {}
+    for key, col in (("sw_history", "sw_history"), ("sw_cross", "sw_cross"), ("sw_votes", "sw_votes")):
+        sw[col] = (1 if data.get(key) else 0) if key in data else (1 if _sw_on(existing, col) else 0)
     db.execute(
-        "UPDATE shares SET pin = ?, can_edit = ?, role = ?, welcome_role = ?, welcome_message = ? "
-        "WHERE id = ?",
-        (pin, can_edit, role, welcome_role, wmsg, share_id),
+        "UPDATE shares SET pin = ?, can_edit = ?, role = ?, welcome_role = ?, welcome_message = ?, "
+        "sw_history = ?, sw_cross = ?, sw_votes = ? WHERE id = ?",
+        (pin, can_edit, role, welcome_role, wmsg,
+         sw["sw_history"], sw["sw_cross"], sw["sw_votes"], share_id),
     )
     db.commit()
     return jsonify({"id": share_id, "pin": pin, "can_edit": bool(can_edit), "role": role,
-                    "welcome_role": welcome_role, "welcome_message": wmsg})
+                    "welcome_role": welcome_role, "welcome_message": wmsg,
+                    "sw_history": bool(sw["sw_history"]), "sw_cross": bool(sw["sw_cross"]),
+                    "sw_votes": bool(sw["sw_votes"])})
 
 
 @app.route("/api/shares/<int:share_id>", methods=["DELETE"])
@@ -7837,6 +7933,24 @@ def hub_data(hub_token):
             f"SELECT * FROM memo_comments WHERE memo_id IN ({ph}) ORDER BY created_at, id",
             memo_ids,
         ).fetchall()
+        # [GUEST-SWITCHES · T3bis] Le hub agrège PLUSIEURS partages, et les interrupteurs sont par
+        # partage : on filtre donc mémo par mémo, avec le partage gagnant de chacun — sinon un
+        # réglage strict sur un dossier serait contourné en passant par le hub.
+        _by_memo = {}
+        for c in crows:
+            _by_memo.setdefault(c["memo_id"], []).append(c)
+        _kept = []
+        for _mid, _lst in _by_memo.items():
+            _r = rows_by_id.get(_mid)
+            _cov = _cover_memo(_r["project_id"], _mid) if _r else []
+            if not _cov:
+                continue
+            _w = _hub_winner(_cov)
+            _sh = db.execute("SELECT * FROM shares WHERE id = ?", (_w["id"],)).fetchone()
+            if not _sh:
+                continue
+            _kept.extend(_visible_comments(db, _sh, _guest_for_email(db, _sh, hub["email"]), _lst))
+        crows = _kept
         cseen = _comment_seen_map(db, [c["id"] for c in crows])
         creacts = _comment_reactions_map(db, [c["id"] for c in crows])  # [COMMENT-REACTIONS]
         _cname = _owner_name(db)
@@ -8132,6 +8246,9 @@ def share_data(token):
             f"SELECT * FROM memo_comments WHERE memo_id IN ({ph}) ORDER BY created_at, id",
             memo_ids,
         ).fetchall()
+        # [GUEST-SWITCHES · T3bis] Filtrage AVANT tout le reste : ce qui n'est pas visible pour cet
+        # invité ne doit pas non plus lui être compté, ni voir ses réactions ou son scrutin servis.
+        crows = _visible_comments(db, share, my_guest, crows)
         cseen = _comment_seen_map(db, [c["id"] for c in crows])
         creacts = _comment_reactions_map(db, [c["id"] for c in crows])  # [COMMENT-REACTIONS]
         _cname = _owner_name(db)
@@ -9116,6 +9233,11 @@ def share_add_comment(token, memo_id):
     # sont exactement celles d'un message. Créer un scrutin = commenter.
     labels = _parse_poll_command(body)
     if labels is not None:
+        # [GUEST-SWITCHES · T3bis] `/vote_choix` coûte `commenter` (§11.4) : la capacité `voter` ne
+        # le couvre donc pas, et l'interrupteur « Votes » doit le dire ICI. Message EXPLICITE — un
+        # refus muet ferait croire à une commande cassée, alors que c'est un réglage du partage.
+        if not _sw_on(share, "sw_votes"):
+            return jsonify({"error": "Les votes sont désactivés sur ce partage."}), 403
         if not labels:
             return jsonify({"error": "Il faut au moins deux options, séparées par « ; »."}), 400
         row = _insert_comment(db, memo, _poll_body(labels), me, share["id"],
@@ -9250,6 +9372,11 @@ def poll_vote_guest(token, comment_id):
     share, guest, row, me, err = _share_poll_guard(db, token, comment_id)
     if err:
         return jsonify(err[0]), err[1]
+    # [GUEST-SWITCHES · T3bis] Voter dans un scrutin de FIL est un vote : l'interrupteur le coupe
+    # aussi (§11.4 « coupe tout »). Le scrutin déjà posé reste LISIBLE — on ne réécrit pas le passé,
+    # on ferme la participation. Clore, lui, reste possible pour son auteur : c'est du ménage.
+    if not _sw_on(share, "sw_votes"):
+        return jsonify({"error": "Les votes sont désactivés sur ce partage."}), 403
     try:
         option_id = int((request.get_json(silent=True) or {}).get("option_id"))
     except (TypeError, ValueError):

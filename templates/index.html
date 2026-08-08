@@ -405,6 +405,20 @@ button.icon { padding: 0.45rem 0.6rem; }
 .setting .hint { font-size: 0.7rem; color: var(--muted); margin-top: 0.35rem; }
 .setting textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
   border-radius: 6px; padding: 0.3rem 0.45rem; font: inherit; font-size: 0.78rem; resize: vertical; }
+/* [GUEST-SWITCHES · T3bis] Interrupteurs du partage. Ce ne sont pas des boutons Luciole (aucune
+   action, aucun geste à récompenser) : un état se dit par la MATIÈRE. Piste allumée = accent
+   discret, jamais d'aplat plein. */
+.switches { display: flex; flex-direction: column; gap: 0.4rem; }
+.sw { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; cursor: pointer;
+  color: var(--muted); background: none; border: none; padding: 0; text-align: left; }
+.sw .track { width: 30px; height: 17px; border-radius: 999px; background: var(--panel-2);
+  border: 1px solid var(--border); position: relative; transition: background .15s, border-color .15s; flex: none; }
+.sw .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
+  border-radius: 50%; background: var(--muted); transition: left .15s, background .15s; }
+.sw.on { color: var(--text); }
+.sw.on .track { background: color-mix(in srgb, var(--accent) 30%, var(--panel-2)); border-color: var(--accent); }
+.sw.on .track::after { left: 15px; background: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .sw .track, .sw .track::after { transition: none; } }
 /* Propagation : une question, pas une alerte — le jaune signale, il ne crie pas. */
 .propag { margin-top: 0.5rem; background: var(--panel-2); border: 1px solid var(--yellow);
   border-radius: 8px; padding: 0.45rem 0.6rem; font-size: 0.78rem; }
@@ -5760,6 +5774,42 @@ function linkWelcomeEl(s, onChange) {
   });
   c2.appendChild(save);
   grid.appendChild(c2);
+
+  // ── [GUEST-SWITCHES · T3bis] Les trois interrupteurs du partage (spec §6) ──
+  const c3 = el('div', { class: 'setting' });
+  c3.appendChild(el('div', { class: 'lab', text: 'Interrupteurs du partage' }));
+  const sws = el('div', { class: 'switches' });
+  [
+    ['sw_history', 'Historique visible avant l\'arrivée',
+     'OFF : un nouvel arrivant ne lit pas ce qui s\'est dit avant lui.'],
+    ['sw_cross', 'Commentaires croisés entre invités',
+     'OFF : chacun ne voit que ses fils et ceux du propriétaire.'],
+    ['sw_votes', 'Votes',
+     'OFF : plus de vote, de coup de cœur ni de scrutin — les scrutins déjà posés restent lisibles.'],
+  ].forEach(([key, label, hint]) => {
+    const on = s[key] === undefined ? true : !!s[key];
+    const b = el('button', { class: 'sw' + (on ? ' on' : ''),
+      attrs: { type: 'button', title: hint, 'aria-pressed': on ? 'true' : 'false' } });
+    b.appendChild(el('span', { class: 'track' }));
+    b.appendChild(el('span', { text: label }));
+    b.addEventListener('click', async () => {
+      const next = !b.classList.contains('on');
+      b.classList.toggle('on', next);
+      b.setAttribute('aria-pressed', next ? 'true' : 'false');
+      const payload = { pin: s.pin, role: _shareRole(s) };
+      payload[key] = next;
+      await api('/api/shares/' + s.id, { method: 'PUT', body: JSON.stringify(payload) });
+      await loadAll(); onChange();
+      notify(label + (next ? ' : activé.' : ' : désactivé.'));
+    });
+    sws.appendChild(b);
+  });
+  c3.appendChild(sws);
+  c3.appendChild(el('div', { class: 'hint',
+    text: 'Ces réglages ne valent que pour les invités identifiés. Qui ouvre le lien sans '
+        + 's\'identifier voit ce que le lien montre, comme avant — on ignore qui il est.' }));
+  grid.appendChild(c3);
+
   body.appendChild(grid);
   box.appendChild(body);
 
