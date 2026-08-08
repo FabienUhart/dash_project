@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — T4b · Admin invité « Gérer les accès »</title>
+<style>
+  :root{
+    --bg:#0d1219; --card:#141b24; --card2:#1a2330; --line:#26303e;
+    --txt:#dbe4ee; --muted:#8494a7; --accent:#7ee2a8; --accent-dim:#3f7a58;
+    --warn:#e2c97e; --danger:#c96a6a; --chip:#202b39; --admin:#c9a24a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px 18px 90px}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 4px;display:flex;gap:9px;align-items:center}
+  .note{background:var(--card2);border:1px dashed var(--line);border-radius:10px;
+    padding:10px 14px;color:var(--muted);font-size:13px;margin:14px 0 22px}
+  .note b{color:var(--txt)}
+  .ic{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+
+  /* ——— bandeau de partage (vue invité) ——— */
+  .share-hd{background:var(--card);border:1px solid var(--line);border-radius:13px;
+    padding:13px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .share-hd .who{font-weight:600}
+  .badge-admin{display:inline-flex;align-items:center;gap:6px;background:rgba(201,162,74,.14);
+    color:var(--admin);border:1px solid var(--admin);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600}
+  .spacer{flex:1}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    background:var(--chip);border:1px solid var(--line);color:var(--txt);
+    border-radius:9px;padding:7px 13px;font-size:13px;cursor:pointer;user-select:none}
+  .btn:hover{border-color:#33445a}
+  .btn.small{padding:4px 9px;font-size:12px}
+  .btn.primary{border-color:var(--accent-dim);color:var(--accent)}
+  .btn.ghost-danger{color:var(--muted)} .btn.ghost-danger:hover{color:var(--danger);border-color:#4a3232}
+
+  .board-hint{margin-top:18px;color:var(--muted);font-size:13px;text-align:center;
+    border:1px dashed var(--line);border-radius:10px;padding:22px}
+
+  /* ——— voile + panneau (modal) ——— */
+  .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:30;opacity:0;transition:.18s}
+  .backdrop.in{opacity:1}
+  .panel{position:fixed;z-index:40;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);
+    width:min(560px,calc(100vw - 28px));max-height:min(86vh,660px);overflow:auto;
+    background:var(--card);border:1px solid #33445a;border-radius:14px;
+    box-shadow:0 16px 46px rgba(0,0,0,.55);opacity:0;transition:.18s}
+  .panel.in{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  @media(max-width:640px){
+    .panel{top:auto;bottom:0;left:0;transform:translateY(16px);width:100vw;max-width:none;
+      max-height:88vh;border-radius:16px 16px 0 0;padding-bottom:env(safe-area-inset-bottom)}
+    .panel.in{transform:translateY(0)}
+    .p-head h2::before{content:'';display:block;width:38px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 10px}
+  }
+  .p-head{padding:14px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card);border-radius:14px 14px 0 0}
+  .p-head h2{margin:0;font-size:15px;display:flex;align-items:center;gap:8px}
+  .p-head .x{margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:2px 6px;border-radius:6px}
+  .p-head .x:hover{color:var(--txt);background:var(--chip)}
+  .p-scope{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+  .p-scope b{color:var(--txt)}
+  .p-body{padding:12px 16px 16px}
+  h3.sec{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:16px 0 8px}
+  h3.sec:first-child{margin-top:4px}
+
+  /* demandes de rôle reçues par l'Admin */
+  .req{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line);
+    border-left:3px solid var(--accent-dim);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13.5px}
+  .req .bell{color:var(--accent)}
+
+  /* rangée personne */
+  .person{display:flex;align-items:center;gap:11px;padding:11px 12px;border:1px solid var(--line);
+    border-radius:11px;margin-bottom:8px;background:var(--card2)}
+  .av{width:30px;height:30px;border-radius:50%;background:var(--chip);display:flex;align-items:center;
+    justify-content:center;font-size:12px;color:var(--muted);flex:none;font-weight:600}
+  .person .id{display:flex;flex-direction:column;min-width:0}
+  .person .nm{font-weight:500}
+  .person .sub{font-size:12px;color:var(--muted)}
+  .rolepill{display:inline-flex;align-items:center;gap:7px;background:var(--chip);border:1px solid var(--line);
+    border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer}
+  .rolepill:hover{border-color:#3a4b62}
+  .rolepill.override{border-style:dashed;border-color:var(--accent-dim)}
+  .rolepill .src{font-size:11px;color:var(--muted)} .rolepill.override .src{color:var(--accent)}
+  .rolepill.admin{border-color:var(--admin)} .rolepill.admin .rn{color:var(--admin)}
+  .person.self{opacity:.75}
+  .person.self .rolepill{cursor:not-allowed;opacity:.6}
+  .locked{font-size:11.5px;color:var(--muted);display:inline-flex;gap:5px;align-items:center}
+
+  /* popin de rôle (2e niveau) */
+  .pop{position:fixed;z-index:50;top:50%;left:50%;transform:translate(-50%,-50%) scale(.97);
+    width:min(330px,calc(100vw - 28px));background:var(--card2);border:1px solid #3a4b62;
+    border-radius:13px;box-shadow:0 16px 46px rgba(0,0,0,.6);opacity:0;transition:.16s}
+  .pop.in{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  @media(max-width:640px){.pop{top:auto;bottom:0;left:0;transform:translateY(14px);width:100vw;max-width:none;border-radius:16px 16px 0 0}.pop.in{transform:translateY(0)}}
+  .pop h4{margin:0;padding:12px 14px 9px;font-size:13.5px;border-bottom:1px solid var(--line)}
+  .pop h4 .sub{display:block;font-weight:400;color:var(--muted);font-size:12px;margin-top:3px}
+  .pop-body{padding:8px 10px 12px}
+  .roleopt{display:flex;align-items:center;gap:10px;padding:9px;border-radius:9px;cursor:pointer;font-size:13.5px}
+  .roleopt:hover{background:var(--chip)}
+  .roleopt .dot{width:7px;height:7px;border-radius:50%;background:var(--line);flex:none}
+  .roleopt.sel .dot{background:var(--accent)}
+  .roleopt .desc{margin-left:auto;font-size:11.5px;color:var(--muted)}
+  .roleopt.adm .dot{background:var(--admin)}
+  .pop-foot{border-top:1px solid var(--line);padding:9px 12px;font-size:11.5px;color:var(--muted)}
+
+  #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--card2);
+    border:1px solid #3a4b62;border-radius:10px;padding:9px 15px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:60;max-width:90vw;text-align:center}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>👑 Gérer les accès — <span style="color:var(--muted)">maquette T4b (Admin invité)</span></h1>
+  <div class="note">
+    Tu es <b>Phiphi</b>, <b>Administratrice</b> du dossier « Voyage eclipse » (tu l'as créé → admin de naissance).
+    Clique <b>« Gérer les accès »</b> dans le bandeau → tu nommes les invités de ton lien, <b>dans ton sous-arbre</b>,
+    jusqu'à Administrateur « comme toi ». Clique une <b>pastille de rôle</b> pour voir le popover.
+    L'owner n'apparaît jamais, tu ne peux pas te changer toi-même, et chaque acte le notifie (révocable).
+    Tout est en mémoire.
+  </div>
+
+  <!-- bandeau de partage vu par l'Admin invité -->
+  <div class="share-hd">
+    <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+    <span class="who">Phiphi</span>
+    <span class="badge-admin">👑 Administratrice · Voyage eclipse</span>
+    <span class="spacer"></span>
+    <span class="btn primary" onclick="openManage(event)">
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c0-3 2.8-4.6 5.5-4.6s5.5 1.6 5.5 4.6"/><circle cx="18.5" cy="9" r="2.4"/><path d="M16 20c0-2.2 1.3-3.6 3.3-3.6 1 0 1.9.4 2.5 1"/></svg>
+      Gérer les accès
+    </span>
+  </div>
+
+  <div class="board-hint">🗺️ (le board du partage « Voyage eclipse » s'afficherait ici — mémos, cartes, fils…)</div>
+
+  <div class="note" style="margin-top:22px">
+    <b>Ce que la maquette fige</b> : ① le bouton « Gérer les accès » n'apparaît que pour un Admin ;
+    ② le panneau ne montre que <b>les invités du lien dans le sous-arbre de l'Admin</b> (l'owner absent, soi-même verrouillé) ;
+    ③ le popover de rôle est <b>borné à Administrateur</b> (pas de rôle au-dessus, pas « owner ») et rappelle « borné à ton sous-arbre · l'owner sera notifié » ;
+    ④ l'Admin reçoit aussi les <b>demandes de rôle</b> de son sous-arbre (accord 1 clic) ;
+    ⑤ pas d'approbation préalable : l'acte part, l'owner est notifié et peut révoquer ;
+    ⑥ centré desktop / bottom-sheet mobile, comme le reste.
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const ROLES = [
+  ['Lecteur','voir'],
+  ['Commentateur','+ commenter, voter, micro'],
+  ['Éditeur','+ créer, éditer, cocher'],
+  ['Modérateur','+ modérer les fils'],
+  ['Administrateur','délègue « comme toi »'],
+];
+let backdrop=null, panel=null, pop=null;
+
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2800);}
+function closeAll(){ if(pop){pop.remove();pop=null;} if(panel){panel.remove();panel=null;} if(backdrop){backdrop.remove();backdrop=null;} }
+document.addEventListener('click',(e)=>{ if(pop){ pop.remove(); pop=null; return; } closeAll(); });
+
+/* ——— panneau « Gérer les accès » ——— */
+function openManage(ev){
+  ev.stopPropagation(); closeAll();
+  backdrop=document.createElement('div'); backdrop.className='backdrop'; document.body.appendChild(backdrop);
+  panel=document.createElement('div'); panel.className='panel';
+  panel.addEventListener('click',e=>e.stopPropagation());
+  panel.innerHTML=`
+    <div class="p-head">
+      <h2>👑 Gérer les accès
+        <button class="x" onclick="closeAll()">✕</button>
+      </h2>
+      <div class="p-scope">Tu administres <b>Voyage eclipse</b> et ses sous-dossiers (<b>Croisière</b>, <b>Excursions</b>).
+        Tu peux nommer les invités de ce lien jusqu'à <b>Administrateur</b> — borné à ton sous-arbre.
+        Chaque acte notifie l'owner, qui peut le révoquer.</div>
+    </div>
+    <div class="p-body">
+      <h3 class="sec">🔔 Demandes reçues (ton sous-arbre)</h3>
+      <div id="reqs">
+        <div class="req">
+          <svg class="ic bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+          <span><b>Zack</b> demande <b>Éditeur</b> sur « Excursions »</span>
+          <span class="spacer"></span>
+          <span class="btn small" onclick="grantReq()">Accorder</span>
+          <span class="btn small ghost-danger" onclick="this.closest('.req').remove();toast('demande ignorée')">Ignorer</span>
+        </div>
+      </div>
+
+      <h3 class="sec">Invités de ce lien (dans ton sous-arbre)</h3>
+
+      <div class="person self">
+        <span class="av">PH</span>
+        <div class="id"><span class="nm">Phiphi <span style="color:var(--admin);font-size:12px">· toi</span></span><span class="sub">Administratrice · Voyage eclipse</span></div>
+        <span class="spacer"></span>
+        <span class="locked"><svg class="ic" style="width:13px;height:13px" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg> on ne se change pas soi-même</span>
+      </div>
+
+      <div class="person">
+        <span class="av">ZA</span>
+        <div class="id"><span class="nm">Zack</span><span class="sub">arrivé par le lien · Lecteur d'accueil</span></div>
+        <span class="spacer"></span>
+        <span class="rolepill" data-name="Zack" data-folder="Excursions" onclick="openRole(this,event)">
+          <svg class="ic" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 19 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span class="rn">Lecteur</span> <span class="src">· du lien</span>
+          <svg class="ic" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </div>
+
+      <div class="person">
+        <span class="av">MA</span>
+        <div class="id"><span class="nm">Manon</span><span class="sub">Commentatrice · Croisière</span></div>
+        <span class="spacer"></span>
+        <span class="rolepill override" data-name="Manon" data-folder="Croisière" onclick="openRole(this,event)">
+          <svg class="ic" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          <span class="rn">Commentateur</span> <span class="src">· surcharge</span>
+          <svg class="ic" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+        </span>
+      </div>
+
+      <div class="p-scope" style="margin-top:12px">
+        <svg class="ic" style="width:13px;height:13px;display:inline;vertical-align:-2px" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        Les invités <b>hors de ton sous-arbre</b> et <b>l'owner</b> n'apparaissent pas ici : tu ne peux agir que là où tu es Admin.
+      </div>
+    </div>`;
+  document.body.appendChild(panel);
+  requestAnimationFrame(()=>{backdrop.classList.add('in');panel.classList.add('in');});
+}
+
+/* ——— popover de rôle (borné à Administrateur) ——— */
+function openRole(pill,ev){
+  ev.stopPropagation(); if(pop) pop.remove();
+  const name=pill.dataset.name, folder=pill.dataset.folder;
+  const current=pill.querySelector('.rn').textContent.trim();
+  pop=document.createElement('div'); pop.className='pop';
+  pop.addEventListener('click',e=>e.stopPropagation());
+  pop.innerHTML=`
+    <h4>Rôle de ${name} sur « ${folder} »
+      <span class="sub">borné à ton sous-arbre · l'owner sera notifié</span></h4>
+    <div class="pop-body">
+      ${ROLES.map(([r,d],i)=>`
+        <div class="roleopt ${r===current?'sel':''} ${r==='Administrateur'?'adm':''}" onclick="pickRole('${name}','${r}')">
+          <span class="dot"></span> ${r} <span class="desc">${d}</span>
+        </div>`).join('')}
+    </div>
+    <div class="pop-foot">Pas d'approbation préalable : l'acte part tout de suite, l'owner le voit dans 🔔 et peut le révoquer (retour au rôle d'avant).</div>`;
+  pill.appendChild(pop);
+  requestAnimationFrame(()=>pop.classList.add('in'));
+}
+function pickRole(name,role){
+  const pill=[...document.querySelectorAll('.rolepill')].find(p=>p.dataset.name===name);
+  pill.querySelector('.rn').textContent=role;
+  pill.querySelector('.src').textContent='· surcharge';
+  pill.classList.add('override');
+  pill.classList.toggle('admin', role==='Administrateur');
+  if(pop){pop.remove();pop=null;}
+  toast(role==='Administrateur'
+    ? `${name} est nommé·e Administrateur·rice « comme toi » sur ce sous-arbre — owner notifié`
+    : `${name} devient ${role} — acte journalisé, owner notifié`);
+}
+function grantReq(){
+  document.querySelector('#reqs').innerHTML='<div class="req"><svg class="ic" style="color:var(--accent)" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg> Zack est maintenant <b>Éditeur</b> sur « Excursions » — owner notifié</div>';
+  const pill=[...document.querySelectorAll('.rolepill')].find(p=>p.dataset.name==='Zack');
+  if(pill){ pill.querySelector('.rn').textContent='Éditeur'; pill.querySelector('.src').textContent='· surcharge'; pill.classList.add('override'); }
+  toast('demande accordée en 1 clic');
+}
+</script>
+</body>
+</html>

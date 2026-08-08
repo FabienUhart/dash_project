@@ -87,6 +87,37 @@ _Vague VOTE (V1 → multi → groups → carte → event agenda), export/import 
 
 **Acceptation (validation Cowork)** : carte du parent (owner + invité approuvé) → le(s) scrutin(s) du/des sous-projet(s) apparaissent, badges de voix corrects, vote ouvrable ; sélection/bascule entre plusieurs scrutins OK ; carte du sous-projet direct **inchangée** ; anonyme = lecture seule. `node --check` + `py_compile`. Invariants 5/6/8/9.
 
+## 🗂 [FOLDER-LIFECYCLE] — supprimer, réimporter, replacer un dossier (réflexion Fabien, 8 août 2026)
+
+**Statut : à réfléchir, pas à coder.** Fabien le juge **important à gérer** mais le garde pour une session
+dédiée — trois manques qui se tiennent, tous autour du cycle de vie d'un dossier.
+
+**① La suppression n'est pas hiérarchique.** Aujourd'hui `delete_project` (app.py ~2250) **remonte les
+enfants à la racine** (`UPDATE projects SET parent_id = NULL WHERE parent_id = ?`) et **détache les mémos**
+(`project_id = NULL` → ils tombent à l'Inbox). Supprimer « Voyage Japon » ne supprime donc pas son
+arborescence : elle se **déverse** à la racine, un sous-dossier à la fois, sans que rien ne le dise. À
+trancher : supprimer le sous-arbre entier, ou proposer le choix (« détacher » / « tout supprimer »), et par
+quelle porte — la corbeille ne couvre que les mémos (invariant 7), pas les dossiers.
+
+**② Réécrire un dossier par un import du même dossier (`--force`).** Réimporter « Voyage Japon » par-dessus
+lui-même devrait pouvoir **remplacer** son contenu au lieu de fusionner. Les briques existent déjà :
+[EXPORT-SUBTREE] exporte un dossier seul, [IMPORT-PREVIEW] fait un **dry-run en lecture pure** et accepte des
+**résolutions par uid** (`overwrite` | `duplicate` | `skip`). Ce qui manque est un mode **au niveau du
+dossier** — « ce dossier, tel qu'il est dans le fichier, fait foi » — avec sa **pop-in de choix à l'import** :
+fusionner / remplacer / dupliquer à côté. ⚠️ Point dur : « remplacer » veut dire **supprimer ce qui n'est plus
+dans le fichier**, ce qui heurte de face l'invariant 2 (« l'import n'est jamais destructif »). Ce n'est pas un
+détail d'implémentation : c'est une **exception explicite à écrire dans le CLAUDE.md**, bornée au dossier
+visé et jamais implicite — sinon la promesse de non-destruction ne vaut plus rien nulle part.
+
+**③ Import à la racine, à faciliter.** « Importer ici » ([EXPORT-SUBTREE], `target_project`) sait rattacher
+les racines nouvelles d'un fichier à un dossier visé ; importer **à la racine** reste le parent pauvre. À
+rendre aussi direct que le reste — vraisemblablement dans la même pop-in de choix que ②.
+
+**Ce qu'il faudra vérifier le jour où on s'y met** : la dédup de noms par parent ([PROJECT-NAME-PER-FOLDER],
+`ux_projects_name_parent` → 409 au déplacement), la purge en cascade déjà en place à la suppression d'un
+dossier (fichiers, partages, invités, ❤️, votes, favoris), et le sort des **partages** pointant sur un dossier
+remplacé — un invité ne doit jamais se retrouver avec un jeton qui vise un dossier vidé sous ses pieds.
+
 ## [FX-CONVERTER] — Widget convertisseur de devises (JPY↔EUR + sélecteur)
 
 **[FX-COPY-V4] → ✅ CODÉ [V27.25.197]** : « Copier » descend au pied en jumeau de « Garder » (même gabarit Luciole), les cales de 196 disparaissent (rangées `[montant][devise]`, montants à 142 px), ↔ toujours sur l'axe commun (0,0) et désormais à −35 px du centre du panneau au lieu de −51. **À arbitrer** : le pied ne tient pas sur UNE ligne à 15 rem (deux boutons libellés = ~151 px sur ~214 utiles, la mention se repliait sur 3 lignes) → mention en haut, paire d'actions dessous à droite. Pour une ligne unique : élargir le panneau, ou boutons en icône seule.

@@ -5513,6 +5513,256 @@ function openGuestSettings(cfg) {
   if (!dlg.open) dlg.showModal();
 }
 
+/* ════════ [GUEST-ROLES V2 · T4b] « Gérer les accès » — le panneau d'un Admin INVITÉ ════════
+   Maquette validée : `docs/maquettes/maquette-t4b-admin-invite.html`. Composant piloté par `cfg`,
+   comme `openGuestSettings` : il ne connaît ni `DATA` ni le jeton, ne décide d'AUCUN droit et
+   n'invente aucune règle — il affiche ce que le serveur lui donne et rappelle ce que le serveur
+   fera. La route `/share/<token>/admin` revérifie tout de son côté (invariant 5) : ce panneau est
+   une commodité, jamais une autorisation.
+     cfg.load()                            → { me, root, folders, guests, requests, roles }
+     cfg.setRole(guestId, projectId, role) → Promise<bool>
+     cfg.decide(reqId, 'grant'|'ignore')   → Promise<bool>
+     cfg.notify(message, {error})
+   Ce que la maquette FIGE, et qu'on tient ici : l'owner n'apparaît jamais ; on ne se change pas
+   soi-même (rangée verrouillée) ; le popover s'arrête à Administrateur — il n'existe rien
+   au-dessus à donner, et surtout pas « propriétaire » ; aucune approbation préalable — l'acte part,
+   l'owner le voit et peut le révoquer. */
+const ADMIN_ROLE_HINTS = { viewer: 'voir', commenter: '+ commenter, voter', contributor: '+ créer',
+                           editor: '+ éditer, cocher', moderator: '+ modérer les fils',
+                           admin: 'délègue « comme toi »' };
+function _guestAdminStyle() {
+  if (document.getElementById('guest-admin-style')) return;
+  const st = document.createElement('style'); st.id = 'guest-admin-style';
+  st.textContent =
+    /* Centré desktop, bottom-sheet mobile — la doctrine de toutes les pop-ins de l'app.
+       ⚠️ `display` vit UNIQUEMENT dans `[open]` : posé dans la règle de base, il neutralise le
+       `dialog:not([open]) { display: none }` du navigateur et laisse un fantôme non modal après
+       `close()` (leçon [POPIN-GHOST-FIX]). */
+    '#guest-admin-dialog{width:min(560px,94vw);max-width:min(560px,94vw);padding:0;overflow:hidden;'
+    + 'border:1px solid var(--border);border-radius:14px;background:var(--panel);color:var(--text)}'
+    + '#guest-admin-dialog[open]{display:flex;flex-direction:column;max-height:min(86vh,660px)}'
+    + '#guest-admin-dialog::backdrop{background:rgba(0,0,0,0.5)}'
+    + '.ga-head{padding:0.75rem 0.9rem;border-bottom:1px solid var(--border);flex:none;'
+    + 'position:sticky;top:0;background:var(--panel);z-index:2}'
+    + '.ga-head h3{margin:0;font-size:0.95rem;display:flex;align-items:center;gap:0.5rem}'
+    + '.ga-head .ga-x{margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;'
+    + 'font-size:1.05rem;line-height:1;padding:0.35rem 0.5rem;border-radius:8px;min-width:44px;min-height:44px}'
+    + '.ga-head .ga-x:hover{color:var(--text);background:var(--panel-2)}'
+    + '.ga-scope{font-size:0.78rem;color:var(--muted);margin-top:0.4rem;line-height:1.45}'
+    + '.ga-scope b{color:var(--text)}'
+    + '.ga-body{padding:0.6rem 0.9rem 0.9rem;overflow-y:auto;flex:1 1 auto;min-height:0}'
+    + '.ga-sec{font-size:0.68rem;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);margin:0.9rem 0 0.45rem}'
+    + '.ga-sec:first-child{margin-top:0.2rem}'
+    /* Une demande : liseré accent à gauche — c'est une donnée qui attend une décision. */
+    + '.ga-req{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;background:var(--panel-2);'
+    + 'border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:10px;'
+    + 'padding:0.5rem 0.6rem;margin-bottom:0.45rem;font-size:0.85rem}'
+    + '.ga-req .ga-sp{flex:1}'
+    + '.ga-person{display:flex;align-items:center;gap:0.6rem;padding:0.55rem 0.6rem;border:1px solid var(--border);'
+    + 'border-radius:11px;margin-bottom:0.45rem;background:var(--panel-2)}'
+    + '.ga-av{width:30px;height:30px;border-radius:50%;background:var(--panel);display:flex;align-items:center;'
+    + 'justify-content:center;font-size:0.72rem;color:var(--muted);flex:none;font-weight:600;border:1px solid var(--border)}'
+    + '.ga-id{display:flex;flex-direction:column;min-width:0}'
+    + '.ga-nm{font-weight:500;font-size:0.88rem}'
+    + '.ga-sub{font-size:0.74rem;color:var(--muted)}'
+    /* La pastille dit sa PROVENANCE : bord tireté = réglage individuel, plein = hérité du lien
+       (même grammaire que la fiche invité de T3 côté owner). */
+    + '.ga-pill{display:inline-flex;align-items:center;gap:0.4rem;background:var(--panel);border:1px solid var(--border);'
+    + 'border-radius:999px;padding:0.25rem 0.7rem;font-size:0.8rem;cursor:pointer;margin-left:auto;flex:none}'
+    + '.ga-pill:hover{border-color:var(--muted)}'
+    + '.ga-pill.over{border-style:dashed;border-color:var(--accent)}'
+    + '.ga-pill .ga-src{font-size:0.68rem;color:var(--muted)}'
+    + '.ga-pill.adm{border-color:var(--accent)} .ga-pill.adm .ga-rn{color:var(--accent)}'
+    + '.ga-person.self{opacity:0.75}'
+    + '.ga-lock{margin-left:auto;font-size:0.72rem;color:var(--muted);display:inline-flex;gap:0.3rem;align-items:center}'
+    + '.ga-note{font-size:0.74rem;color:var(--muted);line-height:1.45;margin-top:0.7rem}'
+    + '.ga-empty{font-size:0.8rem;color:var(--muted);padding:0.3rem 0}'
+    /* Popover de rôle : un second niveau, dans le MÊME dialog (top-layer — un panneau posé sur
+       <body> passerait derrière, leçon [CMD-HINT-TOPLAYER]). */
+    + '.ga-pop{position:fixed;z-index:3;width:min(330px,calc(100vw - 28px));background:var(--panel-2);'
+    + 'border:1px solid var(--border);border-radius:13px;box-shadow:0 16px 46px rgba(0,0,0,0.45);overflow:hidden}'
+    + '.ga-pop h4{margin:0;padding:0.6rem 0.7rem 0.45rem;font-size:0.82rem;border-bottom:1px solid var(--border)}'
+    + '.ga-pop h4 .ga-psub{display:block;font-weight:400;color:var(--muted);font-size:0.72rem;margin-top:0.15rem}'
+    + '.ga-opt{display:flex;align-items:center;gap:0.5rem;padding:0.45rem;border-radius:9px;cursor:pointer;font-size:0.82rem}'
+    + '.ga-opt:hover{background:var(--panel)}'
+    + '.ga-dot{width:7px;height:7px;border-radius:50%;background:var(--border);flex:none}'
+    + '.ga-opt.sel .ga-dot{background:var(--accent)}'
+    + '.ga-opt .ga-desc{margin-left:auto;font-size:0.7rem;color:var(--muted)}'
+    + '.ga-pfoot{border-top:1px solid var(--border);padding:0.45rem 0.6rem;font-size:0.7rem;color:var(--muted);line-height:1.4}'
+    + '@media (max-width:640px){'
+    + '#guest-admin-dialog{box-sizing:border-box;width:100%;max-width:100%;inset:auto 0 0 0;margin:0;'
+    + 'border-radius:16px 16px 0 0;padding-bottom:env(safe-area-inset-bottom)}'
+    + '#guest-admin-dialog[open]{max-height:88vh}'
+    + '.ga-pop{left:0;right:0;bottom:0;top:auto;width:100vw;border-radius:16px 16px 0 0}}';
+  document.head.appendChild(st);
+}
+function openGuestAdmin(cfg) {
+  cfg = cfg || {};
+  _guestAdminStyle();
+  let dlg = document.getElementById('guest-admin-dialog');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'guest-admin-dialog';
+    document.body.appendChild(dlg);
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });   // voile = sortir
+  }
+  const note = (m, o) => { if (typeof cfg.notify === 'function') cfg.notify(m, o || {}); };
+  const initials = (n) => String(n || '?').trim().slice(0, 2).toUpperCase();
+  let pop = null;
+  const closePop = () => { if (pop) { pop.remove(); pop = null; } };
+
+  const draw = (d) => {
+    closePop();
+    dlg.innerHTML = '';
+    const head = el('div', { class: 'ga-head' });
+    const h = el('h3');
+    h.appendChild(el('span', { text: '👑' }));
+    h.appendChild(el('span', { text: 'Gérer les accès' }));
+    const x = el('button', { class: 'ga-x', text: '✕', attrs: { type: 'button', title: 'Fermer (Échap)' } });
+    x.addEventListener('click', () => dlg.close());
+    h.appendChild(x);
+    head.appendChild(h);
+    // La phrase de périmètre n'est pas décorative : c'est elle qui dit à un Admin de sous-dossier
+    // pourquoi il ne voit qu'une partie des gens.
+    const others = (d.folders || []).filter((f) => f.id !== d.root_id).map((f) => f.name).filter(Boolean);
+    const scope = el('div', { class: 'ga-scope' });
+    scope.appendChild(el('span', { text: 'Tu administres ' }));
+    scope.appendChild(el('b', { text: d.root || 'ce dossier' }));
+    scope.appendChild(el('span', { text: others.length ? ' et ses sous-dossiers (' + others.join(', ') + '). ' : '. ' }));
+    scope.appendChild(el('span', { text: 'Tu peux nommer les invités de ce lien jusqu’à Administrateur — borné à ton sous-arbre. '
+      + 'Chaque acte prévient le propriétaire, qui peut le révoquer.' }));
+    head.appendChild(scope);
+    dlg.appendChild(head);
+
+    const body = el('div', { class: 'ga-body' });
+    // ── Demandes reçues ──────────────────────────────────────────────────────────────────
+    const reqs = d.requests || [];
+    if (reqs.length) {
+      body.appendChild(el('div', { class: 'ga-sec', text: '🔔 Demandes reçues (ton sous-arbre)' }));
+      reqs.forEach((q) => {
+        const row = el('div', { class: 'ga-req' });
+        const txt = el('span');
+        txt.appendChild(el('b', { text: q.name || '' }));
+        txt.appendChild(el('span', { text: ' demande ' }));
+        txt.appendChild(el('b', { text: roleLabel(q.role_requested) }));
+        if (q.project) txt.appendChild(el('span', { text: ' sur « ' + q.project + ' »' }));
+        row.appendChild(txt);
+        row.appendChild(el('span', { class: 'ga-sp' }));
+        const yes = el('button', { text: 'Accorder', attrs: { type: 'button' } });
+        yes.addEventListener('click', async () => {
+          yes.disabled = true;
+          const okd = await cfg.decide(q.id, 'grant');
+          if (okd) { note(q.name + ' devient ' + roleLabel(q.role_requested) + ' — le propriétaire est prévenu.'); refresh(); }
+          else { yes.disabled = false; note('Impossible d’accorder.', { error: true }); }
+        });
+        const no = el('button', { text: 'Écarter', attrs: { type: 'button' } });
+        no.addEventListener('click', async () => {
+          no.disabled = true;
+          const okd = await cfg.decide(q.id, 'ignore');
+          if (okd) { note('Demande écartée.'); refresh(); }
+          else { no.disabled = false; note('Impossible.', { error: true }); }
+        });
+        row.appendChild(yes); row.appendChild(no);
+        lucioleize(yes, 'luc-primary'); lucioleize(no, 'luc-neutral');
+        body.appendChild(row);
+      });
+    }
+
+    // ── Les gens ─────────────────────────────────────────────────────────────────────────
+    body.appendChild(el('div', { class: 'ga-sec', text: 'Invités de ce lien (dans ton sous-arbre)' }));
+    // Soi-même, VERROUILLÉ : le serveur refuse déjà qu'on se change (403), l'UI le dit avant le
+    // clic plutôt que de laisser essayer. Un Admin élève les autres, pas lui-même.
+    const meRow = el('div', { class: 'ga-person self' });
+    meRow.appendChild(el('span', { class: 'ga-av', text: initials((d.me || {}).name) }));
+    const meId = el('div', { class: 'ga-id' });
+    meId.appendChild(el('span', { class: 'ga-nm', text: ((d.me || {}).name || '') + ' · toi' }));
+    meId.appendChild(el('span', { class: 'ga-sub', text: 'Administrateur · ' + (d.root || '') }));
+    meRow.appendChild(meId);
+    meRow.appendChild(el('span', { class: 'ga-lock', text: '🔒 on ne se change pas soi-même' }));
+    body.appendChild(meRow);
+
+    const people = d.guests || [];
+    if (!people.length) body.appendChild(el('div', { class: 'ga-empty', text: 'Personne d’autre n’est encore entré par ce lien.' }));
+    people.forEach((p) => {
+      const row = el('div', { class: 'ga-person' });
+      row.appendChild(el('span', { class: 'ga-av', text: initials(p.name) }));
+      const id = el('div', { class: 'ga-id' });
+      id.appendChild(el('span', { class: 'ga-nm', text: p.name || '' }));
+      id.appendChild(el('span', { class: 'ga-sub',
+        text: (p.role_source === 'override' ? roleLabel(p.role_effective) : 'arrivé par le lien · ' + roleLabel(p.role_link))
+          + (p.project ? ' · ' + p.project : '') }));
+      row.appendChild(id);
+      const pill = el('button', { class: 'ga-pill' + (p.role_source === 'override' ? ' over' : '')
+        + (p.role_effective === 'admin' ? ' adm' : ''), attrs: { type: 'button', title: 'Changer le rôle' } });
+      pill.appendChild(el('span', { class: 'ga-rn', text: roleLabel(p.role_effective) }));
+      pill.appendChild(el('span', { class: 'ga-src', text: p.role_source === 'override' ? '· réglé' : '· du lien' }));
+      pill.appendChild(el('span', { text: '⌄' }));
+      pill.addEventListener('click', (e) => { e.stopPropagation(); openRolePop(pill, p, d); });
+      row.appendChild(pill);
+      body.appendChild(row);
+    });
+
+    body.appendChild(el('div', { class: 'ga-note',
+      text: 'ⓘ Les invités hors de ton sous-arbre et le propriétaire n’apparaissent pas ici : '
+        + 'tu ne peux agir que là où tu es Administrateur.' }));
+    dlg.appendChild(body);
+  };
+
+  /* Le popover vit DANS le dialog : posé sur `<body>`, il passerait derrière (top-layer — la
+     leçon de [CMD-HINT-TOPLAYER], qu'on ne réapprend pas une troisième fois). */
+  function openRolePop(pill, person, d) {
+    closePop();
+    pop = el('div', { class: 'ga-pop' });
+    pop.addEventListener('click', (e) => e.stopPropagation());
+    const h4 = el('h4');
+    h4.appendChild(el('span', { text: 'Rôle de ' + (person.name || '') + (person.project ? ' sur « ' + person.project + ' »' : '') }));
+    h4.appendChild(el('span', { class: 'ga-psub', text: 'borné à ton sous-arbre · le propriétaire sera prévenu' }));
+    pop.appendChild(h4);
+    const list = el('div', { attrs: { style: 'padding:0.35rem 0.4rem' } });
+    (d.roles || []).forEach((r) => {
+      const opt = el('div', { class: 'ga-opt' + (r === person.role_effective ? ' sel' : ''),
+        attrs: { role: 'button', tabindex: '0' } });
+      opt.appendChild(el('span', { class: 'ga-dot' }));
+      opt.appendChild(el('span', { text: roleLabel(r) }));
+      opt.appendChild(el('span', { class: 'ga-desc', text: ADMIN_ROLE_HINTS[r] || '' }));
+      opt.addEventListener('click', async () => {
+        closePop();
+        const okd = await cfg.setRole(person.id, person.project_id, r);
+        if (okd) {
+          note(r === 'admin'
+            ? (person.name + ' est Administrateur « comme toi » sur ce sous-arbre — le propriétaire est prévenu.')
+            : (person.name + ' devient ' + roleLabel(r) + ' — le propriétaire est prévenu.'));
+          refresh();
+        } else note('Changement refusé.', { error: true });
+      });
+      list.appendChild(opt);
+    });
+    pop.appendChild(list);
+    pop.appendChild(el('div', { class: 'ga-pfoot',
+      text: 'Pas d’approbation préalable : le changement prend effet tout de suite. '
+        + 'Le propriétaire le voit et peut le remettre comme avant.' }));
+    dlg.appendChild(pop);
+    // Sous la pastille, ramené dans l'écran si ça dépasse (desktop) ; en feuille basse sur mobile,
+    // où le CSS reprend la main.
+    const r = pill.getBoundingClientRect();
+    pop.style.left = Math.round(Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - pop.offsetWidth - 8))) + 'px';
+    const below = r.bottom + 6;
+    pop.style.top = Math.round(below + pop.offsetHeight < window.innerHeight - 8 ? below
+      : Math.max(8, r.top - pop.offsetHeight - 6)) + 'px';
+  }
+
+  const refresh = async () => {
+    const d = await cfg.load();
+    if (d) draw(d);
+    else { dlg.close(); note('Accès impossible.', { error: true }); }
+  };
+  dlg.addEventListener('click', () => closePop());
+  dlg.addEventListener('close', () => closePop(), { once: true });
+  draw({ guests: [], requests: [], roles: [], folders: [] });
+  if (!dlg.open) dlg.showModal();
+  refresh();
+}
+
 // ───────────────────────── [FX-CONVERTER] convertisseur de devises ─────────────────────────
 // Widget flottant calqué sur initPomodoro (lanceur + panneau déplaçables, afficher/masquer,
 // positions/masquage persistés localStorage). Taux BCE base EUR servis par le backend

@@ -1109,6 +1109,43 @@ initThemePref();
 { const _hdr = document.querySelector('header');
   if (_hdr) _hdr.appendChild(guestGearButton('icon', () => openGuestSettings({}))); }
 
+/* [GUEST-ROLES V2 · T4b] « Gérer les accès » — visible UNIQUEMENT pour un Admin (maquette ①).
+   Le bouton se pose à côté de l'engrenage : même famille de commandes (l'engrenage règle ce qui
+   me concerne, la couronne ce qui concerne les autres). `can_admin` vient du serveur ; la route
+   revérifie tout au moment d'ouvrir, donc ce bouton n'accorde rien — il évite juste de proposer
+   une porte fermée. Il se redessine à chaque `load()` : un rôle peut être retiré pendant la
+   session, et le bouton doit disparaître avec lui. */
+function syncAdminButton() {
+  const hdr = document.querySelector('header');
+  if (!hdr) return;
+  const old = document.getElementById('guest-admin-btn');
+  // `can_admin` vient du serveur, qui exige déjà un invité APPROUVÉ : redoubler la garde ici avec
+  // `approved()` n'ajoutait aucune sécurité (le front ne garde rien) et faisait dépendre le bouton
+  // d'un état client qui pouvait, lui, être en retard.
+  if (!DATA || !DATA.can_admin) { if (old) old.remove(); return; }
+  if (old) return;
+  const b = el('button', { class: 'icon gs-gear', attrs: { type: 'button', id: 'guest-admin-btn',
+    title: 'Gérer les accès', 'aria-label': 'Gérer les accès' } });
+  b.appendChild(el('span', { text: '👑' }));
+  b.addEventListener('click', () => openGuestAdmin({
+    load: () => fetch(API + '/admin', { headers: { 'X-Guest-Token': guestToken() } })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    setRole: (guestId, projectId, role) => fetch(API + '/guests/' + guestId + '/role', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+      body: JSON.stringify({ project_id: projectId, role: role }),
+    }).then((r) => r.ok).catch(() => false),
+    decide: (reqId, decision) => fetch(API + '/role-request/' + reqId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+      body: JSON.stringify({ decision: decision }),
+    }).then((r) => r.ok).catch(() => false),
+    notify: (m, o) => notify(m, o),
+  }));
+  const gear = document.getElementById('guest-settings-btn');
+  if (gear) hdr.insertBefore(b, gear); else hdr.appendChild(b);
+}
+
 syncHeaderHeight();
 window.addEventListener('resize', syncHeaderHeight);
 window.addEventListener('load', syncHeaderHeight);
@@ -1190,7 +1227,13 @@ function canCommentMemo(m) { return !!(m && m.can_comment) && approved(); }
 function canVoteMemo(m) { return !!(m && m.can_vote) && approved(); }
 
 async function refreshGuest() {
-  if (!linkWritable()) return;
+  /* [GUEST-ROLES V2 · T4b] Ce court-circuit datait d'avant les rôles : sur un lien en lecture,
+     personne ne pouvait rien écrire, donc savoir QUI on était ne servait à rien. Depuis T1/T2 une
+     personne s'élève par surcharge **indépendamment du rôle du lien** — un Administrateur peut
+     très bien être entré par un lien « lecteur ». En sortant ici, la page le laissait `anonymous`
+     alors que le serveur le reconnaissait : identité muette, et « Gérer les accès » invisible pour
+     celui-là même qui administre. On interroge donc `/me` dès qu'un jeton existe ; sans jeton,
+     rien ne change (aucun appel de plus pour un lecteur anonyme). */
   const t = guestToken();
   if (!t) { GUEST = { status: 'anonymous' }; return; }
   try {
@@ -3224,6 +3267,7 @@ function render() {
   modeEl.append(shareIcon(_mode === 'modifiable' ? 'pencil' : (_mode === 'participation' ? 'reply' : 'eye')),
                 ' ' + _mode);
   modeEl.title = roleLabel(DATA.role_effective || DATA.role || '');
+  syncAdminButton();   // [GUEST-ROLES V2 · T4b] couronne « Gérer les accès » si Admin
   renderWelcome();   // [GUEST-ROLES V2 · T2] bandeau d'accueil + demande de rôle (§5)
   const pdesc = document.getElementById('pdesc');
   let curDesc = DATA.description || '';

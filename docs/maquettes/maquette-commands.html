@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Commandes de commentaire & registre [CUSTOM-COMMANDS]</title>
+<style>
+  :root{
+    --bg:#0d1219; --card:#141b24; --card2:#1a2330; --line:#26303e;
+    --txt:#dbe4ee; --muted:#8494a7; --accent:#7ee2a8; --accent-dim:#3f7a58;
+    --warn:#e2c97e; --danger:#c96a6a; --chip:#202b39; --blue:#5aa9e6; --pos:#7ee2a8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px 18px 90px}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 4px}
+  .note{background:var(--card2);border:1px dashed var(--line);border-radius:10px;padding:10px 14px;color:var(--muted);font-size:13px;margin:12px 0 22px}
+  .note b{color:var(--txt)}
+  .ic{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+  .tabs{display:flex;gap:8px;margin-bottom:16px}
+  .tab{padding:8px 15px;border-radius:9px;background:var(--card);border:1px solid var(--line);cursor:pointer;font-size:14px}
+  .tab.on{border-color:var(--accent-dim);color:var(--accent)}
+  .view{display:none} .view.on{display:block}
+
+  /* ——— FIL ——— */
+  .thread{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+  .thread h2{font-size:13px;color:var(--muted);margin:0 0 12px;font-weight:600}
+  .cmt{display:flex;gap:10px;margin-bottom:14px}
+  .av{width:30px;height:30px;border-radius:50%;background:var(--chip);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);flex:none;font-weight:600}
+  .cbody{flex:1;min-width:0}
+  .cname{font-weight:600;font-size:13.5px;color:var(--blue)}
+  .ctime{font-size:11.5px;color:var(--muted);margin-top:3px}
+  /* chips de commande */
+  .cmd-chip{margin-top:5px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card2);display:flex;gap:11px;align-items:flex-start;max-width:420px}
+  .cmd-ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
+  .cmd-ic.pos{background:rgba(126,226,168,.14)}
+  .cmd-ic.meteo{background:rgba(90,169,230,.14)}
+  .cmd-ic.tache{background:rgba(226,201,126,.14)}
+  .cmd-main{min-width:0}
+  .cmd-title{font-weight:600;font-size:14px}
+  .cmd-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .cmd-link{color:var(--blue);font-size:12.5px;text-decoration:none;display:inline-flex;gap:4px;align-items:center;margin-top:5px}
+  .meteo-big{font-size:22px;font-weight:600}
+  .tache-check{color:var(--accent)}
+
+  /* composeur + aide "/" */
+  .composer{display:flex;gap:9px;align-items:center;margin-top:8px;position:relative}
+  .field{flex:1;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:9px 15px;color:var(--txt);font:inherit;font-size:13.5px}
+  .send{width:34px;height:34px;border-radius:50%;background:var(--chip);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer}
+  .help{position:absolute;bottom:calc(100% + 8px);left:0;right:0;background:var(--card2);border:1px solid #33445a;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.5);overflow:hidden;display:none}
+  .help.show{display:block}
+  .help-hd{padding:9px 13px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+  .help-row{display:flex;gap:10px;align-items:baseline;padding:9px 13px;cursor:pointer}
+  .help-row:hover{background:var(--chip)}
+  .help-cmd{color:var(--accent);font-family:ui-monospace,monospace;font-size:13px;flex:none;min-width:96px}
+  .help-desc{font-size:12.5px;color:var(--muted)}
+  .help-foot{padding:8px 13px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line)}
+
+  /* ——— PARAMÈTRES / REGISTRE ——— */
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .panel h2{font-size:15px;margin:0 0 4px;display:flex;gap:8px;align-items:center}
+  .panel .sub{color:var(--muted);font-size:12.5px;margin-bottom:14px}
+  h3.sec{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
+  .creg{display:flex;align-items:center;gap:12px;padding:11px 13px;border:1px solid var(--line);border-radius:11px;margin-bottom:8px;background:var(--card2)}
+  .creg .cc{font-family:ui-monospace,monospace;color:var(--accent);font-size:13.5px;min-width:110px;flex:none}
+  .creg.off .cc{color:var(--muted);text-decoration:line-through}
+  .creg .cd{font-size:12.5px;color:var(--muted);flex:1;min-width:0}
+  .creg .tag{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px;flex:none}
+  .creg .tag.native{color:var(--blue);border-color:var(--blue)}
+  .creg .tag.perso{color:var(--warn);border-color:var(--warn)}
+  /* switch */
+  .sw{width:38px;height:22px;border-radius:999px;background:var(--chip);border:1px solid var(--line);position:relative;cursor:pointer;flex:none;transition:.15s}
+  .sw::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:.15s}
+  .sw.on{background:var(--accent-dim);border-color:var(--accent-dim)}
+  .sw.on::after{left:18px;background:var(--txt)}
+
+  /* définir une commande perso */
+  .newcmd{border:1px dashed var(--line);border-radius:11px;padding:13px;margin-top:6px}
+  .newcmd label{font-size:12px;color:var(--muted);display:block;margin:8px 0 4px}
+  .newcmd input,.newcmd textarea{width:100%;background:var(--chip);border:1px solid var(--line);border-radius:8px;padding:8px 11px;color:var(--txt);font:inherit;font-size:13.5px}
+  .vars{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .var{font-size:12px;font-family:ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--blue);cursor:pointer}
+  .var:hover{border-color:var(--blue)}
+  .btn{display:inline-flex;align-items:center;gap:7px;background:var(--chip);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:8px 14px;font-size:13px;cursor:pointer;margin-top:12px}
+  .btn.primary{border-color:var(--accent-dim);color:var(--accent)}
+  .scope-hint{font-size:12px;color:var(--muted);margin-top:10px;display:flex;gap:6px;align-items:flex-start}
+
+  #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid #33445a;border-radius:10px;padding:9px 15px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;max-width:90vw;text-align:center}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>💬 Commandes de commentaire — <span style="color:var(--muted)">maquette</span></h1>
+  <div class="note">
+    Deux faces : à gauche <b>le fil</b> (comment /position, /meteo, /tache s'affichent — une pastille, pas du texte),
+    à droite <b>Paramètres → Commandes</b> (le registre : activer/désactiver, et définir tes propres commandes à variables).
+    Tape « / » dans le composeur pour voir l'aide pilotée par le registre. Tout est en mémoire.
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" onclick="showView('fil',this)">Le fil</div>
+    <div class="tab" onclick="showView('reg',this)">Paramètres → Commandes</div>
+  </div>
+
+  <!-- ======== VUE FIL ======== -->
+  <div class="view on" id="view-fil">
+    <div class="thread">
+      <h2>🗾 Osaka · Shinsekai — fil</h2>
+
+      <div class="cmt">
+        <span class="av">FA</span>
+        <div class="cbody"><span class="cname">Fabien</span>
+          <div class="cmd-chip">
+            <div class="cmd-ic pos">📍</div>
+            <div class="cmd-main">
+              <div class="cmd-title">Je suis ici</div>
+              <div class="cmd-sub">Dōtonbori, Osaka · relevé à 19:42</div>
+              <a class="cmd-link" href="#" onclick="return false">🗺 Ouvrir dans la carte ↗</a>
+            </div>
+          </div>
+          <div class="ctime">via <b style="color:var(--muted)">/position</b> · 8 août 19:42</div>
+        </div>
+      </div>
+
+      <div class="cmt">
+        <span class="av">AL</span>
+        <div class="cbody"><span class="cname">Alexia</span>
+          <div class="cmd-chip">
+            <div class="cmd-ic meteo">🌤</div>
+            <div class="cmd-main">
+              <div class="cmd-title"><span class="meteo-big">19°C</span> · Éclaircies</div>
+              <div class="cmd-sub">Osaka · vent 12 km/h · pluie 10 %</div>
+            </div>
+          </div>
+          <div class="ctime">via <b style="color:var(--muted)">/meteo Osaka</b> · 8 août 19:45</div>
+        </div>
+      </div>
+
+      <div class="cmt">
+        <span class="av">FA</span>
+        <div class="cbody"><span class="cname">Fabien</span>
+          <div class="cmd-chip">
+            <div class="cmd-ic tache">✅</div>
+            <div class="cmd-main">
+              <div class="cmd-title">Tâche créée : « Réserver Kushikatsu Daruma »</div>
+              <div class="cmd-sub">→ ajoutée au dossier <b>restaurants</b> · assignée à @Alexia</div>
+              <a class="cmd-link" href="#" onclick="return false">Ouvrir le mémo ↗</a>
+            </div>
+          </div>
+          <div class="ctime">via <b style="color:var(--muted)">/tache Réserver Kushikatsu Daruma @Alexia</b> · 8 août 19:50</div>
+        </div>
+      </div>
+
+      <!-- composeur + aide -->
+      <div class="composer">
+        <span class="av">FA</span>
+        <input class="field" id="field" placeholder="Écrire un commentaire… (/ pour les commandes)" oninput="onType()" onfocus="onType()">
+        <span class="send">➤</span>
+        <div class="help" id="help"></div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Tape « / » dans le champ ci-dessus → l'aide liste <b>uniquement les commandes activées</b> dans le registre. Désactive-en une dans l'onglet Paramètres et reviens voir.</div>
+    </div>
+  </div>
+
+  <!-- ======== VUE REGISTRE ======== -->
+  <div class="view" id="view-reg">
+    <div class="panel">
+      <h2>⚙️ Paramètres · Commandes de commentaire</h2>
+      <div class="sub">Chaque commande peut être activée ou coupée. Désactivée = absente de l'aide « / » <b>et refusée par le serveur</b> (pas juste cachée).</div>
+
+      <h3 class="sec">Commandes natives</h3>
+      <div id="natives"></div>
+
+      <h3 class="sec">Tes commandes (gabarits)</h3>
+      <div id="customs"></div>
+
+      <div class="newcmd">
+        <div style="font-weight:600;font-size:13.5px">+ Nouvelle commande</div>
+        <label>Nom (commence par /)</label>
+        <input id="nc-name" placeholder="/checkin" value="/checkin">
+        <label>Gabarit du message (clique une variable pour l'insérer)</label>
+        <textarea id="nc-tpl" rows="2">Arrivé à {position} à {heure} — il fait {meteo}</textarea>
+        <div class="vars">
+          <span class="var" onclick="insVar('{date}')">{date}</span>
+          <span class="var" onclick="insVar('{heure}')">{heure}</span>
+          <span class="var" onclick="insVar('{position}')">{position}</span>
+          <span class="var" onclick="insVar('{meteo}')">{meteo}</span>
+        </div>
+        <div class="scope-hint">
+          <svg class="ic" style="width:13px;height:13px" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+          Pas de code exécuté : juste un gabarit de texte à variables (briques déjà là). D'abord global, puis réglable par partage.
+        </div>
+        <span class="btn primary" onclick="addCustom()">Créer la commande</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:20px">
+    <b>Ce que la maquette fige</b> : ① chaque commande s'affiche en <b>pastille</b> dans le fil (📍/🌤/✅), pas en texte brut ;
+    ② l'aide « / » est <b>pilotée par le registre</b> — une commande coupée disparaît de l'aide ET serait refusée serveur ;
+    ③ tu définis tes propres commandes en <b>gabarit à variables</b>, sans coder ;
+    ④ chaque commande porte un <b>interrupteur</b> (natives comprises) ; ⑤ la ligne « via /commande » garde la trace de ce qui a été tapé.
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const NATIVE=[
+  {cmd:'/position', desc:'Poste ta position GPS (📍 + carte) dans le fil', on:true},
+  {cmd:'/meteo [lieu]', desc:'La météo du moment (lieu du mémo par défaut)', on:true},
+  {cmd:'/tache [texte] [@qui]', desc:'Crée un mémo/tâche depuis le fil', on:true},
+  {cmd:'/vote_choix a ; b', desc:'Un vote à choix unique dans le fil', on:true},
+];
+let CUSTOM=[
+  {cmd:'/checkin', desc:'Arrivé à {position} à {heure} — il fait {meteo}', on:true},
+];
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
+function showView(v,el){document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));document.getElementById('view-'+v).classList.add('on');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));el.classList.add('on');}
+
+function renderReg(){
+  const nat=document.getElementById('natives'); nat.innerHTML='';
+  NATIVE.forEach((c,i)=>nat.appendChild(regRow(c,'native',()=>{c.on=!c.on;renderReg();})));
+  const cus=document.getElementById('customs'); cus.innerHTML='';
+  if(!CUSTOM.length) cus.innerHTML='<div style="color:var(--muted);font-size:12.5px;padding:4px 2px">Aucune commande perso pour l\'instant.</div>';
+  CUSTOM.forEach((c)=>cus.appendChild(regRow(c,'perso',()=>{c.on=!c.on;renderReg();})));
+}
+function regRow(c,kind,toggle){
+  const row=document.createElement('div'); row.className='creg'+(c.on?'':' off');
+  row.innerHTML=`<span class="cc">${c.cmd.split(' ')[0]}</span>
+    <span class="cd">${c.desc}</span>
+    <span class="tag ${kind}">${kind==='native'?'native':'gabarit'}</span>
+    <span class="sw ${c.on?'on':''}"></span>`;
+  row.querySelector('.sw').addEventListener('click',()=>{toggle();toast(c.on?('« '+c.cmd.split(' ')[0]+' » activée'):('« '+c.cmd.split(' ')[0]+' » coupée — retirée de l\'aide et refusée serveur'));});
+  return row;
+}
+function insVar(v){const t=document.getElementById('nc-tpl');t.value+=(t.value&&!t.value.endsWith(' ')?' ':'')+v;t.focus();}
+function addCustom(){
+  const n=document.getElementById('nc-name').value.trim(), tpl=document.getElementById('nc-tpl').value.trim();
+  if(!n.startsWith('/')||!tpl){toast('donne un nom en /… et un gabarit');return;}
+  CUSTOM.push({cmd:n,desc:tpl,on:true}); renderReg(); toast('commande '+n+' créée — visible dans l\'aide « / »');
+}
+
+/* aide "/" pilotée par le registre (natives activées + customs activées) */
+function onType(){
+  const f=document.getElementById('field'), h=document.getElementById('help');
+  const v=f.value;
+  if(!v.startsWith('/')){h.classList.remove('show');return;}
+  const items=[...NATIVE.filter(c=>c.on),...CUSTOM.filter(c=>c.on)]
+    .filter(c=>c.cmd.toLowerCase().startsWith(v.toLowerCase().split(' ')[0]) || v==='/');
+  h.innerHTML='<div class="help-hd">Commandes</div>'+
+    (items.length?items.map(c=>`<div class="help-row"><span class="help-cmd">${c.cmd.split(' ')[0]}</span><span class="help-desc">${c.desc}</span></div>`).join('')
+      :'<div class="help-row"><span class="help-desc">Aucune commande activée ne correspond.</span></div>')+
+    '<div class="help-foot">↩ pour compléter · Échap pour fermer · gérées dans Paramètres → Commandes</div>';
+  h.classList.add('show');
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.composer'))document.getElementById('help').classList.remove('show');});
+renderReg();
+</script>
+</body>
+</html>

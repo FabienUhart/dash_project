@@ -6545,6 +6545,162 @@ def share_set_guest_role(token, target_id):
                     "source": "override" if (role or add or rem) else "link"})
 
 
+def _admin_projects(db, share, guest):
+    """Les dossiers du partage que CET invité administre — sa zone d'action, et rien de plus.
+
+    L'admin-ship ne se déduit pas du partage : il se gagne par surcharge posée sur un ancêtre ou
+    par propriété (créateur = admin de naissance), donc souvent sur un seul sous-dossier. On teste
+    donc dossier par dossier, comme le fera la route d'écriture — une seule source de vérité."""
+    if share["kind"] != "project":
+        pid = _share_request_project(db, share)
+        return [pid] if (pid and _admin_scope_ok(db, share, guest, pid)) else []
+    out = []
+    for pid in _project_descendants(db, share["target_id"])[:200]:   # borne de sûreté
+        if _admin_scope_ok(db, share, guest, pid):
+            out.append(pid)
+    return out
+
+
+@app.route("/share/<token>/admin", methods=["GET"])
+def share_admin_view(token):
+    """[GUEST-ROLES V2 · T4b] Ce qu'un Admin INVITÉ voit dans « Gérer les accès » (maquette).
+
+    Route publique sous /share/* (bypass Authelia existant — invariant 5), LECTURE seule. Ce
+    qu'elle expose est exactement ce sur quoi elle laisse agir, ni plus ni moins :
+      · les dossiers du partage que cette personne administre (② de la maquette) ;
+      · les invités **du même lien** dont le dossier tombe dans ce sous-arbre — **jamais l'owner**
+        (il n'est pas un `share_guest`, aucune ligne ne le désigne) et **jamais soi-même**, qui
+        apparaît verrouillé plus haut dans l'UI ;
+      · les demandes de rôle **en attente** portant sur un dossier administré (④).
+    Un Admin d'un sous-dossier ne voit donc pas les gens des dossiers voisins : ce panneau n'est
+    pas la page Partages de l'owner en petit, c'est une fenêtre sur SON périmètre.
+    L'e-mail des autres n'est PAS exposé (le nom suffit à nommer quelqu'un — même doctrine que les
+    votants de [COMMENT-REACTIONS])."""
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    admin_pids = _admin_projects(db, share, guest)
+    if not admin_pids:
+        return jsonify({"error": "non autorisé"}), 403
+    root_pid = admin_pids[0]
+    names = {}
+    for pid in admin_pids:
+        r = db.execute("SELECT name FROM projects WHERE id = ?", (pid,)).fetchone()
+        if r:
+            names[pid] = r["name"] or ""
+    admin_set = set(admin_pids)
+    people = []
+    for r in db.execute(
+        "SELECT * FROM share_guests WHERE share_id = ? AND status = 'approved' AND id != ? ORDER BY id",
+        (share["id"], guest["id"]),
+    ).fetchall():
+        # Le rôle se lit SUR UN DOSSIER : on montre celui de la surcharge la plus proche dans mon
+        # sous-arbre quand il y en a une (c'est là que la personne a été réglée), sinon celui de la
+        # racine que j'administre. Sans ça, la rangée dirait « Lecteur » à quelqu'un qu'on vient de
+        # nommer Éditeur sur un sous-dossier — le mensonge déjà corrigé en T2 côté owner.
+        over = db.execute(
+            "SELECT project_id, role FROM guest_roles WHERE guest_id = ? AND role != '' ORDER BY project_id",
+            (r["id"],),
+        ).fetchall()
+        mine = [o for o in over if o["project_id"] in admin_set]
+        pid = mine[0]["project_id"] if mine else root_pid
+        grole = _resolve_guest_overrides(db, r["id"], pid)[0]
+        people.append({
+            "id": r["id"],
+            "name": (r["name"] or r["email"] or "").split("@")[0],
+            "project_id": pid,
+            "project": names.get(pid, ""),
+            "role_effective": grole or _guest_link_role(share, r),
+            "role_link": _guest_link_role(share, r),
+            "role_source": "override" if grole else "link",
+        })
+    requests_out = [
+        q for q in _pending_role_requests(db)
+        if q["project_id"] in admin_set
+        and db.execute("SELECT share_id FROM share_guests WHERE id = ?", (q["guest_id"],)).fetchone()["share_id"] == share["id"]
+        and q["guest_id"] != guest["id"]
+    ]
+    for q in requests_out:
+        q.pop("email", None)   # le nom suffit : l'e-mail reste owner-only
+    return jsonify({
+        "me": {"id": guest["id"], "name": (guest["name"] or guest["email"] or "").split("@")[0]},
+        "root_id": root_pid,
+        "root": names.get(root_pid, ""),
+        "folders": [{"id": p, "name": names.get(p, "")} for p in admin_pids],
+        "guests": people,
+        "requests": requests_out,
+        "roles": list(ASSIGNABLE_ROLES),
+    })
+
+
+@app.route("/share/<token>/role-request/<int:req_id>", methods=["POST"])
+def share_decide_role_request(token, req_id):
+    """[GUEST-ROLES V2 · T4b] Un Admin invité accorde (ou écarte) une demande de son sous-arbre (④).
+
+    Accorder passe par `_apply_guest_role` — **la même porte que la nomination manuelle** (T4a), donc
+    l'acte est journalisé, remonte à l'owner (🔔) et reste **révocable**. C'est le point important :
+    un délégué ne dispose d'aucun chemin d'écriture qui échapperait au journal, sinon « révoquer
+    d'un clic » ne vaudrait que pour la moitié de ses actes.
+    Écarter ne notifie rien et n'écrit aucun rôle : la demande sort de la file, sans « refusé »
+    signifié à personne (même doctrine que la décision owner).
+    Gardes identiques à T4a : invité approuvé, `administrer` sur le dossier VISÉ par la demande,
+    demandeur du MÊME lien, et jamais soi-même."""
+    data = request.get_json(silent=True) or {}
+    decision = (data.get("decision") or "").strip().lower()
+    if decision not in ("grant", "ignore"):
+        return jsonify({"error": "decision must be grant or ignore"}), 400
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    r = db.execute("SELECT * FROM role_requests WHERE id = ?", (req_id,)).fetchone()
+    if not r or r["status"] != "pending":
+        return jsonify({"error": "not found"}), 404
+    if r["guest_id"] == guest["id"]:
+        return jsonify({"error": "on ne tranche pas sa propre demande"}), 403
+    asker = db.execute("SELECT * FROM share_guests WHERE id = ?", (r["guest_id"],)).fetchone()
+    if not asker or asker["share_id"] != share["id"]:
+        return jsonify({"error": "not found"}), 404
+    pid = r["project_id"]
+    if not pid or not _admin_scope_ok(db, share, guest, pid):
+        return jsonify({"error": "non autorisé"}), 403
+    now = datetime.now(timezone.utc).isoformat()
+    role = _clean_requested_role(r["role_requested"])
+    if decision == "grant" and role:
+        actor = f"{guest['name'] or guest['email']} <{guest['email']}>"
+        # Les ajustements fins déjà posés sur cette personne (par l'owner, ou par la fiche invité
+        # de T3) sont RELUS et repassés tels quels : `_apply_guest_role` réécrit la ligne entière,
+        # donc lui donner des ensembles vides effacerait ces réglages. La décision owner prend le
+        # même soin (« on ne détruit jamais un réglage fin en accordant un rôle ») — accorder une
+        # demande n'est pas une remise à zéro.
+        # ⚠ On lit la ligne EXACTE (guest, dossier), pas `_resolve_guest_overrides` : celui-ci
+        # remonte au plus proche ANCÊTRE, et recopier ses caps ici fabriquerait sur ce dossier des
+        # réglages qui n'y étaient pas — en figeant du même coup un héritage qui devait rester vivant.
+        _row = db.execute(
+            "SELECT caps_add, caps_remove FROM guest_roles WHERE guest_id = ? AND project_id = ?",
+            (r["guest_id"], pid),
+        ).fetchone()
+        keep_add = _clean_caps(json.loads(_row["caps_add"] or "[]")) if _row else set()
+        keep_rem = _clean_caps(json.loads(_row["caps_remove"] or "[]")) if _row else set()
+        _apply_guest_role(db, r["guest_id"], pid, role, keep_add, keep_rem, actor,
+                          actor_guest_id=guest["id"])
+    db.execute(
+        "UPDATE role_requests SET status = ?, decided_at = ?, decided_by = ? WHERE id = ?",
+        ("granted" if decision == "grant" else "refused", now, str(guest["id"]), req_id),
+    )
+    db.commit()
+    return jsonify({"id": req_id, "status": "granted" if decision == "grant" else "refused",
+                    "guest_id": r["guest_id"], "project_id": pid,
+                    "role": role if decision == "grant" else ""})
+
+
 @app.route("/api/guests/<int:guest_id>/role", methods=["PUT"])
 def set_guest_role(guest_id):
     """Rôle et ajustements fins d'UNE personne sur UN dossier (surcharge `guest_roles`).
@@ -8540,6 +8696,13 @@ def share_data(token):
             _can(db, share, CAP_EDITER, guest=my_guest, project_id=p["id"]) for p in scope_projects),
         "role": my_role,  # [GUEST-ROLES] rôle de BASE (lien ou personne)
         "role_effective": my_role_effective,
+        # [GUEST-ROLES V2 · T4b] « Gérer les accès » ne s'affiche QUE pour un Admin (maquette ①).
+        # Vrai dès qu'on administre UN dossier du périmètre — l'admin-ship se gagne par surcharge
+        # ou par propriété (créateur = admin de naissance), donc souvent sur un sous-dossier seul.
+        # Le bouton n'est qu'un raccourci : la route `/share/<token>/admin` revérifie tout (le
+        # front ne décide jamais d'un droit, invariant 5).
+        "can_admin": my_guest is not None and any(
+            _can(db, share, CAP_ADMINISTRER, guest=my_guest, project_id=p["id"]) for p in scope_projects),
         # can_add global = au moins un dossier du périmètre addable (zone/perso inclus) ; l'UI filtre
         # le sélecteur de dossier sur `project.can_add`. [GUEST-ROLES passe 2]
         "can_add": (CAP_CREER in my_link_caps) or any(p.get("can_add") for p in scope_projects),
@@ -11057,7 +11220,18 @@ def import_links():
 
         # INSERT (mémo nouveau OU 'duplicate' explicite). Le dédup par contenu est court-circuité
         # pour une duplication demandée (on VEUT une copie), et l'uid est régénéré.
-        if res != "duplicate":
+        # [IMPORT-CONTENT-DEDUP-FIX] ...et il ne s'applique QU'AUX MÉMOS SANS UID.
+        # Ce garde-fou date d'avant les uid (v1 : des chaînes de texte, rien pour les distinguer) ;
+        # le contenu était alors la seule identité disponible. Depuis, l'uid est l'identité — et
+        # deux mémos distincts partagent LÉGITIMEMENT un texte : « J3 matin. », une réservation
+        # recopiée d'un ancien voyage. Un mémo porteur d'un uid qui n'a pas été retrouvé plus haut
+        # est donc un mémo NOUVEAU, point : l'insérer est la seule réponse juste.
+        # Le défaut était silencieux et coûteux — 12 mémos sur 51 disparus à l'import d'un export
+        # de « Voyage Japon » (diagnostic Cowork) : les vols et hôtels entraient en collision avec
+        # un ancien voyage de démo, et Ueno/Akihabara l'un avec l'autre — donc perdus même sur une
+        # base vierge. `skipped_memos` comptait ces pertes comme des doublons évités.
+        # Les imports legacy sans uid gardent leur anti-doublon par contenu, inchangé.
+        if res != "duplicate" and not uid:
             dedup_key = content if content else "\x00title:" + title
             if dedup_key in existing_memos:
                 skipped_memos += 1
@@ -11075,7 +11249,15 @@ def import_links():
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
         ).fetchone()
-        _import_memo_attachments(db, memos_by_uid[new_uid]["id"], new_uid, memo.get("attachments"), now)  # [ATTACHMENTS] v22
+        # [IMPORT-CONTENT-DEDUP-FIX] `memo` peut être une simple CHAÎNE (export v1 : `memos` est
+        # une liste de textes). Appeler `.get()` dessus levait une AttributeError non rattrapée →
+        # **500 sur tout import v1 comportant un mémo au contenu neuf**, c'est-à-dire sur la
+        # compat ascendante que l'invariant 1 promet depuis toujours. Défaut ANTÉRIEUR à ce lot,
+        # trouvé en écrivant les tests : la branche legacy n'était couverte nulle part.
+        _import_memo_attachments(
+            db, memos_by_uid[new_uid]["id"], new_uid,
+            memo.get("attachments") if isinstance(memo, dict) else None, now,   # [ATTACHMENTS] v22
+        )
         imported_memos += 1
 
     existing_hist = {
