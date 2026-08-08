@@ -6400,6 +6400,12 @@ def delete_guest(guest_id):
         scope = _share_scope_project_ids(db, g)
         _delete_votes_for_email(db, g["email"], scope)
         _delete_hearts_for_email(db, g["email"], scope)  # [FESTIVAL-VOTE]
+    # [GUEST-ROLES V2 · T2-FIX] Cascade des tables T1/T2 (constat de la passe Cowork sur 211) :
+    # sans elle, retirer un accès laissait derrière lui la surcharge de rôle et les demandes de cet
+    # invité. Inertes — plus aucun `guest_id` ne les atteint — mais elles s'accumulent et la fiche
+    # invité de T3 les relirait. On nettoie à la source plutôt que d'apprendre à vivre avec.
+    db.execute("DELETE FROM guest_roles WHERE guest_id = ?", (guest_id,))
+    db.execute("DELETE FROM role_requests WHERE guest_id = ?", (guest_id,))
     db.execute("DELETE FROM share_guests WHERE id = ?", (guest_id,))
     db.commit()
     return "", 204
@@ -8043,6 +8049,17 @@ def share_data(token):
         # [GUEST-ROLES V2] miroir de la route : `creer-vote` (≠ `creer`) + permission 'guests'.
         p["can_create_vote"] = (me is not None and _resolve_vote_create(db, p["id"]) == "guests"
                                 and _can(db, share, CAP_CREER_VOTE, guest=my_guest, project_id=p["id"]))
+    # [T2-FIX] Rôle EFFECTIF le plus haut du périmètre : le rôle de base peut être relevé par une
+    # surcharge accordée sur un dossier. Sans lui, le survol du chip annonçait « Lecteur » à
+    # quelqu'un devenu Commentateur — la même demi-vérité que le chip lui-même.
+    # ⚠ `my_guest` est None pour un lecteur ANONYME : `_row_get(None, …)` lève un TypeError que son
+    # try/except (KeyError, IndexError) ne rattrape pas. La garde est donc explicite.
+    my_role_effective = my_role
+    if my_guest is not None:
+        for _p in scope_projects:
+            _gr = _resolve_guest_overrides(db, my_guest["id"], _p["id"])[0]
+            if _gr and _ROLE_RANK.get(_gr, 0) > _ROLE_RANK.get(my_role_effective, 0):
+                my_role_effective = _gr
     att_map = _attachments_map(db, [r["id"] for r in rows], lambda a: "/share/" + token + "/attachment/" + str(a["id"]))  # [ATTACHMENTS]
     hmap = _hearts_map(db, memo_ids)  # [FESTIVAL-VOTE] ❤️ par mémo (scope du partage)
     # [MEMO-LINKS] liens BORNÉS au scope du partage : un lien vers un mémo hors scope est
@@ -8072,12 +8089,23 @@ def share_data(token):
         # « lecture seule » : sinon on montrerait MOINS que ce que le serveur autorise.
         "can_edit": (CAP_EDITER in my_link_caps) or any(
             _can(db, share, CAP_EDITER, guest=my_guest, project_id=p["id"]) for p in scope_projects),
-        "role": my_role,  # [GUEST-ROLES]
+        "role": my_role,  # [GUEST-ROLES] rôle de BASE (lien ou personne)
+        "role_effective": my_role_effective,
         # can_add global = au moins un dossier du périmètre addable (zone/perso inclus) ; l'UI filtre
         # le sélecteur de dossier sur `project.can_add`. [GUEST-ROLES passe 2]
         "can_add": (CAP_CREER in my_link_caps) or any(p.get("can_add") for p in scope_projects),
         "can_comment_default": CAP_COMMENTER in my_link_caps,
         "can_vote_default": CAP_VOTER in my_link_caps,
+        # [T2-FIX] « lecture seule » est FAUX dès qu'on peut écrire quoi que ce soit, pas seulement
+        # éditer : un invité passé Commentateur sur le dossier racine voyait le composeur ET le chip
+        # « 👁 lecture seule » (écart relevé par la passe Cowork sur 211). `can_write` = « peut
+        # écrire quelque chose, quelque part dans le périmètre ». Dérivé des booléens DÉJÀ calculés
+        # par mémo et par dossier → aucun appel supplémentaire à `_guest_caps`.
+        "can_write": bool(
+            (my_link_caps & {CAP_COMMENTER, CAP_VOTER, CAP_COCHER, CAP_CREER, CAP_EDITER})
+            or any(p.get("can_add") for p in scope_projects)
+            or any(m.get("can_comment") or m.get("can_vote") or m.get("can_edit") for m in memos)
+        ),
         # [GUEST-ROLES V2 · T2] accueil (§5) : mot de bienvenue paramétré par l'owner (vide = pas de
         # bandeau) et état de la demande de rôle de CET invité (jamais celle d'un autre).
         "welcome_message": _row_get(share, "welcome_message", "") or "",

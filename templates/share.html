@@ -3210,8 +3210,20 @@ function render() {
     vb.title = voteDeadlineTitle(_vproj);
     h.appendChild(vb);
   }
+  // [T2-FIX] Le chip de mode dit ce que l'invité peut VRAIMENT faire. Il n'avait que deux
+  // extrêmes — « modifiable » ou « lecture seule » — si bien qu'un Commentateur (rôle du lien ou
+  // rôle accordé sur le dossier) voyait « 👁 lecture seule » avec un composeur juste en dessous.
+  // Le serveur tranche : `can_edit` = éditeur quelque part, `can_write` = peut écrire QUELQUE
+  // CHOSE quelque part (commenter, voter, cocher, ajouter). Le survol dit le rôle exact.
   const modeEl = document.getElementById('mode'); modeEl.textContent = '';
-  modeEl.append(shareIcon(canEditNow() || DATA.can_edit ? 'pencil' : 'eye'), ' ' + (canEditNow() ? 'modifiable' : (DATA.can_edit ? 'sur validation' : 'lecture seule')));
+  const _appr = approved();
+  const _mode = (DATA.can_edit && _appr) ? 'modifiable'
+    : (DATA.can_write && _appr) ? 'participation'
+    : ((DATA.can_edit || DATA.can_write) ? 'sur validation' : 'lecture seule');
+  // `reply` = prendre la parole (il n'y a pas d'icône « message » dans cette page).
+  modeEl.append(shareIcon(_mode === 'modifiable' ? 'pencil' : (_mode === 'participation' ? 'reply' : 'eye')),
+                ' ' + _mode);
+  modeEl.title = roleLabel(DATA.role_effective || DATA.role || '');
   renderWelcome();   // [GUEST-ROLES V2 · T2] bandeau d'accueil + demande de rôle (§5)
   const pdesc = document.getElementById('pdesc');
   let curDesc = DATA.description || '';
