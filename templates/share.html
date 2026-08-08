@@ -950,6 +950,8 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 <nav id="snav" hidden></nav>
 <main>
   <div id="guest-banner" hidden></div>
+  <!-- [GUEST-ROLES V2 · T2] accueil : mot de bienvenue de l'owner + demande de rôle (§5). -->
+  <div id="welcome"></div>
   <div id="pdesc" hidden style="color:var(--muted);font-size:0.85rem;margin:0 0 0.7rem;white-space:pre-wrap"></div>
   <div id="pfiles"></div>
   <div id="tiles" hidden></div>
@@ -1418,6 +1420,34 @@ function markMemoSeen(memoId) {
   if (seenMarked.has(memoId)) return;
   seenMarked.add(memoId);
   fetch(API + '/memo/' + memoId + '/seen', { method: 'POST', headers: { 'X-Guest-Token': guestToken() } }).catch(() => {});
+}
+
+// [GUEST-ROLES V2 · T2] Accueil (§5) : le mot de bienvenue de l'owner et le bouton « demander un
+// rôle ». Le composant vit dans le partial (helper PUR) ; ici on ne fait que lui donner les données
+// du serveur et les callbacks. Le ✕ est mémorisé par TOKEN : masquer le mot d'accueil d'un partage
+// ne masque pas celui d'un autre, et le bouton de demande, lui, ne se masque jamais.
+function welcomeDismissed() { return localStorage.getItem('dashwelcome:' + TOKEN) === '1'; }
+function renderWelcome() {
+  const host = document.getElementById('welcome');
+  if (!host) return;
+  host.innerHTML = '';
+  const node = welcomePanel({
+    message: DATA.welcome_message || '',
+    request: DATA.role_request || {},
+    dismissed: welcomeDismissed(),
+    roleLabel: roleLabel,
+    onDismiss: () => { try { localStorage.setItem('dashwelcome:' + TOKEN, '1'); } catch (_) {} },
+    onRequest: async (role) => {
+      const r = await fetch(API + '/role-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+        body: JSON.stringify({ role }),
+      }).catch(() => null);
+      if (r && r.ok) { notify('Demande envoyée au propriétaire.'); await load(); }
+      else notify('Demande impossible.', { error: true });
+    },
+  });
+  if (node) host.appendChild(node);
 }
 
 // Champ commentaire invité (avec priorité + mention + parent éventuel).
@@ -3182,6 +3212,7 @@ function render() {
   }
   const modeEl = document.getElementById('mode'); modeEl.textContent = '';
   modeEl.append(shareIcon(canEditNow() || DATA.can_edit ? 'pencil' : 'eye'), ' ' + (canEditNow() ? 'modifiable' : (DATA.can_edit ? 'sur validation' : 'lecture seule')));
+  renderWelcome();   // [GUEST-ROLES V2 · T2] bandeau d'accueil + demande de rôle (§5)
   const pdesc = document.getElementById('pdesc');
   let curDesc = DATA.description || '';
   if (PFILTER !== 'all') {

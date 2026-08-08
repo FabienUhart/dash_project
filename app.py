@@ -1027,6 +1027,29 @@ def init_db():
             "UPDATE shares SET role = CASE WHEN can_edit = 1 THEN 'editor' ELSE 'commenter' END "
             "WHERE COALESCE(role, '') = ''"
         )
+    # ───────── [GUEST-ROLES V2 · T2] accueil : `welcome_role` + message, et rôle PAR INVITÉ ─────────
+    # §11.6 : `welcome_role` est la valeur COPIÉE À L'ARRIVÉE — à ne jamais confondre avec
+    # `projects.role_floor`, qui est un plancher PERMANENT appliqué à tout le monde en continu.
+    # Backfill = le rôle actuel du lien (même règle que `_share_role`, `can_edit` en repli) : un
+    # nouvel arrivant sur un lien existant obtient donc exactement ce qu'il obtenait hier. Le défaut
+    # « Lecteur » ne vaut que pour les partages créés SANS rôle explicite.
+    if "welcome_role" not in scols:
+        conn.execute("ALTER TABLE shares ADD COLUMN welcome_role TEXT DEFAULT ''")
+        conn.execute(
+            "UPDATE shares SET welcome_role = "
+            "COALESCE(NULLIF(role, ''), CASE WHEN can_edit = 1 THEN 'editor' ELSE 'viewer' END) "
+            "WHERE COALESCE(welcome_role, '') = ''"
+        )
+    # Message d'accueil affiché au nouvel approuvé (§5). Vide = aucun bandeau : zéro rupture.
+    if "welcome_message" not in scols:
+        conn.execute("ALTER TABLE shares ADD COLUMN welcome_message TEXT DEFAULT ''")
+    # Rôle porté par L'INVITÉ (§5 « le rôle descend du lien vers l'invité à l'arrivée »). '' = hérite
+    # du lien, ce qui est l'état de TOUS les invités existants → comportement strictement identique.
+    # C'est ce qui rend les « deux étages » possibles : modifier le lien ne touche plus les personnes
+    # déjà entrées, et une personne se règle sans toucher le lien.
+    gcols = {r[1] for r in conn.execute("PRAGMA table_info(share_guests)").fetchall()}
+    if "role" not in gcols:
+        conn.execute("ALTER TABLE share_guests ADD COLUMN role TEXT DEFAULT ''")
     # [GUEST-ROLES] Overrides granulaires (abaissent l'exigence d'UNE action sur UN mémo/dossier,
     # héritables comme is_trip). NON exportés (donnée d'atelier, précédent vote_excluded) : '' = hérite,
     # 'all' = ouvert à tous les invités (viewer). Absents = compat ascendante v1→v23 identique.
@@ -4821,6 +4844,30 @@ def _share_role(share):
     return "editor" if share["can_edit"] else "viewer"
 
 
+def _guest_link_role(share, guest=None):
+    """[GUEST-ROLES V2 · T2] Rôle de BASE d'un invité sur un lien : le sien (`share_guests.role`,
+    copié de `welcome_role` à son arrivée) s'il en a un, sinon celui du LIEN.
+
+    C'est le premier des « deux étages » de la spec §5 : une fois la personne entrée, son rôle lui
+    appartient — modifier le lien après coup ne vaut que pour les futurs arrivants. Un invité
+    d'avant T2 a `role = ''` : il hérite du lien, donc rien ne change pour lui."""
+    r = _clean_role(_row_get(guest, "role", "")) if guest is not None else ""
+    return r or _share_role(share)
+
+
+def _clean_welcome_message(value):
+    """Mot d'accueil : TEXTE PUR, jamais de HTML (il est rendu en `textContent` côté invité, comme
+    les extraits). 400 caractères suffisent à dire bonjour."""
+    txt = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return re.sub(r"\s+", " ", html.unescape(txt)).strip()[:400]
+
+
+def _welcome_role(share):
+    """Rôle d'accueil du lien (§11.6). Repli sur le rôle du lien pour les partages d'avant T2 dont
+    la colonne n'aurait pas été backfillée (base restaurée d'un export ancien, par exemple)."""
+    return _clean_role(_row_get(share, "welcome_role", "")) or _share_role(share)
+
+
 def _clean_perm(value):
     """Override d'action : '' = hérite (matrice), 'all' = ouvert à tous les invités (viewer)."""
     v = (str(value or "")).strip().lower()
@@ -4990,38 +5037,40 @@ def _guest_caps(db, share, guest=None, project_id=None, memo_row=None):
     """CAPACITÉS EFFECTIVES d'un invité sur un dossier (spec §1 — la seule vérité).
 
     Ordre de composition (§11.6 « le plus permissif gagne », puis retrait absolu) :
-      1. rôle du LIEN (`shares.role`, repli `can_edit`) ;
-      2. ∪ plancher de zone `role_floor` (par ressource — SURVIT) ;
-      3. ∪ éditeur plein si l'invité possède un dossier ancêtre (dossier perso — SURVIT) ;
-      4. ∪ rôle et `caps_add` de la ligne `guest_roles` la plus proche (par personne) ;
-      5. ∪ `perm_comment`/`perm_vote = 'all'` du mémo ou de son sous-arbre (par ressource, ouvert
-         à TOUS les invités — SURVIT) ;
-      6. − `caps_remove` : retrait ciblé ABSOLU, il tient même en zone élevée (§11.6).
-    Aucune étape n'abaisse, sauf la 6 — qui est faite pour ça."""
+      BASE : le rôle de la PERSONNE (`share_guests.role`, copié de `welcome_role` à l'arrivée),
+             à défaut celui du LIEN (`shares.role`, repli `can_edit`) — [T2].
+             Un `role` posé sur un DOSSIER (`guest_roles`) REMPLACE cette base pour son sous-arbre :
+             c'est « le rôle de cette personne ICI », pas un bonus. Sans ce remplacement, §5 serait
+             inopérant — on ne saurait que monter, jamais régler.
+      ÉLÉVATIONS PAR RESSOURCE, toujours unionnées (« le plus permissif gagne », §11.6) :
+             plancher de zone `role_floor` · dossier perso (éditeur plein) ·
+             `perm_comment`/`perm_vote = 'all'` du mémo ou de son sous-arbre.
+      PUIS : ∪ `caps_add` (par personne), − `caps_remove` (retrait ciblé ABSOLU, appliqué en
+             DERNIER : il tient même en zone élevée).
+    Rien n'abaisse en dehors de `caps_remove` et du remplacement explicite de rôle."""
     if project_id is None and memo_row is not None:
         project_id = _row_get(memo_row, "project_id", None)
-    caps = set(_ROLE_CAPS.get(_share_role(share), _ROLE_CAPS["viewer"]))
-    remove = set()
+    base = set(_ROLE_CAPS.get(_guest_link_role(share, guest), _ROLE_CAPS["viewer"]))
+    elevations = set()   # par RESSOURCE : jamais perdues, même si le rôle est remplacé
+    add, remove = set(), set()
     if project_id is not None:
         fl = _resolve_role_floor(db, project_id)
         if fl:
-            caps |= _ROLE_CAPS.get(fl, frozenset())
+            elevations |= _ROLE_CAPS.get(fl, frozenset())
         ge = ((guest["email"] if guest else "") or "").strip().lower()
         if ge and _owns_guest_space_folder(db, ge, project_id):
-            caps |= _ROLE_CAPS["editor"]
+            elevations |= _ROLE_CAPS["editor"]
         gid = _row_get(guest, "id", None) if guest is not None else None
         if gid:
-            grole, add, rem = _resolve_guest_overrides(db, gid, project_id)
+            grole, add, remove = _resolve_guest_overrides(db, gid, project_id)
             if grole:
-                caps |= _ROLE_CAPS.get(grole, frozenset())
-            caps |= add
-            remove = rem
+                base = set(_ROLE_CAPS.get(grole, frozenset()))
     if memo_row is not None:
         if _resolve_memo_perm(db, memo_row, "comment") == "all":
-            caps.add(CAP_COMMENTER)
+            elevations.add(CAP_COMMENTER)
         if _resolve_memo_perm(db, memo_row, "vote") == "all":
-            caps.add(CAP_VOTER)
-    return caps - remove
+            elevations.add(CAP_VOTER)
+    return (base | elevations | add) - remove
 
 
 def _can(db, share, cap, guest=None, memo_row=None, project_id=None):
@@ -5033,7 +5082,7 @@ def _can_anywhere(db, share, cap, guest=None):
     """Même question, mais « quelque part dans le périmètre du partage » — pour les rares routes
     SANS cible (ex. `geocode`) : le lien, puis chaque dossier du scope (E6). S'arrête au premier
     oui ; l'immense majorité des cas répond dès le rôle du lien, sans toucher la base."""
-    if cap in _ROLE_CAPS.get(_share_role(share), frozenset()):
+    if cap in _ROLE_CAPS.get(_guest_link_role(share, guest), frozenset()):
         return True
     for pid in _share_scope_project_ids(db, share):
         if _can(db, share, cap, guest=guest, project_id=pid):
@@ -5110,8 +5159,10 @@ def _ensure_home_access(db, home_id, email, name):
         share_id = share["id"]
     else:
         share_id = db.execute(
-            "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin) "
-            "VALUES (?, 'project', ?, 1, 'editor', ?, ?)",
+            # [T2] Chez soi, on arrive éditeur : `welcome_role` explicite, sinon le défaut Lecteur
+            # ferait entrer l'invité en lecture seule dans son PROPRE espace.
+            "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin, welcome_role) "
+            "VALUES (?, 'project', ?, 1, 'editor', ?, ?, 'editor')",
             (secrets.token_urlsafe(24), home_id, now, f"{secrets.randbelow(10000):04d}"),
         ).lastrowid
     existing = db.execute(
@@ -5204,6 +5255,71 @@ def _role_gate(db, share, action, memo_row=None, project_id=None, guest=None, re
     if not _role_allows(db, share, action, guest=guest, memo_row=memo_row, project_id=project_id):
         return None, (jsonify({"error": "non autorisé"}), 403)
     return guest, None
+
+
+# ───────────────── [GUEST-ROLES V2 · T2] demandes de rôle (spec §5) ─────────────────
+# « Bienvenue — tu es Lecteur ; tu peux demander un rôle. » Un invité approuvé demande, l'owner
+# accorde en un clic. L'accord écrit une surcharge `guest_roles` que le moteur T1 lit déjà : aucune
+# mécanique neuve, aucun droit qui ne passe pas par `can()`.
+# Bornes VOLONTAIRES : on ne peut demander que Commentateur ou Éditeur. Modérateur et
+# Administrateur relèvent de la DÉLÉGATION (T4) et ne se réclament pas — ils se confient.
+REQUESTABLE_ROLES = ("commenter", "editor")
+
+
+def _clean_requested_role(value):
+    v = (str(value or "")).strip().lower()
+    return v if v in REQUESTABLE_ROLES else ""
+
+
+def _share_request_project(db, share):
+    """Dossier visé par une demande sur ce partage : la cible pour un partage de dossier, le
+    dossier PORTEUR pour un partage de mémo (une surcharge se pose toujours sur un dossier).
+    None = demande impossible (mémo sans dossier) : on refuse plutôt que d'inventer une cible."""
+    if share["kind"] == "project":
+        return share["target_id"]
+    row = db.execute("SELECT project_id FROM memos WHERE id = ?", (share["target_id"],)).fetchone()
+    return (row["project_id"] or None) if row else None
+
+
+def _pending_role_request(db, guest_id, project_id):
+    if not guest_id or not project_id:
+        return None
+    return db.execute(
+        "SELECT * FROM role_requests WHERE guest_id = ? AND project_id = ? AND status = 'pending' "
+        "ORDER BY id DESC LIMIT 1",
+        (guest_id, project_id),
+    ).fetchone()
+
+
+def _role_request_payload(db, share, guest):
+    """Ce que l'invité voit de SA demande : le rôle demandé et rien d'autre. Un refus n'est jamais
+    annoncé (§ « refus silencieux ») — la demande disparaît, comme si elle n'avait pas eu lieu.
+
+    On ne propose plus de demander à qui détient DÉJÀ `editer` sur le dossier : le plus haut rôle
+    demandable est Éditeur, donc l'invité n'aurait rien à y gagner — et un bouton qui ne sert à
+    rien est un bouton qui ment."""
+    pid = _share_request_project(db, share)
+    pend = _pending_role_request(db, _row_get(guest, "id", None), pid) if guest is not None else None
+    served = bool(pid) and _can(db, share, CAP_EDITER, guest=guest, project_id=pid)
+    return {
+        "can_request": bool(guest is not None and pid and not served),
+        "pending": (_clean_requested_role(_row_get(pend, "role_requested", "")) if pend else ""),
+        "roles": list(REQUESTABLE_ROLES),
+    }
+
+
+def _apply_welcome_role(db, guest_id, share):
+    """[GUEST-ROLES V2 · T2] À l'ARRIVÉE : copie `welcome_role` du lien sur l'invité, une seule
+    fois. Ne touche JAMAIS un invité qui a déjà un rôle propre (une ré-approbation, ou le PIN
+    resaisi, ne doit pas écraser un réglage individuel — c'est la promesse « les surcharges
+    individuelles ne sont jamais écrasées par une action de masse », §5). Ne commit pas : l'appelant
+    le fait dans sa transaction."""
+    if not guest_id or share is None:
+        return
+    db.execute(
+        "UPDATE share_guests SET role = ? WHERE id = ? AND COALESCE(role, '') = ''",
+        (_welcome_role(share), guest_id),
+    )
 
 
 def _guest_for_email(db, share, email):
@@ -5639,9 +5755,11 @@ def grant_guest_project():
         token = secrets.token_urlsafe(24)
         pin = f"{secrets.randbelow(10000):04d}"
         cur = db.execute(
-            "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin) "
-            "VALUES (?, 'project', ?, ?, ?, ?, ?)",
-            (token, project_id, can_edit, role, now, pin),
+            # [T2] L'octroi owner porte SON rôle comme rôle d'accueil : celui que Fabien vient de
+            # choisir dans la pop-in, pas le défaut Lecteur.
+            "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin, welcome_role) "
+            "VALUES (?, 'project', ?, ?, ?, ?, ?, ?)",
+            (token, project_id, can_edit, role, now, pin, role),
         )
         share_id, reused = cur.lastrowid, False
     existing = db.execute(
@@ -5656,9 +5774,9 @@ def grant_guest_project():
         )
     else:
         cur = db.execute(
-            "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at) "
-            "VALUES (?, ?, ?, ?, 'approved', ?, ?)",
-            (share_id, email, name, secrets.token_urlsafe(24), now, now),
+            "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at, role) "
+            "VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)",
+            (share_id, email, name, secrets.token_urlsafe(24), now, now, role),
         )
         guest_id = cur.lastrowid
     db.commit()
@@ -5693,9 +5811,14 @@ def create_share():
     # pour rester cohérent avec le code historique. Repli sur can_edit si role absent (compat API).
     role = _clean_role(data.get("role")) or ("editor" if data.get("can_edit") else "viewer")
     can_edit = 1 if role == "editor" else 0
+    # [GUEST-ROLES V2 · T2] Rôle d'ACCUEIL du nouveau lien (§5) : celui que l'owner vient de
+    # choisir. Le défaut « Lecteur » de la spec ne s'applique donc qu'à un partage créé SANS rôle
+    # explicite — sinon créer un lien « Éditeur » ferait entrer ses invités en lecture seule.
+    welcome_role = _clean_role(data.get("welcome_role")) or role
+    wmsg = _clean_welcome_message(data.get("welcome_message"))
     cur = db.execute(
-        "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO shares (token, kind, target_id, can_edit, role, created_at, pin, "
+        "welcome_role, welcome_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             token,
             kind,
@@ -5704,6 +5827,8 @@ def create_share():
             role,
             datetime.now(timezone.utc).isoformat(),
             pin,
+            welcome_role,
+            wmsg,
         ),
     )
     db.commit()
@@ -5717,6 +5842,8 @@ def create_share():
                 "can_edit": bool(can_edit),
                 "role": role,
                 "pin": pin,
+                "welcome_role": welcome_role,
+                "welcome_message": wmsg,
             }
         ),
         201,
@@ -5741,12 +5868,23 @@ def update_share(share_id):
     else:
         role = _share_role(existing)
     can_edit = 1 if role == "editor" else 0
+    # [GUEST-ROLES V2 · T2] Réglages d'ACCUEIL du lien (§5, « lien collé dans WhatsApp ») : ils ne
+    # valent que pour les FUTURS arrivants — les personnes déjà entrées portent leur propre rôle et
+    # ne bougent pas. Champs OPTIONNELS : absents = inchangés (la saisie arrive avec la page
+    # Partages V2 en T3 ; ici, seule l'API existe).
+    welcome_role = _clean_role(data.get("welcome_role")) if "welcome_role" in data else ""
+    if not welcome_role:
+        welcome_role = _welcome_role(existing)
+    wmsg = existing["welcome_message"] if "welcome_message" not in data else _clean_welcome_message(
+        data.get("welcome_message"))
     db.execute(
-        "UPDATE shares SET pin = ?, can_edit = ?, role = ? WHERE id = ?",
-        (pin, can_edit, role, share_id),
+        "UPDATE shares SET pin = ?, can_edit = ?, role = ?, welcome_role = ?, welcome_message = ? "
+        "WHERE id = ?",
+        (pin, can_edit, role, welcome_role, wmsg, share_id),
     )
     db.commit()
-    return jsonify({"id": share_id, "pin": pin, "can_edit": bool(can_edit), "role": role})
+    return jsonify({"id": share_id, "pin": pin, "can_edit": bool(can_edit), "role": role,
+                    "welcome_role": welcome_role, "welcome_message": wmsg})
 
 
 @app.route("/api/shares/<int:share_id>", methods=["DELETE"])
@@ -6060,6 +6198,18 @@ def list_guests():
     for r in rows:
         d = dict(r)
         d.pop("guest_token", None)
+        # [GUEST-ROLES V2 · T2] Le chip de la fiche invité doit dire ce que CETTE PERSONNE peut,
+        # pas ce que le lien permet : sans ça, un invité promu par un accord de demande restait
+        # affiché « lecture » — l'owner venait pourtant de cliquer « Accorder ». On résout donc le
+        # rôle effectif sur le dossier visé (rôle propre, surcharges `guest_roles`, zone, dossier
+        # perso), exactement comme le fera la route quand l'invité écrira.
+        share = db.execute("SELECT * FROM shares WHERE id = ?", (r["share_id"],)).fetchone()
+        pid = _share_request_project(db, share) if share else None
+        if share:
+            d["can_edit"] = _can(db, share, CAP_EDITER, guest=r, project_id=pid)
+            grole = _resolve_guest_overrides(db, r["id"], pid)[0] if pid else ""
+            d["role_effective"] = grole or _guest_link_role(share, r)
+            d["welcome_role"] = _welcome_role(share)
         if r["kind"] == "memo":
             t = db.execute(
                 "SELECT content, title FROM memos WHERE id = ?", (r["target_id"],)
@@ -6456,15 +6606,88 @@ def activity():
         "AND COALESCE(deleted_at, '') = ''",   # [COMMENTS-V2 addendum] pas de 🔔 sur une tombale
         (seen_at,),
     ).fetchone()[0]
+    # [GUEST-ROLES V2 · T2] Les demandes de rôle voyagent avec l'activité : l'owner les voit là où
+    # il voit déjà « ce que les invités ont fait », et décide sans second appel ni second écran.
+    role_reqs = _pending_role_requests(db)
     return jsonify(
         {
             "pending_guests": pending,
             "unseen": unseen,
+            "role_requests": role_reqs,
             "revisions": out_rev,
             "data_version": _data_version(db),
             "build_version": BUILD_VERSION,  # [UPDATE-PROMPT] invite si ≠ version embarquée au rendu
         }
     )
+
+
+# ───────── [GUEST-ROLES V2 · T2] demandes de rôle — côté owner (derrière Authelia) ─────────
+# Aucune route publique nouvelle : l'invité demande sous /share/*, l'owner décide ici.
+
+def _pending_role_requests(db):
+    """Demandes EN ATTENTE, enrichies de quoi décider sans rien chercher : qui, quel dossier, quel
+    rôle demandé, quel rôle déjà détenu. Les demandes tranchées ne remontent pas (c'est une file)."""
+    out = []
+    for r in db.execute(
+        "SELECT rr.*, g.name, g.email, g.role AS guest_role, g.share_id, p.name AS project_name "
+        "FROM role_requests rr "
+        "JOIN share_guests g ON g.id = rr.guest_id "
+        "LEFT JOIN projects p ON p.id = rr.project_id "
+        "WHERE rr.status = 'pending' ORDER BY rr.created_at DESC, rr.id DESC LIMIT 50"
+    ).fetchall():
+        share = db.execute("SELECT * FROM shares WHERE id = ?", (r["share_id"],)).fetchone()
+        out.append({
+            "id": r["id"],
+            "guest_id": r["guest_id"],
+            "name": r["name"] or r["email"],
+            "email": r["email"],
+            "project_id": r["project_id"],
+            "project": r["project_name"] or "",
+            "role_requested": r["role_requested"],
+            "current_role": (_clean_role(r["guest_role"]) or (_share_role(share) if share else "")),
+            "created_at": r["created_at"],
+        })
+    return out
+
+
+@app.route("/api/role-requests", methods=["GET"])
+def list_role_requests():
+    return jsonify(_pending_role_requests(get_db()))
+
+
+@app.route("/api/role-requests/<int:req_id>", methods=["POST"])
+def decide_role_request(req_id):
+    """Accord ou refus en UN clic. L'accord écrit une surcharge `guest_roles` (invité × dossier) —
+    le moteur T1 la lit déjà, l'invité gagne la capacité SANS se ré-inscrire ni recharger un lien.
+    Le refus ne notifie rien : la demande disparaît, l'invité n'est pas humilié par un « refusé ».
+    Owner-only (derrière Authelia)."""
+    data = request.get_json(silent=True) or {}
+    decision = (data.get("decision") or "").strip().lower()
+    if decision not in ("grant", "refuse"):
+        return jsonify({"error": "decision must be grant or refuse"}), 400
+    db = get_db()
+    r = db.execute("SELECT * FROM role_requests WHERE id = ?", (req_id,)).fetchone()
+    if not r or r["status"] != "pending":
+        return jsonify({"error": "not found"}), 404
+    now = datetime.now(timezone.utc).isoformat()
+    role = _clean_requested_role(r["role_requested"])
+    if decision == "grant" and role:
+        # Upsert de la surcharge : le rôle accordé REMPLACE la base sur ce dossier et ses
+        # descendants (cf. `_guest_caps`). `caps_add`/`caps_remove` d'une ligne existante — posés à
+        # la main ou, demain, par la fiche invité de T3 — sont PRÉSERVÉS : on ne détruit jamais un
+        # réglage fin en accordant un rôle.
+        db.execute(
+            "INSERT INTO guest_roles (guest_id, project_id, role, caps_add, caps_remove, granted_by, granted_at) "
+            "VALUES (?, ?, ?, '[]', '[]', '', ?) "
+            "ON CONFLICT(guest_id, project_id) DO UPDATE SET role = excluded.role, granted_at = excluded.granted_at",
+            (r["guest_id"], r["project_id"], role, now),
+        )
+    db.execute(
+        "UPDATE role_requests SET status = ?, decided_at = ?, decided_by = '' WHERE id = ?",
+        ("granted" if decision == "grant" else "refused", now, req_id),
+    )
+    db.commit()
+    return jsonify({"id": req_id, "status": "granted" if decision == "grant" else "refused"})
 
 
 @app.route("/api/activity/seen", methods=["POST"])
@@ -7279,12 +7502,25 @@ def hub_approve(hub_token):
     # aussi les `rejected`, donc le PIN du hub annulait silencieusement une révocation. Seul
     # l'owner réactive (`PUT /api/guests/<id>`).
     now = datetime.now(timezone.utc).isoformat()
+    _hub_email = (hub["email"] or "").strip().lower()
+    # [T2] Les accès que CETTE cascade fait passer à « approuvé » sont des ARRIVÉES : ils reçoivent
+    # le rôle d'accueil de leur lien. Relevés AVANT l'UPDATE, sinon on ne saurait plus lesquels.
+    # Les invités DÉJÀ approuvés ne sont pas touchés : leur rôle continue de suivre le lien, comme
+    # hier — on ne fige personne au passage d'un simple PIN.
+    _arrivals = db.execute(
+        "SELECT id, share_id FROM share_guests "
+        "WHERE lower(email) = ? AND status NOT IN ('approved', 'rejected')",
+        (_hub_email,),
+    ).fetchall()
     db.execute(
         "UPDATE share_guests SET status = 'approved', "
         "approved_at = CASE WHEN COALESCE(approved_at,'')='' THEN ? ELSE approved_at END "
         "WHERE lower(email) = ? AND status NOT IN ('approved', 'rejected')",
-        (now, (hub["email"] or "").strip().lower()),
+        (now, _hub_email),
     )
+    for _a in _arrivals:
+        _s = db.execute("SELECT * FROM shares WHERE id = ?", (_a["share_id"],)).fetchone()
+        _apply_welcome_role(db, _a["id"], _s)
     # [HUB-SESSION] Bon PIN → session serveur (un token par hub, partagé par les appareils),
     # transportée en cookie HttpOnly. Générée au premier besoin, invalidée par rotate/rotate-pin.
     session_token = _row_get(hub, "session_token") or ""
@@ -7306,7 +7542,9 @@ def _hub_approved_shares(db, email):
     cet e-mail (invariant 5). Chaque share : token, can_edit, kind, target, desc_set, spec."""
     email = (email or "").strip().lower()
     rows = db.execute(
-        "SELECT s.id, s.token, s.kind, s.target_id, s.can_edit, s.role "
+        # [T2] `g.role` = le rôle PROPRE de cette personne sur ce lien ('' = hérite du lien).
+        "SELECT s.id, s.token, s.kind, s.target_id, s.can_edit, s.role, "
+        "s.welcome_role, g.role AS guest_role "
         "FROM shares s JOIN share_guests g ON g.share_id = s.id "
         "WHERE lower(g.email) = ? AND g.status = 'approved' ORDER BY s.id",
         (email,),
@@ -7323,10 +7561,18 @@ def _hub_approved_shares(db, email):
         else:
             desc = set()
             spec = 0  # un share mémo est le plus spécifique possible
-        role = _share_role(r)  # [GUEST-ROLES]
+        # [T2] Le rôle qui compte pour CETTE personne : le sien s'il existe, sinon celui du lien.
+        role = _clean_role(_row_get(r, "guest_role", "")) or _share_role(r)
         out.append({
-            "id": r["id"], "token": r["token"], "can_edit": bool(r["can_edit"]),
+            "id": r["id"], "token": r["token"],
+            # [T2] `can_edit` = éditeur POUR CETTE PERSONNE (le lien peut l'être sans qu'elle le soit).
+            "can_edit": _ROLE_RANK.get(role, 0) >= _ROLE_RANK["editor"],
             "role": role, "kind": r["kind"], "target_id": r["target_id"], "desc": desc, "spec": spec,
+            # `role` ci-dessus porte DÉJÀ le rôle propre de la personne : ce dict passe ensuite à
+            # `_can(db, win, …)`, où `_share_role(win)` le relira tel quel. Les deux champs bruts
+            # sont conservés pour la lisibilité et pour le payload du hub.
+            "welcome_role": _row_get(r, "welcome_role", ""),
+            "guest_role": _row_get(r, "guest_role", ""),
         })
     return out
 
@@ -7337,6 +7583,21 @@ def _hub_winner(covering):
     return sorted(
         covering, key=lambda s: (-_ROLE_RANK.get(s.get("role", "viewer"), 0), s["spec"], s["id"])
     )[0]
+
+
+def _hub_root_welcome(db, s, email):
+    """[GUEST-ROLES V2 · T2] Accueil d'une racine du hub : le mot de bienvenue du lien et l'état de
+    la demande de rôle de CETTE personne. `s` est un dict de `_hub_approved_shares` — on relit le
+    partage complet, qui seul porte `welcome_message`."""
+    share = db.execute("SELECT * FROM shares WHERE id = ?", (s["id"],)).fetchone()
+    if not share:
+        return {"welcome_message": "", "role_request": {"can_request": False, "pending": "",
+                                                        "roles": list(REQUESTABLE_ROLES)}}
+    guest = _guest_for_email(db, share, email)
+    return {
+        "welcome_message": _row_get(share, "welcome_message", "") or "",
+        "role_request": _role_request_payload(db, share, guest),
+    }
 
 
 def _hub_proof(db, hub):
@@ -7520,6 +7781,10 @@ def hub_data(hub_token):
                 "role": s.get("role", "viewer"),  # [GUEST-ROLES]
                 "can_add": _can(db, s, CAP_CREER, guest=_guest_for_email(db, s, hub["email"]),
                                 project_id=s["target_id"]),  # [GUEST-ROLES V2] E2
+                # [T2] accueil et demande de rôle, PAR DOSSIER : le hub agrège plusieurs partages,
+                # chacun avec son mot d'accueil et sa file. L'écriture repart, elle, sur
+                # /share/<token>/role-request avec le guest_token du dossier (aucune route de hub).
+                **_hub_root_welcome(db, s, hub["email"]),
                 "root_id": s["target_id"],
                 "label": p["name"], "emoji": p["emoji"], "color": p["color"],
             })
@@ -7685,7 +7950,11 @@ def share_data(token):
             # n'ouvrent jamais leur hub (lien direct). Guest APPROUVÉ (filtré par le SELECT) uniquement,
             # jamais anonyme/pending. Idempotent (dédup par e-mail), 1 SELECT/req.
             _ensure_guest_home(db, my_email, grow["name"])
-    my_role = _share_role(share)  # [GUEST-ROLES] rôle du lien
+    # [T2] Le rôle annoncé à la page est celui de LA PERSONNE (le sien s'il en a un, sinon celui du
+    # lien) — sinon l'UI afficherait les droits du lien à quelqu'un qui ne les a pas, et le serveur
+    # refuserait ensuite : exactement le genre d'écart que l'invariant « l'UI ne fait que refléter »
+    # interdit.
+    my_role = _guest_link_role(share, my_guest)
     my_link_caps = _guest_caps(db, share, guest=my_guest)  # capacités du LIEN seul (sans dossier)
     rows = _share_scope_memos(db, share)
     memos = []
@@ -7796,13 +8065,23 @@ def share_data(token):
         "projects": scope_projects,
         "root_id": share["target_id"] if share["kind"] == "project" else None,
         "kind": share["kind"],
-        "can_edit": bool(share["can_edit"]),
+        # [T2] `can_edit` suit lui aussi la personne : un lien éditeur dont l'invité est arrivé
+        # Lecteur ne doit pas faire apparaître les boutons d'édition. Et symétriquement — même
+        # logique que `can_add` juste en dessous — il suffit d'être éditeur QUELQUE PART dans le
+        # périmètre (surcharge accordée sur un sous-dossier) pour que la page cesse de s'annoncer
+        # « lecture seule » : sinon on montrerait MOINS que ce que le serveur autorise.
+        "can_edit": (CAP_EDITER in my_link_caps) or any(
+            _can(db, share, CAP_EDITER, guest=my_guest, project_id=p["id"]) for p in scope_projects),
         "role": my_role,  # [GUEST-ROLES]
         # can_add global = au moins un dossier du périmètre addable (zone/perso inclus) ; l'UI filtre
         # le sélecteur de dossier sur `project.can_add`. [GUEST-ROLES passe 2]
         "can_add": (CAP_CREER in my_link_caps) or any(p.get("can_add") for p in scope_projects),
         "can_comment_default": CAP_COMMENTER in my_link_caps,
         "can_vote_default": CAP_VOTER in my_link_caps,
+        # [GUEST-ROLES V2 · T2] accueil (§5) : mot de bienvenue paramétré par l'owner (vide = pas de
+        # bandeau) et état de la demande de rôle de CET invité (jamais celle d'un autre).
+        "welcome_message": _row_get(share, "welcome_message", "") or "",
+        "role_request": _role_request_payload(db, share, my_guest),
         "memos": memos,
         "priorities": [
             dict(r)
@@ -7903,7 +8182,8 @@ def share_register(token):
                 "UPDATE share_guests SET status = 'approved', approved_at = ? WHERE id = ?",
                 (now, existing["id"]),
             )
-            db.commit()
+        _apply_welcome_role(db, existing["id"], share)  # [T2] sans jamais écraser un rôle propre
+        db.commit()
         _ensure_hub(db, email, name)  # [ONE-LINK-MULTI]
         _ensure_guest_home(db, email, name)  # [GUEST-HOME] espace perso (idempotent, ré-approbation raccroche)
         return jsonify(
@@ -7914,10 +8194,13 @@ def share_register(token):
     ).fetchone()[0] >= 30:
         return jsonify({"error": "trop de demandes pour ce lien"}), 429
     gtoken = secrets.token_urlsafe(24)
+    # [T2] Le nouvel arrivant reçoit le rôle d'ACCUEIL du lien (§5), pas le rôle du lien : c'est
+    # ce qui permet de modifier le lien après coup sans toucher aux gens déjà entrés. Sur un lien
+    # d'avant T2, `welcome_role` a été backfillé au rôle du lien → arrivée identique à hier.
     db.execute(
-        "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at) "
-        "VALUES (?, ?, ?, ?, 'approved', ?, ?)",
-        (share["id"], email, name, gtoken, now, now),
+        "INSERT INTO share_guests (share_id, email, name, guest_token, status, created_at, approved_at, role) "
+        "VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)",
+        (share["id"], email, name, gtoken, now, now, _welcome_role(share)),
     )
     db.commit()
     _ensure_hub(db, email, name)  # [ONE-LINK-MULTI]
@@ -7937,6 +8220,63 @@ def share_me(token):
     return jsonify(
         {"status": guest["status"], "email": guest["email"], "name": guest["name"]}
     )
+
+
+@app.route("/share/<token>/role-request", methods=["POST"])
+def share_role_request(token):
+    """[GUEST-ROLES V2 · T2] L'invité demande un rôle (§5). Route publique sous /share/* (bypass
+    Authelia existant — invariant 5, jamais de préfixe de premier niveau). Invité APPROUVÉ requis :
+    demander n'est pas écrire, mais ça engage une identité. La demande ne CRÉE aucun droit — elle
+    attend l'accord de l'owner, qui écrit alors une surcharge lue par `can()`.
+
+    Anti-spam : une seule demande en attente par (invité × dossier) ; re-demander pendant qu'une
+    demande dort renvoie simplement l'existante (200, pas d'erreur — l'invité n'a rien fait de mal).
+    """
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    role = _clean_requested_role((request.get_json(silent=True) or {}).get("role"))
+    if not role:
+        # Modérateur/Administrateur ne se demandent pas (T4) : refus explicite, pas un 500.
+        return jsonify({"error": "rôle non demandable"}), 400
+    pid = _share_request_project(db, share)
+    if not pid:
+        return jsonify({"error": "aucun dossier à demander ici"}), 400
+    now = datetime.now(timezone.utc).isoformat()
+    pend = _pending_role_request(db, guest["id"], pid)
+    if pend:
+        if _clean_requested_role(_row_get(pend, "role_requested", "")) == role:
+            return jsonify(_role_request_payload(db, share, guest))
+        db.execute("UPDATE role_requests SET role_requested = ?, created_at = ? WHERE id = ?",
+                   (role, now, pend["id"]))
+    else:
+        db.execute(
+            "INSERT INTO role_requests (guest_id, project_id, role_requested, status, created_at) "
+            "VALUES (?, ?, ?, 'pending', ?)", (guest["id"], pid, role, now))
+    # 🔔 owner par le circuit d'activité EXISTANT (une ligne `memo_revisions` de partage, comme
+    # « 📁 Projet créé » ou « 🗑 Photo supprimée ») : aucun circuit de notification nouveau.
+    proj = db.execute("SELECT name FROM projects WHERE id = ?", (pid,)).fetchone()
+    label = "Éditeur" if role == "editor" else "Commentateur"
+    db.execute(
+        "INSERT INTO memo_revisions (memo_id, memo_uid, editor, share_id, before, after, edited_at) "
+        "VALUES (0, '', ?, ?, NULL, ?, ?)",
+        (
+            f"{guest['name'] or guest['email']} <{guest['email']}>",
+            share["id"],
+            json.dumps(
+                {"content": f"🙋 Demande le rôle {label} sur « {proj['name'] if proj else '?'} »",
+                 "done": False, "due_date": "", "priority": 0, "subtasks": [], "recurrence": ""},
+                ensure_ascii=False,
+            ),
+            now,
+        ),
+    )
+    db.commit()
+    return jsonify(_role_request_payload(db, share, guest)), 201
 
 
 @app.route("/share/<token>/memo/<int:memo_id>", methods=["PUT"])

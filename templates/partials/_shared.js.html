@@ -814,6 +814,99 @@ function attachCmdHint(input) {
 function cmdGuardBlocks(input) {
   return !!(input && input._cmdApi && input._cmdApi.blocks());
 }
+/* ════════ [GUEST-ROLES V2 · T2] bandeau d'ACCUEIL + demande de rôle ═══════════════════════
+   Spec §5 : le nouvel arrivant est Lecteur, on le lui dit, et on lui laisse un moyen de demander
+   mieux. Helper PUR (règle du partial) : aucun `state`/`DATA`, aucun réseau — la page fournit le
+   texte, l'état de la demande et les callbacks. Le SERVEUR reste seul juge (invariant 5) : ce
+   bouton n'accorde rien, il demande.
+
+   Doctrine Luciole (`docs/design/LUCIOLE-boutons.md`) : le bouton MURMURE — `.luc-neutral`, aucune
+   couleur au repos, la lueur n'apparaît qu'au geste. Une demande envoyée est un ÉTAT : elle se dit
+   par la MATIÈRE et par les MOTS (une `.badge`), jamais par une animation qui tourne. */
+function _welcomeStyle() {
+  if (document.getElementById('welcome-style')) return;
+  const st = document.createElement('style'); st.id = 'welcome-style';
+  st.textContent =
+    '.wel-panel{display:flex;align-items:flex-start;gap:0.6rem;flex-wrap:wrap;'
+    + 'background:var(--panel-2);border:1px solid var(--border);border-radius:10px;'
+    + 'padding:0.6rem 0.75rem;margin:0 0 0.7rem}'
+    + '.wel-txt{flex:1 1 14rem;min-width:0;font-size:0.88rem;color:var(--text);line-height:1.45}'
+    + '.wel-act{display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap}'
+    + '.wel-ask{display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap}'
+    + '.wel-x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;'
+    + 'line-height:1;padding:0.1rem 0.25rem;border-radius:6px}'
+    + '.wel-x:hover{color:var(--text);background:var(--panel)}';
+  document.head.appendChild(st);
+}
+/* cfg = {
+     message      : mot d'accueil de l'owner (TEXTE pur — posé en textContent, jamais en HTML),
+     request      : { can_request, pending, roles:[…] } tel que servi par le serveur,
+     roleLabel    : (role) => libellé humain,
+     onRequest    : (role) => void   — la page fait le fetch,
+     onDismiss    : () => void       — la page décide de la persistance (localStorage…),
+     dismissed    : bool             — le bandeau a déjà été fermé
+   }
+   Renvoie un nœud, ou null s'il n'y a rien à dire (message vide ET rien à demander) : sur un
+   partage d'avant T2, le rendu est donc strictement identique à hier. */
+function welcomePanel(cfg) {
+  cfg = cfg || {};
+  const req = cfg.request || {};
+  const msg = (cfg.message || '').trim();
+  const canAsk = !!req.can_request && !cfg.dismissed;
+  if ((!msg || cfg.dismissed) && !canAsk) return null;
+  _welcomeStyle();
+  const label = cfg.roleLabel || ((r) => r);
+  const wrap = el('div', { class: 'wel-panel', attrs: { role: 'status' } });
+  if (msg && !cfg.dismissed) wrap.appendChild(el('div', { class: 'wel-txt', text: msg }));
+  const act = el('div', 'wel-act');
+  if (req.pending) {
+    // État persistant → matière + mots. Pas de bouton : il a demandé, on ne le relance pas.
+    act.appendChild(el('span', { class: 'badge', text: '🙋 Demande envoyée : ' + label(req.pending) }));
+  } else if (canAsk) {
+    const ask = el('div', 'wel-ask');
+    const btn = mabGlowButton('mab-btn luc-neutral', 'Demander un rôle',
+      { 'aria-expanded': 'false', title: 'Demander plus de droits au propriétaire' });
+    ask.appendChild(btn);
+    const choices = el('span', 'wel-ask');
+    choices.style.display = 'none';
+    (req.roles || []).forEach((r) => {
+      const c = el('button', { class: 'prio-btn', text: label(r), attrs: { type: 'button' } });
+      c.addEventListener('click', () => {
+        choices.style.display = 'none';
+        btn.setAttribute('aria-expanded', 'false');
+        if (cfg.onRequest) cfg.onRequest(r);
+      });
+      choices.appendChild(c);
+    });
+    btn.addEventListener('click', () => {
+      const open = choices.style.display === 'none';
+      choices.style.display = open ? '' : 'none';
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      // Le libellé DIT l'état (doctrine Luciole §3), il ne se contente pas de changer de couleur.
+      const t = btn.querySelector('.mab-btxt');
+      if (t) t.textContent = open ? 'Annuler' : 'Demander un rôle';
+    });
+    ask.appendChild(choices);
+    act.appendChild(ask);
+  }
+  if (msg && !cfg.dismissed && cfg.onDismiss) {
+    const x = el('button', { class: 'wel-x', text: '✕', attrs: { type: 'button', title: 'Masquer ce message' } });
+    x.addEventListener('click', () => { wrap.remove(); cfg.onDismiss(); });
+    act.appendChild(x);
+  }
+  if (!act.childNodes.length) return msg && !cfg.dismissed ? wrap : null;
+  wrap.appendChild(act);
+  return wrap;
+}
+/* Libellés humains des rôles, SANS emoji — partagés par les 3 pages pour qu'un « Éditeur » soit un
+   « Éditeur » partout.
+   ⚠️ Nommé `ROLE_NAMES` et pas `ROLE_LABELS` : la page owner a déjà un `ROLE_LABELS` à elle (avec
+   emojis, pour son sélecteur de droits). Deux `const` du même nom dans la même portée = la page
+   entière meurt au chargement (`SyntaxError: Identifier already declared`) — piège attrapé au smoke
+   réel, invisible pour `node --check` puisque chaque fichier est valide séparément. */
+const ROLE_NAMES = { viewer: 'Lecteur', commenter: 'Commentateur', contributor: 'Contributeur',
+                     editor: 'Éditeur', moderator: 'Modérateur', admin: 'Administrateur' };
+function roleLabel(role) { return ROLE_NAMES[role] || role || ''; }
 /* ════════ [COMMENT-VOTE] la bulle SCRUTIN ════════════════════════════════════════════════
    Rendu conforme à la maquette validée `docs/maquettes/maquette-comment-vote.html`. C'est un
    `bodyNode` comme un autre : `cmtRow` ne change pas d'un octet, et les 3 pages n'ont qu'une

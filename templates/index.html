@@ -5725,7 +5725,15 @@ async function renderShares() {
       }
       info.appendChild(el('span', { class: 'rev-meta', text: 'depuis le ' + fmtWhen(g.created_at) }));
       row.appendChild(info);
-      row.appendChild(el('span', { class: 'status-pill ' + (g.can_edit ? 'approved' : ''), icon: g.can_edit ? 'pencil' : 'eye', text: g.can_edit ? 'modification' : 'lecture' }));
+      // [GUEST-ROLES V2 · T2] `can_edit` est RÉSOLU par le serveur pour cette personne sur ce
+      // dossier (rôle propre + surcharges) : un invité promu par un accord de demande n'est plus
+      // affiché « lecture ». Le survol dit le rôle exact, sans changer la forme du chip.
+      row.appendChild(el('span', {
+        class: 'status-pill ' + (g.can_edit ? 'approved' : ''),
+        icon: g.can_edit ? 'pencil' : 'eye',
+        text: g.can_edit ? 'modification' : 'lecture',
+        attrs: { title: g.role_effective ? roleLabel(g.role_effective) : '' },
+      }));
       // [GUEST-AUTO-APPROVE] même vocabulaire que la liste : actif / révoqué (plus d'« en attente »).
       row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { approved: 'actif', rejected: 'révoqué' }[g.status] || g.status }));
       row.appendChild(el('button', {
@@ -5867,6 +5875,45 @@ async function renderShares() {
     secL.appendChild(card);
   });
   board.appendChild(secL);
+
+  // [GUEST-ROLES V2 · T2] Demandes de rôle (§5) — emplacement MINIMAL, volontairement : la vraie
+  // fiche invité arrive en T3 avec la maquette. Ici, juste une file au-dessus de l'activité, là où
+  // Fabien regarde déjà « ce que les invités ont fait ». Accord en UN clic : il écrit une surcharge
+  // que le moteur lit déjà — l'invité gagne la capacité sans se ré-inscrire.
+  const reqs = activity.role_requests || [];
+  if (reqs.length) {
+    const secR = el('div', { class: 'memo-section' });
+    secR.appendChild(el('h2', { text: `DEMANDES DE RÔLE (${reqs.length})` }));
+    reqs.forEach(rq => {
+      const card = el('div', { class: 'share-card' });
+      const row = el('div', { class: 'share-row' });
+      row.appendChild(el('span', { icon: 'user' }));
+      row.appendChild(el('span', {
+        class: 'grow',
+        text: `${rq.name} — ${roleLabel(rq.current_role)} → ${roleLabel(rq.role_requested)}`
+              + (rq.project ? ` sur « ${rq.project} »` : ''),
+      }));
+      const decide = async (decision) => {
+        const r = await api(`/api/role-requests/${rq.id}`, {
+          method: 'POST', body: JSON.stringify({ decision }),
+        });
+        if (r) rerender();
+      };
+      row.appendChild(el('button', {
+        text: 'Accorder', attrs: { title: `Donner le rôle ${roleLabel(rq.role_requested)} sur ce dossier` },
+        on: { click: () => decide('grant') },
+      }));
+      row.appendChild(el('button', {
+        // Refus SILENCIEUX côté invité (la demande disparaît, rien ne lui est notifié) : ce n'est
+        // pas une suppression de donnée, donc pas de rouge (doctrine danger).
+        text: 'Refuser', attrs: { title: 'Écarter la demande — l\'invité n\'est pas notifié' },
+        on: { click: () => decide('refuse') },
+      }));
+      card.appendChild(row);
+      secR.appendChild(card);
+    });
+    board.appendChild(secR);
+  }
 
   const byEditor = new Map();
   activity.revisions.forEach(r => {

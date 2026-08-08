@@ -1533,9 +1533,51 @@ function wireChecklist(container, m) {
 }
 
 let hubFilesCfg = null;   // [TOOLS-DOCK-GUEST] cfg de la drop-zone du dossier courant (dock/Vocal)
+// [GUEST-ROLES V2 · T2] Accueil (§5) côté hub. Le hub agrège plusieurs partages : on montre le
+// bandeau de LA racine concernée — celle du dossier courant, sinon la première qui a quelque chose
+// à dire. L'écriture repart sur /share/<token>/role-request via `api()` (le guest_token du dossier
+// est déjà routé) : aucune route de hub, invariant 5 intact.
+function rootOf(pid) {
+  let p = projById(pid), guard = 0;
+  while (p && p.parent_id != null && guard++ < 50) p = projById(p.parent_id);
+  return p ? p.id : null;
+}
+function hubWelcomeRoot() {
+  const roots = (DATA.roots || []).filter(r => r.kind === 'project');
+  const rid = FOCUS != null ? rootOf(FOCUS) : null;
+  const speaks = (r) => (r.welcome_message && !hubWelcomeDismissed(r.share_token))
+    || (r.role_request && (r.role_request.can_request || r.role_request.pending));
+  if (rid != null) {
+    const hit = roots.find(r => r.root_id === rid);
+    return hit && speaks(hit) ? hit : null;
+  }
+  return roots.find(speaks) || null;
+}
+function hubWelcomeDismissed(tok) {
+  try { return localStorage.getItem('dashwelcome:' + tok) === '1'; } catch (e) { return false; }
+}
+function hubWelcomeNode() {
+  const r = hubWelcomeRoot();
+  if (!r) return null;
+  return welcomePanel({
+    message: r.welcome_message || '',
+    request: r.role_request || {},
+    dismissed: hubWelcomeDismissed(r.share_token),
+    roleLabel: roleLabel,
+    onDismiss: () => { try { localStorage.setItem('dashwelcome:' + r.share_token, '1'); } catch (e) {} },
+    onRequest: async (role) => {
+      const resp = await api(r.share_token, '/role-request', { method: 'POST', body: JSON.stringify({ role }) });
+      if (resp && resp.ok) { notify('Demande envoyée au propriétaire.'); await reload(); }
+      else notify('Demande impossible.', { error: true });
+    },
+  });
+}
+
 function renderBoard() {
   const board = document.getElementById('board'); board.innerHTML = '';
   hubFilesCfg = null;
+  const _wel = hubWelcomeNode();   // [GUEST-ROLES V2 · T2]
+  if (_wel) board.appendChild(_wel);
   // [VOTE-GROUPS] reset de la sélection de scrutin au changement de dossier actif.
   if (hubVoteBoardPid !== FOCUS) { hubSelectedVoteId = null; hubVoteCreate = null; hubVoteBoardPid = FOCUS; }
   // [AGENDA-PROJECT] en-tête du dossier courant + bouton 📆 (agenda filtré sur ce
