@@ -356,6 +356,30 @@ button.icon { padding: 0.45rem 0.6rem; }
 .status-pill.approved { color: var(--green); }
 .status-pill.pending { color: var(--yellow); }   /* [GUEST-AUTO-APPROVE] plus émis (aucun invité ne peut être en attente) — règle laissée inoffensive */
 .status-pill.rejected { color: var(--red); }
+/* ═══════ [COMMENTS-POPIN] Le fil de commentaires en pop-in dédiée ═══════
+   Le fil vivait dans un <details> replié, coincé sous `max-height:9rem` : illisible dès qu'une
+   conversation dépassait trois messages. Ici il prend TOUTE la hauteur disponible. Desktop :
+   centrée. Mobile : bottom-sheet, comme le reste de l'app. */
+#comments-dialog { width: min(640px, calc(100vw - 2rem)); max-height: min(86vh, 780px);
+  padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+#comments-dialog[open] { display: flex; }
+.cp-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border); flex: none; }
+.cp-head h3 { margin: 0; font-size: 0.9rem; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cp-head .cp-x { margin-left: auto; background: none; border: none; color: var(--muted);
+  cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0.1rem 0.35rem; border-radius: 6px; flex: none; }
+.cp-head .cp-x:hover { color: var(--text); background: var(--panel-2); }
+/* Le fil défile, le composeur reste accessible : c'est le fil qui bouge, pas la pop-in. */
+.cp-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0.5rem 0.75rem 0.75rem; }
+/* Le composant de fil impose sa propre boîte quand il est intégré ailleurs — en pop-in on lui
+   rend la hauteur. */
+.cp-body > div { margin-top: 0 !important; }
+@media (max-width: 700px) {
+  #comments-dialog { width: 100vw; max-width: none; max-height: 88vh; margin: auto auto 0;
+    border-radius: 12px 12px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+}
+
 /* ═══════ [GUEST-ROLES V2 · T3] 🔗 Partages V2 — les deux étages ═══════
    Maquette validée : docs/maquettes/maquette-partages-v2.html. Les couleurs de la maquette sont
    traduites en TOKENS de l'app (invariant 9) — aucun hex en dur. */
@@ -1161,6 +1185,12 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
 .task .task-actions button:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
 /* Déplier et modifier = actions principales, mises en avant en bleu d'accent. */
 .task .task-actions .texp, .task .task-actions .tedit, .task .task-actions .tview { color: var(--accent); border-color: var(--accent); }  /* [MEMO-VIEW] 👁 même famille */
+/* [COMMENTS-POPIN] 💬 de la rangée d'actions : même gabarit rond que ses voisins, mais discret au
+   repos (c'est une lecture, pas une action principale). Le compte suit l'icône, pas de pastille
+   pleine — la couleur reste aux données. */
+.task .task-actions .tcomments { color: var(--muted); }
+.task .task-actions .tcomments:hover { color: var(--text); }
+.task .task-actions .tcomments span { font-size: 0.74rem; margin-left: 0.1rem; }
 /* === [CARD-REDESIGN] cards mémo resserrées === */
 /* Extrait tronqué à 3 lignes sur la card (contenu complet dans l'éditeur / au déplier). */
 .task .task-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }  /* [CARD-PREVIEW] extrait 2 lignes */
@@ -2401,10 +2431,9 @@ dialog .actions {
   <div id="me-photos"></div>
   <div id="me-attachments"></div>
   <div id="me-links"></div><!-- [MEMO-LINKS] section « 🔗 Relié à » (rendue par renderMeLinks) -->
-  <details id="me-comments-acc" class="me-acc">
-    <summary id="me-comments-sum">💬 Commentaires</summary>
-    <div id="me-comments" style="margin-top:0.2rem;max-height:9rem;overflow-y:auto"></div>
-  </details>
+  <!-- [COMMENTS-POPIN] La section « 💬 Commentaires » a quitté le corps de la fiche : le fil vit
+       maintenant dans sa propre pop-in (pleine hauteur), ouverte par le bouton du pied. Il n'y a
+       plus de mini-scroll de 9 rem ni d'accordéon replié à découvrir. -->
   </div><!-- /.dlg-scroll -->
   <div class="actions">
     <!-- [VERSIONS-ICON] icône trait « history » (sprite Lucide, currentColor) au lieu de l'emoji 📜 :
@@ -2419,6 +2448,12 @@ dialog .actions {
     <button type="button" id="memo-edit-save">Sauver</button>
   </div>
 </dialog>
+
+<!-- [COMMENTS-POPIN] Le fil de commentaires a sa propre pop-in : pleine hauteur, deux chemins
+     d'entrée (le pied de la fiche d'édition, l'icône 💬 des cards), un seul composant. Contenu
+     construit à l'ouverture par `openCommentsPopin`. Invariant 8 : aucune animation GSAP sur le
+     dialog — l'entrée est en CSS, et ce dialog s'ouvre PAR-DESSUS celui d'édition (top-layer). -->
+<dialog id="comments-dialog"></dialog>
 
 <!-- [GUEST-ROLES V2 · T3] Popover de rôle : <dialog> natif (centré desktop, bottom-sheet mobile via
      CSS). Contenu construit à l'ouverture par `openRoleDialog` — un seul dialog pour toutes les
@@ -5458,6 +5493,68 @@ function renderTreeView() {
   });
 }
 
+/* ═══════ [COMMENTS-POPIN] Ouvrir le fil en pop-in ═══════
+   Un seul composant (`commentsBlockEl`), deux chemins d'entrée : le pied de la fiche d'édition et
+   l'icône 💬 des cards. La pop-in s'ouvre AU-DESSUS de la fiche sans la fermer — un <dialog>
+   modal empile dans le top-layer, et la fiche retrouve son état (Quill compris) à la fermeture,
+   puisqu'on ne la touche pas.
+   `onCount` permet à l'appelant de garder son compteur vivant après un envoi : le composant
+   incrémente `memo.comment_count` puis appelle son `onPosted`. */
+function openCommentsPopin(memo, onCount) {
+  const dlg = document.getElementById('comments-dialog');
+  dlg.innerHTML = '';
+  const head = el('div', { class: 'cp-head' });
+  const ic = hdrIcon('message'); ic.setAttribute('width', '16'); ic.setAttribute('height', '16');
+  head.appendChild(ic);
+  const title = stripHTML(memo.title || memo.content || '').trim().slice(0, 70) || 'Mémo';
+  head.appendChild(el('h3', { text: title }));
+  const x = el('button', { class: 'cp-x', text: '✕', attrs: { type: 'button', title: 'Fermer (Échap)' } });
+  x.addEventListener('click', () => dlg.close());
+  head.appendChild(x);
+  dlg.appendChild(head);
+
+  const body = el('div', { class: 'cp-body' });
+  dlg.appendChild(body);
+
+  const mount = () => {
+    body.innerHTML = '';
+    body.appendChild(commentsBlockEl(memo));
+  };
+  mount();
+
+  // Le compte du mémo bouge quand on poste : on prévient l'appelant (pied de fiche, badge de
+  // card) pour qu'il se remette à jour sans recharger toute la page.
+  dlg.addEventListener('close', () => { if (onCount) onCount(memo.comment_count || 0); }, { once: true });
+
+  dlg.showModal();
+  // Un fil s'ouvre sur sa FIN : on arrive aux derniers messages, le composeur juste dessous —
+  // c'est ce que fait toute conversation, et `focus({preventScroll:true})` ne le ferait pas
+  // (il évite précisément de bouger la vue).
+  const stick = () => { body.scrollTop = body.scrollHeight; };
+  // « Épinglé en bas » tant que l'utilisateur n'est pas remonté lui-même. Une simple mesure au
+  // moment de l'ouverture ne suffit pas : le fil continue de GRANDIR après (bulles vocales,
+  // scrutins, images) et on se retrouverait planté en haut. Le fil se re-rend aussi après chaque
+  // envoi/vote/réaction — on recolle alors, mais jamais si la personne lisait plus haut : lui
+  // arracher sa lecture serait pire que de ne rien faire.
+  let pinned = true;
+  body.addEventListener('scroll', () => {
+    pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
+  });
+  const obs = new MutationObserver(() => { if (pinned) stick(); });
+  obs.observe(body, { childList: true, subtree: true });
+  dlg.addEventListener('close', () => obs.disconnect(), { once: true });
+  // Focus du composeur : posé deux fois (leçon de [POPIN-COMMENTS-BTN] 213) — tout de suite, puis
+  // après la frame, le temps que le contenu du dialog soit rendu et focusable.
+  const composer = () => body.querySelector('.cmt-composer input');
+  const early = composer();
+  if (early) early.focus({ preventScroll: true });
+  requestAnimationFrame(() => {
+    stick();
+    const input = composer();
+    if (input) input.focus({ preventScroll: true });
+  });
+}
+
 /* ═══════ [GUEST-ROLES V2 · T3] La pastille de rôle et son popover ═══════
    Maquette validée (docs/maquettes/maquette-partages-v2.html). Deux principes qu'elle fige :
    ① la pastille dit toujours D'OÙ VIENT le rôle — « du lien » ou « surcharge » (bord tireté) ;
@@ -6964,21 +7061,11 @@ function openMemoEditor(memo) {
   renderMePhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderMeAttachments(memo);  // [ATTACHMENTS]
   renderMeLinks(memo);        // [MEMO-LINKS] section « 🔗 Relié à »
-  const mc = document.getElementById('me-comments');
-  mc.innerHTML = '';
-  mc.appendChild(commentsBlockEl(memo));
-  const acc = document.getElementById('me-comments-acc');
-  acc.open = false;
-  document.getElementById('me-comments-sum').textContent =
-    '💬 Commentaires' + (memo.comment_count ? ` (${memo.comment_count})` : '');
-  // [POPIN-COMMENTS-BTN] Le pied porte le même compte que l'accordéon — c'est lui qu'on voit sans
-  // défiler, donc c'est lui qui doit dire s'il y a quelque chose à lire.
+  // [POPIN-COMMENTS-BTN] Le pied porte le compte : c'est lui qu'on voit sans défiler, donc c'est
+  // lui qui doit dire s'il y a quelque chose à lire.
   // ⚠ `lucioleize` enveloppe TOUT le contenu du bouton dans `.mab-btxt`, l'icône `<svg>` comprise :
   // un `textContent =` sur ce span effacerait l'icône. On ne réécrit donc que le nœud TEXTE.
-  const cbtn = document.getElementById('memo-edit-comments');
-  const clbl = cbtn && (cbtn.querySelector('.mab-btxt') || cbtn);
-  const ctxt = clbl && [...clbl.childNodes].reverse().find(n => n.nodeType === Node.TEXT_NODE);
-  if (ctxt) ctxt.textContent = ' Commentaires' + (memo.comment_count ? ` (${memo.comment_count})` : '');
+  syncCommentsBtn(memo.comment_count || 0);
   q.setContents([]);
   if (isRichHTML(memo.content)) {
     q.clipboard.dangerouslyPasteHTML(0, memo.content);
@@ -6994,36 +7081,20 @@ function openMemoEditor(memo) {
 
 document.getElementById('memo-edit-cancel').addEventListener('click', () => memoEditDialog.close());
 memoEditDialog.addEventListener('close', () => { editingMemo = null; saveEditorHeight(document.querySelector('#quill-wrap .ql-container')); });  // [EDITOR-RESIZE]
-// [POPIN-COMMENTS-BTN] Un seul geste : déplier, amener à l'écran, poser le curseur dans le
-// composeur. Le fil est en bas d'un corps défilant — sans le défilement le dépliage ne se voit
-// pas, et sans le focus il faut encore viser le champ.
+/* [COMMENTS-POPIN] Le compte du pied, réécrit sans toucher à l'icône (cf. le piège `.mab-btxt`). */
+function syncCommentsBtn(n) {
+  const btn = document.getElementById('memo-edit-comments');
+  const lbl = btn && (btn.querySelector('.mab-btxt') || btn);
+  const txt = lbl && [...lbl.childNodes].reverse().find(x => x.nodeType === Node.TEXT_NODE);
+  if (txt) txt.textContent = ' Commentaires' + (n ? ` (${n})` : '');
+}
+
+// [COMMENTS-POPIN] Le bouton du pied n'ouvre plus un accordéon : il ouvre LA pop-in du fil, qui se
+// superpose à la fiche sans la fermer — on revient à son édition intacte, Quill compris. Au retour,
+// le compte du pied est rafraîchi : la conversation a pu avancer pendant l'aller-retour.
 document.getElementById('memo-edit-comments').addEventListener('click', () => {
-  const acc = document.getElementById('me-comments-acc');
-  if (!acc) return;
-  acc.open = true;
-  // Après `open = true` les enfants deviennent rendus (donc focusables), mais pas dans le même
-  // tick de layout : on laisse une frame passer avant de défiler et de focuser.
-  const composer = () => document.querySelector('#me-comments .cmt-composer input');
-  // Focus posé DEUX fois, à dessein. Tout de suite : on est encore dans le geste de l'utilisateur,
-  // le moment où un focus programmatique passe le mieux — c'est le cas « le fil était déjà
-  // déplié », où le rAF seul laissait le curseur sur le bouton. Puis après la frame : quand le
-  // <details> vient de s'ouvrir, ses enfants ne sont rendus (donc focusables) qu'à ce moment-là.
-  const early = composer();
-  if (early) early.focus({ preventScroll: true });
-  requestAnimationFrame(() => {
-    // UN SEUL défilement, sur ce qu'on veut réellement voir : le composeur. `scrollIntoView`
-    // remonte nativement toute la chaîne de conteneurs — le mini-scroll du fil (#me-comments,
-    // `max-height:9rem`) ET le corps de la pop-in (.dlg-scroll). Deux appels concurrents sur la
-    // même chaîne se contrarient : le smooth de l'un reprend la main et écrase l'autre. Pas de
-    // `behavior:'smooth'` non plus, pour la même raison — ici on veut arriver, pas voyager.
-    const input = composer();
-    if (input) {
-      input.scrollIntoView({ block: 'center' });
-      input.focus({ preventScroll: true });
-    } else {
-      acc.scrollIntoView({ block: 'end' });   // fil sans composeur (lecture seule) : montrer le fil
-    }
-  });
+  if (!editingMemo) return;
+  openCommentsPopin(editingMemo, syncCommentsBtn);
 });
 document.getElementById('memo-edit-versions').addEventListener('click', () => {
   if (!editingMemo) return;
@@ -7761,6 +7832,16 @@ function taskEl(memo) {
     class: 'tedit', icon: 'pencil', attrs: { title: 'Modifier ce mémo' },
     on: { click: () => { if (!openMemoEditor(memo)) editTaskInline(task, content, memo); } },
   }));
+  // [COMMENTS-POPIN] Second chemin vers le fil : depuis la LISTE, sans ouvrir la fiche. Présent
+  // sur chaque mémo (un fil vide s'écrit aussi) ; le compte vient du serveur, qui exclut déjà
+  // tombales et lignes système — même vérité qu'au pied de la fiche.
+  const cbtn = el('button', {
+    class: 'tcomments', icon: 'message',
+    attrs: { title: memo.comment_count ? memo.comment_count + ' message(s) — ouvrir le fil' : 'Ouvrir le fil de commentaires' },
+  });
+  if (memo.comment_count) cbtn.appendChild(el('span', { text: ' ' + memo.comment_count }));
+  cbtn.addEventListener('click', () => openCommentsPopin(memo, () => renderAll()));
+  actions.appendChild(cbtn);
   // Actions secondaires (Dupliquer) dans un menu ⋯ — seuls déplier/modifier restent visibles. [CARD-REDESIGN]
   const more = el('div', { class: 'task-more' });
   const moreBtn = el('button', { class: 'tmore', text: '⋯', attrs: { title: "Plus d'actions", 'aria-label': "Plus d'actions" } });
