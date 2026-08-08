@@ -6207,9 +6207,24 @@ def list_guests():
         pid = _share_request_project(db, share) if share else None
         if share:
             d["can_edit"] = _can(db, share, CAP_EDITER, guest=r, project_id=pid)
-            grole = _resolve_guest_overrides(db, r["id"], pid)[0] if pid else ""
+            grole, gadd, grem = _resolve_guest_overrides(db, r["id"], pid) if pid else ("", set(), set())
             d["role_effective"] = grole or _guest_link_role(share, r)
             d["welcome_role"] = _welcome_role(share)
+            # [GUEST-ROLES V2 · T3] De quoi peindre la pastille de la fiche invité : le rôle du LIEN,
+            # d'où vient le rôle effectif (la maquette impose que la pastille dise sa provenance —
+            # bord tireté = ajustement individuel), les ajustements fins, le dossier visé, et le
+            # nombre de personnes que le lien concerne (le popover en a besoin pour prévenir avant
+            # de changer quelque chose qui touche plusieurs personnes).
+            d["role_link"] = _guest_link_role(share, r)
+            d["role_source"] = "override" if grole else "link"
+            d["caps_add"] = sorted(gadd)
+            d["caps_remove"] = sorted(grem)
+            d["project_id"] = pid
+            d["welcome_message"] = _row_get(share, "welcome_message", "") or ""
+            d["link_guests"] = db.execute(
+                "SELECT COUNT(*) FROM share_guests WHERE share_id = ? AND status = 'approved'",
+                (share["id"],),
+            ).fetchone()[0]
         if r["kind"] == "memo":
             t = db.execute(
                 "SELECT content, title FROM memos WHERE id = ?", (r["target_id"],)
@@ -6254,6 +6269,89 @@ def update_guest(guest_id):
     if status == "approved":  # [GUEST-HOME] approbation manuelle owner → espace perso (idempotent)
         _ensure_guest_home(db, row["email"], row["name"])
     return jsonify({"id": guest_id, "status": status})
+
+
+# ───────────── [GUEST-ROLES V2 · T3] fiche invité : rôle et ajustements par dossier ─────────────
+
+@app.route("/api/guests/<int:guest_id>/role", methods=["PUT"])
+def set_guest_role(guest_id):
+    """Rôle et ajustements fins d'UNE personne sur UN dossier (surcharge `guest_roles`).
+
+    C'est l'étage « personne » de la maquette : ce qu'on pose ici ne touche QUE cet invité, jamais
+    les autres entrés par le même lien. `role: ''` + aucun ajustement = on retire la surcharge et
+    la personne retombe sur le rôle du lien (le popover appelle ça « suit le lien »).
+
+    `caps_add`/`caps_remove` sont les trois états de la maquette : neutre (dans aucune liste),
+    accordé, retiré. Le retrait est ABSOLU (§11.6) — il tient même si le dossier est ouvert à tous,
+    et c'est précisément pourquoi il se règle ici, personne par personne."""
+    db = get_db()
+    g = db.execute("SELECT * FROM share_guests WHERE id = ?", (guest_id,)).fetchone()
+    if not g:
+        return jsonify({"error": "not found"}), 404
+    share = db.execute("SELECT * FROM shares WHERE id = ?", (g["share_id"],)).fetchone()
+    if not share:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    pid = data.get("project_id") or _share_request_project(db, share)
+    if not pid:
+        return jsonify({"error": "aucun dossier à régler ici"}), 400
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return jsonify({"error": "project_id invalide"}), 400
+    # Le dossier doit appartenir au PÉRIMÈTRE du partage : on ne règle pas les droits de quelqu'un
+    # sur un dossier auquel son lien ne donne pas accès (ce serait un accès créé en douce).
+    scope = set(_project_descendants(db, share["target_id"])) if share["kind"] == "project" else {pid}
+    if pid not in scope:
+        return jsonify({"error": "ce dossier n'est pas dans le périmètre de ce partage"}), 400
+    role = _clean_role(data.get("role"))
+    add = _clean_caps(data.get("caps_add") or [])
+    rem = _clean_caps(data.get("caps_remove") or [])
+    now = datetime.now(timezone.utc).isoformat()
+    if not role and not add and not rem:
+        db.execute("DELETE FROM guest_roles WHERE guest_id = ? AND project_id = ?", (guest_id, pid))
+        db.commit()
+        return jsonify({"guest_id": guest_id, "project_id": pid, "role": "",
+                        "caps_add": [], "caps_remove": [], "source": "link"})
+    db.execute(
+        "INSERT INTO guest_roles (guest_id, project_id, role, caps_add, caps_remove, granted_by, granted_at) "
+        "VALUES (?, ?, ?, ?, ?, '', ?) "
+        "ON CONFLICT(guest_id, project_id) DO UPDATE SET role = excluded.role, "
+        "caps_add = excluded.caps_add, caps_remove = excluded.caps_remove, granted_at = excluded.granted_at",
+        (guest_id, pid, role, json.dumps(sorted(add)), json.dumps(sorted(rem)), now),
+    )
+    db.commit()
+    return jsonify({"guest_id": guest_id, "project_id": pid, "role": role,
+                    "caps_add": sorted(add), "caps_remove": sorted(rem), "source": "override"})
+
+
+@app.route("/api/shares/<int:share_id>/propagate", methods=["POST"])
+def propagate_welcome_role(share_id):
+    """Applique le rôle d'accueil du lien aux personnes DÉJÀ entrées par lui (spec §5, « et les
+    déjà-entrés ? »).
+
+    Par défaut, changer le rôle d'accueil ne vaut que pour les futurs arrivants — c'est tout
+    l'intérêt des deux étages. Cette route est l'action EXPLICITE que la maquette place derrière un
+    second bouton. Elle réécrit `share_guests.role`, donc elle **ne touche à aucune surcharge** :
+    une personne ajustée à la main sur un dossier garde son ajustement (les lignes `guest_roles`
+    priment sur leur sous-arbre). C'est la promesse « jamais écrasé par une action de masse »."""
+    db = get_db()
+    share = db.execute("SELECT * FROM shares WHERE id = ?", (share_id,)).fetchone()
+    if not share:
+        return jsonify({"error": "not found"}), 404
+    wrole = _welcome_role(share)
+    cur = db.execute(
+        "UPDATE share_guests SET role = ? WHERE share_id = ? AND status = 'approved'",
+        (wrole, share_id),
+    )
+    db.commit()
+    # Nombre de personnes qui gardent malgré tout un réglage propre sur un dossier : l'UI le dit,
+    # pour que « appliqué à N personnes » ne se lise pas comme « tout a été aligné ».
+    kept = db.execute(
+        "SELECT COUNT(DISTINCT gr.guest_id) FROM guest_roles gr "
+        "JOIN share_guests g ON g.id = gr.guest_id WHERE g.share_id = ?", (share_id,),
+    ).fetchone()[0]
+    return jsonify({"share_id": share_id, "role": wrole, "updated": cur.rowcount, "overrides_kept": kept})
 
 
 @app.route("/api/guests/<int:guest_id>/send-recap", methods=["POST"])

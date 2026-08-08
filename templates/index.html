@@ -356,6 +356,65 @@ button.icon { padding: 0.45rem 0.6rem; }
 .status-pill.approved { color: var(--green); }
 .status-pill.pending { color: var(--yellow); }   /* [GUEST-AUTO-APPROVE] plus émis (aucun invité ne peut être en attente) — règle laissée inoffensive */
 .status-pill.rejected { color: var(--red); }
+/* ═══════ [GUEST-ROLES V2 · T3] 🔗 Partages V2 — les deux étages ═══════
+   Maquette validée : docs/maquettes/maquette-partages-v2.html. Les couleurs de la maquette sont
+   traduites en TOKENS de l'app (invariant 9) — aucun hex en dur. */
+.tier { border: 1px solid var(--border); border-radius: 10px; margin-top: 0.6rem; }
+.tier-h { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.6rem;
+  background: var(--panel-2); border-radius: 9px 9px 0 0; font-size: 0.68rem;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.tier-h .who { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.tier-body { padding: 0.5rem 0.6rem; }
+/* Pastille de rôle : elle dit TOUJOURS d'où vient le rôle. Bord tireté = ajustement individuel. */
+.rolepill { display: inline-flex; align-items: center; gap: 0.35rem; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 0.12rem 0.55rem;
+  font-size: 0.74rem; color: var(--text); cursor: pointer; flex-shrink: 0; }
+.rolepill:hover, .rolepill:focus-visible { border-color: var(--accent); outline: none; }
+.rolepill.override { border-style: dashed; border-color: var(--accent); }
+.rolepill .src { font-size: 0.66rem; color: var(--muted); }
+.rolepill.override .src { color: var(--accent); }
+/* Réglages de l'étage LIEN */
+.link-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+@media (max-width: 720px) { .link-settings { grid-template-columns: 1fr; } }
+.setting { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem; }
+.setting .lab { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.3rem; }
+.setting .hint { font-size: 0.7rem; color: var(--muted); margin-top: 0.35rem; }
+.setting textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.3rem 0.45rem; font: inherit; font-size: 0.78rem; resize: vertical; }
+/* Propagation : une question, pas une alerte — le jaune signale, il ne crie pas. */
+.propag { margin-top: 0.5rem; background: var(--panel-2); border: 1px solid var(--yellow);
+  border-radius: 8px; padding: 0.45rem 0.6rem; font-size: 0.78rem; }
+.propag b { color: var(--yellow); }
+.propag .row { display: flex; gap: 0.4rem; margin-top: 0.4rem; flex-wrap: wrap; }
+/* Popover de rôle — <dialog> natif (invariant 8 : entrée en CSS, jamais de GSAP sur un dialog).
+   Desktop centré, mobile bottom-sheet. */
+#role-dialog { width: min(360px, calc(100vw - 2rem)); padding: 0; }
+#role-dialog h3 { margin: 0; padding: 0.6rem 0.75rem 0.5rem; font-size: 0.85rem;
+  border-bottom: 1px solid var(--border); }
+#role-dialog h3 .sub { display: block; font-weight: 400; color: var(--muted); font-size: 0.72rem; margin-top: 0.15rem; }
+.scope-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.scope-tab { flex: 1; text-align: center; padding: 0.4rem 0.3rem; font-size: 0.76rem; color: var(--muted);
+  cursor: pointer; border-bottom: 2px solid transparent; background: none; border-radius: 0; }
+.scope-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.role-body { padding: 0.5rem 0.6rem; }
+.roleopt { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.45rem; border-radius: 8px;
+  cursor: pointer; font-size: 0.82rem; }
+.roleopt:hover { background: var(--panel-2); }
+.roleopt .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
+.roleopt.sel .dot { background: var(--accent); }
+.roleopt .desc { margin-left: auto; font-size: 0.7rem; color: var(--muted); }
+.caps { border-top: 1px solid var(--border); margin-top: 0.5rem; padding-top: 0.5rem; }
+.capchips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+/* Trois états, dits par la MATIÈRE : neutre (suit le rôle) → accordé → retiré (barré). */
+.cap { font-size: 0.72rem; border: 1px solid var(--border); border-radius: 999px; padding: 0.1rem 0.5rem;
+  color: var(--muted); cursor: pointer; user-select: none; background: none; }
+.cap.add { border-color: var(--accent); color: var(--accent); }
+.cap.rem { border-color: var(--red); color: var(--red); text-decoration: line-through; }
+@media (max-width: 700px) {
+  #role-dialog { width: 100vw; max-width: none; margin: auto auto 0; border-radius: 12px 12px 0 0;
+    padding-bottom: env(safe-area-inset-bottom); }
+  .roleopt { padding: 0.55rem 0.45rem; }   /* cibles tactiles plus hautes */
+}
 .rev-row.expandable { cursor: pointer; }
 .rev-row.expandable:hover { background: var(--panel-2); }
 .rev-detail {
@@ -2360,6 +2419,11 @@ dialog .actions {
     <button type="button" id="memo-edit-save">Sauver</button>
   </div>
 </dialog>
+
+<!-- [GUEST-ROLES V2 · T3] Popover de rôle : <dialog> natif (centré desktop, bottom-sheet mobile via
+     CSS). Contenu construit à l'ouverture par `openRoleDialog` — un seul dialog pour toutes les
+     pastilles. Invariant 8 : aucune animation GSAP sur le dialog lui-même. -->
+<dialog id="role-dialog"></dialog>
 
 <!-- [SETTINGS-TABS] Pop-in Paramètres en 5 onglets (chips .prio-btn — invariant 9), un seul
      panneau visible, onglet actif persisté localStorage `settingsTab`. Sauvegarde AUTO
@@ -5394,6 +5458,249 @@ function renderTreeView() {
   });
 }
 
+/* ═══════ [GUEST-ROLES V2 · T3] La pastille de rôle et son popover ═══════
+   Maquette validée (docs/maquettes/maquette-partages-v2.html). Deux principes qu'elle fige :
+   ① la pastille dit toujours D'OÙ VIENT le rôle — « du lien » ou « surcharge » (bord tireté) ;
+   ② le popover demande le PÉRIMÈTRE avant le rôle : régler une personne et régler tout un lien
+      ne sont pas le même geste, et l'un des deux touche des gens qu'on ne regarde pas.
+   Les capacités ont trois états (neutre → accordé → retiré), le retrait étant ABSOLU (§11.6).
+   Rôles proposés : ceux que le serveur applique aujourd'hui. Modérateur et Administrateur
+   existent dans la spec mais aucune route ne les honore encore (T4) — les proposer serait
+   promettre un droit qui ne s'exerce pas. */
+const T3_ROLES = ['viewer', 'commenter', 'contributor', 'editor'];
+const T3_ROLE_DESC = {
+  viewer: 'voit', commenter: '+ commente, vote', contributor: '+ ajoute (et édite SES ajouts)',
+  editor: '+ édite tout, coche, déplace',
+};
+const T3_CAPS = ['commenter', 'voter', 'cocher', 'creer', 'editer', 'creer-vote'];
+
+function rolePillEl(g, onChange) {
+  const role = g.role_effective || g.role_link || 'viewer';
+  const isOverride = g.role_source === 'override' || (g.caps_add || []).length || (g.caps_remove || []).length;
+  const pill = el('button', {
+    class: 'rolepill' + (isOverride ? ' override' : ''),
+    attrs: { type: 'button', title: 'Changer le rôle de cette personne sur ce dossier' },
+  });
+  pill.appendChild(el('span', { text: roleLabel(role) }));
+  pill.appendChild(el('span', { class: 'src', text: isOverride ? '· surcharge' : '· du lien' }));
+  pill.addEventListener('click', () => openRoleDialog(g, onChange));
+  return pill;
+}
+
+function openRoleDialog(g, onChange) {
+  const dlg = document.getElementById('role-dialog');
+  dlg.innerHTML = '';
+  // État de travail : on ne touche au serveur qu'au clic sur un rôle (ou sur « Appliquer » pour
+  // les capacités). Fermer sans choisir ne change rien.
+  let scope = 'person';
+  const add = new Set(g.caps_add || []);
+  const rem = new Set(g.caps_remove || []);
+  const who = g.name || g.email;
+  const folder = stripHTML(g.target || '?');
+
+  const h = el('h3', { text: 'Rôle sur « ' + folder + ' »' });
+  const sub = el('span', { class: 'sub' });
+  h.appendChild(sub);
+  dlg.appendChild(h);
+
+  const tabs = el('div', { class: 'scope-tabs' });
+  const tabPerson = el('button', { class: 'scope-tab active', text: who + ' seul·e', attrs: { type: 'button' } });
+  const tabLink = el('button', {
+    class: 'scope-tab', text: 'le lien (' + (g.link_guests || 1) + ' pers.)', attrs: { type: 'button' },
+  });
+  tabs.append(tabPerson, tabLink);
+  dlg.appendChild(tabs);
+
+  const body = el('div', { class: 'role-body' });
+  dlg.appendChild(body);
+
+  const capsBox = el('div', { class: 'caps' });
+
+  const syncScope = () => {
+    const person = scope === 'person';
+    tabPerson.classList.toggle('active', person);
+    tabLink.classList.toggle('active', !person);
+    // Le sous-titre PRÉVIENT quand le geste dépasse la personne qu'on regarde.
+    sub.textContent = person
+      ? 'ajustement individuel — n\'affecte que ' + who
+      : '⚠ change le rôle d\'accueil du lien (' + (g.link_guests || 1) + ' pers. déjà entrées : à propager ou non)';
+    capsBox.style.display = person ? '' : 'none';   // les ajustements fins sont par personne
+  };
+
+  const currentRole = g.role_effective || g.role_link || 'viewer';
+  T3_ROLES.forEach((r) => {
+    const opt = el('div', { class: 'roleopt' + (r === currentRole ? ' sel' : ''), attrs: { role: 'button', tabindex: '0' } });
+    opt.appendChild(el('span', { class: 'dot' }));
+    opt.appendChild(el('span', { text: roleLabel(r) }));
+    opt.appendChild(el('span', { class: 'desc', text: T3_ROLE_DESC[r] || '' }));
+    const pick = async () => {
+      dlg.close();
+      if (scope === 'person') {
+        await api('/api/guests/' + g.id + '/role', {
+          method: 'PUT',
+          body: JSON.stringify({ project_id: g.project_id, role: r, caps_add: [...add], caps_remove: [...rem] }),
+        });
+        notify(who + ' devient ' + roleLabel(r) + ' sur « ' + folder + ' » — les autres du lien ne bougent pas.');
+      } else {
+        await api('/api/shares/' + g.share_id, {
+          method: 'PUT',
+          body: JSON.stringify({ pin: g.pin, role: g.role_link, welcome_role: r }),
+        });
+        notify('Rôle d\'accueil du lien : ' + roleLabel(r) + ' — les personnes déjà entrées gardent le leur.');
+      }
+      await loadAll(); onChange();
+    };
+    opt.addEventListener('click', pick);
+    opt.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    body.appendChild(opt);
+  });
+
+  capsBox.appendChild(el('div', { class: 'lab', attrs: { style: 'font-size:0.7rem;color:var(--muted);margin-bottom:0.3rem' },
+    text: 'Ajustements fins — clic : suit le rôle → accordé → retiré' }));
+  const chips = el('div', { class: 'capchips' });
+  T3_CAPS.forEach((c) => {
+    const chip = el('button', { class: 'cap', text: c, attrs: { type: 'button' } });
+    const paint = () => {
+      chip.classList.toggle('add', add.has(c));
+      chip.classList.toggle('rem', rem.has(c));
+      chip.title = add.has(c) ? 'accordée en plus du rôle'
+        : rem.has(c) ? 'RETIRÉE — tient même si le dossier est ouvert à tous'
+        : 'suit le rôle';
+    };
+    chip.addEventListener('click', () => {
+      if (add.has(c)) { add.delete(c); rem.add(c); }        // accordé → retiré
+      else if (rem.has(c)) { rem.delete(c); }               // retiré → neutre
+      else { add.add(c); }                                  // neutre → accordé
+      paint();
+    });
+    paint();
+    chips.appendChild(chip);
+  });
+  capsBox.appendChild(chips);
+  const applyCaps = el('button', { class: 'prio-btn', text: 'Appliquer les ajustements', attrs: { type: 'button', style: 'margin-top:0.45rem' } });
+  applyCaps.addEventListener('click', async () => {
+    dlg.close();
+    await api('/api/guests/' + g.id + '/role', {
+      method: 'PUT',
+      body: JSON.stringify({
+        project_id: g.project_id,
+        role: g.role_source === 'override' ? (g.role_effective || '') : '',
+        caps_add: [...add], caps_remove: [...rem],
+      }),
+    });
+    await loadAll(); onChange();
+    notify('Ajustements enregistrés pour ' + who + '.');
+  });
+  capsBox.appendChild(applyCaps);
+  body.appendChild(capsBox);
+
+  // Retour au rôle du lien : proposé seulement s'il y a quelque chose à retirer.
+  if (g.role_source === 'override' || add.size || rem.size) {
+    const back = el('button', {
+      class: 'prio-btn', text: '↩ Suivre de nouveau le lien',
+      attrs: { type: 'button', style: 'margin-top:0.5rem;width:100%' },
+    });
+    back.addEventListener('click', async () => {
+      dlg.close();
+      await api('/api/guests/' + g.id + '/role', {
+        method: 'PUT', body: JSON.stringify({ project_id: g.project_id, role: '', caps_add: [], caps_remove: [] }),
+      });
+      await loadAll(); onChange();
+      notify(who + ' suit de nouveau le rôle du lien.');
+    });
+    body.appendChild(back);
+  }
+
+  tabPerson.addEventListener('click', () => { scope = 'person'; syncScope(); });
+  tabLink.addEventListener('click', () => { scope = 'link'; syncScope(); });
+  syncScope();
+  dlg.showModal();
+}
+
+/* [GUEST-ROLES V2 · T3] ÉTAGE LIEN — « ce qui vaut pour tous ceux qui entrent par ce lien ».
+   Deux réglages seulement : le rôle d'accueil et le mot de bienvenue. Le reste (les interrupteurs
+   du partage) est un lot à part, T3bis. La question de la PROPAGATION n'apparaît qu'après un
+   changement de rôle d'accueil : c'est le scénario « lien collé dans WhatsApp » — par défaut on ne
+   touche à personne, et appliquer aux déjà-entrés est une action explicite qui ne détruit jamais un
+   ajustement individuel. */
+function linkWelcomeEl(s, onChange) {
+  const box = el('div', { class: 'tier' });
+  const head = el('div', { class: 'tier-h' });
+  head.appendChild(el('span', { text: 'Le lien — vaut pour qui entre par lui' }));
+  const n = (s.guests || []).filter(g => g.status === 'approved').length;
+  head.appendChild(el('span', { class: 'who', text: n + (n > 1 ? ' personnes entrées' : ' personne entrée') }));
+  box.appendChild(head);
+  const body = el('div', { class: 'tier-body' });
+  const grid = el('div', { class: 'link-settings' });
+
+  // ── Rôle d'accueil ──
+  const c1 = el('div', { class: 'setting' });
+  c1.appendChild(el('div', { class: 'lab', text: 'Rôle d\'accueil' }));
+  const sel = el('select');
+  T3_ROLES.forEach(r => sel.appendChild(el('option', { attrs: { value: r }, text: roleLabel(r) })));
+  sel.value = s.welcome_role || _shareRole(s);
+  c1.appendChild(sel);
+  c1.appendChild(el('div', { class: 'hint', text: 'Copié à chaque nouvel arrivant. Les personnes déjà entrées gardent leur rôle.' }));
+  const propag = el('div', { class: 'propag' });
+  propag.hidden = true;
+  c1.appendChild(propag);
+  grid.appendChild(c1);
+
+  // ── Mot d'accueil ──
+  const c2 = el('div', { class: 'setting' });
+  c2.appendChild(el('div', { class: 'lab', text: 'Message d\'accueil (facultatif)' }));
+  const ta = el('textarea', { attrs: { rows: '3', maxlength: '400',
+    placeholder: 'Bienvenue ! Tu arrives en lecture — demande un rôle si tu veux participer.' } });
+  ta.value = s.welcome_message || '';
+  c2.appendChild(ta);
+  const save = el('button', { class: 'prio-btn', text: 'Enregistrer le message', attrs: { type: 'button', style: 'margin-top:0.4rem' } });
+  save.addEventListener('click', async () => {
+    await api('/api/shares/' + s.id, {
+      method: 'PUT',
+      body: JSON.stringify({ pin: s.pin, role: _shareRole(s), welcome_role: sel.value, welcome_message: ta.value }),
+    });
+    await loadAll(); onChange(); notify('Message d\'accueil enregistré.');
+  });
+  c2.appendChild(save);
+  grid.appendChild(c2);
+  body.appendChild(grid);
+  box.appendChild(body);
+
+  sel.addEventListener('change', async () => {
+    await api('/api/shares/' + s.id, {
+      method: 'PUT',
+      body: JSON.stringify({ pin: s.pin, role: _shareRole(s), welcome_role: sel.value, welcome_message: ta.value }),
+    });
+    if (!n) { await loadAll(); onChange(); notify('Rôle d\'accueil : ' + roleLabel(sel.value) + '.'); return; }
+    // Il y a déjà du monde : on POSE la question au lieu de décider à sa place.
+    propag.innerHTML = '';
+    propag.hidden = false;
+    propag.appendChild(el('b', { text: 'Et ' + (n > 1 ? 'les ' + n + ' personnes déjà entrées' : 'la personne déjà entrée') + ' ?' }));
+    propag.appendChild(el('div', { class: 'hint', text: 'Les ajustements individuels (pastilles en pointillés) ne sont jamais écrasés.' }));
+    const row = el('div', { class: 'row' });
+    const later = el('button', { class: 'prio-btn', text: 'Futurs arrivants seulement', attrs: { type: 'button' } });
+    later.addEventListener('click', async () => {
+      propag.hidden = true; await loadAll(); onChange();
+      notify('Seuls les prochains arrivants hériteront de ' + roleLabel(sel.value) + '.');
+    });
+    const now = el('button', { class: 'prio-btn', text: 'Appliquer aussi aux déjà entrées', attrs: { type: 'button' } });
+    now.addEventListener('click', async () => {
+      const r = await api('/api/shares/' + s.id + '/propagate', { method: 'POST', body: JSON.stringify({}) });
+      propag.hidden = true; await loadAll(); onChange();
+      const kept = (r && r.overrides_kept) || 0;
+      notify('Appliqué à ' + ((r && r.updated) || 0) + ' personne(s)'
+        + (kept ? ' — ' + kept + ' ajustement(s) individuel(s) préservé(s).' : '.'));
+    });
+    row.append(later, now);
+    propag.appendChild(row);
+  });
+  return box;
+}
+
+/* Rôle du lien tel que le serveur le résout (`role` sinon repli `can_edit`) — pour ne pas le
+   perdre en réécrivant un partage dont on ne change que l'accueil. */
+function _shareRole(s) { return s.role || (s.can_edit ? 'editor' : 'viewer'); }
+
 function guestRowEl(g, onChange, share) {
   const row = el('div', { class: 'guest-row' });
   const info = el('span', { class: 'grow' });
@@ -5730,15 +6037,9 @@ async function renderShares() {
       }
       info.appendChild(el('span', { class: 'rev-meta', text: 'depuis le ' + fmtWhen(g.created_at) }));
       row.appendChild(info);
-      // [GUEST-ROLES V2 · T2] `can_edit` est RÉSOLU par le serveur pour cette personne sur ce
-      // dossier (rôle propre + surcharges) : un invité promu par un accord de demande n'est plus
-      // affiché « lecture ». Le survol dit le rôle exact, sans changer la forme du chip.
-      row.appendChild(el('span', {
-        class: 'status-pill ' + (g.can_edit ? 'approved' : ''),
-        icon: g.can_edit ? 'pencil' : 'eye',
-        text: g.can_edit ? 'modification' : 'lecture',
-        attrs: { title: g.role_effective ? roleLabel(g.role_effective) : '' },
-      }));
+      // [GUEST-ROLES V2 · T3] La pastille de rôle remplace le chip figé : elle DIT le rôle, dit
+      // d'où il vient (« du lien » / « surcharge », bord tireté), et s'ouvre pour le changer.
+      row.appendChild(rolePillEl(g, rerender));
       // [GUEST-AUTO-APPROVE] même vocabulaire que la liste : actif / révoqué (plus d'« en attente »).
       row.appendChild(el('span', { class: 'status-pill ' + g.status, text: { approved: 'actif', rejected: 'révoqué' }[g.status] || g.status }));
       row.appendChild(el('button', {
@@ -5876,6 +6177,7 @@ async function renderShares() {
     urlRow.value = url;
     urlRow.addEventListener('focus', () => urlRow.select());
     card.appendChild(urlRow);
+    card.appendChild(linkWelcomeEl(s, rerender));   // [GUEST-ROLES V2 · T3] étage LIEN : l'accueil
     (s.guests || []).forEach(g => card.appendChild(guestRowEl(g, rerender, s)));
     secL.appendChild(card);
   });
