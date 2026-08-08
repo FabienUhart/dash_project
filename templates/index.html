@@ -2350,6 +2350,11 @@ dialog .actions {
   <div class="actions">
     <!-- [VERSIONS-ICON] icône trait « history » (sprite Lucide, currentColor) au lieu de l'emoji 📜 :
          elle suit la couleur du bouton Luciole (muted au repos, réveillée au survol). -->
+    <!-- [POPIN-COMMENTS-BTN] Le fil vit dans un <details> REPLIÉ en bas du corps défilant : on ne
+         le voyait pas, et deux fois de suite un message est parti dans le CONTENU du mémo faute
+         d'avoir trouvé le composeur. Un chemin explicite depuis le pied, à côté des versions —
+         même gabarit `.me-versions`, même icône trait, même Luciole `.luc-neutral`. -->
+    <button type="button" id="memo-edit-comments" class="me-versions"><svg class="ic" aria-hidden="true"><use href="#ic-message"/></svg> Commentaires</button>
     <button type="button" id="memo-edit-versions" class="me-versions"><svg class="ic" aria-hidden="true"><use href="#ic-history"/></svg> Voir les versions</button>
     <button type="button" id="memo-edit-cancel">Annuler</button>
     <button type="button" id="memo-edit-save">Sauver</button>
@@ -6181,6 +6186,7 @@ document.getElementById('share-add-role').addEventListener('click', async () => 
 const memoEditDialog = document.getElementById('memo-edit-dialog');
 // [LUCIOLE-POPIN] pied de l'éditeur : Versions/Annuler en Luciole NEUTRE, Sauver en
 // Luciole PRIMAIRE (teinte accent, fini le dégradé plein trop prononcé en clair).
+lucioleize(document.getElementById('memo-edit-comments'), 'luc-neutral');  // [POPIN-COMMENTS-BTN]
 lucioleize(document.getElementById('memo-edit-versions'), 'luc-neutral');
 lucioleize(document.getElementById('memo-edit-cancel'), 'luc-neutral');
 lucioleize(document.getElementById('memo-edit-save'), 'luc-primary');
@@ -6663,6 +6669,14 @@ function openMemoEditor(memo) {
   acc.open = false;
   document.getElementById('me-comments-sum').textContent =
     '💬 Commentaires' + (memo.comment_count ? ` (${memo.comment_count})` : '');
+  // [POPIN-COMMENTS-BTN] Le pied porte le même compte que l'accordéon — c'est lui qu'on voit sans
+  // défiler, donc c'est lui qui doit dire s'il y a quelque chose à lire.
+  // ⚠ `lucioleize` enveloppe TOUT le contenu du bouton dans `.mab-btxt`, l'icône `<svg>` comprise :
+  // un `textContent =` sur ce span effacerait l'icône. On ne réécrit donc que le nœud TEXTE.
+  const cbtn = document.getElementById('memo-edit-comments');
+  const clbl = cbtn && (cbtn.querySelector('.mab-btxt') || cbtn);
+  const ctxt = clbl && [...clbl.childNodes].reverse().find(n => n.nodeType === Node.TEXT_NODE);
+  if (ctxt) ctxt.textContent = ' Commentaires' + (memo.comment_count ? ` (${memo.comment_count})` : '');
   q.setContents([]);
   if (isRichHTML(memo.content)) {
     q.clipboard.dangerouslyPasteHTML(0, memo.content);
@@ -6678,6 +6692,37 @@ function openMemoEditor(memo) {
 
 document.getElementById('memo-edit-cancel').addEventListener('click', () => memoEditDialog.close());
 memoEditDialog.addEventListener('close', () => { editingMemo = null; saveEditorHeight(document.querySelector('#quill-wrap .ql-container')); });  // [EDITOR-RESIZE]
+// [POPIN-COMMENTS-BTN] Un seul geste : déplier, amener à l'écran, poser le curseur dans le
+// composeur. Le fil est en bas d'un corps défilant — sans le défilement le dépliage ne se voit
+// pas, et sans le focus il faut encore viser le champ.
+document.getElementById('memo-edit-comments').addEventListener('click', () => {
+  const acc = document.getElementById('me-comments-acc');
+  if (!acc) return;
+  acc.open = true;
+  // Après `open = true` les enfants deviennent rendus (donc focusables), mais pas dans le même
+  // tick de layout : on laisse une frame passer avant de défiler et de focuser.
+  const composer = () => document.querySelector('#me-comments .cmt-composer input');
+  // Focus posé DEUX fois, à dessein. Tout de suite : on est encore dans le geste de l'utilisateur,
+  // le moment où un focus programmatique passe le mieux — c'est le cas « le fil était déjà
+  // déplié », où le rAF seul laissait le curseur sur le bouton. Puis après la frame : quand le
+  // <details> vient de s'ouvrir, ses enfants ne sont rendus (donc focusables) qu'à ce moment-là.
+  const early = composer();
+  if (early) early.focus({ preventScroll: true });
+  requestAnimationFrame(() => {
+    // UN SEUL défilement, sur ce qu'on veut réellement voir : le composeur. `scrollIntoView`
+    // remonte nativement toute la chaîne de conteneurs — le mini-scroll du fil (#me-comments,
+    // `max-height:9rem`) ET le corps de la pop-in (.dlg-scroll). Deux appels concurrents sur la
+    // même chaîne se contrarient : le smooth de l'un reprend la main et écrase l'autre. Pas de
+    // `behavior:'smooth'` non plus, pour la même raison — ici on veut arriver, pas voyager.
+    const input = composer();
+    if (input) {
+      input.scrollIntoView({ block: 'center' });
+      input.focus({ preventScroll: true });
+    } else {
+      acc.scrollIntoView({ block: 'end' });   // fil sans composeur (lecture seule) : montrer le fil
+    }
+  });
+});
 document.getElementById('memo-edit-versions').addEventListener('click', () => {
   if (!editingMemo) return;
   openRevisions(editingMemo);
