@@ -4,13 +4,12 @@ Quatre zones restées nues, réunies par une contrainte commune : elles sortent 
 Taux de change (HTTP), envoi de lien (SMTP), export ZIP (fichiers) et la branche vocale de
 la suppression de commentaire (fichiers).
 
-**La garde « zéro réseau » est structurelle, pas une intention** : un fixture autouse fait
-échouer bruyamment tout appel sortant. Un test qui touche le fil rougit.
+**La garde « zéro réseau » est structurelle, pas une intention** : un fixture autouse de
+`tests/conftest.py` fait échouer bruyamment tout appel sortant, pour toute la suite
+([TEST-NET-GUARD]). Un test qui touche le fil rougit.
 
-⚠ Le brief proposait de garder `requests.get` et `smtplib.SMTP`. **Ça n'aurait pas suffi** :
-`_fx_fetch_rates` passe par `urllib.request.urlopen`, pas par `requests` — la garde aurait
-laissé filer un vrai appel à `api.frankfurter.app` dans la fonction même que ce lot vise.
-Les trois portes sont donc fermées.
+⚠ Elle ferme bien `urllib.request.urlopen` et pas seulement `requests` : c'est par `urlopen`
+que passe `_fx_fetch_rates`, la fonction même que ce fichier vise.
 
 Nature = **CARACTÉRISATION + mutation**, comme les vagues précédentes.
 """
@@ -25,32 +24,10 @@ import pytest
 pytestmark = pytest.mark.invariant
 
 
-# ───────────────────────────────── garde « zéro réseau » ─────────────────────────────────
-
-@pytest.fixture(autouse=True)
-def _interdire_le_reseau(monkeypatch):
-    """Ferme les TROIS portes de sortie de l'app. Autouse : aucun test de ce fichier ne peut
-    y échapper, y compris ceux qu'on ajoutera plus tard sans y penser."""
-    import app
-
-    def _boom(*a, **k):
-        raise AssertionError(
-            "réseau/SMTP interdit dans les tests [TESTS-PORT-6] — un appel sortant a été tenté"
-        )
-
-    monkeypatch.setattr(app.urllib.request, "urlopen", _boom)   # ← la vraie porte du FX
-    monkeypatch.setattr(app.smtplib, "SMTP", _boom)
-    monkeypatch.setattr(app.requests, "get", _boom, raising=False)
-
-
-def test_la_garde_reseau_mord_vraiment(client):
-    """Un garde-fou qui n'a jamais dit non ne prouve rien : on vérifie qu'il déclenche, et
-    donc que la « garantie structurelle » des autres tests en est bien une."""
-    import app
-    with pytest.raises(AssertionError, match="réseau/SMTP interdit"):
-        app.urllib.request.urlopen("https://exemple.test")
-    with pytest.raises(AssertionError, match="réseau/SMTP interdit"):
-        app.smtplib.SMTP("localhost")
+# La garde « zéro réseau » n'est plus ici : elle est HISSÉE dans `tests/conftest.py`
+# ([TEST-NET-GUARD]) et couvre désormais toute la suite, avec une exception pour localhost
+# (le fixture `live_server` en dépend). Les tests qui la prouvent vivent dans
+# `tests/back/test_net_guard.py`.
 
 
 # ───────────────────────────────────────── montage ─────────────────────────────────────────
@@ -134,8 +111,9 @@ def test_fx_served_from_cache_without_any_fetch(client, monkeypatch):
     ⚠ Le compteur n'est pas décoratif, et une mutation me l'a appris : j'avais d'abord écrit
     que la garde réseau suffirait à faire rougir un fetch intempestif. C'est faux —
     `_fx_fetch_rates` enveloppe tout dans un `except Exception`, donc il aurait avalé
-    l'AssertionError de la garde et serait retombé sur le cache, l'air de rien. Seul un
-    compteur explicite prouve qu'AUCUN appel n'a été tenté."""
+    l'exception de la garde et serait retombé sur le cache, l'air de rien. C'est d'ailleurs
+    pour cela que la garde de [TEST-NET-GUARD] lève une `BaseException` ; mais même ainsi,
+    seul un compteur explicite prouve qu'AUCUN appel n'a été TENTÉ."""
     import app
     appels = []
     monkeypatch.setattr(app, "_fx_fetch_rates", lambda: appels.append(1))

@@ -79,6 +79,14 @@ Décision Fabien : **pas de plafond de durée** sur le vocal — « c'est une fe
 
 Dans les deux cas : garder le chrono en direct et **tester sur un vrai mobile** (c'est là que la RAM lâche). Importance : **Fabien 6/10** ; Cowork d'accord ~6 — vrai confort, mais l'implémentation « sans bug » n'est pas triviale (ce n'est pas une constante à changer).
 
+### 🌱 Graine backlog — [SIDEBAR-NAV] : réordonner + replier les sections de navigation (importance Fabien : **8/10** ; Cowork : ~6-7/10)
+
+Retours Fabien (captures 9/08) : (1) **desktop** — Partages et Corbeille (vues utilitaires) sont coincés en haut de la colonne de gauche ; les descendre **tout en bas**, contenu (Liens/Projets/Étiquettes) devant. (2) **mobile** — atteindre **Projets** est pénible : la section **Liens** dépliée en entier enterre tout ce qui suit. (3) Solution Fabien : sections **repliables** — un bouton « réduire » sur Liens (et Projets/Étiquettes) pour plier une longue liste et tomber sur la section suivante ; valable mobile ET desktop.
+
+UI → **maquette Cowork d'abord** (règle du projet). À cadrer : ordre exact (Favoris, Liens, Projets, Étiquettes en haut / Partages, Corbeille en bas ?), mémoire de l'état plié/déplié par section, et surtout le **parcours mobile** (accès direct aux sections sans scroller toute la liste — repli + éventuel raccourci de saut). Vérifier l'existant : les ▸ suggèrent un repli déjà là (à étendre/rendre visible) plutôt qu'à créer de zéro.
+
+Importance : **Fabien 8/10** — Cowork ~6-7 (friction quotidienne, surtout mobile ; pas de risque données/sécurité, mais très visible à l'usage).
+
 ### En cours / prochains lots (à jour 10 juil. 2026)
 
 - ✅ **[TEXT-EXCERPT-UNESCAPE]** — **CODÉ [V27.28.203]** (`app.py`, 4 lignes, export 27 inchangé) : `&#39;` ne fuit plus dans les titres dérivés (vue Fichiers, noms de zip, libellés de partage). Le paramètre de `_text_excerpt` s'appelait `html` et **masquait le module** `html` — d'où l'absence de `unescape` que `_memo_link_title` faisait déjà. 13/13 tests + 36/36 de [GUEST-MAIL] rejoués. Détail `REALISATION.md`.

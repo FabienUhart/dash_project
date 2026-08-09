@@ -5,6 +5,10 @@ SÛRETÉ : aucun test ne touche la vraie base (prod/dev). `app.py` lit `DB_PATH`
 à l'import et en dérive `UPLOAD_DIR`/`BACKUP_DIR`/`DERIVED_DIR`. On force un `DB_PATH` temp
 AVANT le premier import de `app`, puis on réoriente vers un `tmp_path` frais à chaque test
 (revert auto via monkeypatch).
+
+SÛRETÉ (2) : aucun test ne touche le RÉSEAU ni SMTP — voir la garde autouse plus bas. Elle
+est ici, et pas dans un fichier de tests, parce qu'un dispositif qui ne protège qu'un fichier
+n'est pas un dispositif : c'est de la chance.
 """
 import os
 import socket
@@ -23,6 +27,70 @@ if REPO_ROOT not in sys.path:
 # vraie base. La base par test est posée par `new_base()`.
 os.environ.setdefault("DB_PATH", os.path.join(REPO_ROOT, ".pytest-scratch", "dashboard.db"))
 os.environ.setdefault("TZ", "Europe/Paris")
+
+
+# ------------------------------------------------------- GARDE ZÉRO-RÉSEAU ----
+# [TEST-NET-GUARD] Motif, découvert en [TESTS-PORT vague 6] : `app.py` appelle `load_dotenv()`
+# à l'import, et un `.env` de dev porte de VRAIS identifiants SMTP. La suite tournait donc avec
+# un SMTP fonctionnel, et n'a évité d'envoyer un vrai message que grâce à une garde locale à un
+# seul fichier. On en fait un dispositif global.
+
+
+class ReseauInterdit(BaseException):
+    """Hérite de `BaseException`, PAS d'`Exception`, et c'est tout l'intérêt.
+
+    Le code applicatif avale les exceptions ordinaires — `_fx_fetch_rates` enveloppe son appel
+    réseau dans un `except Exception: return None`. Une garde levant `AssertionError` y serait
+    silencieusement gobée : le test passerait au vert en croyant qu'aucun appel n'a eu lieu,
+    alors que l'appel a bien été tenté puis avalé. Une `BaseException` traverse ces `except`.
+    """
+
+
+def _est_local(url):
+    u = str(url)
+    return u.startswith("http://127.0.0.1") or u.startswith("http://localhost")
+
+
+@pytest.fixture(autouse=True)
+def _interdire_le_reseau(monkeypatch):
+    """Ferme les trois portes de sortie de l'app, pour TOUS les tests.
+
+    `requests.get` garde une exception pour **localhost** : un appel vers `127.0.0.1` depuis un
+    test vise le serveur de test, pas l'extérieur — le bloquer n'apporterait rien et casserait
+    tout usage légitime.
+
+    ⚠ Mesuré, pas supposé : cette exception n'est PAS ce qui garde l'e2e en vie. `live_server`
+    est **session-scoped**, donc sa boucle de sonde tourne AVANT que cette garde (function-scoped)
+    ne s'installe — vérifié en bloquant localhost exprès : les six tests e2e passent quand même.
+    L'exception reste néanmoins juste : elle couvre les appels faits DANS un corps de test, et
+    le jour où l'ordre des fixtures changerait, elle éviterait une panne franche (`live_server`
+    rattrape `RequestException`, qu'une `BaseException` traverserait sans être amortie).
+
+    `urlopen` et `smtplib.SMTP` sont bloqués sans exception : rien de légitime ne les emprunte
+    dans les tests, et `urlopen` est précisément la porte du convertisseur de devises.
+    """
+    import app
+
+    vrai_get = app.requests.get
+
+    def _get_garde(url, *a, **k):
+        if _est_local(url):
+            return vrai_get(url, *a, **k)      # sonde live_server : autorisée
+        raise ReseauInterdit("réseau interdit dans les tests : %s" % url)
+
+    def _boom(*a, **k):
+        cible = a[0] if a else ""
+        raise ReseauInterdit("réseau/SMTP interdit dans les tests : %s" % (cible,))
+
+    monkeypatch.setattr(app.requests, "get", _get_garde, raising=False)
+    monkeypatch.setattr(app.urllib.request, "urlopen", _boom)
+    monkeypatch.setattr(app.smtplib, "SMTP", _boom)
+
+
+@pytest.fixture
+def reseau_interdit():
+    """L'exception de la garde, pour les tests qui l'attendent explicitement."""
+    return ReseauInterdit
 
 
 # ------------------------------------------------------------------ BACK ----
