@@ -27,6 +27,23 @@ def _boot(page, live_server, path="/"):
     page.wait_for_selector(".cat-item", timeout=10_000)   # la sidebar est peinte = le JS a tourné
 
 
+def _wait_until(fn, timeout_ms=10_000, step_ms=200):
+    """Attend qu'une condition devienne vraie, au lieu de dormir un temps fixe.
+
+    Une pause en dur est un pari sur la vitesse de la machine : `wait_for_timeout(800)`
+    passait sur un portable et **échouait sur le runner CI**, plus lent — un test instable,
+    ce qui est pire qu'un test absent puisqu'il bloque des déploiements au hasard. On
+    interroge donc jusqu'à ce que ce soit vrai, avec une borne franche.
+    """
+    import time
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        if fn():
+            return True
+        time.sleep(step_ms / 1000.0)
+    return False
+
+
 # --- Socle ----------------------------------------------------------------
 
 def test_api_version_reachable(live_server, page):
@@ -57,8 +74,10 @@ def test_navigate_between_views(live_server, page, console_errors):
     """Plan / Agenda / Mémos : les trois vues principales doivent s'ouvrir sans casse."""
     _boot(page, live_server)
     for label in ("Plan", "Agenda", "Mémos"):
-        page.locator(".cat-item", has_text=label).first.click()
-        page.wait_for_timeout(300)
+        item = page.locator(".cat-item", has_text=label).first
+        item.click()
+        # On attend que la vue prenne, pas un délai arbitraire : l'entrée cliquée devient active.
+        _wait_until(lambda i=item: "active" in (i.get_attribute("class") or ""), timeout_ms=5_000)
         assert page.locator("body").count() == 1
     assert console_errors == [], "Erreurs JS pendant la navigation :\n%s" % console_errors
 
@@ -78,14 +97,14 @@ def test_create_memo_through_the_ui(live_server, page, console_errors):
     assert quick.is_visible(), "Le champ de capture rapide n'est pas visible sur l'accueil."
     quick.fill("Mémo créé par le test e2e")
     quick.press("Enter")
-    page.wait_for_timeout(800)
 
-    memos = page.request.get(live_server + "/api/memos").json()
-    rows = memos if isinstance(memos, list) else memos.get("memos", [])
-    contents = [m.get("content", "") + m.get("title", "") for m in rows]
-    assert any("Mémo créé par le test e2e" in c for c in contents), (
-        "Le mémo saisi dans l'UI n'est pas arrivé en base."
-    )
+    def _arrived():
+        memos = page.request.get(live_server + "/api/memos").json()
+        rows = memos if isinstance(memos, list) else memos.get("memos", [])
+        return any("Mémo créé par le test e2e" in (m.get("content", "") + m.get("title", ""))
+                   for m in rows)
+
+    assert _wait_until(_arrived), "Le mémo saisi dans l'UI n'est pas arrivé en base."
     assert console_errors == [], "Erreurs JS pendant la création :\n%s" % console_errors
 
 
@@ -102,6 +121,7 @@ def test_share_page_renders_for_a_guest(live_server, page, console_errors):
                            data={"kind": "project", "target_id": pid}).json()
 
     page.goto(live_server + "/share/" + sh["token"], wait_until="domcontentloaded")
-    page.wait_for_timeout(1200)
-    assert "Visible par l'invité" in page.content(), "La page de partage n'affiche pas son mémo."
+    assert _wait_until(lambda: "Visible par l'invité" in page.content()), (
+        "La page de partage n'affiche pas son mémo."
+    )
     assert console_errors == [], "Erreurs JS sur la page invitée :\n%s" % console_errors

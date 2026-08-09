@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Hook git pre-commit VERSIONNÉ : suite COMPLÈTE (back + front) avant tout commit.
+# Tourne sur la machine qui committe (le M4). Activer une fois : `make hooks`.
+# Contournement d'urgence : `git commit --no-verify`.
+set -uo pipefail
+# Préfère le pytest du venv (make install) sinon celui du PATH.
+PYTEST="$([ -x .venv/bin/pytest ] && echo .venv/bin/pytest || echo pytest)"
+echo "→ pre-commit : $PYTEST (back + front)…"
+if [ ! -x .venv/bin/pytest ] && ! command -v pytest >/dev/null 2>&1; then
+  echo "⚠ pytest indisponible — lance 'make install'. Commit refusé." >&2
+  exit 1
+fi
+if "$PYTEST" -q; then
+  echo "✅ suite complète verte — commit autorisé."
+  exit 0
+fi
+echo "❌ tests ROUGES — commit refusé. Corrige, ou 'git commit --no-verify' en dernier recours." >&2
+exit 1

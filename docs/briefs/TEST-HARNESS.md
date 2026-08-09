@@ -573,33 +573,39 @@ core.hooksPath .githooks` (via `make hooks`), plutôt que le framework `pre-comm
 (pypi). Raison : zéro dépendance nouvelle, versionné avec le repo, activation en une
 ligne — cohérent avec l'esprit « pas de build » du projet.
 
-**Périmètre** : `pytest -m "not e2e"` (back + invariants, quelques secondes). Pas d'e2e
-au commit (navigateur + lenteur + flakiness) : la CI, elle, lance **tout** et bloque le
-deploy. *Pour aussi lancer l'e2e au commit : remplacer `-m "not e2e"` par rien dans le
-script ci-dessous.*
+**Périmètre : la suite COMPLÈTE (back + front).** Le commit se fait sur la machine de
+Fabien (M4), où `make test` tourne en ~6 s e2e comprise — donc on ne laisse **rien**
+passer localement, back comme front. Le pre-commit tourne toujours là où l'on committe :
+c'est le M4, jamais le Zimaboard. La CI reste le filet côté runner. *(Pour un pre-commit
+rapide qui saute le navigateur : ajouter `-m "not e2e"` dans le script.)*
+
+Pré-requis : `make venv` (ou `make install`) une fois — installe pytest, pytest-playwright
+**et Chromium**, sans quoi les tests e2e du hook échoueront.
 
 `.githooks/pre-commit` (à créer **exécutable** : `chmod +x .githooks/pre-commit`) :
 
 ```bash
 #!/usr/bin/env bash
-# Hook git pre-commit VERSIONNÉ : tests back+invariants avant tout commit.
-# Activer une fois : `make hooks`. Contournement d'urgence : `git commit --no-verify`.
+# Hook git pre-commit VERSIONNÉ : suite COMPLÈTE (back + front) avant tout commit.
+# Tourne sur la machine qui committe (le M4). Activer une fois : `make hooks`.
+# Contournement d'urgence : `git commit --no-verify`.
 set -uo pipefail
-# Préfère le python du venv (make install) sinon python3 système.
-PYBIN="$([ -x .venv/bin/python ] && echo .venv/bin/python || echo python3)"
-echo "→ pre-commit : $PYBIN -m pytest -m 'not e2e'…"
-if ! "$PYBIN" -c "import pytest" >/dev/null 2>&1; then
-  echo "⚠ pytest indisponible — lance 'make install'. Commit refusé." >&2
+# Préfère le pytest du venv (make venv) sinon celui du PATH.
+PYTEST="$([ -x .venv/bin/pytest ] && echo .venv/bin/pytest || echo pytest)"
+echo "→ pre-commit : $PYTEST (back + front)…"
+if ! command -v "${PYTEST%% *}" >/dev/null 2>&1 && [ ! -x .venv/bin/pytest ]; then
+  echo "⚠ pytest indisponible — lance 'make venv'. Commit refusé." >&2
   exit 1
 fi
-if "$PYBIN" -m pytest -m "not e2e" -q; then
-  echo "✅ tests verts — commit autorisé."
+if "$PYTEST" -q; then
+  echo "✅ suite complète verte — commit autorisé."
   exit 0
 fi
 echo "❌ tests ROUGES — commit refusé. Corrige, ou 'git commit --no-verify' en dernier recours." >&2
 exit 1
 ```
 
-> Belt-and-suspenders assumé : le hook **Stop** (§11) teste après chaque réalisation, le
-> **pre-commit** re-teste au moment du commit (qui n'arrive qu'après passe Cowork + GO,
-> donc rarement), la **CI** teste tout et garde le deploy. Trois portes, même règle.
+> Belt-and-suspenders assumé : le hook **Stop** (§11) teste le back après chaque
+> réalisation (boucle courte), le **pre-commit** re-teste **tout** au moment du commit
+> (rare, après passe Cowork + GO) **sur le M4**, la **CI** teste tout côté runner et garde
+> le deploy. Le Zimaboard ne lance jamais de tests. Quatre acteurs, une même règle.
