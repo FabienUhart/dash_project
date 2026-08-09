@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maquette — [CARD-ACTIONS-FIXED] · icônes trait monochrome</title>
+<style>
+  :root{
+    --bg:#0b0f14;--panel:#111823;--card:#0f151e;--border:#1e2a38;
+    --muted:#8493a3;--muted2:#63717f;--txt:#dce6f0;--accent:#4aa3ff;
+    --red:#e5726b;--green:#5fcf80;--pink:#ec5c8d;--orange:#e08a4a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#eef2f7;color:var(--txt);font:15px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1240px;margin:0 auto;padding:24px 18px 70px}
+  h1{color:#12222f;font-size:1.4rem;margin:.2rem 0 .1rem}
+  .sub{color:#5a6b7a;margin:0 0 18px;max-width:900px}
+  .tag{display:inline-block;font-size:.72rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#e6f0ff;color:#1c66c9;vertical-align:middle}
+  .legend{background:#fff;border:1px solid #dbe4ee;border-radius:12px;padding:14px 16px;margin:0 0 24px}
+  .legend b{color:#12222f}.legend ul{margin:.5rem 0 0;padding-left:1.1rem}.legend li{margin:.3rem 0;color:#33454f}
+
+  /* line icons — Tabler style, currentColor, monochrome */
+  .ic{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;display:block}
+  .ic.sm{width:15px;height:15px;stroke-width:1.8}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+  @media(max-width:880px){.cols{grid-template-columns:1fr}}
+  .col-h{font-weight:800;color:#12222f;margin:0 0 4px;font-size:1rem}
+  .col-h small{font-weight:600;color:#7a8a98}
+  .col-bad{color:#b23b34}.col-good{color:#1f7a44}
+  .panel{background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:12px;box-shadow:0 8px 30px rgba(20,40,60,.14)}
+  .panel .topbar{display:flex;align-items:center;gap:8px;padding:4px 6px 12px;border-bottom:1px solid var(--border);margin-bottom:12px}
+  .brand{font-weight:800}.brand b{color:var(--accent)}
+  .seg{margin-left:auto;display:flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;font-size:.78rem}
+  .seg span{padding:4px 10px;color:var(--muted)}.seg .on{background:var(--panel);color:var(--accent)}
+
+  /* ---- CARD ---- */
+  .card{position:relative;background:var(--card);border:1px solid var(--border);border-radius:14px;
+        padding:12px 14px 10px 16px;margin:0 0 12px;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
+  .card.c-red::before{background:var(--red)}.card.c-green::before{background:var(--green)}
+  .card.c-pink::before{background:var(--pink)}.card.c-orange::before{background:var(--orange)}
+  .crow{display:flex;align-items:flex-start;gap:10px}
+  .cb{flex:0 0 auto;width:20px;height:20px;border-radius:999px;border:2px solid #3a4c5e;margin-top:2px}
+  .cmain{flex:1 1 auto;min-width:0}
+  .ctitle{font-weight:700;color:#fff;font-size:.98rem;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .cdesc{color:var(--muted);font-size:.9rem;margin:.25rem 0 0}
+  .clink{display:inline-flex;align-items:center;gap:7px;background:#0c1420;border:1px solid var(--border);
+         border-radius:8px;padding:5px 9px;margin:.4rem 0 0;font-size:.82rem;color:var(--muted)}
+  .clink b{color:var(--txt);font-weight:700}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:.5rem 0 0}
+  .bdg{display:inline-flex;align-items:center;gap:5px;background:#16202b;border:1px solid var(--border);
+       border-radius:7px;padding:2px 8px;font-size:.78rem;color:var(--muted)}
+  .thumb{flex:0 0 auto;width:54px;height:54px;border-radius:9px;background:linear-gradient(135deg,#2b3a4d,#16202b);
+         border:1px solid var(--border);display:grid;place-items:center;color:var(--muted);position:relative}
+  .thumb .plus{position:absolute;right:2px;bottom:2px;background:#000a;border-radius:5px;font-size:.62rem;padding:0 3px;color:#fff}
+
+  /* action buttons — monochrome, muted au repos, accent au survol */
+  .acts{display:inline-flex;gap:6px;align-items:center}
+  .abtn{width:34px;height:30px;border-radius:9px;border:1px solid var(--border);background:transparent;
+        color:var(--muted);display:inline-flex;align-items:center;justify-content:center;gap:3px;cursor:pointer;
+        transition:color .12s,border-color .12s}
+  .abtn:hover{color:var(--accent);border-color:#33475c}
+  .abtn .n{font-size:.68rem}
+
+  /* footer bar (category left, actions right) */
+  .foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:9px;border-top:1px solid var(--border)}
+  .cat{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:.82rem;min-width:0}
+  .dot{width:8px;height:8px;border-radius:999px;background:var(--red);flex:0 0 auto}
+  .dot.g{background:var(--green)}.dot.p{background:var(--pink)}
+  .foot .acts{margin-left:auto}
+
+  .ghost{outline:2px dashed #e5726b;outline-offset:2px}
+  .pin{position:absolute;font-size:.66rem;font-weight:700;color:#fff;background:#c0392b;border-radius:6px;padding:1px 6px;z-index:5;white-space:nowrap}
+  .note{background:#fff;border:1px solid #dbe4ee;border-left:4px solid var(--accent);border-radius:8px;
+        padding:9px 12px;font-size:.83rem;color:#33454f;margin:10px 0 0}
+  .note.bad{border-left-color:#e5726b}.note.good{border-left-color:#37a866}.note b{color:#12222f}
+  .alt{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:10px}
+  @media(max-width:880px){.alt{grid-template-columns:1fr}}
+  .altcard{background:#fff;border:1px solid #dbe4ee;border-radius:12px;padding:12px 14px}
+  .altcard h3{margin:.1rem 0 .3rem;font-size:.92rem;color:#12222f}
+  .altcard.pick{border:2px solid var(--accent);box-shadow:0 6px 18px rgba(74,163,255,.15)}
+  .altcard p{margin:.2rem 0;font-size:.82rem;color:#4a5a68}
+  .pill{display:inline-block;font-size:.68rem;font-weight:700;background:#e6f0ff;color:#1c66c9;border-radius:6px;padding:1px 7px}
+  .mini{font-size:.75rem;color:#6a7a88;margin-top:26px}
+  .demoh{display:flex;align-items:center;gap:10px;margin:30px 0 8px}
+  .demoh h2{font-size:1.05rem;color:#12222f;margin:0}
+  .hint{color:#6a7a88;font-size:.8rem;margin:8px 2px 0}
+</style></head>
+<body><div class="wrap">
+
+<!-- ============ SPRITE : icônes Tabler trait ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4l10.5 -10.5a2.83 2.83 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M8 9h8"/><path d="M8 13h5"/><path d="M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3z"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M5 12a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/><path d="M11 12a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/><path d="M17 12a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/><path d="M17.66 16.66l-4.25 4.24a2 2 0 0 1 -2.82 0l-4.25 -4.24a8 8 0 1 1 11.32 0z"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24"><path d="M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2"/><path d="M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0"/><path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M9 15l6 -6"/><path d="M11 6l.46 -.54a5 5 0 0 1 7.07 7.07l-.53 .47"/><path d="M13 18l-.4 .53a5.07 5.07 0 0 1 -7.13 0a4.97 4.97 0 0 1 0 -7.07l.52 -.46"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6"/><path d="M11 13l9 -9"/><path d="M15 4h5v5"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><path d="M15 8h.01"/><path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M4 15l4 -4a3 5 0 0 1 3 0l5 5"/><path d="M14 14l1 -1a3 5 0 0 1 3 0l2 2"/></symbol>
+</defs></svg>
+
+  <h1>Maquette — barre d'action fixe · icônes trait monochrome <span class="tag">[CARD-ACTIONS-FIXED]</span></h1>
+  <p class="sub">Reprise avec le <b>vrai design</b> : icônes Tabler en <b>trait</b>, <code>currentColor</code>, <b>monochrome</b> (muted au repos, accent seulement au survol — passe la souris dessus). À gauche l'œil qui se balade aujourd'hui, à droite la barre d'action en pied, toujours au même endroit.</p>
+
+  <div class="legend">
+    <b>Le principe (Option A retenue)</b>
+    <ul>
+      <li>Actions <span style="color:var(--muted)"><svg class="ic sm" style="display:inline-block;vertical-align:-3px"><use href="#i-eye"/></svg> voir · <svg class="ic sm" style="display:inline-block;vertical-align:-3px"><use href="#i-pencil"/></svg> éditer · <svg class="ic sm" style="display:inline-block;vertical-align:-3px"><use href="#i-msg"/></svg> · <svg class="ic sm" style="display:inline-block;vertical-align:-3px"><use href="#i-dots"/></svg></span> dans une <b>barre en pied</b>, calées à droite ; la catégorie reste à gauche. Filet de séparation, rien de coloré.</li>
+      <li>Titre, badges et vignette occupent le haut — <b>ils ne poussent plus les boutons</b>. L'œil est au même pixel sur toutes les cards.</li>
+      <li>Icônes <b>en trait, monochrome</b> : discrètes au repos, teinte accent au survol seulement — comme le reste de l'app (invariant 9).</li>
+    </ul>
+  </div>
+
+  <!-- ============ INVITÉ : AVANT / APRÈS ============ -->
+  <div class="demoh"><h2>Côté invité — affichage Compact</h2></div>
+  <div class="cols">
+    <!-- AVANT -->
+    <div>
+      <p class="col-h col-bad">✗ Aujourd'hui <small>— l'œil se balade</small></p>
+      <div class="panel">
+        <div class="topbar"><span class="brand"><b>Dash</b>board</span><span class="seg"><span>Immersif</span><span class="on">Compact</span></span></div>
+        <div class="card c-pink">
+          <div class="crow">
+            <div class="cb"></div>
+            <div class="cmain">
+              <div class="ctitle">Meduse carte</div>
+              <div class="clink"><svg class="ic sm"><use href="#i-link"/></svg> <b>meduseo.com</b> /fr/ville/Bilbao-1… <svg class="ic sm"><use href="#i-ext"/></svg></div>
+              <div class="badges"><span class="bdg">Voyage eclipse</span></div>
+            </div>
+            <div class="acts" style="position:relative"><span class="pin" style="top:-16px;right:0">ici</span><button class="abtn ghost"><svg class="ic"><use href="#i-eye"/></svg></button></div>
+          </div>
+        </div>
+        <div class="card c-pink">
+          <div class="crow">
+            <div class="cb"></div>
+            <div class="cmain"><div class="ctitle">Goûter<br>Tatie…</div></div>
+            <div class="acts" style="position:relative"><span class="pin" style="top:-16px;left:-8px">là ?!</span><button class="abtn ghost"><svg class="ic"><use href="#i-eye"/></svg></button></div>
+            <div class="badges" style="margin:0"><span class="bdg">Phiphi</span></div>
+            <div class="thumb"><svg class="ic"><use href="#i-photo"/></svg><span class="plus">+1</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="note bad"><b>Le défaut :</b> card-lien → œil en haut à droite ; card-photo → la vignette le repousse au milieu, à un autre niveau. Rien n'est stable.</div>
+    </div>
+
+    <!-- APRÈS -->
+    <div>
+      <p class="col-h col-good">✓ Proposition A <small>— barre en pied, fixe</small></p>
+      <div class="panel">
+        <div class="topbar"><span class="brand"><b>Dash</b>board</span><span class="seg"><span>Immersif</span><span class="on">Compact</span></span></div>
+        <div class="card c-pink">
+          <div class="crow">
+            <div class="cb"></div>
+            <div class="cmain">
+              <div class="ctitle">Meduse carte</div>
+              <div class="clink"><svg class="ic sm"><use href="#i-link"/></svg> <b>meduseo.com</b> /fr/ville/Bilbao-1… <svg class="ic sm"><use href="#i-ext"/></svg></div>
+            </div>
+          </div>
+          <div class="foot">
+            <span class="cat"><span class="dot p"></span> Voyage eclipse</span>
+            <span class="acts"><button class="abtn"><svg class="ic"><use href="#i-eye"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-dots"/></svg></button></span>
+          </div>
+        </div>
+        <div class="card c-pink">
+          <div class="crow">
+            <div class="cb"></div>
+            <div class="cmain"><div class="ctitle">Goûter Tatie…</div></div>
+            <div class="thumb"><svg class="ic"><use href="#i-photo"/></svg><span class="plus">+1</span></div>
+          </div>
+          <div class="foot">
+            <span class="cat"><span class="dot p"></span> Phiphi</span>
+            <span class="acts"><button class="abtn"><svg class="ic"><use href="#i-eye"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-dots"/></svg></button></span>
+          </div>
+        </div>
+      </div>
+      <div class="note good"><b>Stable :</b> l'œil est au même endroit sur les deux cards. La vignette vit en haut à droite, elle ne touche plus les boutons.</div>
+    </div>
+  </div>
+
+  <!-- ============ OWNER : 4 TYPES ============ -->
+  <div class="demoh"><h2>Côté owner — la même barre sur les 4 types de card</h2></div>
+  <p class="hint">Même barre en pied partout, mêmes icônes trait. Passe la souris sur un bouton : il prend la teinte accent, sinon il reste discret.</p>
+  <div class="panel" style="max-width:720px">
+    <div class="topbar"><span class="brand"><b>Dash</b>board</span><span class="seg"><span>Immersif</span><span class="on">Compact</span></span></div>
+
+    <div class="card c-orange">
+      <div class="crow"><div class="cb"></div><div class="cmain">
+        <div class="ctitle">🏙 Dōtonbori</div>
+        <div class="cdesc">J1 soirée — 10 min à pied de Parco.</div>
+        <div class="badges"><span class="bdg"><svg class="ic sm"><use href="#i-cal"/></svg> 3 nov.</span><span class="bdg"><svg class="ic sm"><use href="#i-pin"/></svg> Dōtonbori, Osaka</span></div>
+      </div></div>
+      <div class="foot"><span class="cat"><span class="dot"></span> Activités Osaka</span>
+        <span class="acts"><button class="abtn"><svg class="ic"><use href="#i-eye"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-pencil"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-msg"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-dots"/></svg></button></span></div>
+    </div>
+
+    <div class="card c-orange">
+      <div class="crow"><div class="cb"></div><div class="cmain">
+        <div class="ctitle">🏯 Château d'Osaka</div>
+        <div class="cdesc">J2 matin.</div>
+        <div class="badges"><span class="bdg"><svg class="ic sm"><use href="#i-cal"/></svg> 4 nov.</span><span class="bdg"><svg class="ic sm"><use href="#i-pin"/></svg> Château d'Osaka</span><span class="bdg"><svg class="ic sm"><use href="#i-cam"/></svg> 1</span></div>
+      </div><div class="thumb"><svg class="ic"><use href="#i-photo"/></svg></div></div>
+      <div class="foot"><span class="cat"><span class="dot"></span> Activités Osaka</span>
+        <span class="acts"><button class="abtn"><svg class="ic"><use href="#i-eye"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-pencil"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-msg"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-dots"/></svg></button></span></div>
+    </div>
+
+    <div class="card c-orange">
+      <div class="crow"><div class="cb"></div><div class="cmain">
+        <div class="ctitle">🛍 Namba + Parco</div>
+        <div class="cdesc">J1 après-midi — balade/shopping, on reste dans le centre.</div>
+        <div class="badges"><span class="bdg"><svg class="ic sm"><use href="#i-cal"/></svg> 3 nov.</span><span class="bdg"><svg class="ic sm"><use href="#i-pin"/></svg> Namba / Shinsaibashi…</span><span class="bdg"><svg class="ic sm"><use href="#i-clip"/></svg> 1</span></div>
+      </div></div>
+      <div class="foot"><span class="cat"><span class="dot"></span> Activités Osaka</span>
+        <span class="acts"><button class="abtn"><svg class="ic"><use href="#i-eye"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-pencil"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-msg"/></svg><span class="n">1</span></button><button class="abtn"><svg class="ic"><use href="#i-dots"/></svg></button></span></div>
+    </div>
+
+    <div class="card c-green">
+      <div class="crow"><div class="cb"></div><div class="cmain">
+        <div class="ctitle">🏨 Osaka · Shinsekai</div>
+        <div class="cdesc">WELLSTAY Shinsekai · 3→6 nov (3 nuits) · arrivée 15h · Réf 6952887889</div>
+        <div class="badges"><span class="bdg"><svg class="ic sm"><use href="#i-cal"/></svg> 3 nov.</span><span class="bdg"><svg class="ic sm"><use href="#i-user"/></svg> Alexia</span></div>
+      </div></div>
+      <div class="foot"><span class="cat"><span class="dot g"></span> Reservations Alex Fab</span>
+        <span class="acts"><button class="abtn"><svg class="ic"><use href="#i-eye"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-pencil"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-msg"/></svg></button><button class="abtn"><svg class="ic"><use href="#i-dots"/></svg></button></span></div>
+    </div>
+  </div>
+  <div class="note good" style="max-width:720px"><b>Le test :</b> parcours la colonne du regard — l'œil <svg class="ic sm" style="display:inline-block;vertical-align:-3px;color:var(--muted)"><use href="#i-eye"/></svg> tombe toujours au même endroit, ligne du bas, à droite.</div>
+
+  <!-- ============ ALT B / C ============ -->
+  <div class="demoh"><h2>Pour mémoire — les deux autres pistes</h2></div>
+  <div class="alt">
+    <div class="altcard pick">
+      <span class="pill">RETENU · A</span>
+      <h3>Barre en pied de card</h3>
+      <p>Actions dans une barre fixe en bas, avec la catégorie. Le plus lisible et découvrable (mobile compris).</p>
+      <p><b>+</b> ancrage parfait · <b>+</b> découvrable · <b>−</b> card un poil plus haute.</p>
+    </div>
+    <div class="altcard">
+      <span class="pill">B</span>
+      <h3>Cluster haut-droite fixe</h3>
+      <p>Emplacement réservé (taille fixe) : la vignette ne pousse plus les boutons. Card compacte.</p>
+      <p><b>+</b> hauteur inchangée · <b>−</b> se dispute l'espace avec la vignette en mobile étroit.</p>
+    </div>
+    <div class="altcard">
+      <span class="pill">C</span>
+      <h3>Révélé au survol</h3>
+      <p>Place réservée, boutons au survol/tap. Card très épurée au repos.</p>
+      <p><b>+</b> le plus épuré · <b>−</b> peu découvrable au doigt sur mobile.</p>
+    </div>
+  </div>
+
+  <p class="mini">Maquette Cowork · icônes Tabler trait <code>currentColor</code> monochrome · à valider avant toute tranche UI · touche invité (share.html) ET owner (index.html), classes/pictos existants (invariant 9).</p>
+</div></body></html>

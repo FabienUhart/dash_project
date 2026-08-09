@@ -2528,6 +2528,11 @@ async function runPhotoView(cfg) {
       imageUrl: cfg.imageUrl, downloadUrl: cfg.downloadUrl, exifUrl: cfg.exifUrl,
       canDelete: !!cfg.canEdit,
       onDelete: async (name) => { const p = byName(name); if (p) { await cfg.deletePhoto(p); await reload(); } },
+      // [PHOTO-ROTATE-SAVE] owner-only : seul un gabarit propriétaire pose `canRotate`. Les
+      // pages invité/hub appellent ce même code sans le flag → aucun bouton, comportement
+      // inchangé chez eux.
+      rotateUrl: cfg.canRotate ? ((n) => '/api/images/' + n + '/rotate') : null,
+      onRotated: cfg.canRotate ? (() => { reload(); }) : null,   // la grille repart droite
     });
     bar.appendChild(obtn('maximize', 'Plein écran (zoom, rotation)', openFull));
     if (ph) {
@@ -3255,6 +3260,11 @@ function runImageViewer(cfg) {
   const zoomOut = ivBtn('button', 'zoom-out', 'Dézoomer');
   const zoomIn = ivBtn('button', 'zoom-in', 'Zoomer');
   bar.appendChild(dl); bar.appendChild(rotL); bar.appendChild(rotR);
+  // [PHOTO-ROTATE-SAVE] « Enregistrer la rotation » : n'existe QUE si l'appelant fournit
+  // `rotateUrl`, c'est-à-dire côté propriétaire. On ne peut pas gater sur `canDelete`/`canEdit` :
+  // ils sont vrais aussi pour un invité contributeur, qui n'a pas à réécrire l'original.
+  const saveRot = cfg.rotateUrl ? ivBtn('button', 'device-floppy', 'Enregistrer la rotation') : null;
+  if (saveRot) { saveRot.style.display = 'none'; bar.appendChild(saveRot); }
   bar.appendChild(zoomOut); bar.appendChild(zoomIn);
   let delBtn = null;
   if (cfg.canDelete) {
@@ -3264,7 +3274,24 @@ function runImageViewer(cfg) {
   const closeBtn = ivBtn('button', 'x', 'Fermer', 'iv-close');
   bar.appendChild(closeBtn);
 
-  function applyTransform() { img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + rot + 'deg) scale(' + scale + ')'; }
+  // [PHOTO-ROTATE-SAVE] angle NET affiché, ramené dans [0,360[ : `rot` s'accumule librement
+  // (deux clics à gauche donnent -180), et c'est cette valeur nette qu'on envoie au serveur.
+  function angleNet() { return ((rot % 360) + 360) % 360; }
+  function updateSaveBtn() {
+    if (saveRot) saveRot.style.display = angleNet() === 0 ? 'none' : '';
+  }
+  // Cache-bust par image : les dérivées sont servies avec un cache fort, donc sans ce paramètre
+  // le navigateur ré-afficherait la version d'avant rotation — l'utilisateur croirait que rien
+  // ne s'est passé.
+  const busts = {};
+  function srcOf(name, size) {
+    const u = imgSize(cfg.imageUrl(name), size);
+    return busts[name] ? u + '&v=' + busts[name] : u;
+  }
+  function applyTransform() {
+    img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + rot + 'deg) scale(' + scale + ')';
+    updateSaveBtn();
+  }
   function setScale(s) {
     scale = Math.min(Math.max(s, 0.25), 5);
     if (scale <= 1) { tx = 0; ty = 0; }
@@ -3273,7 +3300,7 @@ function runImageViewer(cfg) {
   }
   function render() {
     const name = images[idx];
-    img.src = imgSize(cfg.imageUrl(name), 's');   // [IMAGE-THUMBS] image écran ~1600px (dérivée)
+    img.src = srcOf(name, 's');                   // [IMAGE-THUMBS] image écran ~1600px (dérivée)
     dl.href = _ivDownloadUrl(name);               // ⬇ = original brut (inchangé)
     rot = 0; scale = 1; tx = 0; ty = 0;
     stage.classList.remove('zoomed');
@@ -3313,6 +3340,32 @@ function runImageViewer(cfg) {
   next.addEventListener('click', () => go(1));
   rotL.addEventListener('click', () => { rot -= 90; applyTransform(); });
   rotR.addEventListener('click', () => { rot += 90; applyTransform(); });
+  if (saveRot) {
+    saveRot.addEventListener('click', async () => {
+      const angle = angleNet();
+      if (!angle) return;
+      const name = images[idx];
+      saveRot.disabled = true;                    // anti double-clic : l'appel réécrit un fichier
+      try {
+        const r = await fetch(cfg.rotateUrl(name), {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, cfg.headers || {}),
+          body: JSON.stringify({ angle }),
+        });
+        if (!r.ok) throw new Error('rotate');
+        const d = await r.json();
+        busts[name] = d.rotated_at || Date.now();
+        buildThumbs();                            // la bande porte aussi l'ancienne orientation
+        render();                                 // remet rot/zoom à zéro et recharge l'image droite
+        if (cfg.onRotated) cfg.onRotated(name, busts[name]);   // la grille du mémo suit
+      } catch (_) {
+        // On NE remet PAS `rot` à zéro : l'utilisateur garde son geste et peut réessayer.
+        if (typeof toast === 'function') toast("La rotation n'a pas pu être enregistrée.");
+      } finally {
+        saveRot.disabled = false;
+      }
+    });
+  }
   zoomIn.addEventListener('click', () => setScale(scale * 1.25));
   zoomOut.addEventListener('click', () => setScale(scale / 1.25));
   closeBtn.addEventListener('click', () => dlg.close());
@@ -3344,7 +3397,7 @@ function runImageViewer(cfg) {
     strip.style.display = '';
     images.forEach((name, i) => {
       const t = el('button', { class: 'iv-thumb', attrs: { type: 'button', title: 'Image ' + (i + 1), 'aria-label': 'Aller à l\'image ' + (i + 1) } });
-      t.appendChild(el('img', { attrs: { src: imgSize(cfg.imageUrl(name), 't'), alt: '', loading: 'lazy' } }));   // [IMAGE-THUMBS] vignette
+      t.appendChild(el('img', { attrs: { src: srcOf(name, 't'), alt: '', loading: 'lazy' } }));   // [IMAGE-THUMBS] vignette
       t.addEventListener('click', () => { if (i !== idx) { idx = i; render(); } });
       thumbEls.push(t);
       strip.appendChild(t);
@@ -4719,6 +4772,12 @@ function renderMemoPhotos(cfg) {
           imageUrl: url, downloadUrl: dl, exifUrl: cfg.exifUrl || null,
           canDelete: !!cfg.canEdit,
           onDelete: async (n) => { await cfg.onDelete(n); await cfg.onChange(); },
+          // [PHOTO-ROTATE-SAVE-FIX] relai de `canRotate`. `renderMePhotos` (owner) le posait
+          // déjà, mais cette fonction ne le lisait nulle part : le drapeau se perdait ici même,
+          // et la grille « 📷 Photos » de l'éditeur restait sans bouton d'enregistrement.
+          // Owner-only : pas de valeur par défaut, les pages invité n'envoient rien.
+          rotateUrl: cfg.canRotate ? ((n) => '/api/images/' + n + '/rotate') : null,
+          onRotated: cfg.canRotate ? (() => { if (cfg.onChange) cfg.onChange(); }) : null,
         });
       });
       tw.appendChild(img);
@@ -6760,6 +6819,9 @@ const HDR_ICONS = {
   // Tabler outline, `currentColor`, additifs : ils remplacent les derniers emojis du convertisseur.
   clipboard: ['M9 5h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2h-2', 'M9 3m0 2a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v0a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z'],
   bookmark: ['M18 7v14l-6 -4l-6 4v-14a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4z'],
+  // [PHOTO-ROTATE-SAVE] disquette : « enregistrer la rotation » dans la visionneuse. Aucune
+  // icône du jeu existant ne disait « sauvegarder » (archive/signet auraient menti sur le geste).
+  'device-floppy': ['M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2', 'M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M14 4l0 4l-6 0l0 -4'],
   // [COMMENTS-V2] avion « send » du composer de commentaires.
   plus: ['M12 5l0 14', 'M5 12l14 0'],
   send: ['M10 14l11 -11', 'M21 3l-6.5 18a.55 .55 0 0 1 -1 0l-3.5 -7l-7 -3.5a.55 .55 0 0 1 0 -1l18 -6.5'],

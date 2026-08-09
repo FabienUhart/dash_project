@@ -7122,6 +7122,7 @@ function renderMePhotos(memo) {
   const sec = renderMemoPhotos({
     images: memo.images || [],
     canEdit: true,
+    canRotate: true,   // [PHOTO-ROTATE-SAVE] owner : « Enregistrer la rotation » dans la visionneuse
     imageUrl: (n) => `/uploads/${n}`,
     downloadUrl: (n) => `/uploads/${n}`,
     exifUrl: (n) => `/api/image-exif/${n}`,
@@ -7473,14 +7474,12 @@ function thumbsEl(memo, editable, collapsed = false) {
     const img = el('img', { attrs: { src: imgSize(`/uploads/${name}`, 't'), alt: '', loading: 'lazy' } });   // [IMAGE-THUMBS] vignette
     img.addEventListener('click', (e) => {
       e.stopPropagation();
-      runImageViewer({
-        images, startIndex: images.indexOf(name),
-        imageUrl: (n) => `/uploads/${n}`,
-        downloadUrl: (n) => `/uploads/${n}`,
-        exifUrl: (n) => `/api/image-exif/${n}`,
-        canDelete: !!editable,
-        onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
-      });
+      runImageViewer(Object.assign(
+        ownerMemoPhotoViewer(memo, images.indexOf(name), { images, canDelete: !!editable }),
+        // [PHOTO-ROTATE-SAVE-FIX] 5e porte, absente de la liste du brief : la BANDE de vignettes
+        // d'une card dépliée. Même famille que la vignette compacte — la manquer aurait laissé
+        // le même trou un cran plus loin.
+        {}));
     });
     tw.appendChild(img);
     if (collapsed && images.length > 1) {
@@ -7903,6 +7902,35 @@ function openVoteManage(v) {
 
 // [MEMO-VIEW] cfg owner de la fiche de lecture : données déjà normalisées (aucun appel API —
 // tout vient de `state`), sanitizer maison (`contentNode`), visionneuse existante.
+// [PHOTO-ROTATE-SAVE-FIX] SOURCE UNIQUE de la config visionneuse des photos d'un mémo (owner).
+// La v1 câblait `rotateUrl` porte par porte : sur six entrées vers les mêmes `memo.images`, deux
+// l'avaient. Résultat, ouvrir une photo par la vignette d'une card ne proposait pas d'enregistrer
+// — la fonctionnalité semblait absente alors qu'elle n'était que débranchée. Toute porte passe
+// désormais par ici, donc le bouton est là PAR CONSTRUCTION et non par copier-coller.
+// `opts.images` : sous-ensemble explicite (la fiche ouvre parfois la seule couverture).
+// `opts.canDelete: false` : conserve le comportement d'une porte qui n'offrait pas la corbeille —
+// ce lot branche la rotation, il n'ajoute pas de capacité au passage.
+function ownerMemoPhotoViewer(memo, startIndex, opts) {
+  const o = opts || {};
+  const cfg = {
+    images: o.images || (memo && memo.images) || [],
+    startIndex: startIndex || 0,
+    imageUrl: (n) => `/uploads/${n}`,
+    downloadUrl: (n) => `/uploads/${n}`,
+    exifUrl: (n) => `/api/image-exif/${n}`,
+    rotateUrl: (n) => `/api/images/${n}/rotate`,
+    onRotated: () => { loadAll(); },   // la card et sa vignette repartent droites
+  };
+  if (memo && memo.id && o.canDelete !== false) {
+    cfg.canDelete = true;
+    cfg.onDelete = async (n) => {
+      await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' });
+      await loadAll();
+    };
+  }
+  return cfg;
+}
+
 function memoViewCfg() {
   return {
     load: (id) => {
@@ -7942,10 +7970,8 @@ function memoViewCfg() {
     // ⚠️ mémo relu FRAIS : la fiche n'est pas redessinée après une écriture, `m` serait périmé.
     onToggleCheck: (m, i) => toggleCheckItem((state.memos || []).find(x => x.id === m.id) || m, i),
     imageUrl: (n) => `/uploads/${n}`,
-    onOpenPhoto: (images, i) => runImageViewer({
-      images, startIndex: i, imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`,
-      exifUrl: (n) => `/api/image-exif/${n}`,
-    }),
+    onOpenPhoto: (images, i, m) => runImageViewer(
+      ownerMemoPhotoViewer(m, i, { images, canDelete: false })),
   };
 }
 
@@ -8036,11 +8062,8 @@ function taskEl(memo) {
     images: (memo.images || []).length,
     attachments: (memo.attachments || []).length,
     comments: memo.comment_count || 0,
-    onImages: (memo.images || []).length ? () => runImageViewer({
-      images: memo.images, startIndex: 0,
-      imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`, exifUrl: (n) => `/api/image-exif/${n}`,
-      canDelete: true, onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
-    }) : null,
+    onImages: (memo.images || []).length
+      ? () => runImageViewer(ownerMemoPhotoViewer(memo)) : null,
     onAttach: (memo.attachments || []).length ? () => openMemoAttachments(memo) : null,
     onComments: memo.comment_count ? () => openCommentsPopin(memo, () => renderAll()) : null,
   });
@@ -8174,11 +8197,7 @@ function taskEl(memo) {
   if (!coverName && !expanded && (memo.images || []).length) {
     applyCardThumb(row, {
       url: `/uploads/${memo.images[0]}`, count: memo.images.length,
-      onOpen: () => runImageViewer({
-        images: memo.images, startIndex: 0,
-        imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`, exifUrl: (n) => `/api/image-exif/${n}`,
-        canDelete: true, onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
-      }),
+      onOpen: () => runImageViewer(ownerMemoPhotoViewer(memo)),
     });
   }
 
@@ -8203,11 +8222,7 @@ function taskEl(memo) {
   if (coverName) {
     applyCardCover(task, {
       url: `/uploads/${coverName}`,
-      onOpen: () => runImageViewer({
-        images: memo.images, startIndex: 0,
-        imageUrl: (n) => `/uploads/${n}`, downloadUrl: (n) => `/uploads/${n}`, exifUrl: (n) => `/api/image-exif/${n}`,
-        canDelete: true, onDelete: async (n) => { await fetch(`/api/memos/${memo.id}/images/${n}`, { method: 'DELETE' }); await loadAll(); },
-      }),
+      onOpen: () => runImageViewer(ownerMemoPhotoViewer(memo)),
     });
   }
 

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maquette — [SIDEBAR-NAV]</title>
+<style>
+  :root{--bg:#0b0f14;--panel:#111823;--panel2:#0e141d;--border:#1e2a38;--muted:#8aa0b4;--txt:#dce6f0;--accent:#4aa3ff;--red:#e5726b;--green:#5fcf80;}
+  *{box-sizing:border-box}
+  body{margin:0;background:#eef2f7;color:var(--txt);font:15px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 18px 60px}
+  h1{color:#12222f;font-size:1.35rem;margin:.2rem 0 .1rem}
+  .sub{color:#5a6b7a;margin:0 0 20px}
+  .legend{background:#fff;border:1px solid #dbe4ee;border-radius:12px;padding:14px 16px;margin:0 0 22px}
+  .legend b{color:#12222f}
+  .legend ul{margin:.5rem 0 0;padding-left:1.1rem}.legend li{margin:.25rem 0;color:#33454f}
+  .tag{display:inline-block;font-size:.72rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#e6f0ff;color:#1c66c9;vertical-align:middle}
+  .frames{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+  .frame{background:var(--bg);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 8px 30px rgba(20,40,60,.15)}
+  .frame-desktop{width:340px}
+  .frame-mobile{width:300px}
+  .cap{font-weight:700;color:#12222f;margin:0 0 8px;font-size:.95rem}
+  .cap small{font-weight:500;color:#6a7a88}
+  .topbar{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .brand{font-weight:800}.brand b{color:var(--accent)}
+  .clock{margin-left:auto;color:var(--muted);font-size:.85rem}
+  .sb{padding:8px 8px 14px}
+  .sec{border-radius:10px}
+  .sec-head{display:flex;align-items:center;gap:6px;padding:9px 8px;cursor:pointer;border-radius:8px;user-select:none}
+  .sec-head:hover{background:var(--panel)}
+  .chev{width:16px;text-align:center;color:var(--muted);font-size:.8rem;transition:transform .12s}
+  .sec-title{font-size:.72rem;letter-spacing:.06em;font-weight:800;color:var(--muted);text-transform:uppercase;flex:1}
+  .sec-title .em{filter:saturate(1)}
+  .plus{margin-left:auto;width:22px;height:22px;border-radius:7px;background:var(--panel);border:1px solid var(--border);color:var(--muted);display:grid;place-items:center;font-size:.9rem}
+  .kids{padding:2px 6px 8px 26px;display:block}
+  .kids.collapsed{display:none}
+  .leaf{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;color:var(--txt);font-size:.9rem}
+  .leaf:hover{background:var(--panel)}
+  .leaf .ic{opacity:.85}
+  .count{margin-left:auto;color:var(--muted);font-size:.78rem}
+  .sep{height:1px;background:var(--border);margin:10px 6px}
+  .util-label{font-size:.68rem;letter-spacing:.08em;color:#54677a;text-transform:uppercase;padding:2px 10px 4px;font-weight:700}
+  .util{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:8px;color:var(--txt);font-size:.92rem}
+  .util:hover{background:var(--panel)}
+  .util .count{background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:0 .45rem}
+  .note{position:relative;margin-top:8px}
+  .callout{background:#fff;border:1px solid #dbe4ee;border-left:4px solid var(--accent);border-radius:8px;padding:8px 11px;font-size:.82rem;color:#33454f;margin:10px 0 0}
+  .callout b{color:#12222f}
+  .hint{color:#6a7a88;font-size:.8rem;margin:6px 2px 0}
+  .pulse{animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(74,163,255,.0)}50%{box-shadow:0 0 0 3px rgba(74,163,255,.25)}}
+  .mini{font-size:.75rem;color:#6a7a88}
+</style></head>
+<body><div class="wrap">
+  <h1>Maquette — réorganisation de la navigation <span class="tag">[SIDEBAR-NAV]</span></h1>
+  <p class="sub">Clique sur les en-têtes de section (chevron ▸/▾) pour les replier. Le mécanisme de repli existe déjà dans l'app — ici on montre <b>l'ordre</b> et le <b>parcours mobile</b>.</p>
+
+  <div class="legend">
+    <b>Ce que la maquette propose</b>
+    <ul>
+      <li><b>Contenu en haut</b> : Favoris, Liens, Projets, Étiquettes — les sections où l'on travaille.</li>
+      <li><b>Utilitaires en bas</b> : Partages et Corbeille descendus sous un séparateur (ils étaient coincés en haut).</li>
+      <li><b>Sections repliables</b> : plier <b>Liens</b> fait remonter <b>Projets</b> d'un geste — décisif en mobile, où la liste des liens enterrait tout.</li>
+      <li><b>Mobile : sections repliées par défaut</b> (proposition) — on ouvre celle qu'on veut, Projets est atteignable sans scroller toute la liste.</li>
+    </ul>
+  </div>
+
+  <div class="frames">
+    <!-- ================= DESKTOP ================= -->
+    <div>
+      <p class="cap">🖥 Desktop <small>— ordre revu</small></p>
+      <div class="frame frame-desktop">
+        <div class="topbar"><span class="brand"><b>Dash</b>board</span><span class="clock">18:15 · 25°C</span></div>
+        <div class="sb" id="sb-d">
+          <!-- contenu -->
+          <div class="sec"><div class="sec-head" data-t="d-fav"><span class="chev">▾</span><span class="sec-title"><span class="em">⭐</span> Favoris</span><span class="count">5</span></div>
+            <div class="kids" id="d-fav"><div class="leaf"><span class="ic">📁</span> Voyage Japon</div><div class="leaf"><span class="ic">🗒</span> Courses</div></div></div>
+          <div class="sec"><div class="sec-head" data-t="d-liens"><span class="chev">▾</span><span class="sec-title"><span class="em">🔗</span> Liens</span><span class="plus">＋</span></div>
+            <div class="kids" id="d-liens">
+              <div class="leaf"><span class="ic">🌿</span> trilium</div><div class="leaf"><span class="ic">▶️</span> Memos</div>
+              <div class="leaf"><span class="ic">📓</span> SiYuan</div><div class="leaf"><span class="ic">🎵</span> Navidrome</div>
+              <div class="leaf"><span class="ic">💸</span> Actual</div><div class="leaf"><span class="ic">🔐</span> Authelia</div>
+            </div></div>
+          <div class="sec"><div class="sec-head" data-t="d-proj"><span class="chev">▾</span><span class="sec-title"><span class="em">📁</span> Projets</span><span class="plus">＋</span></div>
+            <div class="kids" id="d-proj"><div class="leaf"><span class="ic">📁</span> Voyage Japon</div><div class="leaf"><span class="ic">🏠</span> Maison<span class="count">3</span></div><div class="leaf"><span class="ic">🌱</span> Jardin</div></div></div>
+          <div class="sec"><div class="sec-head" data-t="d-tags"><span class="chev">▸</span><span class="sec-title"><span class="em">🏷</span> Étiquettes</span><span class="plus">＋</span></div>
+            <div class="kids collapsed" id="d-tags"><div class="leaf">#notes</div><div class="leaf">#pkm</div></div></div>
+          <!-- utilitaires en bas -->
+          <div class="sep"></div>
+          <div class="util-label">Gestion</div>
+          <div class="util"><span>🔗</span> Partages <span class="count">5 · 12</span></div>
+          <div class="util"><span>🗑</span> Corbeille <span class="count">0</span></div>
+        </div>
+      </div>
+      <div class="callout"><b>Partages &amp; Corbeille</b> passent sous le séparateur « Gestion », tout en bas — le contenu reprend le haut.</div>
+    </div>
+
+    <!-- ================= MOBILE ================= -->
+    <div>
+      <p class="cap">📱 Mobile <small>— sections repliées par défaut</small></p>
+      <div class="frame frame-mobile">
+        <div class="topbar"><span class="brand"><b>Dash</b>board</span><span class="clock">18:15</span></div>
+        <div class="sb" id="sb-m">
+          <div class="sec"><div class="sec-head" data-t="m-fav"><span class="chev">▸</span><span class="sec-title">⭐ Favoris</span><span class="count">5</span></div><div class="kids collapsed" id="m-fav"><div class="leaf">📁 Voyage Japon</div></div></div>
+          <div class="sec"><div class="sec-head pulse" data-t="m-liens"><span class="chev">▸</span><span class="sec-title">🔗 Liens</span><span class="count">12</span></div>
+            <div class="kids collapsed" id="m-liens"><div class="leaf">🌿 trilium</div><div class="leaf">▶️ Memos</div><div class="leaf">📓 SiYuan</div><div class="leaf">🎵 Navidrome</div><div class="leaf">💸 Actual</div><div class="leaf">🔐 Authelia</div></div></div>
+          <div class="sec"><div class="sec-head" data-t="m-proj"><span class="chev">▸</span><span class="sec-title">📁 Projets</span><span class="count">3</span></div><div class="kids collapsed" id="m-proj"><div class="leaf">📁 Voyage Japon</div><div class="leaf">🏠 Maison</div><div class="leaf">🌱 Jardin</div></div></div>
+          <div class="sec"><div class="sec-head" data-t="m-tags"><span class="chev">▸</span><span class="sec-title">🏷 Étiquettes</span></div><div class="kids collapsed" id="m-tags"><div class="leaf">#notes</div><div class="leaf">#pkm</div></div></div>
+          <div class="sep"></div>
+          <div class="util-label">Gestion</div>
+          <div class="util"><span>🔗</span> Partages <span class="count">5 · 12</span></div>
+          <div class="util"><span>🗑</span> Corbeille <span class="count">0</span></div>
+        </div>
+      </div>
+      <div class="callout"><b>Le geste clé :</b> tout est replié → <b>Projets est visible immédiatement</b>. Plus besoin de scroller les 12 liens. Ouvre « Liens » (il pulse) pour voir qu'il repousse le reste — puis replie-le, et Projets remonte.</div>
+      <p class="hint">Alternative possible à discuter : mémoriser l'état plié/déplié de chaque section entre les visites.</p>
+    </div>
+  </div>
+
+  <p class="mini" style="margin-top:26px">Maquette Cowork · à valider avant toute tranche UI · le repli s'appuie sur le mécanisme <code>sb-chevron</code> existant.</p>
+
+<script>
+  document.querySelectorAll('.sec-head').forEach(h=>{
+    h.addEventListener('click',()=>{
+      const kids=document.getElementById(h.dataset.t);
+      const chev=h.querySelector('.chev');
+      const open=kids.classList.toggle('collapsed')===false;
+      chev.textContent=open?'▾':'▸';
+      h.classList.remove('pulse');
+    });
+  });
+</script>
+</div></body></html>

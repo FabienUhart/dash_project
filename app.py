@@ -4308,6 +4308,83 @@ def delete_memo_image(memo_id, name):
     return jsonify(_memo_dict(row))
 
 
+# ─────────────────────── [PHOTO-ROTATE-SAVE] pivoter et ENREGISTRER ───────────────────────
+# La visionneuse savait déjà pivoter (transform CSS), mais rien n'était persisté : à la
+# fermeture, la photo repartait de travers. Cette route rend le geste durable.
+#
+# `Image.ROTATE_*` de Pillow tourne en sens ANTI-horaire, alors que `rotate(deg)` en CSS — donc
+# les flèches de la visionneuse — tourne en sens HORAIRE. D'où le croisement 90↔270 ci-dessous :
+# le confondre livrerait une fonctionnalité qui tourne dans le mauvais sens, ce qu'aucun test de
+# dimensions ne verrait (un quart de tour et son inverse échangent tous deux largeur et hauteur).
+# `transpose` plutôt que `rotate` : exact, sans ré-échantillonnage — la seule perte est celle du
+# ré-encodage JPEG.
+_ROTATE_TRANSPOSE = {}
+if Image is not None:
+    _ROTATE_TRANSPOSE = {90: Image.ROTATE_270, 180: Image.ROTATE_180, 270: Image.ROTATE_90}
+
+ROTATABLE_EXT = ("jpg", "jpeg", "png", "webp")   # gif exclu : animé possible, jamais de dérivée
+
+
+@app.route("/api/images/<name>/rotate", methods=["POST"])
+def rotate_image(name):
+    """[PHOTO-ROTATE-SAVE] Pivote physiquement l'image ORIGINALE d'un quart de tour (owner).
+
+    Owner-only en v1, et c'est délibéré : il n'existe AUCUNE variante `/share/*` (invariant 5).
+    Un invité ne réécrit pas le fichier du propriétaire — un geste de redressement est destructif
+    au sens où il remplace l'original, contrairement à tout ce que `/share/*` autorise.
+
+    Le point délicat est l'EXIF. Ce que l'utilisateur voit, c'est la dérivée, produite par
+    `_gen_derived` qui applique `ImageOps.exif_transpose` : l'affiché vaut donc déjà
+    « original redressé par son tag ». On cuit cette orientation dans les pixels, on applique la
+    rotation demandée, puis on remet `Orientation = 1` — sans quoi la génération suivante
+    re-tournerait par-dessus (double rotation). Le reste de l'EXIF est PRÉSERVÉ : les tags GPS et
+    date alimentent la carte du projet, et redresser une photo ne la déplace ni ne la date à
+    nouveau.
+    """
+    if Image is None:
+        return jsonify({"error": "rotation indisponible (Pillow absent)"}), 503
+    if not SAFE_IMG_NAME.match(name or ""):
+        return jsonify({"error": "nom d'image invalide"}), 400
+    ext = name.rsplit(".", 1)[-1].lower()
+    if ext not in ROTATABLE_EXT:
+        return jsonify({"error": "format non pivotable (gif animé)"}), 400
+    try:
+        angle = int((request.get_json(silent=True) or {}).get("angle")) % 360
+    except (TypeError, ValueError):
+        return jsonify({"error": "angle invalide"}), 400
+    if angle not in _ROTATE_TRANSPOSE:
+        return jsonify({"error": "angle invalide (90, 180 ou 270 attendus)"}), 400
+    src = os.path.join(UPLOAD_DIR, name)
+    if not os.path.isfile(src):
+        return jsonify({"error": "not found"}), 404
+
+    try:
+        with Image.open(src) as im:
+            fmt = im.format or ("PNG" if ext == "png" else "WEBP" if ext == "webp" else "JPEG")
+            exif = im.getexif()                       # lu AVANT transpose (qui retire le tag)
+            im = ImageOps.exif_transpose(im)          # les pixels deviennent ce qu'on voyait
+            im = im.transpose(_ROTATE_TRANSPOSE[angle])
+            exif[0x0112] = 1                          # Orientation neutralisée, GPS/date gardés
+            kw = {}
+            if fmt == "JPEG":
+                if im.mode not in ("RGB", "L"):
+                    im = im.convert("RGB")
+                kw = {"quality": 92, "optimize": True, "exif": exif.tobytes()}
+            elif fmt == "WEBP":
+                kw = {"quality": 92, "exif": exif.tobytes()}
+            im.save(src, fmt, **kw)                   # Option A : on écrase l'original
+    except Exception:
+        app.logger.warning("rotate: échec du traitement de %s", name)
+        return jsonify({"error": "image illisible"}), 400
+
+    # Les dérivées portent l'ancienne orientation : les purger NE SUFFIT PAS (`_gen_derived` est
+    # idempotent et saute ce qui existe — mais surtout la vignette doit être droite tout de
+    # suite, sans attendre qu'un affichage la regénère).
+    _delete_derived(name)
+    _gen_derived(name)
+    return jsonify({"ok": True, "name": name, "rotated_at": int(time.time())})
+
+
 # ─────────────────────────── [ATTACHMENTS] routes owner ───────────────────────────
 def _owner_attach_url(r):
     return "/api/attachments/" + str(r["id"])

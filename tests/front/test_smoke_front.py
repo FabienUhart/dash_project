@@ -214,3 +214,106 @@ def test_share_page_renders_for_a_guest(live_server, page, console_errors):
         "La page de partage n'affiche pas son mémo."
     )
     assert console_errors == [], "Erreurs JS sur la page invitée :\n%s" % console_errors
+
+
+# --- Parcours 5 : pivoter une photo ET l'enregistrer ------------------------
+
+def test_rotate_and_save_a_photo(live_server, page, console_errors):
+    """[PHOTO-ROTATE-SAVE] Le geste complet dans un vrai navigateur : le bouton n'existe que
+    côté propriétaire, n'apparaît qu'une fois l'angle changé, et le fichier ORIGINAL a bien
+    pivoté après la sauvegarde.
+
+    On ouvre la visionneuse en l'appelant directement plutôt qu'en cliquant le picto d'une
+    carte : ce test porte sur `runImageViewer`, pas sur le chrome des cartes — le viser par
+    l'UI rendait le test fragile sans rien prouver de plus (deux sélecteurs différents ont déjà
+    expiré avant que je renonce à ce chemin).
+    """
+    import io as _io
+    from PIL import Image as _Image
+
+    memo = page.request.post(live_server + "/api/memos",
+                             data={"content": "Photo de travers"}).json()
+    buf = _io.BytesIO()
+    _Image.new("RGB", (900, 500), (200, 40, 40)).save(buf, "JPEG")
+    up = page.request.post(live_server + "/api/memos/%d/images" % memo["id"],
+                           multipart={"image": {"name": "p.jpg", "mimeType": "image/jpeg",
+                                                "buffer": buf.getvalue()}})
+    assert up.ok, up.text()
+    nom = up.json()["images"][-1]
+
+    _boot(page, live_server)
+
+    # ① gabarit INVITÉ : aucun `rotateUrl` → aucun bouton (non-régression du périmètre invité)
+    page.evaluate("(n) => runImageViewer({ images:[n], startIndex:0, imageUrl:(x)=>'/uploads/'+x })", nom)
+    page.wait_for_selector(".iv-bar", timeout=10_000)
+    assert page.locator(".iv-bar button[title='Enregistrer la rotation']").count() == 0, (
+        "un invité ne doit pas pouvoir réécrire l'original du propriétaire"
+    )
+    page.keyboard.press("Escape")
+
+    # ② gabarit OWNER : `rotateUrl` fourni
+    page.evaluate("(n) => runImageViewer({ images:[n], startIndex:0, imageUrl:(x)=>'/uploads/'+x,"
+                  " rotateUrl:(x)=>'/api/images/'+x+'/rotate' })", nom)
+    page.wait_for_selector(".iv-bar", timeout=10_000)
+    save = page.locator(".iv-bar button[title='Enregistrer la rotation']")
+    assert save.count() == 1
+    assert not save.is_visible(), "masqué tant que l'angle affiché est nul"
+
+    page.locator(".iv-bar button[title='Pivoter à droite']").click()
+    assert save.is_visible(), "il doit apparaître dès que l'angle change"
+
+    save.click()
+    assert _wait_until(lambda: not save.is_visible(), timeout_ms=10_000), (
+        "après sauvegarde le bouton doit se re-masquer (l'angle est revenu à zéro)"
+    )
+
+    brut = page.request.get(live_server + "/uploads/" + nom).body()
+    with _Image.open(_io.BytesIO(brut)) as im:
+        assert im.size == (500, 900), "l'original doit avoir pivoté sur le disque"
+
+    assert console_errors == [], "Erreurs JS pendant la rotation :\n%s" % console_errors
+
+
+def test_rotate_button_is_there_when_opening_from_a_card_thumbnail(live_server, page, console_errors):
+    """[PHOTO-ROTATE-SAVE-FIX] Le garde-fou qui manquait, et qui aurait vu le trou.
+
+    Le parcours précédent appelle `runImageViewer` directement : il prouve que la visionneuse
+    sait afficher le bouton, pas qu'une PORTE le lui demande. Or la v1 ne câblait `rotateUrl`
+    que sur deux entrées sur six — ouvrir une photo par la vignette d'une card ne proposait donc
+    rien à enregistrer, et aucun test ne s'en apercevait.
+
+    Celui-ci ouvre par le vrai DOM (`.tc-thumb`, la vignette posée par `applyCardThumb`).
+    """
+    import io as _io
+    from PIL import Image as _Image
+
+    memo = page.request.post(live_server + "/api/memos",
+                             data={"content": "Card avec vignette"}).json()
+    buf = _io.BytesIO()
+    _Image.new("RGB", (900, 500), (40, 120, 200)).save(buf, "JPEG")
+    up = page.request.post(live_server + "/api/memos/%d/images" % memo["id"],
+                           multipart={"image": {"name": "p.jpg", "mimeType": "image/jpeg",
+                                                "buffer": buf.getvalue()}})
+    assert up.ok, up.text()
+
+    _boot(page, live_server)
+    # Les cards à vignette vivent sur le board « Mémos », pas sur l'accueil — constaté, pas
+    # supposé : le premier jet cherchait `.tc-thumb` sur l'accueil et ne trouvait rien.
+    page.locator(".cat-item", has_text="Mémos").first.click()
+    vignette = page.locator(".tc-thumb").first
+    assert _wait_until(lambda: vignette.count() > 0, timeout_ms=10_000), (
+        "aucune vignette de card : la porte testée n'est pas là où on la cherche"
+    )
+    vignette.click()
+    page.wait_for_selector(".iv-bar", timeout=10_000)
+
+    save = page.locator(".iv-bar button[title='Enregistrer la rotation']")
+    assert save.count() == 1, (
+        "ouvrir par la vignette d'une card doit proposer d'enregistrer la rotation — "
+        "c'est exactement la porte qui était débranchée"
+    )
+    assert not save.is_visible(), "masqué tant que l'angle est nul"
+    page.locator(".iv-bar button[title='Pivoter à droite']").click()
+    assert save.is_visible(), "il doit apparaître dès que l'angle change"
+
+    assert console_errors == [], "Erreurs JS :\n%s" % console_errors
