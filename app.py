@@ -6568,12 +6568,15 @@ def share_admin_view(token):
     Route publique sous /share/* (bypass Authelia existant — invariant 5), LECTURE seule. Ce
     qu'elle expose est exactement ce sur quoi elle laisse agir, ni plus ni moins :
       · les dossiers du partage que cette personne administre (② de la maquette) ;
-      · les invités **du même lien** dont le dossier tombe dans ce sous-arbre — **jamais l'owner**
-        (il n'est pas un `share_guest`, aucune ligne ne le désigne) et **jamais soi-même**, qui
-        apparaît verrouillé plus haut dans l'UI ;
+      · les invités **approuvés du même lien** (le rôle affiché est résolu sur un dossier
+        réellement administré — une surcharge posée sur un dossier voisin ne transparaît pas)
+        — **jamais l'owner** (il n'est pas un `share_guest`, aucune ligne ne le désigne) et
+        **jamais soi-même**, qui apparaît verrouillé plus haut dans l'UI ;
       · les demandes de rôle **en attente** portant sur un dossier administré (④).
-    Un Admin d'un sous-dossier ne voit donc pas les gens des dossiers voisins : ce panneau n'est
-    pas la page Partages de l'owner en petit, c'est une fenêtre sur SON périmètre.
+    Ce panneau n'est pas la page Partages de l'owner en petit : c'est une fenêtre sur SON
+    périmètre — les DOSSIERS et les DEMANDES s'arrêtent au sous-arbre administré, et un rôle
+    réglé ailleurs ne s'y lit pas. La liste des personnes, elle, est celle du lien : quelqu'un
+    entré par le même jeton n'est pas un secret pour un autre porteur de ce jeton.
     L'e-mail des autres n'est PAS exposé (le nom suffit à nommer quelqu'un — même doctrine que les
     votants de [COMMENT-REACTIONS])."""
     db = get_db()
