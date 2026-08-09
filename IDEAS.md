@@ -34,6 +34,26 @@ Pour passer « API produit » — **à cadrer en spec avant tout code**, comme G
 
 Prérequis de confiance **déjà en cours** : la couverture de tests de `/share/*` ([TESTS-PORT]) fige le contrat — une régression d'API passe au rouge. C'est ce qui rendra l'API digne d'être un socle.
 
+### 🌱 Graine backlog — [GUEST-WELCOME] : accueillir l'invité dans son espace (importance Fabien : **7/10**)
+
+Idée Fabien : quand un invité arrive dans **son espace perso** (le dossier 🏠 [GUEST-HOME] que tout invité approuvé possède déjà), lui montrer clairement — **desktop ET mobile** — que « c'est ton espace », avec un **mémo d'accueil déjà installé**, et un **process qui l'invite à aller le lire**. Ce mémo sert de **récap de l'application** : ce qu'il peut faire ici.
+
+À creuser (spec avant tout code, comme GUEST-ROLES) :
+
+1. **Le bandeau « c'est ton espace »** : encart responsive dans `share.html`/`hub.html` quand l'invité est sur son 🏠 — accueillant, non intrusif, **refermable avec mémoire du « déjà vu »** (ne pas ré-afficher à chaque visite).
+2. **Le mémo d'accueil pré-installé** : semé à la création de l'espace (`_ensure_guest_home`, idempotent). Question clé : **que faire s'il le supprime ?** → le semer **UNE fois** via un flag, ne jamais le ré-imposer (supprimer reste son droit — doctrine corbeille) ; éviter que le ré-approvisionnement paresseux ne le recrée en boucle.
+3. **Récap PERSONNALISÉ par capacité** (l'amélioration qui compte) : un lecteur lit « tu peux consulter et réagir » ; un contributeur/éditeur voit ce qu'il peut créer/cocher/voter. Le récap reflète ce que la **matrice de rôles** autorise vraiment pour CETTE personne — sinon on promet ce que le rôle ne permet pas.
+4. **Process d'invitation à lire** : au **premier** passage (1re approbation / 1er chargement du hub), pousser doucement vers le mémo (mise en avant, pastille « nouveau »), puis s'effacer une fois vu — jamais de rappel insistant.
+5. **Relation avec l'existant** : distinct du `welcome_message` **par lien** (l'owner l'écrit sur un partage donné — contextuel) ; [GUEST-WELCOME] est global à l'espace perso + récap de l'app. Proche de **[GUEST-PROFILE]** (déjà en file) : profil = *qui je suis*, welcome = *comment ça marche ici* → sans doute à faire avec ou juste après GUEST-PROFILE. Vérifier que les deux messages ne se répètent pas.
+
+Importance (Fabien) : **7/10**.
+
+### 🌱 Graine backlog — [OFFLINE-TRUST] : le repli hors-ligne se fie à `navigator.onLine` (importance Cowork : ~4/10)
+
+Découvert en creusant [E2E-FLAKY-FIX] : le handler de `#memo-quick` bascule en file locale (`localStorage.offlineQueue`) **sur `navigator.onLine === false`**, pas sur un échec réel de requête. Un navigateur qui « doute » (détection réseau capricieuse, certains états OS/navigateur) verrait donc une note partir en file locale **alors que le réseau marche** — silencieusement (ni requête, ni erreur, ni ligne serveur tant que `onLine` ne repasse pas à `true`). **Pas une perte** (la file rejoue par uid au retour en ligne, idempotent) et **peu probable sur un vrai appareil** (`navigator.onLine` y est généralement fiable), mais le design robuste serait : **tenter le POST et ne basculer en file QUE sur échec réel** (avec l'`onLine` comme indice, pas comme verdict). À garder si un jour un invité rapporte « ma note n'est pas partie alors que j'avais du réseau ».
+
+Importance (Cowork, à valider) : **~4/10** — réel mais rare.
+
 ### En cours / prochains lots (à jour 10 juil. 2026)
 
 - ✅ **[TEXT-EXCERPT-UNESCAPE]** — **CODÉ [V27.28.203]** (`app.py`, 4 lignes, export 27 inchangé) : `&#39;` ne fuit plus dans les titres dérivés (vue Fichiers, noms de zip, libellés de partage). Le paramètre de `_text_excerpt` s'appelait `html` et **masquait le module** `html` — d'où l'absence de `unescape` que `_memo_link_title` faisait déjà. 13/13 tests + 36/36 de [GUEST-MAIL] rejoués. Détail `REALISATION.md`.
