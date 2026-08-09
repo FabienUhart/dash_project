@@ -53,40 +53,53 @@ Règles d'usage :
 2. **`REALISATION.md` (journal)** : chaque accomplissement est consigné avec son tag `[VX.Y.Z]` au moment de sa complétion/livraison, ex. `- [V19.1.123] Implémentation du module X.` C'est la **source de vérité du compteur Z** (prendre le dernier Z + 1).
 3. `APP_VERSION` et le footer suivent **X** (le format d'export). Un changement de format = bump de X **et** d'une entrée d'invariant 1.
 
-## Comment tester avant de commit
+## Tests (pytest) & méthode TDD
+
+Depuis **V27.38.230** le projet a une **suite de tests** (`tests/`, lancée par `pytest`),
+une **batterie d'invariants** et un barrage CI. Commande unique :
 
 ```bash
-# syntaxe
-python3 -m py_compile app.py
-
-# lancer sur une COPIE de la base (jamais sur data/dashboard.db directement)
-cp data/dashboard.db /tmp/test.db
-DB_PATH=/tmp/test.db flask --app app run -p 8099
-
-# scénarios critiques à vérifier :
-# 1. la migration passe sur une base existante (l'app démarre, GET /api/links OK)
-# 2. ré-import d'un export complet → 0 ajout, tout en "skipped"
-# 3. import v1 sans uid → pas de doublon, champs vides enrichis
-# 4. CRUD catégories/mémos + reorder
+make test            # toute la suite (back + front)
+make test-back       # back seul (unit + invariants), rapide, sans navigateur
+make test-front      # front seul (pytest-playwright, headless)
+make test-invariants # les garde-fous seuls
+make install         # crée .venv + deps de dev + Chromium (une fois)
 ```
 
+**Sûreté** : les tests back tournent sur des **bases SQLite temporaires** (fixtures de
+`tests/conftest.py`), **jamais** `data/dashboard.db` ; le front lance un `live_server` sur
+une base temp dédiée. `make test` ne touche donc jamais les vraies données.
+
+**Batterie d'invariants** (`-m invariant`) = les garde-fous non négociables, qui encodent
+les invariants ci-dessus : round-trip export→import sans perte ni doublon, v1 importable,
+import non destructif, uid stable, corbeille hors export, écriture invitée sous `/share/*`
+uniquement, format d'export figé v27. **Un rouge sur un invariant = pas de deploy.**
+
+**Méthode = TDD (rouge → vert)** :
+- Toute **nouvelle feature back** et **tout bugfix** commencent par un **test qui échoue**
+  (pour un bug : un test qui **reproduit** le bug), puis le code jusqu'au vert. Un test qui
+  passe sur un bug déjà corrigé ne prouve rien — le prouver rouge d'abord.
+- Le **legacy** n'est pas réécrit : il est couvert par la **batterie d'invariants**, pas par
+  une couverture rétroactive ligne à ligne (doctrine hybride).
+- Le **front** grossit par petits parcours e2e, chacun avec l'assertion « zéro erreur
+  console ».
+- Boucle : **Fabien donne l'idée → Cowork cadre (le brief liste d'abord les tests + les
+  invariants touchés) → CC écrit les tests rouges puis le code → passe Cowork → GO Fabien.**
+
+Exploration manuelle toujours possible sur une **copie** de la base (jamais la vraie) :
+`cp data/dashboard.db /tmp/test.db && DB_PATH=/tmp/test.db flask --app app run -p 8099` —
+mais `make test` est la source de vérité.
+
 `backup*.json` est gitignoré (données perso) — ne jamais le committer.
-
-### Scénarios de test spécifiques v19 (created_by)
-
-- import v18 (sans `created_by`) → pas de doublon, `created_by` reste `''` = propriétaire ;
-- mémo créé par owner → en-tête affiche le propriétaire (`created_by_display` résolu) ;
-- mémo créé via partage invité (`POST /share/<token>/memos`) → en-tête owner affiche « Nom <email> » ;
-- `GET /api/export` → `version: 19` + `created_by` présent sur chaque mémo (jamais `created_by_display`).
 
 ## Process de fin de réalisation
 
 Après **chaque réalisation** (un lot livré et testé — pas à chaque tour de conversation), Claude Code doit, dans l'ordre :
 
-1. **Tester** : `python3 -m py_compile app.py` + les scénarios critiques (voir « Comment tester »), toujours sur une **copie** de la base (`cp data/dashboard.db /tmp/test.db`), jamais sur `data/dashboard.db`.
+1. **Tester** : `make test` **vert** (back + front ; bases temporaires, jamais `data/dashboard.db`). Un bugfix a d'abord eu son test rouge (cf. § Tests & TDD). Le `py_compile` reste couvert par la CI.
 2. **Journaliser** : ajouter l'entrée taggée `[VX.Y.Z]` dans `REALISATION.md` (Z = dernier + 1) et basculer l'item correspondant d'`IDEAS.md` en « Fait » (cf. § Versionnage).
 3. **Rebuild local** : lancer **`docker compose up -d --build`** pour que la nouvelle version tourne sur `http://localhost:8099/` et soit immédiatement testable (par Fabien et par l'agent Cowork). Le rebuild local utilise la vraie base (`./data`) : la migration doit donc rester additive et non destructive (invariant 1).
-4. **Mettre à jour le journal et le handoff** : la ligne `✅` dans `.claude/session-log.md` et `.claude/handoff.json` (statut `ready`, pas `deployed`).
+4. **Mettre à jour le journal et le handoff** : la ligne `✅` dans `.claude/session-log.md` et `.claude/handoff.json`. **`status: ready` ne vaut que si le build ET `pytest -m "not e2e"` sont verts** — le hook Stop l'impose (sinon `tests_failed`, ou `tests_skipped` si les deps dev manquent) ; jamais `deployed`.
 5. **S'ARRÊTER LÀ.** Fin du lot.
 
 ### ⛔ Règle permanente : CC ne déploie pas (actée par Fabien le 8 août 2026)
@@ -108,6 +121,24 @@ fini » ne valent autorisation. Dans le doute : proposer, ne pas pousser.
 
 (Option « dure » équivalente : un hook `Stop` dans `.claude/settings.local.json` qui lance le rebuild automatiquement — voir le script fourni hors dépôt. Le présent process reste la source de vérité même si le hook n'est pas activé.)
 
+### Les garde-fous : qui teste où
+
+Quatre acteurs, une même règle « pas de rouge » :
+
+1. **Hook Stop** (après chaque réalisation, sur le M4) — `pytest -m "not e2e"` (back rapide)
+   → `handoff.json` `ready` seulement si vert. Boucle courte.
+2. **Pre-commit** (`.githooks/pre-commit`, activé une fois par `make hooks`, sur le M4) —
+   **suite complète** (back + front) avant que le commit n'existe ; rouge = commit refusé
+   (`git commit --no-verify` = secours d'urgence seulement).
+3. **Passe Cowork** — revue d'**honnêteté** des tests (le rouge-avant-vert est-il prouvé ?
+   aucun bug figé en « comportement attendu » ?), en plus de la validation Chrome des features.
+4. **CI GitHub** — `deploy.yml` porte `deploy: needs [tests]` → **rouge = pas de deploy**.
+   C'est la garantie **portable** : elle suit le dépôt. Les hooks locaux (Stop, pre-commit)
+   vivent sur la machine — sur une machine neuve, les réarmer par `make install` + `make hooks`
+   (le hook Stop, dans `.claude/` gitignoré, est à réappliquer à la main).
+
+Le Zimaboard ne lance **jamais** de tests : uniquement l'étape de déploiement.
+
 ## Historique des évolutions majeures
 
 Déplacé dans **[`docs/HISTORIQUE.md`](docs/HISTORIQUE.md)** (chargé à la demande, pas à chaque session).
@@ -127,7 +158,7 @@ Voir [IDEAS.md](IDEAS.md). Le README documente le modèle de données et l'API c
 **Journal de session partagé** — `.claude/session-log.md`, **append-only strict** : une ligne datée par événement, jamais d'édition ni de suppression d'une ligne existante (c'est un journal, pas un état). Partagé entre `[CC]` (Claude Code), `[COWORK]` et `[FABIEN]` ; format et emojis décrits dans l'en-tête du fichier. `.claude/` est gitignoré : rien ne part en prod.
 - **Lire** : les ~30 dernières lignes au début de chaque session, en même temps que la FILE D'ATTENTE.
 - **Écrire** : à chaque événement notable — `▶` début de lot, `✅` lot livré (avec `❓` si un arbitrage reste ouvert), `⚠` piège découvert, `🚀` commit/tag/déploiement. **Court** : le détail long reste dans `REALISATION.md`.
-- **Automatisé** : le hook `Stop` (`.claude/hooks/post-stop-rebuild.sh`) appende lui-même la ligne `✅ rebuild local OK` (ou `⚠ rebuild local ECHOUE`) en même temps qu'il écrit `handoff.json`. Le `▶` et les `⚠`/`❓` restent **manuels** — c'est du jugement, pas de l'automatisme.
+- **Automatisé** : le hook `Stop` (`.claude/hooks/post-stop-rebuild.sh`) rebuild le local **puis lance `pytest -m "not e2e"`** et écrit `handoff.json` avec le statut correspondant (`ready` = build + tests verts / `tests_failed` / `tests_skipped` si deps dev absentes / `build_failed`), en appendant la ligne `✅`/`⚠` au journal. Le `▶` et les `⚠`/`❓` restent **manuels** — c'est du jugement, pas de l'automatisme.
 
 ## graphify
 
