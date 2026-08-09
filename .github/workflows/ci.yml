@@ -71,7 +71,16 @@ jobs:
       - name: Deps
         run: pip install -r requirements-dev.txt
       - name: Tests back (unit + invariants)
-        run: pytest -m "not e2e"
+        run: pytest -m "not e2e" --junitxml=junit-back.xml
+      # [TEST-REPORTS] `if: always()` n'est pas un détail : c'est SURTOUT quand c'est rouge
+      # qu'on veut le rapport. Sans ça, l'étape serait sautée à l'échec — au moment précis
+      # où le fichier devient utile.
+      - name: Rapport JUnit back (artefact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-back
+          path: junit-back.xml
 
   tests-e2e:
     runs-on: ubuntu-latest
@@ -85,4 +94,10 @@ jobs:
       - name: Navigateur headless
         run: playwright install --with-deps chromium
       - name: Tests e2e (front)
-        run: pytest -m e2e
+        run: pytest -m e2e --junitxml=junit-e2e.xml
+      - name: Rapport JUnit e2e (artefact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-e2e
+          path: junit-e2e.xml

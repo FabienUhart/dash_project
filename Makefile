@@ -10,7 +10,7 @@
 VENV ?= .venv
 PY ?= $(shell [ -x $(VENV)/bin/python ] && echo $(VENV)/bin/python || echo python3)
 
-.PHONY: help install venv test test-back test-front test-inv test-invariants build hooks
+.PHONY: help install venv test test-back test-front test-inv test-invariants test-cov build hooks
 
 help:  ## Liste les cibles
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -38,6 +38,17 @@ test-inv:  ## Batterie d'invariants seule
 	$(PY) -m pytest -m invariant
 
 test-invariants: test-inv  ## Alias verbeux de `test-inv`
+
+# Couverture mesurée sur le BACK SEUL, et c'est volontaire : les tests back importent `app`
+# dans le processus pytest, donc chaque ligne exécutée est vue. Les e2e, eux, tapent l'app via
+# `live_server` — un SOUS-PROCESSUS que pytest-cov ne capte pas sans instrumentation dédiée.
+# Les inclure donnerait un chiffre faussement bas (tout ce que le navigateur exerce compterait
+# comme non couvert), et un mauvais chiffre oriente plus mal qu'aucun chiffre.
+# Pas de `--cov-fail-under` : on mesure d'abord (décision Fabien), on fixera un plancher quand
+# la suite aura mûri.
+test-cov:  ## Couverture back (term-missing) + rapport HTML dans htmlcov/
+	$(PY) -m pytest -m "not e2e" --cov=app --cov-report=term-missing --cov-report=html
+	@echo "Rapport HTML : ouvre htmlcov/index.html"
 
 build:  ## Rebuild local (docker compose)
 	docker compose up -d --build

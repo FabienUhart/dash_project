@@ -28,3 +28,10 @@ graphify-out/
 # donc du jetable par construction (jamais la vraie base, jamais à versionner).
 .pytest_cache/
 .pytest-scratch/
+
+# [TEST-REPORTS] artefacts de couverture et de rapport : re-générables, jamais versionnés.
+# (Les `junit-*.xml` naissent en CI, mais un `pytest --junitxml` lancé à la main en laisserait
+#  traîner un ici — autant qu'il ne puisse pas se faire committer par distraction.)
+htmlcov/
+.coverage
+junit-*.xml
