@@ -420,6 +420,12 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 /* [DANGER-SOFT] `.iv-del` (aplat rouge permanent) supprimé : mort depuis [EDITOR-FILES-MONO],
    remplacé par `.iv-danger` — monochrome au repos, rouge au survol seulement. */
 .iv-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
+/* [PHOTO-ROTATE-POLISH] État désactivé : le bouton « Enregistrer la rotation » reste TOUJOURS
+   dans la barre (largeur constante → la rangée, centrée, ne saute plus quand il apparaît) et
+   c'est son activation qui change. Il ne doit donc pas avoir l'air cliquable au repos : opacité
+   réduite, curseur neutre, et surtout AUCUNE teinte d'accent au survol. */
+.iv-btn:disabled { opacity: 0.38; cursor: default; }
+.iv-btn:disabled:hover { color: var(--muted); background: var(--panel-2); border-color: var(--border); }
 .iv-btn.iv-accent { color: var(--accent); border-color: var(--accent); }
 /* [UI-POLISH-BOARD] danger aligné sur le gabarit iv-btn (fond sombre) : glyphe/bordure danger,
    remplissage rouge au survol seulement. Même taille que les autres boutons de la barre. */

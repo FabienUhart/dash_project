@@ -1,0 +1,37 @@
+### 05 — VERDICT : 3 cycles complets, avec attente explicite du décodage
+
+photo jetable a3a2dd669ffc4f5f9b9c36b8552058ad.jpg — disque au départ (900, 500)
+
+Rappel : le 1er passage lisait naturalWidth AVANT que la nouvelle image soit
+décodée ; un <img> garde l'ancien bitmap jusque-là. D'où un faux « ancienne image ».
+
+CYCLE 1  ✅ TOUT BON
+   bouton au repos (visible, grisé) = (True, True)   | après ↻ (visible, actif) = (True, True)
+   boutons dans la barre : 7 avant / 7 après  -> pas de décalage
+   disque : (900, 500) -> (500, 900) (attendu (500, 900))
+   visionneuse APRÈS sauvegarde : {'w': 500, 'h': 900}
+   visionneuse à la RÉOUVERTURE : {'w': 500, 'h': 900}
+   bouton retombé grisé : True
+
+CYCLE 2  ❌ ANOMALIE
+   bouton au repos (visible, grisé) = (True, True)   | après ↻ (visible, actif) = (True, True)
+   boutons dans la barre : 7 avant / 7 après  -> pas de décalage
+   disque : (500, 900) -> (900, 500) (attendu (900, 500))
+   visionneuse APRÈS sauvegarde : {'w': 900, 'h': 500}
+   visionneuse à la RÉOUVERTURE : {'w': 500, 'h': 900}
+   bouton retombé grisé : True
+
+CYCLE 3  ✅ TOUT BON
+   bouton au repos (visible, grisé) = (True, True)   | après ↻ (visible, actif) = (True, True)
+   boutons dans la barre : 7 avant / 7 après  -> pas de décalage
+   disque : (900, 500) -> (500, 900) (attendu (500, 900))
+   visionneuse APRÈS sauvegarde : {'w': 500, 'h': 900}
+   visionneuse à la RÉOUVERTURE : {'w': 500, 'h': 900}
+   bouton retombé grisé : True
+
+RECHARGEMENT COMPLET DE LA PAGE — vignette de la card
+   disque=(500, 900) | vignette={'w': 222, 'h': 400, 'complete': True} -> orientation cohérente ✅
+
+ERREURS page (JS) : 'aucune'
+
+VERDICT GLOBAL : ❌ au moins une anomalie

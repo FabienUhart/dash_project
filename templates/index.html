@@ -1421,6 +1421,12 @@ span.prio-btn { background: var(--panel-2); color: var(--text); border: 1px soli
   display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
 }
 .iv-btn:hover { color: var(--text); background: var(--panel); border-color: var(--muted); }
+/* [PHOTO-ROTATE-POLISH] État désactivé : le bouton « Enregistrer la rotation » reste TOUJOURS
+   dans la barre (largeur constante → la rangée, centrée, ne saute plus quand il apparaît) et
+   c'est son activation qui change. Il ne doit donc pas avoir l'air cliquable au repos : opacité
+   réduite, curseur neutre, et surtout AUCUNE teinte d'accent au survol. */
+.iv-btn:disabled { opacity: 0.38; cursor: default; }
+.iv-btn:disabled:hover { color: var(--muted); background: var(--panel-2); border-color: var(--border); }
 .iv-btn.iv-accent { color: var(--accent); border-color: var(--accent); }
 /* [UI-POLISH-BOARD] danger aligné sur le gabarit iv-btn (fond sombre) : glyphe/bordure
    var(--red), remplissage rouge au survol seulement. Même taille que les autres boutons. */
@@ -8668,14 +8674,27 @@ function renderBoard() {
     }
   }
   const mapPoints = boardMapPoints();
-  if (mapPoints.length) {
+  // [MAP-PHOTO-COUNT] La géo d'un dossier ne vient pas que des localisations MANUELLES : une
+  // photo géotaguée est un point tout aussi réel. Le bouton ne regardait que `m.location`, si
+  // bien qu'un dossier plein de photos situées n'avait pas de carte — et donc aucun moyen de
+  // les voir. On somme sur le MÊME périmètre que `boardMapPoints` (mêmes mémos que la liste
+  // affichée), et seulement sur un vrai projet : le calque photo est scopé par `loadPhotos`,
+  // il n'existe pas sur « tous »/« inbox » — compter là ferait un badge sans carte derrière.
+  const mapRealProject = state.memoProject !== 'all' && state.memoProject !== 'inbox';
+  const photoGeo = mapRealProject
+    ? visibleMemos().filter(boardScopeFilter()).reduce((n, m) => n + (m.geo_photo_count || 0), 0)
+    : 0;
+  if (mapPoints.length || photoGeo) {
     // Nom de la vue SEULEMENT (pas le textContent du conteneur). [V20.6.34]
     const mapName = state.memoProject === 'all' ? 'Tous les mémos'
       : state.memoProject === 'inbox' ? 'Inbox'
       : ((state.projects.find(p => p.id === state.memoProject) || {}).name || 'Carte');
-    tb.add({ icon: 'map', label: 'Carte', count: mapPoints.length,
-      title: 'Voir tous les points géolocalisés de cette vue sur une carte',
-      onClick: () => openMapDialog(mapName, boardMapPoints(), boardMapPoints) }); tbCount++;
+    tb.add({ icon: 'map', label: 'Carte', count: mapPoints.length + photoGeo,
+      title: 'Voir les points géolocalisés de cette vue (mémos et photos) sur une carte',
+      // Sans point-mémo, `runMapDialog` refuserait de s'ouvrir (« Aucun élément géolocalisé ») :
+      // on demande donc l'ouverture directe sur le calque photo, qui est justement ce qu'on a.
+      onClick: () => openMapDialog(mapName, boardMapPoints(), boardMapPoints,
+        mapPoints.length ? {} : { autoPhoto: true }) }); tbCount++;
   }
   // [HEADER-TOOLBAR v3] ordre du header : titre SEUL (plus rien à droite) → description → rangée
   // d'infos → barre d'actions. La barre + les contrôles de vote-dossier sont appendés APRÈS le bloc

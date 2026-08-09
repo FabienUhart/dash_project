@@ -1,0 +1,54 @@
+### 03 — Parcours complet sur localhost:8099 (27.40.247)
+
+Mémo jetable id=393, photo synthétique a9ded68ba325424191125bd146e0087a.jpg
+  dimensions initiales sur disque : (900, 500)  (paysage, repère rouge en haut à gauche)
+  GET ?size=s -> HTTP 200 | Cache-Control=no-cache | ETag="1786302769.4645624-8511-3720220756"
+
+A. Ouverture par la VIGNETTE de la card (porte réelle)
+   card trouvée=True | vignette présente=True
+   bouton Enregistrer : présent=True visible=True désactivé=True
+   boutons dans la barre AVANT rotation : 7
+
+B. Après un clic sur ↻
+   bouton Enregistrer : visible=True activé=True
+   boutons dans la barre APRÈS rotation : 7  -> IDENTIQUE, aucun décalage
+
+C. UN SEUL clic sur « Enregistrer »
+   requêtes /rotate observées : []
+   fichier pivoté sur disque : True (en 0.2 s) — dimensions=(500, 900)
+   bouton retombé grisé : True
+   ETag ?size=s : avant="1786302769.4645624-8511-3720220756"
+                  après="1786302782.8405602-3319-3720220756"
+   -> ETag CHANGÉ (le navigateur ira chercher la bonne image)
+   image AFFICHÉE dans la visionneuse : {'w': 500, 'h': 900, 'src': '/uploads/a9ded68ba325424191125bd146e0087a.jpg?size=s&_r=1786302782845'}
+   -> PORTRAIT = l'écran suit le fichier
+
+D. Fermeture puis RÉOUVERTURE de la galerie
+   image affichée : {'w': 900, 'h': 500} -> ANCIENNE IMAGE
+
+E. RECHARGEMENT complet de la page — vignette de la card
+   vignette : {'w': 222, 'h': 400} -> PORTRAIT, correcte
+
+F. Le cas qui cassait avant : DEUX sauvegardes rapprochées (même seconde)
+   sauvegarde 1 -> disque=(900, 500)
+   sauvegarde 2 -> disque=(500, 900)
+   requêtes /rotate cumulées : 3
+
+G. Environnement navigateur
+   service workers enregistrés : ['http://localhost:8099/sw.js']
+   caches présents : ['dash-shell-27.40.247', 'dash-data-27.40.247', 'dash-media-27.40.247']
+   erreurs console/page : ['console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 ()', 'console: Failed to load resource: the server responded with a status of 404 ()', 'console: Failed to load resource: the server responded with a status of 404 ()', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 (NOT FOUND)', 'console: Failed to load resource: the server responded with a status of 404 ()', 'console: Failed to load resource: the server responded with a status of 404 ()', 'console: Failed to load resource: the server responded with a status of 404 ()']
+
+H. En-têtes HTTP réellement reçus par la page pour /uploads/ (échantillon)
+   status=200 9946cf13d31c4fa3b4a3bf46fc cache-control=no-cache  etag="1784824803.1608536-10
+   status=200 00385325198643979ebdfaff15 cache-control=no-cache  etag="1784824804.192538-121
+   status=200 c58e91f57fc64dbcb7449d3882 cache-control=no-cache  etag="1786301840.1408596-28
+   status=200 8b59fc6c17d54d64b06de1991d cache-control=no-cache  etag="1785661503.883733-664
+   status=200 a9ded68ba325424191125bd146 cache-control=no-cache  etag="1786302769.4731314-10
+   status=200 a9ded68ba325424191125bd146 cache-control=no-cache  etag="1786302769.4645624-85
+   status=200 a9ded68ba325424191125bd146 cache-control=no-cache  etag="1786302782.8405602-33
+   status=200 04362303e7424f4991191faf4b cache-control=no-cache  etag="1785538877.9059134-79
+   status=200 8f9206ba3b5c41dfbda29f1ba7 cache-control=no-cache  etag="1784824802.8911955-18
+   status=200 a7d316aa8313417198884c2986 cache-control=no-cache  etag="1784824803.6421072-20
+   status=200 04362303e7424f4991191faf4b cache-control=no-cache  etag="1785538877.9059134-79
+   status=200 8f9206ba3b5c41dfbda29f1ba7 cache-control=no-cache  etag="1784824802.8911955-18

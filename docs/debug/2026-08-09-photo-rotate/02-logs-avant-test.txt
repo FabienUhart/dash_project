@@ -1,0 +1,5 @@
+dashboard  | 172.19.0.1 - - [09/Aug/2026:19:11:20 +0000] "GET /api/guests HTTP/1.1" 200 5858 "http://localhost:8099/" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+dashboard  | 172.19.0.1 - - [09/Aug/2026:19:11:31 +0000] "GET /api/version HTTP/1.1" 200 36 "-" "curl/8.7.1"
+dashboard  | 172.19.0.1 - - [09/Aug/2026:19:11:31 +0000] "GET /sw.js HTTP/1.1" 200 4500 "-" "curl/8.7.1"
+dashboard  | 172.19.0.1 - - [09/Aug/2026:19:11:35 +0000] "GET /api/activity HTTP/1.1" 200 50696 "http://localhost:8099/" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+dashboard  | 172.19.0.1 - - [09/Aug/2026:19:11:35 +0000] "GET /api/guests HTTP/1.1" 200 5858 "http://localhost:8099/" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"

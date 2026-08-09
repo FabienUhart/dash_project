@@ -35,9 +35,44 @@ function fmtMemoTime(t) {
 // (cards, bande, calque photo, section 📷), 's' = taille écran ~1600px (image de la visionneuse).
 // Le serveur retombe sur l'original si pas de dérivée (gif / plus petite / échec) → jamais de 404.
 // URL vide inchangée. Le téléchargement (⬇) et l'EXIF continuent d'utiliser l'original (sans size).
+// [PHOTO-ROTATE-MEMCACHE] Versions d'images, par NOM DE FICHIER, partagées par toute la page.
+//
+// Pourquoi il en faut un EN PLUS de la revalidation ETag posée en 247 : quand on rouvre la
+// galerie sans recharger la page, le code réassigne `img.src` à une URL DÉJÀ chargée dans ce
+// document. Chromium sert alors l'image depuis son cache MÉMOIRE — mesuré : aucune requête ne
+// part, ni au réseau ni au service worker. `Cache-Control: no-cache` n'a donc aucune prise, et
+// l'utilisateur revoit sa photo de travers juste après l'avoir redressée.
+//
+// Le jeton est en MILLISECONDES : c'est là qu'était le tort de la V27.39.245, qui utilisait les
+// secondes du serveur — deux sauvegardes dans la même seconde produisaient la même URL, donc la
+// même image. Et il vit dans `imgSize`, l'entonnoir que traversent DÉJÀ la visionneuse, les
+// vignettes de cards, la bande et les grilles photo : une seule mécanique, pas un paramètre à
+// trimballer de proche en proche. Tant qu'aucune rotation n'a eu lieu la table reste vide et les
+// URLs sont inchangées — les pages invitées, qui ne pivotent pas, ne voient aucune différence.
+const _imgVersions = Object.create(null);
+
+function _imgBaseName(url) {
+  const s = String(url || '').split('?')[0];
+  const i = s.lastIndexOf('/');
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
+// À appeler après une rotation ENREGISTRÉE : toute URL construite ensuite pour ce fichier
+// (visionneuse, vignette de card, bande) portera le nouveau jeton et sera donc re-téléchargée.
+function bumpImgVersion(name) {
+  const n = _imgBaseName(name);
+  if (n) _imgVersions[n] = Date.now();
+}
+
+// [IMAGE-THUMBS] Ajoute ?size=t|s à une URL d'image (dérivée serveur) : 't' = vignette ~400px
+// (cards, bande, calque photo, section 📷), 's' = taille écran ~1600px (image de la visionneuse).
+// Le serveur retombe sur l'original si pas de dérivée (gif / plus petite / échec) → jamais de 404.
+// URL vide inchangée. Le téléchargement (⬇) et l'EXIF continuent d'utiliser l'original (sans size).
 function imgSize(url, sz) {
   if (!url) return url;
-  return url + (url.indexOf('?') < 0 ? '?' : '&') + 'size=' + sz;
+  const u = url + (url.indexOf('?') < 0 ? '?' : '&') + 'size=' + sz;
+  const v = _imgVersions[_imgBaseName(url)];
+  return v ? u + '&v=' + v : u;
 }
 
 // [MEMO-TITLE-FALLBACK] Intitulé de repli pour les mémos sans titre. Placeholder unique
@@ -3264,7 +3299,10 @@ function runImageViewer(cfg) {
   // `rotateUrl`, c'est-à-dire côté propriétaire. On ne peut pas gater sur `canDelete`/`canEdit` :
   // ils sont vrais aussi pour un invité contributeur, qui n'a pas à réécrire l'original.
   const saveRot = cfg.rotateUrl ? ivBtn('button', 'device-floppy', 'Enregistrer la rotation') : null;
-  if (saveRot) { saveRot.style.display = 'none'; bar.appendChild(saveRot); }
+  // [PHOTO-ROTATE-POLISH] TOUJOURS dans la barre, désactivé tant qu'il n'y a rien à sauver.
+  // Le masquer par `display:none` puis le révéler réélargissait la rangée — qui est centrée —
+  // et faisait SAUTER les flèches ↺ ↻ sous le doigt au moment précis où on s'en sert.
+  if (saveRot) { saveRot.disabled = true; bar.appendChild(saveRot); }
   bar.appendChild(zoomOut); bar.appendChild(zoomIn);
   let delBtn = null;
   if (cfg.canDelete) {
@@ -3278,16 +3316,13 @@ function runImageViewer(cfg) {
   // (deux clics à gauche donnent -180), et c'est cette valeur nette qu'on envoie au serveur.
   function angleNet() { return ((rot % 360) + 360) % 360; }
   function updateSaveBtn() {
-    if (saveRot) saveRot.style.display = angleNet() === 0 ? 'none' : '';
+    if (saveRot) saveRot.disabled = angleNet() === 0;
   }
-  // Cache-bust par image : les dérivées sont servies avec un cache fort, donc sans ce paramètre
-  // le navigateur ré-afficherait la version d'avant rotation — l'utilisateur croirait que rien
-  // ne s'est passé.
-  const busts = {};
-  function srcOf(name, size) {
-    const u = imgSize(cfg.imageUrl(name), size);
-    return busts[name] ? u + '&v=' + busts[name] : u;
-  }
+  // [PHOTO-ROTATE-MEMCACHE] La fraîcheur tient à deux mécaniques complémentaires, et il faut
+  // les deux : l'ETag (posé en 247) règle le cache HTTP — d'un chargement de page à l'autre —
+  // tandis que le jeton de `imgSize` règle le cache MÉMOIRE du document, seul en cause quand on
+  // rouvre la galerie sans recharger. `srcOf` n'a donc plus de logique propre.
+  function srcOf(name, size) { return imgSize(cfg.imageUrl(name), size); }
   function applyTransform() {
     img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + rot + 'deg) scale(' + scale + ')';
     updateSaveBtn();
@@ -3353,16 +3388,25 @@ function runImageViewer(cfg) {
           body: JSON.stringify({ angle }),
         });
         if (!r.ok) throw new Error('rotate');
-        const d = await r.json();
-        busts[name] = d.rotated_at || Date.now();
+        await r.json();
+        // [PHOTO-ROTATE-MEMCACHE] Un SEUL geste, posé AVANT tout rendu : toutes les URLs
+        // construites ensuite pour ce fichier changent, donc plus rien ne peut ressortir du
+        // cache mémoire — ni ici, ni dans la bande, ni sur la vignette de la card que
+        // `onRotated` va faire repeindre. Le rechargement forcé ponctuel d'avant devenait
+        // redondant, et deux paramètres de fraîcheur valaient mieux qu'un seul : retiré.
+        bumpImgVersion(name);
         buildThumbs();                            // la bande porte aussi l'ancienne orientation
-        render();                                 // remet rot/zoom à zéro et recharge l'image droite
-        if (cfg.onRotated) cfg.onRotated(name, busts[name]);   // la grille du mémo suit
+        render();                                 // remet rot/zoom à zéro et recharge l'image
+        if (cfg.onRotated) cfg.onRotated(name);   // la grille du mémo suit
       } catch (_) {
         // On NE remet PAS `rot` à zéro : l'utilisateur garde son geste et peut réessayer.
         if (typeof toast === 'function') toast("La rotation n'a pas pu être enregistrée.");
       } finally {
-        saveRot.disabled = false;
+        // ⚠ PAS `disabled = false` : après un succès, `render()` a remis l'angle à zéro, donc le
+        // bouton doit RETOMBER grisé. Un ré-armement inconditionnel laisserait un bouton actif
+        // qui ne ferait rien — et rejouerait la confusion qu'on vient de corriger. Après un
+        // échec, l'angle est toujours là : `updateSaveBtn` le réactive pour permettre un 2e essai.
+        updateSaveBtn();
       }
     });
   }

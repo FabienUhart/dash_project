@@ -14,7 +14,7 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 _(À jour au 9 août 2026, après **V27.38.243** (non déployé — la prod reste sur **V27.37.229**). **Le chantier [TESTS-PORT] est CLOS** : six vagues, couverture back **32 % → 55 %**, surface publique invitée + données d'import + utilitaires owner sous garde durable. Livrés depuis : [TEST-HARNESS] (230→232), [TEST-REPORTS] (233), [PROCESS-DOC] (234), [TESTS-PORT] 1→6 (235→237, 239, 241, 243), [DOC-FIX] (238), [E2E-FLAKY-FIX] (240), [IMPORT-SKIP-FIX] (242).)_
 
-1. **[PHOTO-ROTATE-SAVE]** — **BRIEF PRÊT** (docs/briefs/PHOTO-ROTATE-SAVE.md), tranché avec Fabien (Option A, 7/10, owner v1, TDD, **tag + Deploy** au bout). Pivoter une photo (flèches existantes ↺ ↻) + bouton **Sauvegarder** → route owner POST /api/images/NAME/rotate (ré-encode, Orientation EXIF remise à 1 pour éviter la double-rotation, dérivées t/s régénérées).
+1. **[MAP-PHOTO-COUNT]** — **BRIEF PRET** (docs/briefs/MAP-PHOTO-COUNT.md), tranche avec Fabien (7/10). Le bouton Carte dun dossier doit apparaitre des quil y a un point geo dans les memos (localisation manuelle OU photo geotaguee) et le badge compte tous les points. Backend : geo_photo_count par memo (image_meta has_gps, batch, hors corbeille). Front : garde + badge + ouverture autoPhoto anti-avortement. Tests du flux complet. Applicatif -> tag + Deploy.
 2. **[GUEST-PROFILE]** — reprise de la file PRODUIT après le chantier tests : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
 3. **[GUEST-WELCOME]** (importance Fabien : **7/10**, graine détaillée plus bas) — accueillir l'invité dans son espace perso 🏠 : bandeau « c'est ton espace », mémo d'accueil pré-installé, récap **personnalisé par capacité**.
 4. **[DEBUG-RECORDER]** — enregistreur de diagnostic **intégré à l'app** (idée Fabien, reco Cowork du 8/08) : mode OFF par défaut, journalise clics + ouverture/fermeture des `<dialog>` **avec leur état** (`open`/`:modal`/`display`) + erreurs console + contexte (viewport, version, navigateur), bouton « Copier le log », **tout local, aucun envoi réseau**. Motif : c'est exactement l'état interne qui aurait montré le fantôme de [POPIN-GHOST-FIX] du premier coup. Utile **avant** de reprendre la chasse aux bugs mobiles.
@@ -90,6 +90,10 @@ UI → **maquette Cowork d'abord** (règle du projet). À cadrer : ordre exact (
 **Ajout (retours 9/08, maquette validée)** : (4) **créer vite un projet / un lien en mobile** est pénible aujourd'hui — le « + » contextuel ([HEADER-ADD-CONTEXT]) ne suffit pas, surtout sections repliées où il se cache. Le lot doit prévoir un **accès rapide à la création** (nouveau projet / nouveau lien) atteignable même replié. (5) **À traiter en UNE session dédiée** (bloc unique : ordre + repli mobile + création rapide). Maquette de base validée (`docs/maquettes/maquette-sidebar-nav.html`) ; à ÉTENDRE avec le geste de création avant le brief CC.
 
 Importance : **Fabien 8/10** — Cowork ~6-7 (friction quotidienne, surtout mobile ; pas de risque données/sécurité, mais très visible à l'usage).
+
+### 🌱 Graine backlog — [MAP-ROTATE] : pivoter une photo depuis le calque photo de la carte (Cowork ~4/10)
+
+Deux portes owner laissees HORS de [PHOTO-ROTATE-SAVE], notees pour ne pas les perdre (rappel CC 9/08) : (1) le **calque photo de la carte** — on pourrait y pivoter une photo, mais la carte ne se rafraichit pas apres coup (vignette/marqueur perimes) : a traiter AVEC le refresh du calque, sinon demi-feature ; (2) la **corbeille dimages** — pivoter une photo supprimee na pas de sens, volontairement exclu. Les pieces jointes-images restent hors v1. Petit lot separe si Fabien le veut. Importance : Cowork ~4/10 (confort, faible frequence).
 
 ### 🌱 Graine backlog — [CARD-ACTIONS-FIXED] : ancrage stable des boutons de la card (invite + owner) (importance Fabien : a preciser ; Cowork : ~6/10)
 

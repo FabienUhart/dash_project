@@ -3136,6 +3136,32 @@ def _project_descendants(db, root_id):
     return ids
 
 
+def _geo_photo_counts(db, memo_ids):
+    """[MAP-PHOTO-COUNT] Nombre de photos GÉOLOCALISÉES par mémo, en un seul passage.
+
+    Le filtre est volontairement le MÊME que celui de `_project_photos` ci-dessous — `has_gps`
+    et l'exclusion de la corbeille image. Les deux doivent rester alignés : un compteur qui
+    annonce un point que le calque n'affiche pas est pire qu'un compteur absent, parce qu'il
+    fait ouvrir une carte vide.
+
+    En batch (jamais dans `_memo_dict`, qui ne fait aucune requête) : la liste des mémos est
+    déjà chargée, une requête par mémo transformerait l'affichage du board en N+1.
+    """
+    if not memo_ids:
+        return {}
+    ph = ",".join("?" * len(memo_ids))
+    return {
+        r["memo_id"]: r["n"]
+        for r in db.execute(
+            f"SELECT memo_id, COUNT(*) AS n FROM image_meta "
+            f"WHERE has_gps = 1 AND memo_id IN ({ph}) "
+            f"AND filename NOT IN (SELECT filename FROM image_trash) "
+            f"GROUP BY memo_id",
+            list(memo_ids),
+        ).fetchall()
+    }
+
+
 def _project_photos(db, memo_ids):
     # [PHOTO-MAP] Lit le calque photo depuis image_meta (donnée dérivée, déjà géocodée
     # à l'upload) pour un ensemble de mémos NON corbeille. Aucune écriture, aucun appel
@@ -3685,6 +3711,7 @@ def list_memos():
     amap = _attachments_map(db, [r["id"] for r in rows], lambda r: "/api/attachments/" + str(r["id"]))  # [ATTACHMENTS]
     hmap = _hearts_map(db)  # [FESTIVAL-VOTE] ❤️ par mémo
     lmap = _links_map(db, [r["id"] for r in rows])  # [MEMO-LINKS] owner = tout (mono-base)
+    gmap = _geo_photo_counts(db, [r["id"] for r in rows])  # [MAP-PHOTO-COUNT]
     out = []
     for row in rows:
         d = _memo_dict(row, owner_name, lmap.get(row["id"], []))
@@ -3696,6 +3723,9 @@ def list_memos():
             d["guest_action"] = "created" if g["created"] else "edited"
             d["guest_at"] = g["edited_at"]
         d["comment_count"] = ccounts.get(d["id"], 0)
+        # [MAP-PHOTO-COUNT] Donnée DÉRIVÉE (jamais exportée) : elle sert au front à décider si le
+        # bouton Carte a lieu d'être. Toujours présente, à 0 par défaut — le front somme sans garde.
+        d["geo_photo_count"] = gmap.get(d["id"], 0)
         pv = vpay.get(d.get("project_id"))
         if pv and not d.get("vote_excluded"):  # [VOTE-EXCLUDE] mémo exclu = pas une option
             voters = vmap[d["project_id"]].get(d["id"], [])
@@ -4228,6 +4258,26 @@ def duplicate_memo(memo_id):
     return jsonify(_memo_dict(row)), 201
 
 
+def _image_response(directory, filename):
+    """[PHOTO-ROTATE-POLISH] Sert une image en REVALIDATION plutôt qu'en cache figé.
+
+    Le nom d'un fichier ne change pas quand on pivote la photo : seul son contenu change. Avec
+    l'ancien `max_age=86400`, le navigateur resservait donc l'image d'avant pendant 24 h — sans
+    même demander. L'utilisateur croyait que sa sauvegarde n'avait pas pris, recliquait, et
+    chaque clic re-pivotait pour de vrai (90 → 180 → 270). Le `?v=<secondes>` qui compensait
+    côté front ne pouvait pas suffire : deux sauvegardes dans la même seconde donnent la même URL.
+
+    `no-cache` ne veut pas dire « ne mets pas en cache » mais « revalide avant de servir » : le
+    navigateur garde l'image et demande juste si elle a changé. Tant que non, `send_from_directory`
+    répond **304** sans corps (l'ETag est dérivé du mtime et de la taille) — le coût est une
+    requête vide, pas un transfert. Dès qu'une rotation réécrit le fichier, l'ETag change et la
+    bonne image arrive du premier coup, dans la visionneuse comme sur la vignette.
+    """
+    resp = send_from_directory(directory, filename, max_age=0, conditional=True)
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.route("/uploads/<path:filename>")
 def serve_upload(filename):
     name = os.path.basename(filename)
@@ -4238,8 +4288,8 @@ def serve_upload(filename):
     if size in DERIVED_SIZES:
         dname = _derived_ready(name, size)
         if dname:
-            return send_from_directory(DERIVED_DIR, dname, max_age=86400)
-    return send_from_directory(UPLOAD_DIR, name, max_age=86400)
+            return _image_response(DERIVED_DIR, dname)
+    return _image_response(UPLOAD_DIR, name)
 
 
 @app.route("/api/image-exif/<name>")

@@ -154,6 +154,11 @@ def live_server(tmp_path_factory):
     data_dir = tmp_path_factory.mktemp("e2e_data")
     env = dict(os.environ)
     env["DB_PATH"] = str(data_dir / "dashboard.db")
+    # [MAP-PHOTO-COUNT] La base du live_server vit dans un sous-processus : sans ce relai, un test
+    # e2e ne peut pas préparer un état que l'API ne sait pas produire sans réseau (ici : une photo
+    # géolocalisée, dont l'upload déclencherait un vrai géocodage — la garde zéro-réseau ne couvre
+    # pas ce process). Lecture seule côté test, et strictement une base temporaire.
+    os.environ["E2E_DATA_DIR"] = str(data_dir)
     env["TZ"] = "Europe/Paris"
 
     proc = subprocess.Popen(

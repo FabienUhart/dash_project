@@ -1,0 +1,62 @@
+### 06 — CAUSE de l'intermittence : instrumentation de la réouverture
+
+photo jetable f725c8e3105c49ed9baaf50c296c6c79.jpg
+
+CYCLE 1 — ok
+   disque (900, 500) -> (500, 900) | après save à l'écran (500, 900) | réouverture (500, 900)
+   src à la réouverture : /uploads/f725c8e3105c49ed9baaf50c296c6c79.jpg?size=s&v=1786304007034
+   ⚠ AUCUNE REQUÊTE ?size=s : l'image vient du cache MÉMOIRE du document —
+     ni le service worker ni le réseau ne sont consultés, donc `no-cache`
+     n'a aucune prise. C'est l'explication de l'intermittence.
+
+CYCLE 2 — ok
+   disque (500, 900) -> (900, 500) | après save à l'écran (900, 500) | réouverture (900, 500)
+   src à la réouverture : /uploads/f725c8e3105c49ed9baaf50c296c6c79.jpg?size=s&v=1786304008545
+   ⚠ AUCUNE REQUÊTE ?size=s : l'image vient du cache MÉMOIRE du document —
+     ni le service worker ni le réseau ne sont consultés, donc `no-cache`
+     n'a aucune prise. C'est l'explication de l'intermittence.
+
+CYCLE 3 — ok
+   disque (900, 500) -> (500, 900) | après save à l'écran (500, 900) | réouverture (500, 900)
+   src à la réouverture : /uploads/f725c8e3105c49ed9baaf50c296c6c79.jpg?size=s&v=1786304010068
+   ⚠ AUCUNE REQUÊTE ?size=s : l'image vient du cache MÉMOIRE du document —
+     ni le service worker ni le réseau ne sont consultés, donc `no-cache`
+     n'a aucune prise. C'est l'explication de l'intermittence.
+
+CYCLE 4 — ok
+   disque (500, 900) -> (900, 500) | après save à l'écran (900, 500) | réouverture (900, 500)
+   src à la réouverture : /uploads/f725c8e3105c49ed9baaf50c296c6c79.jpg?size=s&v=1786304011467
+   ⚠ AUCUNE REQUÊTE ?size=s : l'image vient du cache MÉMOIRE du document —
+     ni le service worker ni le réseau ne sont consultés, donc `no-cache`
+     n'a aucune prise. C'est l'explication de l'intermittence.
+
+CYCLE 5 — ok
+   disque (900, 500) -> (500, 900) | après save à l'écran (500, 900) | réouverture (500, 900)
+   src à la réouverture : /uploads/f725c8e3105c49ed9baaf50c296c6c79.jpg?size=s&v=1786304012960
+   ⚠ AUCUNE REQUÊTE ?size=s : l'image vient du cache MÉMOIRE du document —
+     ni le service worker ni le réseau ne sont consultés, donc `no-cache`
+     n'a aucune prise. C'est l'explication de l'intermittence.
+
+CYCLE 6 — ok
+   disque (500, 900) -> (900, 500) | après save à l'écran (900, 500) | réouverture (900, 500)
+   src à la réouverture : /uploads/f725c8e3105c49ed9baaf50c296c6c79.jpg?size=s&v=1786304014450
+   ⚠ AUCUNE REQUÊTE ?size=s : l'image vient du cache MÉMOIRE du document —
+     ni le service worker ni le réseau ne sont consultés, donc `no-cache`
+     n'a aucune prise. C'est l'explication de l'intermittence.
+
+RÉSUMÉ : 0 anomalie(s) sur 6 cycles observés.
+
+────────────────────────────────────────────────────────────────────────
+LECTURE DE CE FICHIER (ajout après coup)
+
+Rejeu de la sonde du 06 sur la version CORRIGÉE 27.40.248 : 0 anomalie sur 6 cycles,
+là où la même sonde en donnait 2 sur 3 avant correctif.
+
+⚠ La ligne « AUCUNE REQUÊTE ?size=s » est un texte figé de la sonde et n'a plus le même
+sens ici : elle reste vraie (le navigateur sert bien depuis son cache mémoire) mais ce
+n'est plus un défaut. L'URL portant désormais un jeton `&v=<ms>` renouvelé à chaque
+sauvegarde, l'entrée mémoire réutilisée est celle de l'image NEUVE — chargée juste après
+le clic. Le cache mémoire n'est plus contourné : il est correctement invalidé.
+
+Preuve dans les `src` ci-dessus : un jeton différent à chaque cycle, et une orientation
+de réouverture toujours conforme au disque.

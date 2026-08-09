@@ -1,0 +1,6 @@
+memos non supprimés : 179
+memos en corbeille  : 0
+lignes image_meta   : 15
+lignes image_trash  : 0
+fichiers uploads    : 24
+fichiers derived    : 23

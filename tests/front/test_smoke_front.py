@@ -6,6 +6,8 @@ formulaire aboutit-il jusqu'en base ? Un `node --check` valide la syntaxe mais l
 une `ReferenceError` qui tue la page au chargement — c'est précisément ce que ces tests
 attrapent. D'où l'assertion « aucune erreur console » sur chaque parcours.
 """
+import time
+
 import pytest
 
 pytestmark = pytest.mark.e2e
@@ -257,19 +259,38 @@ def test_rotate_and_save_a_photo(live_server, page, console_errors):
     page.wait_for_selector(".iv-bar", timeout=10_000)
     save = page.locator(".iv-bar button[title='Enregistrer la rotation']")
     assert save.count() == 1
-    assert not save.is_visible(), "masqué tant que l'angle affiché est nul"
+    # [PHOTO-ROTATE-POLISH] Le bouton n'est plus masqué/révélé : il reste là, GRISÉ. Le masquer
+    # réélargissait la barre centrée et faisait sauter les flèches sous le doigt.
+    assert save.is_visible(), "le bouton doit rester dans la barre (largeur constante)"
+    assert save.is_disabled(), "désactivé tant qu'il n'y a rien à sauver"
 
     page.locator(".iv-bar button[title='Pivoter à droite']").click()
-    assert save.is_visible(), "il doit apparaître dès que l'angle change"
+    assert save.is_enabled(), "il doit s'activer dès que l'angle change"
+
+    # ⚠ On lit le fichier SUR LE DISQUE du live_server, plus par HTTP : depuis
+    # [PHOTO-ROTATE-POLISH] les images sont servies en revalidation et le client de test peut
+    # légitimement rendre un corps vide (304 amorti par son propre cache), ce qui faisait
+    # échouer la lecture Pillow alors que RIEN n'était cassé. Le disque dit la vérité.
+    import os as _os
+    chemin = _os.path.join(_os.environ["E2E_DATA_DIR"], "uploads", nom)
+
+    def _pivotee():
+        try:
+            with _Image.open(chemin) as im:
+                return im.size == (500, 900)
+        except Exception:
+            return False
 
     save.click()
-    assert _wait_until(lambda: not save.is_visible(), timeout_ms=10_000), (
-        "après sauvegarde le bouton doit se re-masquer (l'angle est revenu à zéro)"
+    # ⚠ On attend l'EFFET, pas l'état du bouton : le handler pose `disabled = true` dès la
+    # première ligne (anti double-clic), donc guetter « le bouton est grisé » rendait la main
+    # AVANT même que la requête parte — le test lisait le fichier d'origine et accusait le code.
+    assert _wait_until(_pivotee, timeout_ms=10_000), (
+        "l'original n'a pas pivoté sur le disque après le clic Enregistrer"
     )
-
-    brut = page.request.get(live_server + "/uploads/" + nom).body()
-    with _Image.open(_io.BytesIO(brut)) as im:
-        assert im.size == (500, 900), "l'original doit avoir pivoté sur le disque"
+    assert save.is_disabled(), (
+        "une fois la sauvegarde passée, l'angle est revenu à zéro : le bouton doit retomber grisé"
+    )
 
     assert console_errors == [], "Erreurs JS pendant la rotation :\n%s" % console_errors
 
@@ -312,8 +333,200 @@ def test_rotate_button_is_there_when_opening_from_a_card_thumbnail(live_server, 
         "ouvrir par la vignette d'une card doit proposer d'enregistrer la rotation — "
         "c'est exactement la porte qui était débranchée"
     )
-    assert not save.is_visible(), "masqué tant que l'angle est nul"
+    assert save.is_visible() and save.is_disabled(), "présent mais grisé tant que l'angle est nul"
+
+    # Preuve anti-décalage : la barre contient EXACTEMENT le même nombre de boutons avant et
+    # après la rotation. C'est ce qui garantit que la rangée, centrée, ne se recentre pas sous
+    # le doigt au moment où l'on clique sur les flèches.
+    avant = page.locator(".iv-bar button").count()
     page.locator(".iv-bar button[title='Pivoter à droite']").click()
-    assert save.is_visible(), "il doit apparaître dès que l'angle change"
+    assert save.is_enabled(), "il doit s'activer dès que l'angle change"
+    assert page.locator(".iv-bar button").count() == avant, (
+        "le nombre de boutons de la barre a changé : la rangée va se décaler"
+    )
+
+    assert console_errors == [], "Erreurs JS :\n%s" % console_errors
+
+
+# --- Parcours 6 : le bouton Carte compte aussi les photos géolocalisées -----
+
+def test_map_button_appears_for_photo_geo_only(live_server, page, console_errors):
+    """[MAP-PHOTO-COUNT] La régression que le lot corrige, prise par la vraie barre.
+
+    Un dossier dont un mémo porte une photo géolocalisée mais AUCUNE localisation manuelle
+    n'avait pas de bouton Carte : le garde ne lisait que `memos.location`. On ne pouvait donc
+    pas ouvrir la carte pour voir ces photos, alors que la donnée existait depuis l'upload.
+
+    L'état est monté par l'API pour la partie normale (projet, mémo, upload réel), puis le seul
+    bit qui manque — « cette photo a des coordonnées » — est posé en base : l'uploader vraiment
+    géotaguée ferait géocoder chez Nominatim, et ce sous-processus n'est pas couvert par la
+    garde zéro-réseau. On ouvre ensuite par la BARRE du dossier, pas en appelant `openMapDialog` :
+    c'est la leçon du lot précédent, un test qui court-circuite la porte ne prouve rien sur elle.
+    """
+    import os as _os
+    import sqlite3 as _sqlite3
+    import io as _io
+    from PIL import Image as _Image
+
+    proj = page.request.post(live_server + "/api/projects",
+                             data={"name": "Dossier photos situees"}).json()
+    memo = page.request.post(live_server + "/api/memos",
+                             data={"content": "Mémo sans localisation manuelle",
+                                   "project_id": proj["id"]}).json()
+    assert not memo.get("location"), "le mémo ne doit PAS avoir de localisation manuelle"
+
+    buf = _io.BytesIO()
+    _Image.new("RGB", (600, 400), (90, 120, 60)).save(buf, "JPEG")
+    up = page.request.post(live_server + "/api/memos/%d/images" % memo["id"],
+                           multipart={"image": {"name": "p.jpg", "mimeType": "image/jpeg",
+                                                "buffer": buf.getvalue()}})
+    assert up.ok, up.text()
+    nom = up.json()["images"][-1]
+
+    con = _sqlite3.connect(_os.path.join(_os.environ["E2E_DATA_DIR"], "dashboard.db"))
+    try:
+        con.execute("UPDATE image_meta SET has_gps = 1, lat = ?, lng = ?, label = ? "
+                    "WHERE filename = ?", (43.4832, -1.4666, "Bayonne", nom))
+        con.commit()
+    finally:
+        con.close()
+
+    _boot(page, live_server)
+    page.locator(".cat-item", has_text="Dossier photos situees").first.click()
+
+    # `.hdr-btn` = le bouton de la BARRE du dossier. Un `button:has-text("Carte")` trop large
+    # attrapait un onglet caché d'une pop-in — le test échouait sur un élément invisible qui
+    # n'avait rien à voir avec la fonctionnalité.
+    carte = page.locator(".hdr-btn", has_text="Carte").first
+    assert _wait_until(lambda: carte.count() > 0, timeout_ms=10_000), (
+        "le bouton Carte doit apparaître alors que SEULE une photo est géolocalisée"
+    )
+    carte.click()
+
+    assert _wait_until(lambda: page.locator(".leaflet-container").count() > 0, timeout_ms=10_000), (
+        "la carte doit s'ouvrir sur le calque photo au lieu d'avorter sur « Aucun élément "
+        "géolocalisé » — c'est le second volet du correctif"
+    )
+    assert console_errors == [], "Erreurs JS :\n%s" % console_errors
+
+
+# --- Parcours 7 : la rotation survit à une réouverture SANS recharger la page ---
+
+def _img_decodee(page, selecteur="dialog[open] img", timeout_ms=10_000):
+    """Attend que l'image soit vraiment DÉCODÉE, pas seulement présente dans le DOM.
+
+    Un `<img>` conserve l'ancien bitmap tant que le nouveau n'est pas décodé : lire
+    `naturalWidth` trop tôt renvoie les dimensions de l'image PRÉCÉDENTE. C'est le piège qui
+    m'a fait rapporter un faux « la réouverture montre l'ancienne image » lors du diagnostic —
+    l'anomalie était réelle, mais pas au taux annoncé.
+    """
+    lire = ("(sel) => { const i = document.querySelector(sel);"
+            " return i ? {w: i.naturalWidth, h: i.naturalHeight, complete: i.complete,"
+            " src: i.getAttribute('src')} : null; }")
+    fin = time.time() + timeout_ms / 1000.0
+    while time.time() < fin:
+        d = page.evaluate(lire, selecteur)
+        if d and d["complete"] and d["w"] > 0:
+            return d
+        time.sleep(0.15)
+    return page.evaluate(lire, selecteur)
+
+
+def _img_versionnee(page, selecteur="dialog[open] img", timeout_ms=15_000):
+    """Attend l'image d'APRÈS sauvegarde : `src` portant le jeton `&v=` ET décodée.
+
+    ⚠ Ne jamais attendre `save.is_disabled()` pour ça : le handler pose `disabled = true` dès sa
+    première ligne, en anti-double-clic, donc la condition est vraie AVANT même que la requête
+    parte. Je m'y suis laissé prendre deux fois — dont une en écrivant ce test-ci.
+    """
+    fin = time.time() + timeout_ms / 1000.0
+    while time.time() < fin:
+        d = _img_decodee(page, selecteur, timeout_ms=1_000)
+        if d and d["complete"] and d["w"] > 0 and "&v=" in (d["src"] or ""):
+            return d
+        time.sleep(0.15)
+    return _img_decodee(page, selecteur)
+
+
+def test_rotation_survives_reopening_without_a_page_reload(live_server, page, console_errors):
+    """[PHOTO-ROTATE-MEMCACHE] Le défaut que la revalidation ETag ne pouvait pas corriger.
+
+    En rouvrant la galerie sans recharger la page, le code réassigne `img.src` à une URL déjà
+    chargée : Chromium sert alors depuis son cache MÉMOIRE — mesuré, aucune requête ne part, ni
+    au réseau ni au service worker. Le `no-cache` du serveur n'a donc aucune prise, et la photo
+    réapparaissait de travers juste après avoir été redressée.
+
+    Le jeton de version par fichier (millisecondes) change l'URL, ce qui est la seule chose que
+    ce cache-là respecte. On vérifie les DEUX chemins qui en dépendent : la visionneuse rouverte
+    et la vignette de la card — l'un et l'autre sans jamais recharger la page.
+    """
+    import io as _io
+    from PIL import Image as _Image
+
+    memo = page.request.post(live_server + "/api/memos",
+                             data={"content": "Photo à redresser sans rechargement"}).json()
+    buf = _io.BytesIO()
+    _Image.new("RGB", (900, 500), (30, 110, 170)).save(buf, "JPEG", quality=95)
+    up = page.request.post(live_server + "/api/memos/%d/images" % memo["id"],
+                           multipart={"image": {"name": "p.jpg", "mimeType": "image/jpeg",
+                                                "buffer": buf.getvalue()}})
+    assert up.ok, up.text()
+
+    _boot(page, live_server)
+    page.locator(".cat-item", has_text="Mémos").first.click()
+    carte = page.locator(".task", has_text="Photo à redresser sans rechargement").first
+    assert _wait_until(lambda: carte.count() > 0, timeout_ms=10_000), "card introuvable"
+    carte.scroll_into_view_if_needed()
+
+    # ── ouverture par la vignette (porte réelle), rotation, sauvegarde
+    carte.locator(".tc-thumb").first.click()
+    page.wait_for_selector(".iv-bar", timeout=10_000)
+    depart = _img_decodee(page)
+    assert depart["w"] > depart["h"], "l'image de départ doit être en paysage"
+
+    page.locator(".iv-bar button[title='Pivoter à droite']").click()
+    save = page.locator(".iv-bar button[title='Enregistrer la rotation']")
+    assert save.is_enabled()
+    save.click()
+    apres = _img_versionnee(page)
+    assert apres["h"] > apres["w"], (
+        "la visionneuse doit montrer l'image redressée dès le clic (src=%s)" % apres["src"])
+    assert save.is_disabled(), "l'angle est retombé à zéro : le bouton doit être grisé"
+
+    # ── fermeture puis RÉOUVERTURE, SANS recharger la page : le cœur du test
+    page.keyboard.press("Escape")
+    # ⚠ Un <dialog> fermé garde ses enfants dans le DOM : compter `.iv-bar` ne dit rien.
+    # C'est l'attribut `open` qui fait foi.
+    assert _wait_until(lambda: page.locator("dialog[open]").count() == 0, timeout_ms=5_000), (
+        "la visionneuse ne s'est pas fermée")
+    carte.locator(".tc-thumb").first.click()
+    page.wait_for_selector(".iv-bar", timeout=10_000)
+    rouvert = _img_decodee(page)
+    assert rouvert["h"] > rouvert["w"], (
+        "la galerie rouverte montre l'ancienne image (%dx%d) : le cache mémoire n'a pas été "
+        "défait — src=%s" % (rouvert["w"], rouvert["h"], rouvert["src"])
+    )
+    assert "&v=" in (rouvert["src"] or ""), (
+        "l'URL doit porter le jeton de version, sinon rien ne distingue cette requête de la "
+        "précédente pour le cache mémoire (src=%s)" % rouvert["src"]
+    )
+    page.keyboard.press("Escape")
+
+    # ── la vignette de la card, elle aussi SANS rechargement
+    # (on passe par le locator : `:has-text()` est une extension Playwright, pas un sélecteur CSS
+    # valide pour `querySelector`.)
+    vig = carte.locator(".tc-thumb img").first
+    lire = "i => ({w: i.naturalWidth, h: i.naturalHeight, complete: i.complete, src: i.getAttribute('src')})"
+    vignette = None
+    fin = time.time() + 15
+    while time.time() < fin:
+        vignette = vig.evaluate(lire)
+        if vignette["complete"] and vignette["w"] > 0 and "&v=" in (vignette["src"] or ""):
+            break
+        time.sleep(0.2)
+    assert vignette and vignette["h"] > vignette["w"], (
+        "la vignette de la card montre encore l'ancienne orientation (%r) — `onRotated` repeint "
+        "les cards, mais sans jeton l'URL identique ressort du cache mémoire" % (vignette,)
+    )
 
     assert console_errors == [], "Erreurs JS :\n%s" % console_errors

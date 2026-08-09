@@ -1,0 +1,11 @@
+### 01 — Version servie et service worker (localhost:8099)
+
+$ curl -s http://localhost:8099/api/version
+{"export":27,"version":"27.40.247"}
+
+
+$ curl -s http://localhost:8099/sw.js | grep VERSION
+const VERSION = '27.40.247';
+
+Conteneur :
+dashboard  dash_project-dashboard  Up 25 minutes

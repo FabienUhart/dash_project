@@ -1,0 +1,15 @@
+### 04 — Pourquoi la RÉOUVERTURE de la galerie montre l'ancienne image
+
+photo jetable 035ab4b2088145609c1d1d0b0ca71bc3.jpg — disque au départ : (900, 500)
+
+1) PREMIÈRE ouverture — requêtes /uploads observées :
+   {'url': '035ab4b2088145609c1d1d0b0ca71bc3.jpg?size=t', 'status': 200, 'sw': True, 'etag': '"1786302853.8269763-811-', 'cc': 'no-cache'}
+   {'url': '035ab4b2088145609c1d1d0b0ca71bc3.jpg?size=s', 'status': 200, 'sw': True, 'etag': '"1786302853.8201191-7926', 'cc': 'no-cache'}
+
+2) APRÈS sauvegarde — disque=(500, 900) ; requêtes /uploads :
+   {'url': '035ab4b2088145609c1d1d0b0ca71bc3.jpg?size=s&_r=1786302867598', 'status': 200, 'sw': True, 'etag': '"1786302867.5927176-3059', 'cc': 'no-cache'}
+
+3) RÉOUVERTURE — image affichée : {'w': 500, 'h': 900, 'src': '/uploads/035ab4b2088145609c1d1d0b0ca71bc3.jpg?size=s'}
+   -> correcte (portrait)
+   requêtes /uploads pendant la réouverture :
+   {'url': '035ab4b2088145609c1d1d0b0ca71bc3.jpg?size=s', 'status': 200, 'sw': True, 'etag': '"1786302867.5927176-3059', 'cc': 'no-cache'}

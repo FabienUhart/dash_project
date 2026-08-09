@@ -1,0 +1,32 @@
+### 06 — CAUSE de l'intermittence : instrumentation de la réouverture
+### (état AVANT correctif, sur 27.40.247)
+
+⚠ Ce fichier a été RÉÉCRIT à l'identique depuis la sortie de la sonde : en rejouant celle-ci
+après correctif, elle a écrasé son propre artefact. Le contenu ci-dessous est celui du passage
+d'origine (avant [PHOTO-ROTATE-MEMCACHE]) ; le résultat d'après correctif vit dans le 09.
+
+photo jetable afacf742b85a4d01b7e81bdb7df7ae0f.jpg
+
+CYCLE 1 — ❌ RÉOUVERTURE PÉRIMÉE
+   disque (900, 500) -> (500, 900) | après save à l'écran (500, 900) | réouverture (900, 500)
+   src à la réouverture : /uploads/afacf742b85a4d01b7e81bdb7df7ae0f.jpg?size=s
+   ⚠ AUCUNE REQUÊTE ?size=s : l'image vient du cache MÉMOIRE du document —
+     ni le service worker ni le réseau ne sont consultés, donc `no-cache`
+     n'a aucune prise. C'est l'explication de l'intermittence.
+
+CYCLE 2 — ok
+   disque (500, 900) -> (900, 500) | après save à l'écran (900, 500) | réouverture (900, 500)
+   src à la réouverture : /uploads/afacf742b85a4d01b7e81bdb7df7ae0f.jpg?size=s
+   ⚠ AUCUNE REQUÊTE ?size=s (coïncidence : la copie mémoire correspondait par hasard)
+
+CYCLE 3 — ❌ RÉOUVERTURE PÉRIMÉE
+   disque (900, 500) -> (500, 900) | après save à l'écran (500, 900) | réouverture (900, 500)
+   src à la réouverture : /uploads/afacf742b85a4d01b7e81bdb7df7ae0f.jpg?size=s
+   ⚠ AUCUNE REQUÊTE ?size=s
+
+RÉSUMÉ : 2 anomalie(s) sur 3 cycles observés.
+
+CONCLUSION : à la réouverture, l'URL demandée est IDENTIQUE à celle déjà chargée dans le
+document. Chromium sert alors depuis son cache mémoire sans émettre de requête — ni réseau,
+ni service worker. Le `Cache-Control: no-cache` du serveur (247) est donc hors jeu, et seule
+une URL DIFFÉRENTE peut invalider cette copie.
