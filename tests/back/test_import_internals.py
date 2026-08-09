@@ -463,39 +463,47 @@ def test_resolution_duplicate_creates_a_second_memo(client):
     assert uid in uids and len(uids) == 2, "la copie doit porter un uid NEUF, pas celui d'origine"
 
 
-def test_resolution_skip_is_not_what_its_name_says(client):
-    """⚠ CARACTÉRISATION D'UN BUG CONNU — ce test fige le comportement ACTUEL, pas le bon.
+def test_resolution_skip_leaves_the_memo_untouched(client):
+    """[IMPORT-SKIP-FIX] « Ignorer » ignore — y compris un fichier plus récent.
 
-    Seuls `overwrite` et `duplicate` sont interprétés ; tout le reste — y compris le mot
-    `"skip"` — retombe sur le défaut, qui est **newer-wins**. Un fichier plus RÉCENT met donc
-    à jour un mémo explicitement marqué `"skip"`.
+    L'écran « Importer ici » propose « Écraser / Dupliquer / **Ignorer** » conflit par conflit
+    et envoie `"skip"` pour le dernier. C'est un choix EXPLICITE : *laisse ce mémo tel quel*.
+    Le respecter même quand le fichier est plus récent est tout l'intérêt du bouton — sinon
+    « Ignorer » ne serait qu'un synonyme de « laisse le newer-wins décider », c'est-à-dire rien.
 
-    Et ce n'est pas qu'une question de nommage : l'écran « Importer ici » propose bien
-    « Écraser / Dupliquer / **Ignorer** » conflit par conflit et envoie `"skip"` pour le
-    dernier. Quelqu'un qui clique « Ignorer » attend « ne touche pas à mon mémo » et se le
-    fait écraser quand même. Rien n'est perdu (les révisions gardent l'état d'avant), mais le
-    résultat contredit un choix explicite de l'utilisateur.
-
-    On fige le réel ici parce que c'est un lot de caractérisation. La correction a son lot :
-    **[IMPORT-SKIP-FIX]** — ce test sera alors RETOURNÉ en rouge (assertion juste : `skip`
-    laisse intact même si le fichier est plus récent) avant que `import_links` ne l'honore."""
+    Ce test a d'abord été écrit en CARACTÉRISATION du bug (V27.38.241), puis retourné ici pour
+    exiger le bon comportement — rouge prouvé avant correction."""
     c = client
     mid = _memo(c, "Version locale")
     uid = _memo_uid(mid)
 
-    # ① fichier PLUS ANCIEN → rien ne bouge (ce que « skip » laisse espérer)
+    # ① fichier PLUS ANCIEN → rien ne bouge (le newer-wins l'écartait déjà)
     assert _import(c, {"memos": [{"content": "Vieille version", "uid": uid,
                                   "updated_at": "2000-01-01T00:00:00+00:00"}],
                        "resolutions": {uid: "skip"}}).status_code == 200
     assert _row("memos", id=mid)["content"] == "Version locale"
 
-    # ② fichier PLUS RÉCENT → mis à jour MALGRÉ le « skip »
-    assert _import(c, {"memos": [{"content": "Version du futur", "uid": uid,
-                                  "updated_at": "2099-01-01T00:00:00+00:00"}],
-                       "resolutions": {uid: "skip"}}).status_code == 200
-    assert _row("memos", id=mid)["content"] == "Version du futur", (
-        "comportement réel : « skip » n'est pas interprété, le défaut newer-wins s'applique"
+    # ② fichier PLUS RÉCENT → doit RESTER intact : c'est là que « Ignorer » se prouve
+    r = _import(c, {"memos": [{"content": "Version du futur", "uid": uid,
+                               "updated_at": "2099-01-01T00:00:00+00:00"}],
+                    "resolutions": {uid: "skip"}})
+    assert r.status_code == 200, r.data
+    assert _row("memos", id=mid)["content"] == "Version locale", (
+        "« Ignorer » doit laisser le mémo intact, même si le fichier est plus récent"
     )
+    assert r.get_json()["skipped_memos"] == 1, "le mémo ignoré doit être compté comme ignoré"
+
+
+def test_resolution_skip_also_blocks_a_brand_new_memo(client):
+    """L'autre moitié du court-circuit : `skip` sort AVANT le bloc de conflit, donc il vaut
+    aussi pour un uid inconnu. C'est cohérent — « Ignorer » veut dire « n'importe pas ce
+    mémo », pas seulement « ne résous pas ce conflit »."""
+    c = client
+    r = _import(c, {"memos": [{"content": "Ne dois pas exister", "uid": "uid-neuf"}],
+                    "resolutions": {"uid-neuf": "skip"}})
+    assert r.status_code == 200, r.data
+    assert r.get_json()["imported_memos"] == 0
+    assert _memos_matching("Ne dois pas exister") == []
 
 
 def test_absent_resolution_is_newer_wins(client):

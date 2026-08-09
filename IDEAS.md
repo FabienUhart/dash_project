@@ -53,6 +53,12 @@ Découvert en creusant [E2E-FLAKY-FIX] : le handler de `#memo-quick` bascule en 
 
 Importance (Cowork, à valider) : **~4/10** — réel mais rare.
 
+### 🌱 Graine backlog — [IMPORT-CONFLICT-FILES] : écran de choix des fichiers au conflit d'import (importance Fabien : **8/10** ; Cowork : ~6-7, chemin niche)
+
+Idée Fabien (née de [IMPORT-SKIP-FIX]) : quand un mémo importé entre en **conflit** et porte des **pièces jointes**, ne pas trancher en silence (aujourd'hui « Ignorer » laisse le mémo tel quel et **jette** ses PJ). Offrir plutôt un **écran « à toi de jouer »** : l'utilisateur **voit** les fichiers du fichier importé et **choisit** ceux qu'il rajoute au mémo existant. Le repli actuel (skip = tout ignorer, PJ comprises) reste le comportement sûr **par défaut** ; cette feature l'enrichit d'un choix granulaire. À cadrer en spec (UI de conflit + endpoint d'ajout ciblé de PJ à un mémo existant, déjà quasi présent via les routes d'attachements). S'appuie sur l'aperçu dry-run (`_import_dry_run`) qui liste déjà les conflits.
+
+Importance (Fabien) : **8/10** — Cowork estimerait ~6-7 (vrai plus UX mais chemin niche : conflit d'import AVEC pièces jointes).
+
 ### En cours / prochains lots (à jour 10 juil. 2026)
 
 - ✅ **[TEXT-EXCERPT-UNESCAPE]** — **CODÉ [V27.28.203]** (`app.py`, 4 lignes, export 27 inchangé) : `&#39;` ne fuit plus dans les titres dérivés (vue Fichiers, noms de zip, libellés de partage). Le paramètre de `_text_excerpt` s'appelait `html` et **masquait le module** `html` — d'où l'absence de `unescape` que `_memo_link_title` faisait déjà. 13/13 tests + 36/36 de [GUEST-MAIL] rejoués. Détail `REALISATION.md`.

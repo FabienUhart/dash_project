@@ -11179,6 +11179,17 @@ def import_links():
             continue
 
         res = str(res_map.get(uid) or "").strip().lower() if uid else ""
+        # [IMPORT-SKIP-FIX] « Ignorer » ignore. L'écran « Importer ici » propose Écraser /
+        # Dupliquer / Ignorer conflit par conflit ; `skip` est donc un choix EXPLICITE de
+        # l'utilisateur, pas une absence de choix (celle-là n'envoie rien et garde le
+        # newer-wins par défaut, juste en dessous). Sans ce court-circuit, un fichier plus
+        # récent écrasait le mémo qu'on venait de demander de laisser tranquille — le code
+        # contredisait le bouton. On sort AVANT le bloc de conflit, ce qui couvre aussi un
+        # `skip` posé sur un uid non conflictuel : ignorer, c'est ne rien importer du tout
+        # pour ce mémo (pièces jointes comprises).
+        if res == "skip":
+            skipped_memos += 1
+            continue
         # [IMPORT-PREVIEW] 'duplicate' → ne touche pas l'existant, tombe vers l'INSERT (uid neuf).
         if uid and uid in memos_by_uid and res != "duplicate":
             existing = memos_by_uid[uid]
