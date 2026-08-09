@@ -15,7 +15,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # [TEST-HARNESS] Barrage : « rouge = pas de deploy » (décision Fabien). Le tag est déjà
+  # poussé quand ce workflow démarre — c'est donc ICI, et pas dans la CI de `main`, que la
+  # prod est protégée : sans ce job, un tag posé sur une révision cassée partait quand même.
+  # `pytest` complet (back + front) : le back tient les invariants d'export/import, l'e2e
+  # vérifie que la page se rend vraiment. Le job tourne sur un runner GitHub, pas sur le
+  # Zimaboard — on ne teste pas sur la machine qu'on s'apprête à déployer.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt
+      - run: playwright install --with-deps chromium
+      - run: pytest        # back + front ; un rouge stoppe le deploy
+
   deploy:
+    needs: [tests]         # [TEST-HARNESS] pas de déploiement sur une révision au rouge
     runs-on: [self-hosted, zimaboard]
     env:
       # Dossier de déploiement persistant (clone git avec .env + ./data). NE PAS

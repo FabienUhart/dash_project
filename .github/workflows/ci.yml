@@ -57,3 +57,32 @@ jobs:
 
       - name: Build de l'image Docker (sans déploiement)
         run: docker build -t dashboard:ci .
+
+  # [TEST-HARNESS] Deux jobs séparés : le back est rapide (quelques secondes) et doit
+  # rendre son verdict tout de suite ; l'e2e paie l'installation d'un navigateur, on ne
+  # veut pas que sa lenteur masque un rouge back. Les deux sont bloquants.
+  tests-back:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Deps
+        run: pip install -r requirements-dev.txt
+      - name: Tests back (unit + invariants)
+        run: pytest -m "not e2e"
+
+  tests-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Deps
+        run: pip install -r requirements-dev.txt
+      - name: Navigateur headless
+        run: playwright install --with-deps chromium
+      - name: Tests e2e (front)
+        run: pytest -m e2e

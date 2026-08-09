@@ -22,3 +22,9 @@ skills-lock.json
 
 # graphify : sorties du graphe de connaissance (re-générables par /graphify)
 graphify-out/
+
+# [TEST-HARNESS] pytest : cache, et le scratch de sûreté du conftest — c'est le filet qui
+# reçoit une base bidon si `app` est importé avant qu'une fixture ait posé le tmp_path,
+# donc du jetable par construction (jamais la vraie base, jamais à versionner).
+.pytest_cache/
+.pytest-scratch/
