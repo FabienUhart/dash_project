@@ -12,10 +12,10 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 **Ordre ferme, tenu à jour à chaque fin de lot** : le lot terminé est **retiré**, la file remonte d'un cran. En l'absence de brief collé, le **n° 1 est le travail en cours**. Un brief collé par Fabien **prime toujours** sur cette file. Le reste du fichier, en dessous, est le backlog **non ordonné**.
 
-_(À jour au 9 août 2026, après **V27.38.241** (non déployé — la prod reste sur **V27.37.229**). [TEST-HARNESS] (230→232), [TEST-REPORTS] (233), [PROCESS-DOC] (234), [TESTS-PORT] vagues 1 à 5 (235→237, 239, 241), [DOC-FIX] (238) et [E2E-FLAKY-FIX] (240) sont livrés — lignes ✅ plus bas et `REALISATION.md`.)_
+_(À jour au 9 août 2026, après **V27.38.243** (non déployé — la prod reste sur **V27.37.229**). **Le chantier [TESTS-PORT] est CLOS** : six vagues, couverture back **32 % → 55 %**, surface publique invitée + données d'import + utilitaires owner sous garde durable. Livrés depuis : [TEST-HARNESS] (230→232), [TEST-REPORTS] (233), [PROCESS-DOC] (234), [TESTS-PORT] 1→6 (235→237, 239, 241, 243), [DOC-FIX] (238), [E2E-FLAKY-FIX] (240), [IMPORT-SKIP-FIX] (242).)_
 
-1. **[TESTS-PORT-6] Utilitaires owner — dernier lot du chantier** — export **ZIP** (`_memo_zip_files`/`_send_zip`), **`_fx_rates` et `hub_fx` SANS jamais toucher le réseau** (c'est la contrainte : le cache se teste, l'appel se simule), `hub_send_link` (SMTP, même règle) et les branches **vocales** de `_soft_delete_comment` (purge du fichier + retrait de la ligne système). Après ce lot on **quitte [TESTS-PORT]** : la surface publique invitée (4 vagues) et les entrailles de l'import (vague 5) sont sous garde, la couverture back est passée de 32 % à **52 %**. Le reste d'`import_links` (58 lignes nues : mapping champ à champ v1→v27, commentaires, réactions, pièces jointes, liens entre mémos) est une queue longue à traiter au fil des lots qui y touchent, pas en bloc.
-2. **[GUEST-PROFILE]** — **après** les rôles : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
+1. **[GUEST-PROFILE]** — reprise de la file PRODUIT après le chantier tests : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
+2. **[GUEST-WELCOME]** (importance Fabien : **7/10**, graine détaillée plus bas) — accueillir l'invité dans son espace perso 🏠 : bandeau « c'est ton espace », mémo d'accueil pré-installé, récap **personnalisé par capacité**.
 3. **[DEBUG-RECORDER]** — enregistreur de diagnostic **intégré à l'app** (idée Fabien, reco Cowork du 8/08) : mode OFF par défaut, journalise clics + ouverture/fermeture des `<dialog>` **avec leur état** (`open`/`:modal`/`display`) + erreurs console + contexte (viewport, version, navigateur), bouton « Copier le log », **tout local, aucun envoi réseau**. Motif : c'est exactement l'état interne qui aurait montré le fantôme de [POPIN-GHOST-FIX] du premier coup. Utile **avant** de reprendre la chasse aux bugs mobiles.
 
 ---
@@ -58,6 +58,26 @@ Importance (Cowork, à valider) : **~4/10** — réel mais rare.
 Idée Fabien (née de [IMPORT-SKIP-FIX]) : quand un mémo importé entre en **conflit** et porte des **pièces jointes**, ne pas trancher en silence (aujourd'hui « Ignorer » laisse le mémo tel quel et **jette** ses PJ). Offrir plutôt un **écran « à toi de jouer »** : l'utilisateur **voit** les fichiers du fichier importé et **choisit** ceux qu'il rajoute au mémo existant. Le repli actuel (skip = tout ignorer, PJ comprises) reste le comportement sûr **par défaut** ; cette feature l'enrichit d'un choix granulaire. À cadrer en spec (UI de conflit + endpoint d'ajout ciblé de PJ à un mémo existant, déjà quasi présent via les routes d'attachements). S'appuie sur l'aperçu dry-run (`_import_dry_run`) qui liste déjà les conflits.
 
 Importance (Fabien) : **8/10** — Cowork estimerait ~6-7 (vrai plus UX mais chemin niche : conflit d'import AVEC pièces jointes).
+
+### 🌱 Graine backlog — [EXPORT-MEDIA-BUNDLE] : export/import PORTABLE avec les fichiers (importance Fabien : à préciser ; Cowork : ~7/10)
+
+Constat (question Fabien) : l'export est un **JSON de noms de fichiers seulement** — les photos, audio et pièces jointes vivent dans `data/uploads/` et **ne voyagent pas**. À l'import, un fichier n'est rattaché **que si son binaire existe déjà** sur la machine (`os.path.isfile`) → sur une AUTRE machine (ou la future app Flutter), les médias sont **abandonnés en silence**. Les fichiers ne sont pas perdus (volume `data/` sauvegardé) mais le couple export/import n'est **pas portable pour les médias**.
+
+Feature : un **bundle** (archive JSON + binaires de `data/uploads/`) exporté, et un import qui repose les fichiers sur le disque **avant** de recâbler les références. Briques existantes : la machinerie ZIP (`_send_zip`), et l'import d'attachements qui vérifie déjà la présence du binaire (il suffirait qu'il soit là). À CADRER EN SPEC : format du bundle, **taille** (peut faire des Go), streaming, **limite d'upload 320 Mo** (`MAX_CONTENT_LENGTH`) qu'un bundle média dépasse → chemin d'upload dédié / chunké / côté serveur ; dédup ; sécurité (chemins de fichiers). Sous-tend aussi [API-READY] (une app Flutter qui synchronise a besoin des médias) et recoupe [IMPORT-CONFLICT-FILES].
+
+Importance : **Fabien à préciser** — Cowork estimerait **~7/10** : c'est la différence entre une vraie sauvegarde et une sauvegarde de métadonnées, et ça conditionne tout déménagement vers une nouvelle machine ou l'app Flutter.
+
+### 🌱 Graine backlog — [VOICE-LONGER] : audio SANS limite de durée, mais ROBUSTE (importance Fabien : **6/10**)
+
+Décision Fabien : **pas de plafond de durée** sur le vocal — « c'est une feature que je donne, je ne veux pas qu'elle bugue ». Aujourd'hui : cap dur à 5 min (`VOICE_MAX_MS`, `setTimeout(stopRec)` dans `templates/partials/_shared.js.html` → `recordVoice`).
+
+⚠️ **Honnêteté d'ingénierie** : retirer juste le `setTimeout` ferait buguer exactement ce qu'on veut protéger. `MediaRecorder` accumule l'audio **en mémoire** jusqu'au `stop` → sur **mobile**, un long enregistrement **sature la RAM et plante l'onglet** ; et un envoi unique > **320 Mo** (`MAX_CONTENT_LENGTH`) est **rejeté (413)**. « Illimité » naïf = crash mobile + échec d'envoi silencieux.
+
+« Illimité qui ne bugue pas » = vrai (petit) lot, à trancher en spec, deux voies :
+1. **Auto-découpe (plus simple)** : à l'approche de la zone de danger (RAM / ~300 Mo), clore le clip et **enchaîner** un nouveau sans coupure ressentie → plusieurs bulles pour un long enregistrement, jamais de crash ni de 413 ; reste dans le modèle « un clip = une PJ ».
+2. **Upload chunké + réassemblage serveur (plus lourd)** : streamer les morceaux → un seul fichier, RAM bornée, dépasse les 320 Mo ; nouvelle route serveur.
+
+Dans les deux cas : garder le chrono en direct et **tester sur un vrai mobile** (c'est là que la RAM lâche). Importance : **Fabien 6/10** ; Cowork d'accord ~6 — vrai confort, mais l'implémentation « sans bug » n'est pas triviale (ce n'est pas une constante à changer).
 
 ### En cours / prochains lots (à jour 10 juil. 2026)
 
