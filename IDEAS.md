@@ -91,6 +91,10 @@ UI → **maquette Cowork d'abord** (règle du projet). À cadrer : ordre exact (
 
 Importance : **Fabien 8/10** — Cowork ~6-7 (friction quotidienne, surtout mobile ; pas de risque données/sécurité, mais très visible à l'usage).
 
+### 🌱 Graine backlog — [GUEST-COMMENTS-POPIN] : le fil de commentaires en pop-in cote INVITE ne va pas (importance Fabien : a preciser ; Cowork : ~5/10)
+
+Constat Fabien (9/08) : en tant quinvite, les commentaires en pop-in ([COMMENTS-V2], openCommentsPopin, share.html) "c est pas ca". A traiter PLUS TARD. A PRECISER quand on sy mettra : ce qui cloche exactement (le format pop-in lui-meme ? la mise en page / lisibilite ? le composer / champ de saisie ? un role donne — commentateur vs lecteur ? mobile vs desktop ?). Point de depart code : openCommentsPopin cote invite (share.html) + le squelette partage cmtRow / bulles [COMMENTS-V2]. Comparer au rendu owner (index.html) pour la parite, comme on la fait pour [CARD-ACTIONS-FIXED]. Importance : Fabien a preciser — Cowork ~5/10 (polish cote invite, le public du partage ; severite a confirmer selon ce qui gene).
+
 ### 🌱 Graine backlog — [MAP-ROTATE] : pivoter une photo depuis le calque photo de la carte (Cowork ~4/10)
 
 Deux portes owner laissees HORS de [PHOTO-ROTATE-SAVE], notees pour ne pas les perdre (rappel CC 9/08) : (1) le **calque photo de la carte** — on pourrait y pivoter une photo, mais la carte ne se rafraichit pas apres coup (vignette/marqueur perimes) : a traiter AVEC le refresh du calque, sinon demi-feature ; (2) la **corbeille dimages** — pivoter une photo supprimee na pas de sens, volontairement exclu. Les pieces jointes-images restent hors v1. Petit lot separe si Fabien le veut. Importance : Cowork ~4/10 (confort, faible frequence).

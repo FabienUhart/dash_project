@@ -306,6 +306,22 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 /* [MEMO-VIEW correctif 3] groupe d'actions : c'est le CONTENEUR qui pousse à droite (les boutons
    ne portent plus `margin-left:auto`, sinon ils se séparaient au wrap mobile). */
 .task-acts { display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0; margin-left: auto; }
+/* [CARD-ACTIONS-FIXED] Pied de card : provenance à gauche, actions à droite, séparées par un
+   trait. Repris À L'IDENTIQUE du propriétaire (`index.html`) plutôt que réinventé : c'est le
+   même composant, il doit se ressembler d'une page à l'autre (invariant 9). Sans lui, les
+   actions vivaient sur la ligne du titre en `margin-left:auto` et se décalaient selon ce que
+   cette ligne portait — badge de dossier, vignette photo, pastille de priorité. */
+.task-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  margin: 0.55rem 0 0; padding: 0.5rem 0 0; border-top: 1px solid var(--border);
+}
+.task-foot .foot-proj {
+  display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0;
+  font-size: 0.8rem; color: var(--muted);
+}
+.task-foot .foot-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Le groupe d'actions ne pousse plus à droite : c'est le pied qui l'y place. */
+.task-foot .task-acts { margin-left: 0; }
 .task-edit {
   flex-shrink: 0; min-height: 0; width: 1.6rem; height: 1.6rem;
   padding: 0; border: none; background: none; color: var(--muted); cursor: pointer;
@@ -3548,7 +3564,9 @@ function render() {
       });
       row.appendChild(stack);
     }
-    if (memo.project) row.appendChild(el('span', 'badge', memo.project));
+    // [CARD-ACTIONS-FIXED] En compact la provenance descend dans le pied (à gauche des
+    // actions), comme chez le propriétaire ; en immersif la ligne la garde.
+    if (memo.project && coverName) row.appendChild(el('span', 'badge', memo.project));
     if (memo.due_date) {
       const dt = fmtMemoRange(memo.due_time, memo.end_time);  // [FESTIVAL-VOTE] plage horaire début → fin
       // [MEMO-DATE-RANGE] libellé « 3 → 6 nov » si plage de dates.
@@ -3573,9 +3591,10 @@ function render() {
     vBtn.title = 'Voir le mémo';
     vBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openMemoView(shareMemoViewCfg(), memo.id); });
     acts.appendChild(vBtn);
-    // [CARD-COVER] en immersif les actions descendent dans un pied de card (bas à droite,
-    // sur fond de verre) ; en compact elles restent où elles ont toujours été.
-    if (!coverName) row.appendChild(acts);
+    // [CARD-ACTIONS-FIXED] Les actions ne sont plus posées ici : en compact elles vont dans le
+    // pied de card (construit plus bas), en immersif dans le pied de verre de [CARD-COVER].
+    // Sur la ligne du titre, leur `margin-left:auto` les faisait dépendre de ce que cette ligne
+    // portait — l'œil 👁 tombait donc ailleurs d'une card à l'autre.
     if (canEditMemo(memo)) {  // [GUEST-ROLES] ✎/⋯ (éditer/supprimer) = own-or-editor
       const eBtn = el('button', 'task-edit');
       eBtn.appendChild(shareIcon('pencil'));
@@ -3756,6 +3775,16 @@ function render() {
     // existantes) et dans le menu ⋯ de la rangée. La card ne garde que la consultation active.
     // [CARD-COVER] pied (actions) puis habillage photo + voile, en DERNIER : la couche photo
     // passe sous les rangées déjà construites. Clic sur la photo = visionneuse.
+    // [CARD-ACTIONS-FIXED] Pied de card en COMPACT : provenance à gauche, actions à droite —
+    // même gabarit que le propriétaire, donc même ancre quel que soit le type de card.
+    if (!coverName) {
+      const foot = el('div', 'task-foot');
+      const fp = el('div', 'foot-proj');
+      if (memo.project) fp.appendChild(el('span', '', memo.project));
+      foot.appendChild(fp);
+      foot.appendChild(acts);
+      t.appendChild(foot);
+    }
     if (coverName) {
       const foot = coverFoot();
       foot.appendChild(acts);

@@ -262,6 +262,22 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .task-content li[data-list]:empty::before { display: none; }
 /* [MEMO-VIEW correctif 3] groupe d'actions de la card (👁) : poussé à droite, jamais séparé au wrap. */
 .task-acts { display: inline-flex; align-items: flex-start; gap: 0.25rem; flex-shrink: 0; margin-left: auto; }
+/* [CARD-ACTIONS-FIXED] Pied de card : provenance à gauche, actions à droite, séparées par un
+   trait. Repris À L'IDENTIQUE du propriétaire (`index.html`) plutôt que réinventé : c'est le
+   même composant, il doit se ressembler d'une page à l'autre (invariant 9). Sans lui, les
+   actions vivaient sur la ligne du titre en `margin-left:auto` et se décalaient selon ce que
+   cette ligne portait — badge de dossier, vignette photo, pastille de priorité. */
+.task-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  margin: 0.55rem 0 0; padding: 0.5rem 0 0; border-top: 1px solid var(--border);
+}
+.task-foot .foot-proj {
+  display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0;
+  font-size: 0.8rem; color: var(--muted);
+}
+.task-foot .foot-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Le groupe d'actions ne pousse plus à droite : c'est le pied qui l'y place. */
+.task-foot .task-acts { margin-left: 0; }
 .badges { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; flex-basis: 100%; margin-left: 1.8rem; }
 .badge { font-size: 0.72rem; padding: 0.12rem 0.45rem; border-radius: 4px; background: var(--panel-2);
   color: var(--muted); white-space: nowrap; }
@@ -1303,12 +1319,15 @@ function memoCard(m) {
   vBtn.appendChild(vIc);
   vBtn.addEventListener('click', (e) => { e.stopPropagation(); openMemoView(hubMemoViewCfg(), m.id); });
   acts.appendChild(vBtn);
-  // [CARD-COVER] en immersif, les actions descendent en pied de card (bas à droite, en verre).
-  if (!coverName) row.appendChild(acts);
+  // [CARD-ACTIONS-FIXED] Les actions quittent la ligne du titre : en compact elles vont dans le
+  // pied de card (plus bas), en immersif dans le pied de verre de [CARD-COVER]. Posées ici, leur
+  // ancre dépendait des badges voisins et changeait d'une card à l'autre.
   const badges = el('div', { class: 'badges' });
   if (prio && prio.color && !m.done) badges.appendChild(el('span', { class: 'prio-chip', text: prio.name, attrs: { style: 'background:' + prio.color + ';color:' + textOn(prio.color) } }));
   const due = dueInfo(m); if (due) badges.appendChild(el('span', { class: 'badge ' + due.cls, text: due.label }));
-  if (m.project) badges.appendChild(el('span', { class: 'badge', text: '📁 ' + m.project }));
+  // [CARD-ACTIONS-FIXED] En compact la provenance descend dans le pied ; en immersif elle reste
+  // dans les badges de la ligne.
+  if (m.project && coverName) badges.appendChild(el('span', { class: 'badge', text: '📁 ' + m.project }));
   // [CARD-PREVIEW] Le compteur 📎 est dans la rangée de pictos (anti-doublon).
   (m.assignees || []).forEach(a => badges.appendChild(el('span', { class: 'asg-av', text: initials(a), attrs: { title: a } })));
   if (!m.can_edit) badges.appendChild(el('span', { class: 'lock', text: '🔒 lecture' }));
@@ -1333,6 +1352,15 @@ function memoCard(m) {
   }
   // [CARD-COVER] pied (actions) puis habillage photo + voile, en DERNIER : la couche photo
   // passe sous les rangées déjà construites. Clic sur la photo = visionneuse.
+  // [CARD-ACTIONS-FIXED] Pied de card en COMPACT — parité avec le propriétaire et l'invité.
+  if (!coverName) {
+    const foot = el('div', { class: 'task-foot' });
+    const fp = el('div', { class: 'foot-proj' });
+    if (m.project) fp.appendChild(el('span', { text: '📁 ' + m.project }));
+    foot.appendChild(fp);
+    foot.appendChild(acts);
+    task.appendChild(foot);
+  }
   if (coverName) {
     const foot = coverFoot();
     foot.appendChild(acts);
