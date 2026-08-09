@@ -12,13 +12,27 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 **Ordre ferme, tenu à jour à chaque fin de lot** : le lot terminé est **retiré**, la file remonte d'un cran. En l'absence de brief collé, le **n° 1 est le travail en cours**. Un brief collé par Fabien **prime toujours** sur cette file. Le reste du fichier, en dessous, est le backlog **non ordonné**.
 
-_(À jour au 9 août 2026, après **V27.38.237** (non déployé — la prod reste sur **V27.37.229**). [TEST-HARNESS] (230→232), [TEST-REPORTS] (233), [PROCESS-DOC] (234) et [TESTS-PORT] vagues 1 à 3 (235, 236, 237) sont livrés — lignes ✅ plus bas et `REALISATION.md`.)_
+_(À jour au 9 août 2026, après **V27.38.239** (non déployé — la prod reste sur **V27.37.229**). [TEST-HARNESS] (230→232), [TEST-REPORTS] (233), [PROCESS-DOC] (234), [TESTS-PORT] vagues 1 à 4 (235→237, 239) et [DOC-FIX] (238) sont livrés — lignes ✅ plus bas et `REALISATION.md`.)_
 
-1. **[TESTS-PORT-4] Quatrième vague — sortir de `/share/*`** — les trois premières vagues ont mis **dix-sept fonctions** de la surface publique invitée à 100 % de leurs lignes (délégation, expression, vote) et porté la couverture back de 32 % à **46 %**. L'invariant 5 est désormais tenu par des tests durables ; le reste du risque nu est ailleurs. Cibles d'après `htmlcov/` : l'**export ZIP** (`_memo_zip_files`/`_send_zip`), `_fx_rates` (cache FX — **1 appel réseau par jour maximum**, à tester **sans jamais toucher le réseau** : c'est la contrainte principale du lot), les branches **vocales** de `_soft_delete_comment` (purge du fichier + retrait de la ligne système) et le **hub** `/share/hub/…` (agrégation multi-partages, jamais testée). Même discipline : **caractérisation**, **aucun changement applicatif**, chaque garde éprouvée **par mutation** — et une mutation qui survit se traite comme un test manquant, pas comme un détail (trois cas en vague 3, cf. 237).
-2. **[GUEST-PROFILE]** — **après** les rôles : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
-3. **[DEBUG-RECORDER]** — enregistreur de diagnostic **intégré à l'app** (idée Fabien, reco Cowork du 8/08) : mode OFF par défaut, journalise clics + ouverture/fermeture des `<dialog>` **avec leur état** (`open`/`:modal`/`display`) + erreurs console + contexte (viewport, version, navigateur), bouton « Copier le log », **tout local, aucun envoi réseau**. Motif : c'est exactement l'état interne qui aurait montré le fantôme de [POPIN-GHOST-FIX] du premier coup. Utile **avant** de reprendre la chasse aux bugs mobiles.
+1. **[TESTS-PORT-5] Les entrailles de l'import** — la surface **publique** invitée est désormais entièrement sous garde (partages **et** hub : 4 vagues, couverture back 32 % → **50 %**). Le risque bascule côté **données**, là où la douleur d'origine s'était produite : `import_links` (157 lignes) et `_import_dry_run` (46). Ce sont les invariants 1, 2 et 3 — compat ascendante v1→v27, import jamais destructif, uid jamais régénéré — dont la batterie actuelle ne couvre que la crête. Rappel du précédent : [IMPORT-CONTENT-DEDUP-FIX] (V27.36.228) avait perdu 12 mémos sur 51 **en silence**, et un export v1 déclenchait un 500 sur une branche que rien ne testait. Même discipline : **caractérisation**, **aucun changement applicatif**, mutation systématique — et un contre-témoin partout où le test ne fait que constater un refus (leçon des vagues 3 et 4).
+2. **[TESTS-PORT-6] Utilitaires owner** — export **ZIP** (`_memo_zip_files`/`_send_zip`), **`_fx_rates` et `hub_fx` SANS jamais toucher le réseau** (c'est la contrainte du lot : le cache se teste, l'appel se simule), `hub_send_link` (SMTP, même règle), et les branches **vocales** de `_soft_delete_comment` (purge du fichier + retrait de la ligne système).
+3. **[GUEST-PROFILE]** — **après** les rôles : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
+4. **[DEBUG-RECORDER]** — enregistreur de diagnostic **intégré à l'app** (idée Fabien, reco Cowork du 8/08) : mode OFF par défaut, journalise clics + ouverture/fermeture des `<dialog>` **avec leur état** (`open`/`:modal`/`display`) + erreurs console + contexte (viewport, version, navigateur), bouton « Copier le log », **tout local, aucun envoi réseau**. Motif : c'est exactement l'état interne qui aurait montré le fantôme de [POPIN-GHOST-FIX] du premier coup. Utile **avant** de reprendre la chasse aux bugs mobiles.
 
 ---
+
+### 🌱 Graine backlog — [API-READY] : préparer l'API pour une 2e application (client Flutter)
+
+Fabien prévoit une app **Flutter** (un seul code → **Android, iOS/Apple, macOS, Linux**). Ces clients ne sont **pas** « un navigateur derrière le proxy » : le modèle actuel (aucune auth dans l'app, Authelia au reverse proxy — invariant 5) ne leur convient pas pour `/api/*`. La surface `/share/*` + `/share/hub/*` (jeton + PIN) est **déjà** consommable telle quelle par n'importe quel client — c'est elle qu'on met sous garde par tests en ce moment.
+
+Pour passer « API produit » — **à cadrer en spec avant tout code**, comme GUEST-ROLES / MEMO-HANDLE :
+
+1. **Auth clients non-navigateur** : un **jeton d'API** owner, qui s'ajoute sans casser l'invariant 5 ni le rôle d'Authelia pour le web.
+2. **Contrat écrit** : un **OpenAPI** (le README documente déjà une partie du modèle et de l'API).
+3. **CORS** si le client tape depuis une origine distincte.
+4. **Versionnage par endpoint** (aujourd'hui seul le format d'export est versionné, v27).
+
+Prérequis de confiance **déjà en cours** : la couverture de tests de `/share/*` ([TESTS-PORT]) fige le contrat — une régression d'API passe au rouge. C'est ce qui rendra l'API digne d'être un socle.
 
 ### En cours / prochains lots (à jour 10 juil. 2026)
 
