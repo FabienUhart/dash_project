@@ -306,6 +306,26 @@ main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem
 /* [MEMO-VIEW correctif 3] groupe d'actions : c'est le CONTENEUR qui pousse à droite (les boutons
    ne portent plus `margin-left:auto`, sinon ils se séparaient au wrap mobile). */
 .task-acts { display: inline-flex; align-items: center; gap: 0.25rem; flex-shrink: 0; margin-left: auto; }
+/* [GUEST-COMMENTS-POPIN] Coquille de la pop-in de commentaires — copiée telle quelle depuis
+   `index.html` : c'est le même composant des deux côtés, il doit se ressembler (invariant 9).
+   Le fil défile, l'en-tête reste collé en tête avec sa croix (leçon [MOBILE-POPIN-CLOSE-FIX] :
+   une croix hors d'atteinte enferme l'utilisateur dans la pop-in). */
+#comments-dialog { width: min(640px, calc(100vw - 2rem)); max-height: min(86vh, 780px);
+  padding: 0; flex-direction: column; overflow: hidden; }
+#comments-dialog[open] { display: flex; }
+.cp-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border); flex: none;
+  position: sticky; top: 0; z-index: 2; background: var(--panel); }
+@media (max-width: 700px) {
+  .cp-head .cp-x { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+}
+.cp-head h3 { margin: 0; font-size: 0.9rem; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cp-head .cp-x { margin-left: auto; background: none; border: none; color: var(--muted);
+  cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0.1rem 0.35rem; border-radius: 6px; flex: none; }
+.cp-head .cp-x:hover { color: var(--text); background: var(--panel-2); }
+.cp-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0.5rem 0.75rem 0.75rem; }
+.cp-body > div { margin-top: 0 !important; }
 /* [CARD-ACTIONS-FIXED] Pied de card : provenance à gauche, actions à droite, séparées par un
    trait. Repris À L'IDENTIQUE du propriétaire (`index.html`) plutôt que réinventé : c'est le
    même composant, il doit se ressembler d'une page à l'autre (invariant 9). Sans lui, les
@@ -1102,6 +1122,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   </div>
 </dialog>
 
+<dialog id="comments-dialog"></dialog>
 <dialog id="move-dialog">
   <h3 id="move-title" style="margin:0 0 0.6rem">Déplacer vers…</h3>
   <p id="move-sub" class="move-sub"></p>
@@ -1516,6 +1537,149 @@ function renderWelcome() {
 }
 
 // Champ commentaire invité (avec priorité + mention + parent éventuel).
+// [GUEST-COMMENTS-POPIN] Le fil de commentaires de l'invité, extrait tel quel de la card.
+// Il s'y empilait en entier — bulles, réponses, réactions, composeur — et une card à dix
+// messages devenait une colonne illisible, alors que le propriétaire ouvre le même fil dans
+// une pop-in depuis toujours. Le contenu ne change pas d'un octet : seul son CONTENANT
+// change. Les droits non plus (invariant 5) — `canCommentMemo` gate toujours le composeur,
+// les réponses, les réactions et les votes, et le serveur revalide de toute façon.
+function shareCommentsBlock(memo) {
+    const cwrap = el('div', '');
+    cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
+    const comments = memo.comments || [];
+    // [COMMENTS-V2] une bulle par commentaire (squelette partagé `cmtRow`) — droits INCHANGÉS.
+    const buildC = (c, isReply) => {
+      const author = (c.author || '').replace(/\s*<[^>]*>/, '');
+      const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));   // [VOICE-MESSAGES]
+      // [COMMENT-VOTE] scrutin → la bulle de vote remplace le corps. Voter exige la capacité
+      // `comment` (voter, c'est prendre la parole) ; le SERVEUR revalide périmètre et rôle à
+      // chaque appel — la page ne fait qu'afficher ce qu'il autorise (invariant 5).
+      const pollNode = c.poll ? cmtPollNode(c.poll, {
+        canVote: canCommentMemo(memo),
+        onVote: async (optionId) => {
+          const r = await fetch(API + '/comment-poll/' + c.id + '/vote', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+            body: JSON.stringify({ option_id: optionId }) });
+          if (r.ok) await load(); else notify('Vote impossible.', { error: true });
+        },
+        onClose: async () => {
+          if (!(await confirmPopin('Le gagnant sera figé et plus personne ne pourra voter.', { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
+          const r = await fetch(API + '/comment-poll/' + c.id + '/close', {
+            method: 'POST', headers: { 'X-Guest-Token': guestToken() } });
+          if (r.ok) await load(); else notify('Clôture impossible.', { error: true });
+        },
+      }) : null;
+      const bodyNode = pollNode || vf || commentBodyNode(c.body);           // [COMMENT-LINKIFY]
+      const self = (GUEST && (GUEST.name || GUEST.email)) || '';
+      const others = (c.seen || []).filter(v => v && v !== author && v !== self);
+      const when = new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+      const _sys = cmtSystemInfo(c.body);   // [SYSTEM-LINES-MONO]
+      return cmtRow({
+        author: c.author, guest: !!c.guest, bodyNode, isReply,
+        when: when + (vf ? ' · 🎤 message vocal' : ''),
+        seenText: others.length ? ('👁 ' + others.join(', ')) : '',
+        priority: c.priority, prioColor: commentPrioColor, prioLabel: commentPrioLabel,
+        deleted: !!c.deleted,   // [COMMENTS-V2 addendum] pierre tombale
+        system: _sys,           // [SYSTEM-LINES-MONO]
+        actions: [
+          (!isReply && canCommentMemo(memo)) && { label: '↩ Répondre', onClick: (r) => {   // [GUEST-ROLES]
+            if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
+            const rb = shareCommentInput(memo, c.id);
+            rb.classList.add('reply-box');
+            rb.style.marginLeft = '1.5rem';
+            r.after(rb);
+            rb.querySelector('input').focus();
+          } },
+          // [COMMENTS-V2 addendum] l'AUTEUR supprime SON message. `can_delete` est calculé par le
+          // SERVEUR (match par e-mail) : la page ne fait qu'afficher — viser le message d'un
+          // autre reste refusé côté serveur (403), invariant 5.
+          c.can_delete && { label: '✕', title: 'Supprimer mon message', danger: true, onClick: async () => {
+            if (!(await confirmPopin('Il laissera une trace « Message supprimé » et les réponses resteront.', { title: 'Supprimer ton message ?' }))) return;
+            const resp = await fetch(API + '/comment/' + c.id, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } });
+            if (resp.ok) await load(); else notify('Suppression impossible.', { error: true });
+          } },
+        ],
+        // [COMMENT-REACTIONS] invité APPROUVÉ peut réagir (can_edit non requis).
+        reactionsRow: reactionRow(c.reactions, !_sys && canCommentMemo(memo), async (emoji) => {
+          const resp = await fetch(API + '/comment/' + c.id + '/react', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify({ emoji }) });
+          if (resp.ok) await load(); else notify('Réaction impossible.', { error: true });
+        }),
+      });
+    };
+    // au-delà de 2 réponses : repliées derrière « ▾ Voir n réponses de plus » (état de session).
+    cmtHideVoiceLogs(comments).filter(c => !c.parent_id).forEach(c => {
+      cwrap.appendChild(buildC(c, false));
+      const replies = cmtHideVoiceLogs(comments).filter(ch => ch.parent_id === c.id);
+      replies.slice(0, 2).forEach(ch => cwrap.appendChild(buildC(ch, true)));
+      const extra = replies.slice(2);
+      if (extra.length) {
+        const holder = el('div', '');
+        holder.style.display = 'none';
+        extra.forEach(ch => holder.appendChild(buildC(ch, true)));
+        cwrap.appendChild(cmtMoreToggle(extra.length, (open) => { holder.style.display = open ? '' : 'none'; }));
+        cwrap.appendChild(holder);
+      }
+    });
+    if (canCommentMemo(memo)) cwrap.appendChild(shareCommentInput(memo, null));  // [GUEST-ROLES]
+  if ((memo.comments || []).length && canCommentMemo(memo)) markMemoSeen(memo.id);
+  return cwrap;
+}
+
+// [GUEST-COMMENTS-POPIN] La pop-in invitée reprend la coquille du propriétaire —
+// `#comments-dialog`, `.cp-head`, `.cp-body`, sa CSS copiée à l'identique — parce que c'est
+// le même composant et qu'il doit se ressembler d'une page à l'autre (invariant 9).
+// Voie retenue : pop-in locale plutôt qu'une coquille commune extraite dans le partial.
+// Extraire aurait voulu dire paramétrer l'accès aux données des DEUX côtés (routes owner
+// contre `/share/*` + `X-Guest-Token`, `commentsBlockEl` contre `shareCommentsBlock`) :
+// trop lourd pour un lot dont l'intention tient en une phrase. La duplication se limite à
+// la coquille ; tout le fil, lui, vient des composants partagés.
+function openShareCommentsPopin(memo) {
+  const dlg = document.getElementById('comments-dialog');
+  if (!dlg) return;
+  dlg.innerHTML = '';
+  const head = el('div', 'cp-head');
+  const ic = hdrIcon('message');
+  ic.setAttribute('width', '16'); ic.setAttribute('height', '16');
+  head.appendChild(ic);
+  // ⚠ `memoHeadline` est un helper du PROPRIÉTAIRE : l'appeler ici lèverait une
+  // ReferenceError. Le titre du mémo, sinon sa première ligne, sinon un libellé neutre.
+  const titre = (memo.title || '').trim()
+    || (stripTags(memo.content || '').trim().split('\n')[0] || '').slice(0, 80)
+    || 'Commentaires';
+  head.appendChild(el('h3', '', titre));
+  const x = el('button', 'cp-x', '✕');
+  x.title = 'Fermer (Échap)';
+  x.addEventListener('click', () => dlg.close());
+  head.appendChild(x);
+  dlg.appendChild(head);
+  const body = el('div', 'cp-body');
+  body.appendChild(shareCommentsBlock(memo));
+  dlg.appendChild(body);
+  dlg.showModal();
+  // Un fil s'ouvre sur sa FIN : on arrive aux derniers messages, le composeur dessous.
+  body.scrollTop = body.scrollHeight;
+  _CMT_POPIN = memo.id;
+  dlg.addEventListener('close', () => { _CMT_POPIN = 0; }, { once: true });
+}
+// Mémo dont le fil est ouvert (0 = aucun).
+let _CMT_POPIN = 0;
+// [GUEST-COMMENTS-POPIN] Le fil ayant quitté la card, `load()` ne le reconstruit plus : il
+// refait la liste, et la pop-in ouverte garde son contenu d'avant. Un message posté depuis la
+// pop-in partait donc bien en base sans jamais apparaître à l'écran. On rebâtit le fil ouvert
+// à chaque rendu, en conservant la position de lecture.
+function refreshShareCommentsPopin() {
+  const dlg = document.getElementById('comments-dialog');
+  if (!dlg || !dlg.open || !_CMT_POPIN) return;
+  const memo = (DATA.memos || []).find(m => m.id === _CMT_POPIN);
+  if (!memo) { dlg.close(); return; }   // mémo sorti du périmètre : on ne montre pas un fantôme
+  const body = dlg.querySelector('.cp-body');
+  if (!body) return;
+  const enBas = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+  const y = body.scrollTop;
+  body.innerHTML = '';
+  body.appendChild(shareCommentsBlock(memo));
+  body.scrollTop = enBas ? body.scrollHeight : y;
+}
 function shareCommentInput(memo, parentId) {
   _commentsV2Style();   // [COMMENTS-V2]
   const row = el('div', 'cmt-composer');
@@ -3591,6 +3755,20 @@ function render() {
     vBtn.title = 'Voir le mémo';
     vBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openMemoView(shareMemoViewCfg(), memo.id); });
     acts.appendChild(vBtn);
+    // [GUEST-COMMENTS-POPIN] 💬 : le fil vit désormais dans une pop-in. Le compteur ne montre que
+    // les messages HUMAINS (`cmtHumanCount` — ni journaux de l'app, ni tombales), comme le hub.
+    // Posé dans `acts`, il suit le pied de card en compact ET le pied de verre en immersif.
+    const nCmt = cmtHumanCount(memo.comments);
+    if (nCmt || canCommentMemo(memo)) {
+      const cBtn = el('button', 'task-edit');
+      cBtn.title = 'Commentaires';
+      const cIc = hdrIcon('message');
+      cIc.setAttribute('width', '16'); cIc.setAttribute('height', '16');
+      cBtn.appendChild(cIc);
+      if (nCmt) cBtn.appendChild(el('span', '', ' ' + nCmt));
+      cBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openShareCommentsPopin(memo); });
+      acts.appendChild(cBtn);
+    }
     // [CARD-ACTIONS-FIXED] Les actions ne sont plus posées ici : en compact elles vont dans le
     // pied de card (construit plus bas), en immersif dans le pied de verre de [CARD-COVER].
     // Sur la ligne du titre, leur `margin-left:auto` les faisait dépendre de ce que cette ligne
@@ -3664,88 +3842,8 @@ function render() {
       t.appendChild(makeItemAdd());
     }
 
-    // [CARD-COVER] le fil de commentaires n'a pas sa place sur une couverture (fiche 👁 / compact).
-    if (!coverName && ((memo.comments || []).length || canCommentMemo(memo))) {  // [GUEST-ROLES] commentateur+ ou override
-      const cwrap = el('div', '');
-      cwrap.style.cssText = 'margin:0.4rem 0 0 1.75rem';
-      const comments = memo.comments || [];
-      // [COMMENTS-V2] une bulle par commentaire (squelette partagé `cmtRow`) — droits INCHANGÉS.
-      const buildC = (c, isReply) => {
-        const author = (c.author || '').replace(/\s*<[^>]*>/, '');
-        const vf = renderVoiceBody(c.body, voiceUrlFor(memo.attachments));   // [VOICE-MESSAGES]
-        // [COMMENT-VOTE] scrutin → la bulle de vote remplace le corps. Voter exige la capacité
-        // `comment` (voter, c'est prendre la parole) ; le SERVEUR revalide périmètre et rôle à
-        // chaque appel — la page ne fait qu'afficher ce qu'il autorise (invariant 5).
-        const pollNode = c.poll ? cmtPollNode(c.poll, {
-          canVote: canCommentMemo(memo),
-          onVote: async (optionId) => {
-            const r = await fetch(API + '/comment-poll/' + c.id + '/vote', {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
-              body: JSON.stringify({ option_id: optionId }) });
-            if (r.ok) await load(); else notify('Vote impossible.', { error: true });
-          },
-          onClose: async () => {
-            if (!(await confirmPopin('Le gagnant sera figé et plus personne ne pourra voter.', { title: 'Clore ce vote ?', okLabel: 'Clore', danger: false }))) return;
-            const r = await fetch(API + '/comment-poll/' + c.id + '/close', {
-              method: 'POST', headers: { 'X-Guest-Token': guestToken() } });
-            if (r.ok) await load(); else notify('Clôture impossible.', { error: true });
-          },
-        }) : null;
-        const bodyNode = pollNode || vf || commentBodyNode(c.body);           // [COMMENT-LINKIFY]
-        const self = (GUEST && (GUEST.name || GUEST.email)) || '';
-        const others = (c.seen || []).filter(v => v && v !== author && v !== self);
-        const when = new Date(c.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-        const _sys = cmtSystemInfo(c.body);   // [SYSTEM-LINES-MONO]
-        return cmtRow({
-          author: c.author, guest: !!c.guest, bodyNode, isReply,
-          when: when + (vf ? ' · 🎤 message vocal' : ''),
-          seenText: others.length ? ('👁 ' + others.join(', ')) : '',
-          priority: c.priority, prioColor: commentPrioColor, prioLabel: commentPrioLabel,
-          deleted: !!c.deleted,   // [COMMENTS-V2 addendum] pierre tombale
-          system: _sys,           // [SYSTEM-LINES-MONO]
-          actions: [
-            (!isReply && canCommentMemo(memo)) && { label: '↩ Répondre', onClick: (r) => {   // [GUEST-ROLES]
-              if (r.nextSibling && r.nextSibling.classList && r.nextSibling.classList.contains('reply-box')) { r.nextSibling.remove(); return; }
-              const rb = shareCommentInput(memo, c.id);
-              rb.classList.add('reply-box');
-              rb.style.marginLeft = '1.5rem';
-              r.after(rb);
-              rb.querySelector('input').focus();
-            } },
-            // [COMMENTS-V2 addendum] l'AUTEUR supprime SON message. `can_delete` est calculé par le
-            // SERVEUR (match par e-mail) : la page ne fait qu'afficher — viser le message d'un
-            // autre reste refusé côté serveur (403), invariant 5.
-            c.can_delete && { label: '✕', title: 'Supprimer mon message', danger: true, onClick: async () => {
-              if (!(await confirmPopin('Il laissera une trace « Message supprimé » et les réponses resteront.', { title: 'Supprimer ton message ?' }))) return;
-              const resp = await fetch(API + '/comment/' + c.id, { method: 'DELETE', headers: { 'X-Guest-Token': guestToken() } });
-              if (resp.ok) await load(); else notify('Suppression impossible.', { error: true });
-            } },
-          ],
-          // [COMMENT-REACTIONS] invité APPROUVÉ peut réagir (can_edit non requis).
-          reactionsRow: reactionRow(c.reactions, !_sys && canCommentMemo(memo), async (emoji) => {
-            const resp = await fetch(API + '/comment/' + c.id + '/react', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify({ emoji }) });
-            if (resp.ok) await load(); else notify('Réaction impossible.', { error: true });
-          }),
-        });
-      };
-      // au-delà de 2 réponses : repliées derrière « ▾ Voir n réponses de plus » (état de session).
-      cmtHideVoiceLogs(comments).filter(c => !c.parent_id).forEach(c => {
-        cwrap.appendChild(buildC(c, false));
-        const replies = cmtHideVoiceLogs(comments).filter(ch => ch.parent_id === c.id);
-        replies.slice(0, 2).forEach(ch => cwrap.appendChild(buildC(ch, true)));
-        const extra = replies.slice(2);
-        if (extra.length) {
-          const holder = el('div', '');
-          holder.style.display = 'none';
-          extra.forEach(ch => holder.appendChild(buildC(ch, true)));
-          cwrap.appendChild(cmtMoreToggle(extra.length, (open) => { holder.style.display = open ? '' : 'none'; }));
-          cwrap.appendChild(holder);
-        }
-      });
-      if (canCommentMemo(memo)) cwrap.appendChild(shareCommentInput(memo, null));  // [GUEST-ROLES]
-      t.appendChild(cwrap);
-      if (comments.length && canCommentMemo(memo)) markMemoSeen(memo.id);
-    }
+    // [GUEST-COMMENTS-POPIN] Le fil ne s'empile plus ici : il s'ouvre par le 💬 du pied
+    // de card (voir `acts` plus haut), dans la même pop-in que chez le propriétaire.
 
     // [CARD-COVER] la photo EST la card en immersif.
     // [CARD-COVER v1.1] en compact, la bande de vignettes sous la card cède la place à la
@@ -3803,6 +3901,7 @@ function render() {
   });
   // [SUBHIDE-V2] pendant ⤒ du bas (parité owner : on peut revenir en haut après le saut).
   if (shown.length > 8) list.appendChild(memoJumpBar('up'));
+  refreshShareCommentsPopin();   // [GUEST-COMMENTS-POPIN] le fil ouvert suit les données
 }
 
 async function load() {

@@ -278,6 +278,26 @@ main { flex: 1; min-width: 0; padding: 1rem; }
 .task-foot .foot-proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Le groupe d'actions ne pousse plus à droite : c'est le pied qui l'y place. */
 .task-foot .task-acts { margin-left: 0; }
+/* [HUB-COMMENTS-POPIN] Pop-in de commentaires — reprise À L'IDENTIQUE de `index.html` et
+   `share.html` : c'est le même composant sur les trois pages, il doit s'y ressembler
+   (invariant 9). Le fil défile, l'en-tête reste collé en tête avec sa croix (leçon
+   [MOBILE-POPIN-CLOSE-FIX] : une croix hors d'atteinte enferme l'utilisateur dans la pop-in). */
+#comments-dialog { width: min(640px, calc(100vw - 2rem)); max-height: min(86vh, 780px);
+  padding: 0; flex-direction: column; overflow: hidden; }
+#comments-dialog[open] { display: flex; }
+.cp-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border); flex: none;
+  position: sticky; top: 0; z-index: 2; background: var(--panel); }
+@media (max-width: 700px) {
+  .cp-head .cp-x { min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+}
+.cp-head h3 { margin: 0; font-size: 0.9rem; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cp-head .cp-x { margin-left: auto; background: none; border: none; color: var(--muted);
+  cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0.1rem 0.35rem; border-radius: 6px; flex: none; }
+.cp-head .cp-x:hover { color: var(--text); background: var(--panel-2); }
+.cp-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0.5rem 0.75rem 0.75rem; }
+.cp-body > div { margin-top: 0 !important; }
 .badges { display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; flex-basis: 100%; margin-left: 1.8rem; }
 .badge { font-size: 0.72rem; padding: 0.12rem 0.45rem; border-radius: 4px; background: var(--panel-2);
   color: var(--muted); white-space: nowrap; }
@@ -558,6 +578,9 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
     <main id="board"></main>
   </div>
 </div>
+
+<!-- [HUB-COMMENTS-POPIN] fil de commentaires seul (l'éditeur complet reste le dialogue `ed`) -->
+<dialog id="comments-dialog"></dialog>
 
 <!-- éditeur mémo -->
 <dialog id="ed">
@@ -1296,7 +1319,12 @@ function memoCard(m) {
       imageUrl: (n) => '/share/' + m.share_token + '/image/' + n, downloadUrl: (n) => '/share/' + m.share_token + '/image/' + n, exifUrl: (n) => '/share/' + m.share_token + '/image-exif/' + n,
     }) : null,
     onAttach: (m.attachments || []).length ? () => openHubMemoAttachments(m) : null,
-    onComments: cmtHumanCount(m.comments) ? () => openEditor(m) : null,
+    // [HUB-COMMENTS-POPIN-ADDENDUM] Le 💬 apparaît dès qu'il y a des messages **ou** qu'on peut
+    // commenter — parité exacte avec `share.html`. L'apparition-à-vide est conditionnée à
+    // `can_comment`, pas à la simple présence du gestionnaire : ouvrir un fil vide sans droit
+    // d'écrire ne mènerait nulle part.
+    onComments: (cmtHumanCount(m.comments) || m.can_comment) ? () => openHubCommentsPopin(m) : null,
+    commentsShowWhenEmpty: !!m.can_comment,   // [HUB-COMMENTS-POPIN-ADDENDUM] opt-in explicite
   });
   if (_pic) content.appendChild(_pic);
   // [MEMO-LINKS] D3 : chips des deux côtés ; clic = éditeur du relié (stopPropagation dans le helper).
@@ -2341,8 +2369,53 @@ function renderEdImages(m, ro) {
   });
   if (sec) box.appendChild(sec);
 }
-function renderEdComments(m, ro) {
-  const cw = document.getElementById('ed-comments'); cw.innerHTML = '';
+// [HUB-COMMENTS-POPIN] Le 💬 d'une card ouvrait `openEditor` — la fiche COMPLÈTE du mémo
+// (titre, contenu, échéance, priorité, assigné·es, images, fichiers), commentaires tout en bas.
+// Pour lire trois messages on ouvrait un formulaire d'édition. Il ouvre désormais le fil seul,
+// dans la même coquille que le propriétaire et que `share.html` (invariant 9) ; la fiche
+// complète reste sur le clic de card, et la fiche en lecture sur le 👁.
+// Droits inchangés (invariant 5) : c'est `renderEdComments` qui gate le composeur, comme avant.
+function openHubCommentsPopin(m) {
+  const dlg = document.getElementById('comments-dialog');
+  if (!dlg) return;
+  dlg.innerHTML = '';
+  const head = el('div', { class: 'cp-head' });
+  const ic = hdrIcon('message');
+  ic.setAttribute('width', '16'); ic.setAttribute('height', '16');
+  head.appendChild(ic);
+  const titre = (m.title || '').trim()
+    || (stripTags(m.content || '').trim().split('\n')[0] || '').slice(0, 80)
+    || 'Commentaires';
+  head.appendChild(el('h3', { text: titre }));
+  const x = el('button', { class: 'cp-x', text: '\u2715', attrs: { title: 'Fermer (Échap)' } });
+  x.addEventListener('click', () => dlg.close());
+  head.appendChild(x);
+  dlg.appendChild(head);
+  const body = el('div', { class: 'cp-body' });
+  // Le fil est dessiné dans un conteneur PROPRE à l'intérieur du corps défilant : `cw.innerHTML
+  // = ''` le vide à chaque re-rendu, et vider directement `.cp-body` remettrait le défilement
+  // à zéro à chaque message.
+  const holder = el('div', {});
+  body.appendChild(holder);
+  dlg.appendChild(body);
+  renderEdComments(m, !m.can_edit, holder);
+  dlg.showModal();
+  body.scrollTop = body.scrollHeight;   // un fil s'ouvre sur sa fin
+}
+// [HUB-COMMENTS-POPIN] `cible` = le conteneur où dessiner le fil. Par défaut la zone de
+// l'éditeur, comme avant ; la pop-in de commentaires lui passe la sienne. C'est ce paramètre
+// qui évite de dupliquer le fil : un seul rendu, deux hôtes.
+// ⚠ Les re-rendus internes (envoi, réaction, vote, suppression) DOIVENT relayer `cw`. Sans ça
+// ils redessinent la zone de l'éditeur — fermée — et le message posté depuis la pop-in part
+// bien en base sans jamais apparaître à l'écran (le trou déjà rencontré dans `share.html`).
+function renderEdComments(m, ro, cible) {
+  const cw = cible || document.getElementById('ed-comments');
+  // Le fil est reconstruit de zéro : on note si la lecture était collée au bas pour l'y
+  // remettre après (poster un message doit amener au message, pas laisser en place).
+  const scroller = cw.closest ? cw.closest('.cp-body') : null;
+  const enBas = scroller
+    ? (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40) : false;
+  cw.innerHTML = '';
   // [COMMENTS-V2] bulles (squelette partagé `cmtRow`) ; le hub n'a pas de réponses imbriquées
   // (pas de `parent_id` exposé ici) → fil à plat, comme avant. Droits INCHANGÉS.
   // [COMMENT-PRIO-CONFIG] priorités = LA liste configurée par le propriétaire (`DATA.priorities`).
@@ -2354,7 +2427,7 @@ function renderEdComments(m, ro) {
     const refreshEd = async () => {
       await reload();
       const fresh = (DATA.memos || []).find(x => x.id === m.id);
-      if (fresh) renderEdComments(fresh, ro);
+      if (fresh) renderEdComments(fresh, ro, cw);
     };
     const pollNode = c.poll ? cmtPollNode(c.poll, {
       onVote: async (optionId) => {
@@ -2384,14 +2457,14 @@ function renderEdComments(m, ro) {
         c.can_delete && { label: '✕', title: 'Supprimer mon message', danger: true, onClick: async () => {
           if (!(await confirmPopin('Il laissera une trace « Message supprimé » et les réponses resteront.', { title: 'Supprimer ton message ?' }))) return;
           const resp = await api(m.share_token, '/comment/' + c.id, { method: 'DELETE' });
-          if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
+          if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro, cw); }
           else notify('Suppression impossible.', { error: true });
         } },
       ],
       // [GUEST-ROLES] réagir = commentateur (ou override perm_comment='all' du mémo).
       reactionsRow: reactionRow(c.reactions, !_sys && !!m.can_comment, async (emoji) => {
         const resp = await api(m.share_token, '/comment/' + c.id + '/react', { method: 'POST', body: JSON.stringify({ emoji }) });
-        if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); }
+        if (resp.ok) { await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro, cw); }
         else notify('Réaction impossible.', { error: true });
       }),
     }));
@@ -2407,7 +2480,7 @@ function renderEdComments(m, ro) {
       placeholder: _solo.length === 1 ? ('Écrire à ' + _solo[0].split(/\s+/)[0] + '… (@ pour mentionner)') : 'Écrire un commentaire… (@ pour mentionner)' } });
     const prioSel = cmtPrioSelect(DATA.priorities || []);
     attachCmdHint(inp);   // [COMMENT-VOTE] aide « / »
-    inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; if (cmdGuardBlocks(inp)) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b, priority: parseInt(prioSel.value, 10) || 0 }) }); inp.value = ''; prioSel.value = '0'; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro); });
+    inp.addEventListener('keydown', async e => { if (e.key !== 'Enter') return; const b = inp.value.trim(); if (!b) return; if (cmdGuardBlocks(inp)) return; await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: b, priority: parseInt(prioSel.value, 10) || 0 }) }); inp.value = ''; prioSel.value = '0'; await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro, cw); });
     const composer = el('div', { class: 'cmt-composer' });
     composer.appendChild(cmtAvatar(_me, true));
     const field = el('div', { class: 'cmt-field' });
@@ -2427,7 +2500,7 @@ function renderEdComments(m, ro) {
       headers: { 'X-Guest-Token': gtFor(m.share_token) },
       postComment: async (body) => {
         await api(m.share_token, '/memo/' + m.id + '/comments', { method: 'POST', body: JSON.stringify({ body: body, priority: parseInt(prioSel.value, 10) || 0 }) });
-        await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro);
+        await reload(); const fresh = (DATA.memos || []).find(x => x.id === m.id); if (fresh) renderEdComments(fresh, ro, cw);
       },
     });
     if (vbtn) field.appendChild(vbtn);   // [COMPOSER-MIC-MONO] icône trait posée par le helper partagé
@@ -2437,6 +2510,7 @@ function renderEdComments(m, ro) {
     send.addEventListener('click', () => { if (inp.value.trim()) inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     field.appendChild(send);
   }
+  if (scroller && enBas) scroller.scrollTop = scroller.scrollHeight;
 }
 document.getElementById('ed-cancel').addEventListener('click', () => edDialog.close());
 document.getElementById('ed-save').addEventListener('click', async () => {

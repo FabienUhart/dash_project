@@ -12,12 +12,13 @@ Backlog d'idées pour le dashboard, par ordre approximatif d'intérêt/effort.
 
 **Ordre ferme, tenu à jour à chaque fin de lot** : le lot terminé est **retiré**, la file remonte d'un cran. En l'absence de brief collé, le **n° 1 est le travail en cours**. Un brief collé par Fabien **prime toujours** sur cette file. Le reste du fichier, en dessous, est le backlog **non ordonné**.
 
-_(À jour au 9 août 2026, après **V27.38.243** (non déployé — la prod reste sur **V27.37.229**). **Le chantier [TESTS-PORT] est CLOS** : six vagues, couverture back **32 % → 55 %**, surface publique invitée + données d'import + utilitaires owner sous garde durable. Livrés depuis : [TEST-HARNESS] (230→232), [TEST-REPORTS] (233), [PROCESS-DOC] (234), [TESTS-PORT] 1→6 (235→237, 239, 241, 243), [DOC-FIX] (238), [E2E-FLAKY-FIX] (240), [IMPORT-SKIP-FIX] (242).)_
+_(À jour au 10 août 2026, après **V27.42.251** (non déployé — la prod est sur **V27.41.249**). Livrés depuis la dernière mise à jour : [MAP-PHOTO-COUNT] (246), [PHOTO-ROTATE-POLISH] (247), [PHOTO-ROTATE-MEMCACHE] (248), [CARD-ACTIONS-FIXED] (249), [GUEST-COMMENTS-POPIN] (250) et le correctif de banc d'essai (251). La **maquette v3 des cards** est en cours : lot 1 [CARD-ACTIONS-FIXED] fait, lot 2 [LINK-OG] briefé.)_
 
-1. **[MAP-PHOTO-COUNT]** — **BRIEF PRET** (docs/briefs/MAP-PHOTO-COUNT.md), tranche avec Fabien (7/10). Le bouton Carte dun dossier doit apparaitre des quil y a un point geo dans les memos (localisation manuelle OU photo geotaguee) et le badge compte tous les points. Backend : geo_photo_count par memo (image_meta has_gps, batch, hors corbeille). Front : garde + badge + ouverture autoPhoto anti-avortement. Tests du flux complet. Applicatif -> tag + Deploy.
-2. **[GUEST-PROFILE]** — reprise de la file PRODUIT après le chantier tests : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
-3. **[GUEST-WELCOME]** (importance Fabien : **7/10**, graine détaillée plus bas) — accueillir l'invité dans son espace perso 🏠 : bandeau « c'est ton espace », mémo d'accueil pré-installé, récap **personnalisé par capacité**.
-4. **[DEBUG-RECORDER]** — enregistreur de diagnostic **intégré à l'app** (idée Fabien, reco Cowork du 8/08) : mode OFF par défaut, journalise clics + ouverture/fermeture des `<dialog>` **avec leur état** (`open`/`:modal`/`display`) + erreurs console + contexte (viewport, version, navigateur), bouton « Copier le log », **tout local, aucun envoi réseau**. Motif : c'est exactement l'état interne qui aurait montré le fantôme de [POPIN-GHOST-FIX] du premier coup. Utile **avant** de reprendre la chasse aux bugs mobiles.
+1. **[LINK-OG]** — **BRIEF PRÊT** (docs/briefs/LINK-OG.md, v2 après revue Fabien). Lot 2 de la maquette v3 des cards, et le plus gros gain visuel : aperçu de lien enrichi (miniature + titre + domaine) via OpenGraph, **backend** avec cache local. Non négociables : SSRF (`url_public` seul, plages privées bloquées, revalidation à chaque redirection), owner-only, garde zéro-réseau (fetcher stubbé), invités servis par le cache sans fetch, fetch **hors** du chemin de sauvegarde. Découpe A (backend) / B (front) possible. Applicatif → tag + Deploy.
+2. **[CARD-POLISH-V3]** — suite de la maquette v3 après [LINK-OG] : polish photo/audio/checklist, puis chip lieu sur la card. Un lot à la fois.
+3. **[GUEST-PROFILE]** — reprise de la file PRODUIT après le chantier tests : fiche de présentation invité dans la pop-in Paramètres (surnom, photo, emoji/couleur perso…), avatar + surnom dans le bandeau.
+4. **[GUEST-WELCOME]** (importance Fabien : **7/10**, graine détaillée plus bas) — accueillir l'invité dans son espace perso 🏠 : bandeau « c'est ton espace », mémo d'accueil pré-installé, récap **personnalisé par capacité**.
+5. **[DEBUG-RECORDER]** — enregistreur de diagnostic **intégré à l'app** (idée Fabien, reco Cowork du 8/08) : mode OFF par défaut, journalise clics + ouverture/fermeture des `<dialog>` **avec leur état** (`open`/`:modal`/`display`) + erreurs console + contexte (viewport, version, navigateur), bouton « Copier le log », **tout local, aucun envoi réseau**. Motif : c'est exactement l'état interne qui aurait montré le fantôme de [POPIN-GHOST-FIX] du premier coup. Utile **avant** de reprendre la chasse aux bugs mobiles.
 
 ---
 
@@ -128,17 +129,6 @@ Décision Fabien : **pas de plafond de durée** sur le vocal — « c'est une fe
 2. **Upload chunké + réassemblage serveur (plus lourd)** : streamer les morceaux → un seul fichier, RAM bornée, dépasse les 320 Mo ; nouvelle route serveur.
 
 Dans les deux cas : garder le chrono en direct et **tester sur un vrai mobile** (c'est là que la RAM lâche). Importance : **Fabien 6/10** ; Cowork d'accord ~6 — vrai confort, mais l'implémentation « sans bug » n'est pas triviale (ce n'est pas une constante à changer).
-
-### 🌱 Graine backlog — [SIDEBAR-NAV] : réordonner + replier les sections de navigation (importance Fabien : **8/10** ; Cowork : ~6-7/10)
-
-Retours Fabien (captures 9/08) : (1) **desktop** — Partages et Corbeille (vues utilitaires) sont coincés en haut de la colonne de gauche ; les descendre **tout en bas**, contenu (Liens/Projets/Étiquettes) devant. (2) **mobile** — atteindre **Projets** est pénible : la section **Liens** dépliée en entier enterre tout ce qui suit. (3) Solution Fabien : sections **repliables** — un bouton « réduire » sur Liens (et Projets/Étiquettes) pour plier une longue liste et tomber sur la section suivante ; valable mobile ET desktop.
-
-UI → **maquette Cowork d'abord** (règle du projet). À cadrer : ordre exact (Favoris, Liens, Projets, Étiquettes en haut / Partages, Corbeille en bas ?), mémoire de l'état plié/déplié par section, et surtout le **parcours mobile** (accès direct aux sections sans scroller toute la liste — repli + éventuel raccourci de saut). Vérifier l'existant : les ▸ suggèrent un repli déjà là (à étendre/rendre visible) plutôt qu'à créer de zéro.
-
-
-**Ajout (retours 9/08, maquette validée)** : (4) **créer vite un projet / un lien en mobile** est pénible aujourd'hui — le « + » contextuel ([HEADER-ADD-CONTEXT]) ne suffit pas, surtout sections repliées où il se cache. Le lot doit prévoir un **accès rapide à la création** (nouveau projet / nouveau lien) atteignable même replié. (5) **À traiter en UNE session dédiée** (bloc unique : ordre + repli mobile + création rapide). Maquette de base validée (`docs/maquettes/maquette-sidebar-nav.html`) ; à ÉTENDRE avec le geste de création avant le brief CC.
-
-Importance : **Fabien 8/10** — Cowork ~6-7 (friction quotidienne, surtout mobile ; pas de risque données/sécurité, mais très visible à l'usage).
 
 ### 🌱 Graine backlog — [PHOTO-ROTATE-SAVE] : pivoter une photo ET l'enregistrer (importance Fabien : 7/10 ; Cowork : ~7/10)
 

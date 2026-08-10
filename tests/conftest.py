@@ -10,10 +10,12 @@ SÛRETÉ (2) : aucun test ne touche le RÉSEAU ni SMTP — voir la garde autouse
 est ici, et pas dans un fichier de tests, parce qu'un dispositif qui ne protège qu'un fichier
 n'est pas un dispositif : c'est de la chance.
 """
+import collections
 import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -168,12 +170,23 @@ def live_server(tmp_path_factory):
         cwd=REPO_ROOT, env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
+    # ⚠ Le tube DOIT être vidé en continu. Le serveur de développement journalise une ligne par
+    # requête ; personne ne lisait `proc.stdout` avant la fin de la session, si bien qu'au bout
+    # de ~64 Ko (le tampon de tube du noyau) le serveur **bloquait en écriture** et cessait
+    # simplement de répondre — au milieu de la suite, sans rien dans les logs. Le symptôme était
+    # un `page.goto` qui pendait alors qu'une requête servie l'instant d'avant allait très bien,
+    # et il se déplaçait de test en test au gré du volume : le plus fourbe des rouges.
+    journal = collections.deque(maxlen=400)   # on garde la fin pour le diagnostic
+    lecteur = threading.Thread(
+        target=lambda: [journal.append(l.decode("utf-8", "replace")) for l in proc.stdout],
+        daemon=True)
+    lecteur.start()
     base = "http://127.0.0.1:%d" % port
     try:
         for _ in range(60):
             if proc.poll() is not None:  # le process est mort au démarrage
-                out = proc.stdout.read().decode("utf-8", "replace") if proc.stdout else ""
-                raise RuntimeError("live_server arrêté au démarrage :\n" + out)
+                lecteur.join(timeout=2)
+                raise RuntimeError("live_server arrêté au démarrage :\n" + "".join(journal))
             try:
                 if requests.get(base + "/api/version", timeout=0.5).status_code == 200:
                     break

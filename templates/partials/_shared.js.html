@@ -4515,7 +4515,12 @@ function openMemoView(cfg, memoId) {
 function memoPictosRow(cfg) {
   const subs = cfg.subtasks || [];
   const nImg = cfg.images || 0, nAtt = cfg.attachments || 0, nCom = cfg.comments || 0;
-  if (!subs.length && !nImg && !nAtt && !nCom) return null;
+  // [HUB-COMMENTS-POPIN-ADDENDUM] Pastille 💬 affichée MÊME à zéro message — pour qui peut
+  // commenter, c'est la porte d'entrée de la discussion. **Opt-in délibéré** : ce composant sert
+  // les trois pages, et l'allumer par défaut ferait pousser un 💬 vide sur des cards qui n'ont
+  // rien à en faire. Un appelant qui ne passe pas le drapeau garde le comportement d'avant.
+  const comVide = !nCom && !!cfg.commentsShowWhenEmpty && !!cfg.onComments;
+  if (!subs.length && !nImg && !nAtt && !nCom && !comVide) return null;
   _pictosStyle();
   const row = el('div', { class: 'task-pictos' });
   const plural = (n, sing, plur) => n + ' ' + (n > 1 ? (plur || sing + 's') : sing);
@@ -4530,7 +4535,10 @@ function memoPictosRow(cfg) {
   }
   if (nImg) chip('📷 ' + nImg, plural(nImg, 'photo') + (cfg.onImages ? ' — voir' : ''), cfg.onImages || null);
   if (nAtt) chip('📎 ' + nAtt, plural(nAtt, 'fichier joint') + (cfg.onAttach ? ' — voir' : ''), cfg.onAttach || null);
+  // Le nombre n'apparaît QUE s'il y en a un : à zéro c'est l'icône seule, jamais « 💬 0 »
+  // (parité exacte avec `share.html`).
   if (nCom) chip('💬 ' + nCom, plural(nCom, 'commentaire') + (cfg.onComments ? ' — voir' : ''), cfg.onComments || null);
+  else if (comVide) chip('💬', 'Commenter', cfg.onComments);
   return row;
 }
 
@@ -6865,6 +6873,10 @@ const HDR_ICONS = {
   bookmark: ['M18 7v14l-6 -4l-6 4v-14a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4z'],
   // [PHOTO-ROTATE-SAVE] disquette : « enregistrer la rotation » dans la visionneuse. Aucune
   // icône du jeu existant ne disait « sauvegarder » (archive/signet auraient menti sur le geste).
+  // [GUEST-COMMENTS-POPIN] `message` MANQUAIT au jeu : `hdrIcon('message')` rendait un SVG vide,
+  // y compris dans l'en-tête de la pop-in du propriétaire (défaut cosmétique jamais vu). Ajouté
+  // ici, il sert les deux pages.
+  message: ['M8 9h8', 'M8 13h6', 'M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12z'],
   'device-floppy': ['M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2', 'M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M14 4l0 4l-6 0l0 -4'],
   // [COMMENTS-V2] avion « send » du composer de commentaires.
   plus: ['M12 5l0 14', 'M5 12l14 0'],
