@@ -26,3 +26,51 @@ def test_live_server_survives_more_logs_than_its_pipe_buffer(live_server, page):
     # La preuve qui compte : une page HTML complète, pas seulement une réponse JSON minuscule.
     page.goto(live_server, wait_until="domcontentloaded", timeout=15_000)
     page.wait_for_selector(".cat-item", timeout=15_000)
+
+
+# ─────────────────────── Le navigateur non plus ne sort pas ───────────────────────
+# La garde « zéro réseau » de `tests/conftest.py` ferme le processus pytest. Le NAVIGATEUR,
+# lui, restait libre : la page propriétaire appelle open-meteo au chargement, donc nos e2e
+# dépendaient d'internet sans le dire. Ça s'est payé sur un runner GitHub, sans accès sortant :
+# l'appel météo pendait jusqu'à `ERR_TIMED_OUT`, `networkidle` n'aboutissait jamais, et quatre
+# tests de la page propriétaire tombaient — verts en local pour la seule raison que la machine
+# avait une connexion.
+
+def test_the_browser_cannot_reach_the_outside(live_server, page):
+    """Un `fetch` vers l'extérieur doit échouer, et échouer VITE."""
+    page.goto(live_server, wait_until="domcontentloaded")
+    verdict = page.evaluate("""async () => {
+      try { await fetch('https://api.open-meteo.com/v1/forecast'); return 'ATTEINT'; }
+      catch (e) { return 'BLOQUE'; }
+    }""")
+    assert verdict == "BLOQUE", (
+        "la page a joint un hôte externe : la suite dépend alors d'internet, et rougit sur "
+        "une machine qui n'en a pas")
+
+    # Et l'app, elle, doit rester joignable — bloquer l'extérieur ne doit pas la couper d'elle-même.
+    interne = page.evaluate("""async () => {
+      const r = await fetch('/api/version'); return r.ok ? 'OK' : ('HTTP ' + r.status);
+    }""")
+    assert interne == "OK", "l'app doit rester joignable depuis la page (vu : %s)" % interne
+
+
+def test_the_offline_filter_stays_narrow(live_server, page, console_errors):
+    """Le filtre de `console_errors` écarte la dégradation hors ligne, RIEN d'autre.
+
+    ⚠ Première version de ce test : verte pour la mauvaise raison. Elle écoutait sa PROPRE
+    liste — jamais filtrée — et comparait les signatures à la main. Élargir le filtre à un
+    simple « Failed » la laissait passer sans broncher. On exerce donc la vraie fixture, avec
+    un message qu'un filtre trop large avalerait : une erreur d'application qui contient, elle
+    aussi, le mot « Failed ». Écarter large serait pire que ne rien écarter — une vraie panne
+    passerait inaperçue.
+    """
+    page.goto(live_server, wait_until="domcontentloaded")
+    page.wait_for_selector(".cat-item", timeout=15_000)
+    page.wait_for_load_state("networkidle")   # la météo est bloquée ⇒ le filtre est ARMÉ
+
+    page.evaluate(
+        """() => { console.error('TypeError: Failed to load memo board at renderBoard'); }""")
+
+    assert any("renderBoard" in t for t in console_errors), (
+        "une vraie erreur d'application doit être collectée même quand le filtre hors ligne "
+        "est armé (collectées : %r)" % console_errors)

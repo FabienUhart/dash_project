@@ -13,17 +13,6 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 
-@pytest.fixture
-def console_errors(page):
-    """Collecte les erreurs JS de la page. Une page owner qui meurt au chargement laisse ici
-    une `SyntaxError`/`ReferenceError` — le symptôme exact d'une collision de `const` entre le
-    partial et la page, invisible pour une vérification de syntaxe fichier par fichier."""
-    errors = []
-    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    page.on("pageerror", lambda e: errors.append(str(e)))
-    return errors
-
-
 def _boot(page, live_server, path="/"):
     """Charge la page ET attend qu'elle soit au REPOS.
 
