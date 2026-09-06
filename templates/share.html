@@ -2434,11 +2434,14 @@ function shareSearch() { return parseSearchPrefix(shareSearchRaw(), shareSearchS
 function shareMatchingProjects(q) {
   if (!q) return [];
   const n = q.charAt(0) === '#' ? q.slice(1) : q;
-  return (DATA.projects || []).filter(p => (p.name || '').toLowerCase().includes(n));
+  // [SEARCH-FOLD] accents et ordre des mots indifférents, comme chez le propriétaire — c'est le
+  // MÊME helper partagé. La portée, elle, ne change pas : le token la borne déjà (invariant 5).
+  const words = searchFold(n).split(' ').filter(Boolean);
+  return (DATA.projects || []).filter(p => searchMatch(words, p.name, p.tags));
 }
 function shareSearchScoped() { return PFILTER !== 'all' && !!shareSearch().q && !shareSearchWide; }
 function scopedMemos() {
-  const { scope, q } = shareSearch();
+  const { scope, q, words } = shareSearch();
   let ms = DATA.memos || [];
   // Dossier courant : borné au dossier + descendants, sauf si le chip a été éteint (recherche large).
   if (PFILTER !== 'all' && !(q && shareSearchWide)) {
@@ -2450,7 +2453,10 @@ function scopedMemos() {
     const ids = new Set(shareMatchingProjects(q).map(p => p.id));
     return ms.filter(m => ids.has(m.project_id));
   }
-  return ms.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
+  // [SEARCH-FOLD] `searchMatch` prend les champs ENSEMBLE : un mot dans le titre et un autre
+  // dans le contenu suffisent. Aucune fusion de sous-arbre ici — c'est owner seulement.
+  return ms.filter(m => searchMatch(words, m.title, stripTags(m.content),
+                                    (m.assignees || []).join(' ')));
 }
 
 // [PHOTO-BATCH-DOWNLOAD] Fichiers d'un dossier partagé (+ sous-dossiers) — scope borné à
@@ -4034,6 +4040,7 @@ const shareSearchUI = attachSearchUI({
   helpRows: [
     { k: 'p#', fill: 'p#', d: 'Chercher un <b>dossier</b> — <i>p#hôtels</i>' },
     { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#train</i>' },
+    { k: 'éÉ', d: '<b>Accents et ordre des mots</b> indifférents — <i>sanjo kyoto</i> trouve <i>Kyoto · Sanjo</i>' },
   ],
   helpFoot: [['Échap', 'efface et ferme']],
   scopeNote: () => {

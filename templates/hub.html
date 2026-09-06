@@ -862,18 +862,23 @@ function hubSearch() { return parseSearchPrefix(hubSearchRaw(), hubSearchScope);
 function hubMatchingProjects(q) {
   if (!q) return [];
   const n = q.charAt(0) === '#' ? q.slice(1) : q;
-  return (DATA.projects || []).filter(p => (p.name || '').toLowerCase().includes(n));
+  // [SEARCH-FOLD] même helper partagé que l'owner et le partage — un seul normaliseur.
+  const words = searchFold(n).split(' ').filter(Boolean);
+  return (DATA.projects || []).filter(p => searchMatch(words, p.name, p.tags));
 }
 // Filtre de recherche appliqué aux mémos — UN seul endroit, réutilisé par le board ET l'agenda
 // (sinon la grille et la liste ne montreraient pas les mêmes mémos).
 function hubMemoFilter(ms) {
-  const { scope, q } = hubSearch();
+  const { scope, q, words } = hubSearch();
   if (!q) return ms;
   if (scope === 'projects') {
     const ids = new Set(hubMatchingProjects(q).map(p => p.id));
     return ms.filter(m => ids.has(m.project_id));
   }
-  return ms.filter(m => ((m.title || '') + ' ' + stripTags(m.content) + ' ' + (m.assignees || []).join(' ')).toLowerCase().includes(q));
+  // [SEARCH-FOLD] accents et ordre des mots indifférents. Pas de fusion de sous-arbre : le hub
+  // agrège des accès existants, il n'élargit rien (invariant 5).
+  return ms.filter(m => searchMatch(words, m.title, stripTags(m.content),
+                                    (m.assignees || []).join(' ')));
 }
 function hubSearchScoped() {   // vrai quand la recherche est effectivement bornée au dossier focalisé
   return FOCUS != null && !!hubSearch().q && !hubSearchWide;
@@ -2644,6 +2649,7 @@ const hubSearchUI = attachSearchUI({
   helpRows: [
     { k: 'p#', fill: 'p#', d: 'Chercher un <b>dossier</b> — <i>p#japon</i>' },
     { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#hôtel</i>' },
+    { k: 'éÉ', d: '<b>Accents et ordre des mots</b> indifférents — <i>sanjo kyoto</i> trouve <i>Kyoto · Sanjo</i>' },
   ],
   helpFoot: [['Échap', 'efface et ferme']],
   scopeNote: () => {

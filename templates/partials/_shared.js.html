@@ -7430,8 +7430,44 @@ function hdrToolbar() {
    }
    Renvoie { refreshHelp, positionHelp, openSheet, closeSheet, sheetOpen }. */
 
+/* [SEARCH-FOLD] Normaliseur de recherche — helper PUR, sans état, au corps identique sur les
+   trois pages (critère ADR-001). Il n'y a pas d'index : on plie la REQUÊTE et les CHAMPS de la
+   même façon, au moment de comparer. Zéro lib (invariant 6).
+
+   Mesuré en prod le 6 sept. 2026 sur 244 mémos, c'est ce qui manquait : « eclipse » rendait
+   4 mémos et « éclipse » 1 seul — deux réponses à la même question, selon qu'on avait pensé à
+   l'accent. `NFD` sépare la lettre de son accent, `\p{M}` retire l'accent : « é » devient « e ».
+   Les apostrophes typographiques suivent (un mémo écrit sur iOS porte « l'hôtel », tapé au
+   clavier on écrit « l'hotel »), et les espaces multiples ou insécables se réduisent à un —
+   sans quoi « kyoto  sanjo » ne trouverait rien. */
+function searchFold(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFD').replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201B]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* [SEARCH-FOLD] « Tous les mots, n'importe quel ordre » : chaque mot de la requête doit
+   apparaître quelque part dans les champs fournis, pris ENSEMBLE.
+
+   C'est ce qui fait que « sanjo kyoto » trouve « Kyoto · Sanjo » — avant, la requête entière
+   était cherchée telle quelle, donc il fallait la phrase exacte, dans le bon ordre. Prendre les
+   champs ensemble a un effet voulu : un mot dans le titre et un autre dans le contenu suffisent,
+   ce qui est bien la question que l'utilisateur pose. */
+function searchMatch(words, ...fields) {
+  if (!words || !words.length) return true;
+  const hay = searchFold(fields.filter(f => f != null && f !== '').join(' '));
+  return words.every(w => hay.indexOf(w) >= 0);
+}
+
 // Parseur PUR des préfixes de portée `p#` / `l#` / `m#` (aussi `p:`), identique aux 3 pages.
 // Rien d'autre n'est interprété : le `#tag` reste dans `q`, chaque page le traite comme avant.
+// [SEARCH-FOLD] `q` sort désormais FOLDÉ (plus seulement en minuscules) et s'accompagne de
+// `words`, sa découpe en mots — les deux formes servent : `q` pour le `#tag` (match exact) et
+// les tests de préfixe, `words` pour `searchMatch`.
 function parseSearchPrefix(raw, scope) {
   let q = String(raw == null ? '' : raw).trim();
   const m = q.match(/^([plm])[#:](.*)$/i);
@@ -7439,7 +7475,8 @@ function parseSearchPrefix(raw, scope) {
     scope = { p: 'projects', l: 'links', m: 'memos' }[m[1].toLowerCase()];
     q = m[2].trim();
   }
-  return { scope: scope, q: q.toLowerCase() };
+  q = searchFold(q);
+  return { scope: scope, q: q, words: q ? q.split(' ').filter(Boolean) : [] };
 }
 
 // Vrai sur mobile / pointeur grossier : c'est là que la feuille remplace la saisie inline.
@@ -7467,6 +7504,9 @@ function _searchStyle() {
     + '.sh-panel .sh-row{display:flex;align-items:center;gap:0.7rem;padding:0.4rem 0.5rem;'
     + 'border-radius:8px;cursor:pointer}'
     + '.sh-panel .sh-row:hover,.sh-panel .sh-row:focus-visible{background:var(--panel-2);outline:none}'
+    // [SEARCH-FOLD] ligne informative : ni curseur main, ni surbrillance — elle ne fait rien.
+    + '.sh-panel .sh-row.sh-info{cursor:default}'
+    + '.sh-panel .sh-row.sh-info:hover{background:transparent}'
     + '.sh-panel kbd{background:var(--panel-2);border:1px solid var(--border);border-bottom-width:2px;'
     + 'border-radius:5px;padding:0.05rem 0.45rem;font-size:0.78rem;color:var(--accent);'
     + 'font-family:ui-monospace,Menlo,monospace;min-width:3.2rem;text-align:center;flex:none}'
@@ -7561,13 +7601,19 @@ function attachSearchUI(cfg) {
     if (cfg.onChange) cfg.onChange();
     refreshHelp();
   };
+  // [SEARCH-FOLD] Une ligne SANS `fill` est purement informative : elle explique un
+  // comportement (les accents, l'ordre des mots) au lieu de pré-remplir le champ. La rendre
+  // cliquable viderait la recherche au premier clic — un raccourci qui dessert.
   const helpRowEl = (r, onPick) => {
-    const row = el('div', { class: 'sh-row', attrs: { role: 'button', tabindex: '-1', title: 'Pré-remplir « ' + r.fill + ' »' } });
+    const fillable = r.fill != null;
+    const row = el('div', { class: 'sh-row' + (fillable ? '' : ' sh-info'), attrs: fillable
+      ? { role: 'button', tabindex: '-1', title: 'Pré-remplir « ' + r.fill + ' »' }
+      : { role: 'note' } });
     row.appendChild(el('kbd', { text: r.k }));
     const d = el('span', { class: 'sh-d' });
     d.innerHTML = r.d;   // libellés STATIQUES fournis par la page, aucune donnée utilisateur
     row.appendChild(d);
-    row.addEventListener('mousedown', (e) => { e.preventDefault(); onPick(r.fill); });
+    if (fillable) row.addEventListener('mousedown', (e) => { e.preventDefault(); onPick(r.fill); });
     return row;
   };
   if (rows.length) {

@@ -986,6 +986,8 @@ a.og:hover { border-color: var(--accent); }
 .empty-state .es-title { font-size: 1rem; font-weight: 600; color: var(--text); }
 .empty-state .es-hint { font-size: 0.85rem; max-width: 34ch; line-height: 1.4; }
 .empty-state .es-action { margin-top: 0.5rem; }
+/* [SEARCH-FOLD] deux actions possibles (« Chercher partout » + « Effacer ») : on les sépare. */
+.empty-state .es-action + .es-action { margin-left: 0.4rem; }
 .cards .empty-li { grid-column: 1 / -1; list-style: none; }
 
 /* ---------- vue Mémos (board) ---------- */
@@ -2836,11 +2838,29 @@ function boardScopeFilter() {
 function matchingProjects(q) {
   const needle = q.startsWith('#') ? q.slice(1) : q;
   if (!needle) return [];
-  return state.projects.filter(p =>
-    p.name.toLowerCase().includes(needle) ||
-    (p.tags || '').split(/\s+/).includes(needle) ||
-    (p.tags || '').includes(needle)
-  );
+  // [SEARCH-FOLD] nom + étiquettes, tous les mots, accents et ordre indifférents. En prod, le
+  // dossier « Maison _ Déménagment _ APPT » (faute de frappe incluse) était introuvable en
+  // tapant « déménagement » ; le pli des accents règle la moitié du problème, la découpe en
+  // mots l'autre moitié.
+  const words = searchFold(needle).split(' ').filter(Boolean);
+  return state.projects.filter(p => searchMatch(words, p.name, p.tags));
+}
+
+/* [SEARCH-FOLD] Sous-arbre d'un dossier trouvé : lui + tous ses descendants.
+   La recherche « japon » désignait « Voyage Japon » sans en montrer le contenu — et le sous-arbre
+   contenait 51 mémos quand la ligne du dossier en annonçait 2 (les seuls DIRECTS). Un dossier
+   trouvé apporte donc désormais tout ce qu'il contient, à n'importe quelle profondeur. */
+function projectSubtreeSet(ids) {
+  const out = new Set();
+  ids.forEach(id => { out.add(id); projectDescendants(id).forEach(d => out.add(d)); });
+  return out;
+}
+
+// Mémos NON FAITS d'un sous-arbre — même définition que le `memo_count` du serveur (qui, lui,
+// ne compte que les mémos DIRECTS), pour que la ligne « PROJETS » dise enfin la vérité.
+function projectDeepCount(pid) {
+  const set = projectSubtreeSet([pid]);
+  return state.memos.filter(m => !m.done && set.has(m.project_id)).length;
 }
 
 const CAT_EMOJIS = ['📁', '🎬', '🏠', '🔧', '📄', '🎮', '💾', '🌐'];
@@ -4193,21 +4213,17 @@ function tagQuery() {
 
 function visibleLinks() {
   let links = state.links;
-  const { scope, q } = parseSearch();
+  const { scope, q, words } = parseSearch();
   if (q) {
     if (scope === 'memos' || scope === 'projects') return [];
     const tag = q.startsWith('#') && q.length > 1 ? q.slice(1) : null;
     if (tag) {
-      return links.filter(l => (l.tags || '').split(/\s+/).includes(tag));
+      // [SEARCH-FOLD] `#tag` reste un match EXACT d'étiquette — foldé des DEUX côtés, mais
+      // jamais réduit à « un mot parmi d'autres » : `#note` ne doit pas trouver `#notes`.
+      return links.filter(l => (l.tags || '').split(/\s+/).map(searchFold).includes(tag));
     }
-    return links.filter(l =>
-      (l.name || '').toLowerCase().includes(q) ||
-      (l.descr || '').toLowerCase().includes(q) ||
-      (l.memo || '').toLowerCase().includes(q) ||
-      (l.tags || '').toLowerCase().includes(q) ||
-      (l.url_public || '').toLowerCase().includes(q) ||
-      (l.url_local || '').toLowerCase().includes(q)
-    );
+    return links.filter(l => searchMatch(words, l.name, l.descr, l.memo, l.tags,
+                                         l.url_public, l.url_local));
   }
   if (state.filterCat === 'all') return links;
   if (state.filterCat === 'none') return links.filter(l => !l.category_id);
@@ -4619,6 +4635,11 @@ function emptyState(opts) {
   if (opts.actionLabel && opts.onAction) {
     box.appendChild(el('button', { class: 'primary es-action', text: opts.actionLabel, on: { click: opts.onAction } }));
   }
+  // [SEARCH-FOLD] Action SECONDAIRE optionnelle : une impasse doit offrir la sortie qu'elle
+  // suggère. `.btn-soft`, le bouton discret déjà en place — pas de style bespoke (invariant 9).
+  if (opts.action2Label && opts.onAction2) {
+    box.appendChild(el('button', { class: 'btn-soft es-action', text: opts.action2Label, on: { click: opts.onAction2 } }));
+  }
   return box;
 }
 // Efface la recherche courante et re-rend (action des états vides « aucun résultat »).
@@ -4856,24 +4877,36 @@ const expandedMemos = new Set();
 let doneOpen = false;
 
 function visibleMemos() {
-  const { scope, q } = parseSearch();
+  const { scope, q, words } = parseSearch();
   if (!q) return state.memos;
   if (scope === 'links') return [];
-  const projIds = new Set(matchingProjects(q).map(p => p.id));
+  // [SEARCH-FOLD] Un dossier trouvé apporte son SOUS-ARBRE, pas ses seuls mémos directs.
+  const projScope = projectSubtreeSet(matchingProjects(q).map(p => p.id));
   if (scope === 'projects') {
-    return state.memos.filter(m => projIds.has(m.project_id));
+    return state.memos.filter(m => projScope.has(m.project_id));
   }
   const tag = q.startsWith('#') && q.length > 1 ? q.slice(1) : null;
   if (tag) {
-    const re = new RegExp('#' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9_à-ÿ-])', 'i');
-    return state.memos.filter(m => re.test(stripHTML(m.content)) || projIds.has(m.project_id));
+    const re = new RegExp('#' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9_-])', 'i');
+    // Le contenu est foldé AVANT le test : `#eclipse` trouve un `#éclipse` écrit dans le corps.
+    // La borne de fin reste stricte — c'est ce qui garde `#note` distinct de `#notes`.
+    return state.memos.filter(m => re.test(searchFold(stripHTML(m.content))) || projScope.has(m.project_id));
   }
-  return state.memos.filter(m =>
-    stripHTML(m.content).toLowerCase().includes(q) ||
-    (m.title || '').toLowerCase().includes(q) ||
-    (m.assignees || []).some(a => a.toLowerCase().includes(q)) ||
-    (m.subtasks || []).some(st => st.content.toLowerCase().includes(q))
-  );
+  const parTexte = state.memos.filter(m => searchMatch(
+    words, m.title, stripHTML(m.content),
+    (m.assignees || []).join(' '),
+    (m.subtasks || []).map(st => st.content).join(' ')
+  ));
+  // `m#` = texte SEUL, c'est tout son sens : il sert justement à ne PAS ratisser les dossiers.
+  if (scope === 'memos') return parTexte;
+  /* [SEARCH-FOLD] Portée « Tout » : union du texte et du sous-arbre des dossiers trouvés,
+     dédupliquée par id. Avant, chercher « japon » affichait « PROJETS (1) Voyage Japon » à côté
+     d'UN seul mémo — celui dont le texte portait le mot — pendant que le dossier annoncé en
+     contenait 51. Deux réponses à la même question, sur le même écran. L'étiquette de dossier
+     déjà présente sur chaque card dit pourquoi un mémo est là ; rien à ajouter. */
+  const vus = new Set(parTexte.map(m => m.id));
+  return parTexte.concat(
+    state.memos.filter(m => !vus.has(m.id) && projScope.has(m.project_id)));
 }
 
 function dateStr(d) {
@@ -8971,7 +9004,10 @@ function renderBoard() {
         const badges = el('div', { class: 'task-badges' });
         (p.tags || '').split(/\s+/).filter(Boolean).forEach(t =>
           badges.appendChild(el('span', { class: 'tag-chip', text: '#' + t })));
-        badges.appendChild(el('span', { class: 'badge', text: `${p.memo_count} mémo${p.memo_count > 1 ? 's' : ''}` }));
+        // [SEARCH-FOLD] Le total du SOUS-ARBRE : `p.memo_count` (serveur) ne compte que les
+        // mémos directs, et annonçait « 2 mémos » sur un dossier qui en contenait 51.
+        const nDeep = projectDeepCount(p.id);
+        badges.appendChild(el('span', { class: 'badge', text: `${nDeep} mémo${nDeep > 1 ? 's' : ''}` }));
         r1.appendChild(badges);
         row.appendChild(r1);
         wrap.appendChild(row);
@@ -9283,8 +9319,24 @@ function renderBoard() {
       return;
     }
   } else if (pending.length === 0 && done.length === 0) {
+    /* [SEARCH-FOLD] « Aucun résultat » disait la requête mais jamais la PORTÉE : depuis
+       « Voyage Japon », chercher « eclipse » annonçait qu'aucun mémo ne correspondait, alors
+       qu'il y en avait quatre ailleurs. Le chip « dans : … ✕ » le disait, mais dans le header,
+       loin des yeux. Le message nomme donc le dossier et propose la sortie — la MÊME bascule
+       que le ✕ du chip, pas un second chemin qui pourrait diverger. */
+    const projScoped = searchIsScoped()
+      ? state.projects.find(p => p.id === state.memoProject) : null;
+    const elargir = () => { searchWide = true; searchWideProj = state.memoProject; refreshSearch(); };
     board.appendChild(state.search
-      ? emptyState({ icon: '🔍', title: 'Aucun résultat', hint: 'Aucun mémo ne correspond à « ' + state.search + ' ».', actionLabel: 'Effacer la recherche', onAction: clearSearch })
+      ? emptyState({
+          icon: '🔍', title: 'Aucun résultat',
+          hint: 'Aucun mémo ne correspond à « ' + state.search + ' »'
+                + (projScoped ? ' dans ' + (projScoped.emoji ? projScoped.emoji + ' ' : '') + projScoped.name : '') + '.',
+          actionLabel: projScoped ? 'Chercher partout' : 'Effacer la recherche',
+          onAction: projScoped ? elargir : clearSearch,
+          action2Label: projScoped ? 'Effacer la recherche' : null,
+          onAction2: projScoped ? clearSearch : null,
+        })
       : emptyState({ icon: '📝', title: 'Aucun mémo ici', hint: 'Ajoute ta première note pour commencer à t’organiser.', actionLabel: '+ Nouveau mémo', onAction: focusAddMemo }));
     return;
   }
@@ -9653,6 +9705,7 @@ const searchUI = attachSearchUI({
     { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#hôtel</i>' },
     { k: 'l#', fill: 'l#', d: 'Chercher un <b>lien</b> — <i>l#navidrome</i>' },
     { k: '#…', fill: '#',  d: 'Par <b>étiquette</b> — <i>#japon</i>, <i>#notes</i>' },
+    { k: 'éÉ', d: '<b>Accents et ordre des mots</b> indifférents — <i>sanjo kyoto</i> trouve <i>Kyoto · Sanjo</i>' },
   ],
   helpFoot: [['/', 'ouvre la recherche'], ['Entrée', 'ouvre le premier lien'], ['Échap', 'efface et ferme']],
   scopeNote: () => {
