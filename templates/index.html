@@ -745,7 +745,16 @@ nav#sidebar.sb-rail .sb-proj-chev { display: none; }
    header (hauteur mesurée en JS → --header-h). Scrollbar fine aux tokens existants.
    .sb-hidden/.sb-rail (spécificité supérieure) gardent leurs overflow/width. */
 @media (min-width: 901px) {
-  nav#sidebar {
+  /* [SPLIT-SCROLL] La colonne MÉMOS rejoint la sidebar dans ce sélecteur, et ce n'est pas une
+     économie de lignes : deux blocs séparés auraient fini par diverger. Sans ce gabarit,
+     `aside#memo-panel` n'avait ni hauteur ni `overflow` — c'était la FENÊTRE qui défilait, donc
+     la molette sur les mémos entraînait le board du milieu, et le board entraînait les mémos.
+     Chaque colonne a désormais son propre défileur ; `main` garde, lui, le défilement de page
+     (ses en-têtes collants, le dock et les vues Plan/Carte s'y appuient).
+     `overscroll-behavior: contain` est la pièce qui compte : arrivée en bout de colonne, la
+     molette s'arrête là au lieu de « déborder » sur la page. */
+  nav#sidebar,
+  aside#memo-panel {
     position: sticky;
     top: var(--header-h, 57px);
     height: calc(100dvh - var(--header-h, 57px));
@@ -754,9 +763,12 @@ nav#sidebar.sb-rail .sb-proj-chev { display: none; }
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
-  nav#sidebar::-webkit-scrollbar { width: 8px; }
-  nav#sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
-  nav#sidebar::-webkit-scrollbar-track { background: transparent; }
+  nav#sidebar::-webkit-scrollbar,
+  aside#memo-panel::-webkit-scrollbar { width: 8px; }
+  nav#sidebar::-webkit-scrollbar-thumb,
+  aside#memo-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  nav#sidebar::-webkit-scrollbar-track,
+  aside#memo-panel::-webkit-scrollbar-track { background: transparent; }
 }
 .cat-dot {
   width: 0.7rem;
@@ -887,6 +899,26 @@ main { flex: 1; padding: 1.25rem; min-width: 0; }
   white-space: nowrap;
 }
 .card .descr { color: var(--muted); font-size: 0.85rem; }
+/* [LINK-OG] Aperçu OpenGraph d'une card de lien : miniature CACHÉE LOCALEMENT (jamais l'URL
+   distante — ni fuite d'IP, ni card cassée quand la source disparaît), domaine, titre de page.
+   Rien de neuf visuellement : les tokens existants (--panel-2 / --border / --muted / --text),
+   comme les chips d'URL juste en dessous (invariant 9). Les trois lignes de texte sont tronquées
+   — un titre à rallonge ne doit pas pousser la card hors de sa colonne. */
+.og {
+  display: flex; gap: 0; margin-top: 0.4rem; min-width: 0; max-width: 100%;
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  background: var(--panel-2); text-decoration: none; color: inherit;
+}
+a.og:hover { border-color: var(--accent); }
+.og-img {
+  flex: 0 0 auto; width: 74px; align-self: stretch; object-fit: cover;
+  background: var(--panel); border-right: 1px solid var(--border);
+}
+.og-b { padding: 0.4rem 0.55rem; min-width: 0; }
+.og-dom { font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.og-t { font-weight: 600; font-size: 0.86rem; color: var(--text); margin-top: 0.1rem; }
+.og-s { font-size: 0.78rem; color: var(--muted); margin-top: 0.12rem; }
+.og-dom, .og-t, .og-s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .memo {
   background: var(--panel-2);
   border-left: 2px solid var(--accent);
@@ -1533,15 +1565,32 @@ aside#memo-panel {
   padding-top: 0.5rem;
   margin-top: 0.2rem;
 }
-/* [MEMO-JUMP-BOTTOM] en-tête MÉMOS collant en HAUT (sous le header, --header-h) : le bouton ⤓/⤒
-   « Aller en bas / Remonter » reste visible pendant qu'on parcourt la colonne (miroir du
-   #memo-quick-wrap collant en bas). Desktop/tablette ; remis en statique en mobile (≤900). */
+/* [MEMO-JUMP-BOTTOM] en-tête MÉMOS collant en HAUT : le bouton ⤓/⤒ « Aller en bas / Remonter »
+   reste visible pendant qu'on parcourt la colonne (miroir du #memo-quick-wrap collant en bas).
+   Desktop/tablette ; remis en statique en mobile (≤900).
+   [SPLIT-SCROLL] `top: 0` et non plus `--header-h` : depuis que l'aside est lui-même le défileur,
+   l'offset se compte par rapport à LUI, et il commence déjà sous le header. Garder `--header-h`
+   aurait creusé un trou de 57 px en haut de la colonne. */
 #memo-details summary {
   position: sticky;
-  top: var(--header-h, 57px);
+  top: 0;
   z-index: 6;
   background: var(--panel);
   padding-bottom: 0.4rem;
+}
+/* [SPLIT-SCROLL] Le liseré, mesuré (12 px) puis bouché. Le `padding` de l'aside fait partie du
+   scrollport : les mémos défilaient DERRIÈRE une bande visible au-dessus de l'en-tête collant et
+   en dessous de la note rapide (même piège qu'en [DIALOG-STICKY-ACTIONS-DESKTOP]). On rend cette
+   bande AUX deux collants — le padding vertical quitte le conteneur et passe dans les éléments
+   qui, eux, couvrent pour de bon. Le padding horizontal ne pose aucun problème et ne bouge pas.
+   ⚠️ CE BLOC EST ICI, ET PAS AVEC LE GABARIT DE DÉFILEMENT PLUS HAUT : un `@media` n'augmente pas
+   la spécificité, c'est l'ORDRE qui tranche. Placé près de la sidebar, il perdait contre les
+   règles de base de `aside#memo-panel` / `#memo-quick-wrap`, qui vivent juste au-dessus — le
+   liseré restait, et à 12 px près on ne le voit qu'en le mesurant. */
+@media (min-width: 901px) {
+  aside#memo-panel { padding-top: 0; padding-bottom: 0; }
+  #memo-details summary { padding-top: 0.75rem; }
+  #memo-quick-wrap { padding-bottom: 0.75rem; }
 }
 
 /* ---------- contenu riche ---------- */
@@ -2191,6 +2240,11 @@ dialog .actions {
     <label># Tags<input type="text" name="tags" placeholder="#docker #media — relie ce lien aux mémos qui portent le même tag"></label>
     <label>Mémo<textarea name="memo" rows="3" placeholder="Notes, identifiants, rappels..."></textarea></label>
     <div class="actions">
+      <!-- [LINK-OG] Porte MANUELLE de l'aperçu : visible seulement en édition d'un lien qui a
+           une URL publique (rien à rafraîchir sinon). Owner-only par construction — la route
+           qu'il appelle n'a aucune variante sous /share/*. -->
+      <button type="button" id="link-og-refresh" hidden
+              title="Re-télécharge le titre, la description et la miniature de l'URL publique">↻ Rafraîchir l'aperçu</button>
       <button type="button" id="cancel">Annuler</button>
       <button type="submit" id="link-save">Sauver</button>
     </div>
@@ -4618,7 +4672,11 @@ function linkCardEl(link) {
     titleRow.appendChild(t);
   }
   card.appendChild(titleRow);
-  if (link.descr) card.appendChild(el('div', { class: 'descr', text: link.descr }));
+  // [LINK-OG] L'aperçu REMPLACE la ligne de description quand il existe — il la porte déjà
+  // (cf. ogBlockEl), la répéter ferait doublon. Sans aperçu, la card garde son allure d'avant.
+  const ogBox = ogBlockEl(link);
+  if (ogBox) card.appendChild(ogBox);
+  else if (link.descr) card.appendChild(el('div', { class: 'descr', text: link.descr }));
   if (link.memo) card.appendChild(el('div', { class: 'memo', text: link.memo }));
   const urls = el('div', { class: 'url-links' });
   if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
@@ -4632,6 +4690,71 @@ function linkCardEl(link) {
   card.addEventListener('dragstart', (e) => { dragLinkId = link.id; card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
   card.addEventListener('dragend', () => { dragLinkId = null; card.classList.remove('dragging'); });
   return card;
+}
+
+// [LINK-OG] Bloc d'aperçu d'un lien, ou null s'il n'y a rien à montrer.
+//
+// Le repli « remplir si vide » est ici, et NULLE PART AILLEURS : `descr` cède la place à
+// `og_desc` seulement quand elle est vide. La base, elle, n'est jamais réécrite — le texte que
+// Fabien a saisi lui appartient, et un Rafraîchir ne doit rien pouvoir lui prendre.
+//
+// Tout statut autre que `ok` (`pending` le temps qu'un sweep passe, `none` sur une page muette,
+// `failed` sur un refus SSRF ou une coupure) rend null : la card retombe sur son allure
+// classique. Un `pending` ne laisse donc pas de trou, juste une card d'avant.
+function ogBlockEl(link) {
+  const dom = link.og_domain || '';
+  const ogTitre = link.og_title || '';
+  // Le titre OG ne s'affiche QUE si `name` est vide — même repli d'affichage que
+  // `descr || og_desc`, et pour la même raison. Décision Fabien du 6 sept. 2026, après avoir vu
+  // le résultat : la card empilait son nom soigné PUIS le titre de la page, et le titre d'une
+  // page vaut ce que vaut la page — celui de Google annonce « votre navigateur n'est pas
+  // compatible ». La curation passe devant, toujours.
+  const titre = link.name ? '' : ogTitre;
+  const desc = link.descr || link.og_desc || '';
+  // ⚠️ La condition « y a-t-il de quoi montrer ? » se juge sur l'OG BRUT (`ogTitre`), pas sur le
+  // titre après repli : sinon un lien nommé dont l'OG n'a QUE le titre verrait son bloc — et
+  // donc son domaine et sa description — disparaître d'un coup.
+  if (link.og_status !== 'ok' || !(dom || ogTitre || desc)) return null;
+  const box = el('a', {
+    class: 'og',
+    attrs: { href: link.url_public, target: '_blank', rel: 'noopener noreferrer', title: link.url_public },
+  });
+  if (link.og_image) {
+    const img = el('img', {
+      class: 'og-img',
+      attrs: {
+        // Cache-bust par `og_fetched_at` : le fichier garde son nom quand son contenu change,
+        // donc sans ce jeton un Rafraîchir resservirait l'ancienne image (leçon
+        // [PHOTO-ROTATE-MEMCACHE], payée une fois sur la rotation de photo).
+        src: '/api/og-image/' + encodeURIComponent(link.og_image)
+             + '?v=' + encodeURIComponent(link.og_fetched_at || ''),
+        alt: '', loading: 'lazy', width: '74',
+      },
+    });
+    // Fichier caché disparu (purge, corruption) : on RETIRE l'image plutôt que de laisser
+    // l'icône cassée du navigateur. Le bloc bascule en texte seul — le texte, lui, est intact.
+    img.addEventListener('error', () => { img.remove(); box.classList.add('og-noimg'); });
+    box.appendChild(img);
+  } else {
+    box.classList.add('og-noimg');
+  }
+  const corps = el('div', { class: 'og-b' });
+  if (dom) corps.appendChild(el('div', { class: 'og-dom', text: dom }));
+  if (titre) corps.appendChild(el('div', { class: 'og-t', text: titre }));
+  if (desc) corps.appendChild(el('div', { class: 'og-s', text: desc }));
+  box.appendChild(corps);
+  return box;
+}
+
+// [LINK-OG] Va chercher l'aperçu d'un lien. En TÂCHE DE FOND et sans jamais bloquer : le
+// serveur, lui, ne fetch pas pendant un enregistrement (il pose `pending` et répond tout de
+// suite). Un échec est sans conséquence — le sweep du démarrage repassera, et le bouton
+// « Rafraîchir » de l'édition reste la porte manuelle.
+async function refreshLinkOg(id, { reload = true } = {}) {
+  try {
+    await api('/api/links/' + id + '/og-refresh', { method: 'POST' });
+    if (reload) await loadAll();
+  } catch (_) { /* aperçu absent, jamais une erreur pour l'utilisateur */ }
 }
 
 // [TAG-NAV] Rangée d'étiquettes d'un lien. Passive en consultation (clic chip → vue tag).
@@ -9742,6 +9865,10 @@ function openDialog(link = null) {
   } else {
     form.elements.id.value = '';
   }
+  // [LINK-OG] Rien à rafraîchir sur un lien qui n'existe pas encore, ni sur un lien sans URL
+  // publique (`url_local` n'est JAMAIS fetché — c'est le LAN).
+  const ogBtn = document.getElementById('link-og-refresh');
+  if (ogBtn) ogBtn.hidden = !(link && link.url_public);
   dialog.showModal();
 }
 
@@ -9759,17 +9886,32 @@ form.addEventListener('submit', async (e) => {
   const id = form.elements.id.value;
   const _sb = form.querySelector('button[type="submit"]');
   if (_sb) { _sb.disabled = true; _sb.style.opacity = '0.6'; }
+  let saved = null;
   try {
     if (id) {
-      await api(`/api/links/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+      saved = await api(`/api/links/${id}`, { method: 'PUT', body: JSON.stringify(data) });
     } else {
-      await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
+      saved = await api('/api/links', { method: 'POST', body: JSON.stringify(data) });
     }
     dialog.close();
     await loadAll();
+    // [LINK-OG] Le serveur a répondu tout de suite en posant `pending` : un site lent ne fait
+    // jamais attendre un enregistrement. L'aperçu se va chercher ICI, une fois la pop-in
+    // fermée et la liste déjà rafraîchie — l'attente, s'il y en a une, ne coûte rien.
+    if (data.url_public) refreshLinkOg(saved && saved.id ? saved.id : id);
   } finally { if (_sb) { _sb.disabled = false; _sb.style.opacity = ''; } }
 });
 
+// [LINK-OG] Rafraîchir depuis la pop-in : on ferme d'abord (le résultat se voit sur la card,
+// pas dans le formulaire), puis on va chercher. Le bouton se désarme le temps de l'aller-retour
+// pour qu'un double-clic ne lance pas deux fetchs.
+document.getElementById('link-og-refresh').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const id = form.elements.id.value;
+  if (!id) return;
+  btn.disabled = true;
+  try { await refreshLinkOg(id); } finally { btn.disabled = false; dialog.close(); }
+});
 document.getElementById('cancel').addEventListener('click', () => dialog.close());
 document.getElementById('add-link').addEventListener('click', () => openDialog());
 // [LINK-ADD-RELOCATE] « + Ajouter une catégorie » dans la page Liens (même handler que le « + »
@@ -9822,7 +9964,12 @@ document.getElementById('add-cat-page').addEventListener('click', () => addCateg
     const endEl = () => document.getElementById('memos') || panel;
     // « en bas » : page entière en desktop ; fin du BLOC mémos visible en mobile.
     const atBottom = () => {
-      if (!stacked()) return (window.innerHeight + window.scrollY) >= (scroller.scrollHeight - 4);
+      // [SPLIT-SCROLL] Le défileur de référence en desktop n'est plus la fenêtre mais LA COLONNE :
+      // depuis qu'elle a son propre `overflow-y`, la page ne bouge plus quand on parcourt les
+      // mémos — mesurer `window.scrollY` aurait dit « on est en haut » quoi qu'on fasse, et le
+      // bouton serait resté bloqué sur ⤓. En mobile (empilé), l'aside redevient un bloc de page :
+      // la branche [MEMO-JUMP-MOBILE] ci-dessous est inchangée.
+      if (!stacked()) return (panel.scrollTop + panel.clientHeight) >= (panel.scrollHeight - 4);
       if (!det.open) return false;                       // bloc replié → il reste à descendre
       const r = endEl().getBoundingClientRect();
       return r.bottom <= window.innerHeight + 4;
@@ -9836,8 +9983,8 @@ document.getElementById('add-cat-page').addEventListener('click', () => addCateg
     };
     memoJumpBtn.addEventListener('click', (e) => {
       e.preventDefault(); e.stopPropagation();
-      if (!stacked()) {                                  // desktop : inchangé
-        window.scrollTo({ top: atBottom() ? 0 : scroller.scrollHeight, behavior: 'smooth' });
+      if (!stacked()) {                                  // [SPLIT-SCROLL] la colonne, pas la page
+        panel.scrollTo({ top: atBottom() ? 0 : panel.scrollHeight, behavior: 'smooth' });
         return;
       }
       if (atBottom()) {                                  // ⤒ : retour à l'en-tête du bloc
@@ -9848,9 +9995,26 @@ document.getElementById('add-cat-page').addEventListener('click', () => addCateg
       // laisse le layout se poser après le dépliage, puis descend à la FIN DU BLOC seulement
       setTimeout(() => { endEl().scrollIntoView({ block: 'end', behavior: 'smooth' }); syncJump(); }, 30);
     });
+    // [SPLIT-SCROLL] Deux défileurs, deux sources de re-synchro : la colonne en desktop, la
+    // fenêtre en mobile. On écoute les deux plutôt que de brancher selon la largeur — un
+    // changement de viewport n'a alors rien à re-câbler, et `syncJump` est idempotent.
+    panel.addEventListener('scroll', syncJump, { passive: true });
     window.addEventListener('scroll', syncJump, { passive: true });
     window.addEventListener('resize', syncJump);
     det.addEventListener('toggle', syncJump);
+    // [SPLIT-SCROLL] ⚠️ Défaut PRÉEXISTANT, que ce lot a rendu visible : `syncJump()` ne tournait
+    // qu'au câblage, c'est-à-dire AVANT que `loadAll()` n'ait rendu le moindre mémo. À cet
+    // instant rien ne déborde, donc `atBottom()` est vrai et le bouton affichait « ⤒ Remonter »
+    // alors qu'on était en haut d'une colonne pleine — et il gardait ce mensonge tant qu'aucun
+    // scroll ni resize ne le réveillait. L'état du bouton est une fonction de la GÉOMÉTRIE du
+    // défileur : on observe donc cette géométrie, plutôt que d'aller appeler `syncJump` depuis
+    // `renderMemos()` (ce qui aurait couplé le rendu de la liste à ce bouton). On observe
+    // `#memos` et pas le summary : `syncJump` ne touche que le libellé du bouton, mais l'observer
+    // lui-même serait une boucle en puissance.
+    const memosBox = document.getElementById('memos');
+    if (memosBox && typeof ResizeObserver === 'function') {
+      new ResizeObserver(syncJump).observe(memosBox);
+    }
     syncJump();
   }
 })();

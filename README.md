@@ -53,6 +53,20 @@ Table `links` :
 | `created_at`  | TEXT    | Date de création (ISO, UTC)            |
 | `updated_at`  | TEXT    | Dernière modification (ISO, UTC)       |
 | `tags`        | TEXT    | Tags normalisés (minuscules, sans #, séparés par espaces) |
+| `og_title`    | TEXT    | **[LINK-OG]** Titre OpenGraph de `url_public` — **dérivé** |
+| `og_desc`     | TEXT    | **[LINK-OG]** Description OpenGraph — **dérivée**      |
+| `og_domain`   | TEXT    | **[LINK-OG]** Hôte de `url_public` (sans `www.`) — **dérivé** |
+| `og_image`    | TEXT    | **[LINK-OG]** Nom de la vignette cachée (`<uid>.jpg` sous `data/uploads/og/`) — **dérivé** |
+| `og_fetched_at` | TEXT  | **[LINK-OG]** Horodatage du dernier fetch, sert de cache-bust à l'image — **dérivé** |
+| `og_status`   | TEXT    | **[LINK-OG]** `''` (jamais tenté) · `pending` (posé par create/update) · `ok` · `none` (page muette) · `failed` (refus SSRF, réseau) — **dérivé** |
+
+> **[LINK-OG] Les colonnes `og_*` sont DÉRIVÉES** : recalculables depuis `url_public`, donc
+> **jamais exportées** (`APP_VERSION` reste **27**), au même titre que `data/uploads/derived/`.
+> Le fetch est **owner-only**, ne vise **que `url_public`** (`url_local` — le LAN — n'y entre
+> jamais), passe une **garde SSRF re-validée à chaque redirection**, et n'a **jamais lieu dans le
+> chemin de sauvegarde** : créer ou modifier un lien pose `pending` et répond tout de suite.
+> `name`/`descr` ne sont **jamais mutés** — le repli « remplir si vide » est une règle
+> d'**affichage** (`descr || og_desc`), pas une écriture.
 
 Table `categories` : `id`, `name` (unique), `position`, `color` (hex, optionnel), `emoji` (optionnel — catégories, projets et mémos ont chacun un champ `emoji`, réglable via la pop-in d'édition ou le détail du mémo, affiché dans la sidebar, les cards et la page partagée).
 
@@ -82,6 +96,7 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | DELETE  | `/api/links/<id>`          | Supprime un lien                               |
 | POST    | `/api/links/reorder`       | `{ids: [...]}` — réécrit les positions         |
 | GET     | `/api/links/status`        | `{id: {public, local}}` — ping côté serveur    |
+| POST    | `/api/links/<id>/og-refresh` | **[LINK-OG]** Rafraîchit l'aperçu OpenGraph (owner-only, aucune variante `/share/*`) |
 | GET     | `/api/categories`          | Liste avec `link_count`                        |
 | POST    | `/api/categories`          | Crée une catégorie (`{name}`)                  |
 | PUT     | `/api/categories/<id>`     | Renomme                                        |
@@ -119,6 +134,7 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | DELETE  | `/api/memos/<id>/images/<nom>` | Supprime l'image (fichier inclus)          |
 | GET     | `/uploads/<nom>`           | Sert une image uploadée                        |
 | GET     | `/api/favicon/<id>`        | Favicon du service, récupéré côté serveur (cache mémoire) |
+| GET     | `/api/og-image/<nom>`      | **[LINK-OG]** Vignette d'aperçu cachée (`<uid>.jpg` uniquement, revalidation ETag) |
 | GET     | `/api/export`              | Sauvegarde JSON v15 (liens + catégories + projets hiérarchisés + priorités + mémos hors corbeille + historique + géoloc + commentaires avec priorité/réponses) |
 | POST    | `/api/import`              | Réimporte une sauvegarde (voir Backup / restore) |
 

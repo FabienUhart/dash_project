@@ -2,11 +2,14 @@ import calendar
 import hashlib
 import hmac
 import html
+import io
+import ipaddress
 import json
 import mimetypes
 import os
 import secrets
 import smtplib
+import socket
 import sqlite3
 import ssl
 import tempfile
@@ -19,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import parseaddr
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import re
 
@@ -181,6 +184,386 @@ def _looks_like_image(head, ext):
     if ext == "webp":
         return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
     return False
+
+
+# ───────────────────────── [LINK-OG] aperçu OpenGraph des liens ─────────────────────────
+# Enrichit une card de lien avec les métadonnées de `url_public` : titre, description, domaine
+# et une MINIATURE téléchargée puis cachée localement (jamais un lien vers l'image distante —
+# ni fuite d'IP du visiteur, ni card cassée le jour où la source disparaît).
+#
+# Trois règles portent tout le reste :
+#
+#   1. `url_public` SEUL. `url_local` (192.168.x, le LAN) n'entre jamais ici. C'est la moitié
+#      du problème SSRF réglée à la source : le seul champ fetchable est celui qui, par
+#      définition, désigne l'extérieur.
+#   2. La garde SSRF s'applique AVANT le premier octet et À CHAQUE REDIRECTION. Un hôte public
+#      qui renvoie un 302 vers 169.254.169.254 est le trou classique ; on ne suit donc jamais
+#      une redirection sans re-résoudre et re-valider sa cible.
+#   3. Le fetch ne vit JAMAIS dans le chemin de sauvegarde. Créer ou modifier un lien pose
+#      `og_status='pending'` et répond tout de suite : un site lent ne doit pas faire attendre
+#      un enregistrement. C'est le refresh explicite ou le sweep qui va chercher la matière.
+#
+# Les colonnes `og_*` sont de la donnée DÉRIVÉE, recalculable depuis `url_public` : jamais
+# exportées (invariant 1, `APP_VERSION` reste 27), au même titre que `data/uploads/derived/`.
+# Le cache image vit sous `data/uploads/og/<uid_du_lien>.jpg` — un fichier par lien, écrasé au
+# refresh, donc idempotent et sans doublon possible.
+
+OG_TIMEOUT = 3                      # s — un site lent est un site sans aperçu, pas une attente
+OG_HTML_MAX = 512 * 1024            # on ne lit que la tête de page : les balises y sont
+OG_IMG_MAX = 5 * 1024 * 1024        # plafond de TÉLÉCHARGEMENT (le brut est jeté ensuite)
+OG_MAX_REDIRECTS = 3
+OG_THUMB_PX = 600                   # on ne stocke QUE la vignette, jamais un PNG 4K
+# Délai au-delà duquel une RÉSERVATION de sweep est considérée périmée (worker mort en plein
+# téléchargement). Assez long pour couvrir un fetch (timeout 3 s × page + image), assez court
+# pour qu'un lien ne reste jamais durablement sans aperçu.
+OG_CLAIM_TTL = 120
+OG_TITLE_MAX = 300
+OG_DESC_MAX = 600
+# UA d'aspirateur de métadonnées, pas de navigateur déguisé : le jeton produit est honnête,
+# et le préfixe « Mozilla/5.0 (compatible ) » est ce que la plupart des sites attendent pour
+# servir leurs balises OG. (Un « +URL » de contact n'aurait rien à pointer ici.)
+OG_UA = "Mozilla/5.0 (compatible; dash-perso/%s)" % APP_VERSION
+# Le cache ne sert que des `<uid>.jpg` : ni traversée de chemin, ni extension exotique.
+SAFE_OG_NAME = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$"
+)
+
+
+def _og_dir():
+    """Dossier du cache OG. FONCTION et pas constante, délibérément : `UPLOAD_DIR` est
+    ré-orienté vers un tmp_path par les fixtures de test, et une constante figée à l'import
+    écrirait dans le VRAI volume pendant la suite. Résoudre au dernier moment supprime cette
+    classe de bug au lieu d'en confier la charge au prochain qui écrira un test."""
+    return os.path.join(UPLOAD_DIR, "og")
+
+
+def _og_resolve(host):
+    """Toutes les IP derrière `host`. Un littéral IP est rendu tel quel (aucun DNS) — c'est
+    aussi le point de couture que les tests remplacent pour ne pas dépendre d'un résolveur."""
+    try:
+        return [ipaddress.ip_address(host)]
+    except ValueError:
+        pass
+    infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    return [ipaddress.ip_address(i[4][0]) for i in infos]
+
+
+def _og_ip_public(ip):
+    """Vrai seulement pour une IP routable sur l'internet public. On refuse en bloc privé,
+    loopback, link-local (dont 169.254.169.254, l'endpoint métadonnée des clouds), multicast,
+    réservé et non spécifié — et on refuse aussi l'IPv4 mappée en IPv6, qui est le contournement
+    évident (::ffff:127.0.0.1)."""
+    if getattr(ip, "ipv4_mapped", None):
+        ip = ip.ipv4_mapped
+    return not (
+        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+        or ip.is_reserved or ip.is_unspecified
+    )
+
+
+def _og_url_allowed(url):
+    """Garde SSRF, appelée avant CHAQUE requête (première URL comme chaque redirection)."""
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    if u.scheme not in ("http", "https"):
+        return False
+    host = u.hostname
+    if not host:
+        return False
+    try:
+        ips = _og_resolve(host)
+    except Exception:
+        return False        # hôte irrésoluble = pas d'aperçu, jamais un appel à l'aveugle
+    return bool(ips) and all(_og_ip_public(ip) for ip in ips)
+
+
+def _og_http_get(url, max_bytes):
+    """GET borné et SSRF-safe. Rend {url, ctype, body} ou None.
+
+    Les redirections sont suivies À LA MAIN (`allow_redirects=False`) : c'est la seule façon de
+    re-valider chaque saut. Le corps est lu par morceaux et COUPÉ au plafond — un serveur
+    hostile qui ouvre un robinet sans fin remplirait sinon la RAM du worker.
+    """
+    seen = url
+    for _ in range(OG_MAX_REDIRECTS + 1):
+        if not _og_url_allowed(seen):
+            return None
+        r = None
+        try:
+            r = requests.get(
+                seen, timeout=OG_TIMEOUT, allow_redirects=False, stream=True,
+                headers={"User-Agent": OG_UA, "Accept-Language": "fr,en;q=0.8"},
+            )
+            code = getattr(r, "status_code", 0)
+            if code in (301, 302, 303, 307, 308):
+                loc = (r.headers.get("Location") or "").strip()
+                if not loc:
+                    return None
+                seen = urljoin(seen, loc)
+                continue
+            if code != 200:
+                return None
+            body = bytearray()
+            for chunk in r.iter_content(8192):
+                if not chunk:
+                    continue
+                body += chunk
+                if len(body) >= max_bytes:
+                    del body[max_bytes:]
+                    break
+            return {
+                "url": seen,
+                # entête COMPLET, pas seulement le type : le `charset=` vit dans ses paramètres
+                "ctype": (r.headers.get("Content-Type") or "").strip().lower(),
+                "body": bytes(body),
+            }
+        except Exception:
+            return None
+        finally:
+            try:
+                if r is not None:
+                    r.close()
+            except Exception:
+                pass
+    return None             # trop de redirections
+
+
+_OG_META_RE = re.compile(r"<meta\s[^>]*>", re.I)
+_OG_ATTR_RE = re.compile(r"([a-zA-Z:-]+)\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)")
+_OG_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+
+
+def _og_parse(text, base_url):
+    """Extrait (title, desc, image_url) d'une page. OG d'abord, repli `<title>` /
+    `<meta name=description>` ensuite. L'URL d'image est rendue ABSOLUE (une balise porte
+    souvent `/img/cover.jpg`) et le texte est dé-échappé puis borné."""
+    metas = []
+    for tag in _OG_META_RE.findall(text or ""):
+        attrs = {}
+        for k, v in _OG_ATTR_RE.findall(tag):
+            attrs[k.lower()] = v.strip("\"'")
+        metas.append(attrs)
+
+    def _meta(*cles):
+        for attrs in metas:
+            nom = (attrs.get("property") or attrs.get("name") or "").lower()
+            if nom in cles and (attrs.get("content") or "").strip():
+                return html.unescape(attrs["content"]).strip()
+        return ""
+
+    titre = _meta("og:title", "twitter:title")
+    if not titre:
+        m = _OG_TITLE_RE.search(text or "")
+        if m:
+            titre = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()
+    desc = _meta("og:description", "twitter:description", "description")
+    img = _meta("og:image", "og:image:url", "og:image:secure_url", "twitter:image")
+    if img:
+        try:
+            img = urljoin(base_url, img)
+        except Exception:
+            img = ""
+    return {
+        "title": titre[:OG_TITLE_MAX],
+        "desc": desc[:OG_DESC_MAX],
+        "image_url": img,
+    }
+
+
+def _og_domain(url):
+    host = (urlparse(url).hostname or "") if url else ""
+    return (host[4:] if host.startswith("www.") else host)[:120]
+
+
+def _fetch_og(url):
+    """LE fetcher — owner-only, `url_public` seulement. Rend un dict, ne lève jamais.
+
+    `status` vaut `ok` (des balises ont été lues), `none` (page servie mais muette) ou `failed`
+    (refus SSRF, réseau, code non-200). `image_bytes` est le BRUT téléchargé : c'est l'appelant
+    qui le réduit en vignette puis le jette.
+    """
+    out = {"status": "failed", "title": "", "desc": "", "domain": "", "image_bytes": b""}
+    try:
+        if not _og_url_allowed(url):
+            return out                       # refus AVANT le premier octet
+        out["domain"] = _og_domain(url)
+        page = _og_http_get(url, OG_HTML_MAX)
+        if not page:
+            return out
+        charset = "utf-8"
+        m = re.search(r"charset=([\w-]+)", page["ctype"] or "")
+        if m:
+            charset = m.group(1)
+        try:
+            text = page["body"].decode(charset, "replace")
+        except (LookupError, UnicodeDecodeError):
+            text = page["body"].decode("utf-8", "replace")
+        meta = _og_parse(text, page["url"])
+        out["title"] = meta["title"]
+        out["desc"] = meta["desc"]
+        out["status"] = "ok" if (meta["title"] or meta["desc"] or meta["image_url"]) else "none"
+        if meta["image_url"]:
+            img = _og_http_get(meta["image_url"], OG_IMG_MAX)
+            if img and img["body"]:
+                out["image_bytes"] = img["body"]
+    except Exception:
+        pass
+    return out
+
+
+def _og_store_image(uid, raw):
+    """Range le brut en VIGNETTE JPEG bornée (`<uid>.jpg`) et rend son nom, '' si impossible.
+
+    Signature vérifiée avant d'ouvrir quoi que ce soit (même doctrine que `_save_uploaded_image` :
+    on ne fait pas confiance au Content-Type d'un serveur distant). Le brut n'est jamais écrit
+    sur le volume — seule la vignette y arrive.
+    """
+    if Image is None or not raw or not uid:
+        return ""
+    tete = raw[:12]
+    if not any(_looks_like_image(tete, e) for e in ("jpg", "png", "gif", "webp")):
+        return ""
+    nom = uid + ".jpg"
+    if not SAFE_OG_NAME.match(nom):
+        return ""
+    try:
+        os.makedirs(_og_dir(), exist_ok=True)
+        with Image.open(io.BytesIO(raw)) as im:
+            im = ImageOps.exif_transpose(im)
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            im.thumbnail((OG_THUMB_PX, OG_THUMB_PX), Image.LANCZOS)
+            im.save(os.path.join(_og_dir(), nom), "JPEG",
+                    quality=DERIVED_QUALITY, optimize=True)
+        return nom
+    except Exception:
+        return ""
+
+
+def _og_delete_image(uid):
+    """Purge la vignette d'un lien (URL vidée, lien supprimé, refresh sans image)."""
+    if not uid:
+        return
+    try:
+        os.remove(os.path.join(_og_dir(), uid + ".jpg"))
+    except OSError:
+        pass
+
+
+def _og_apply(db, row):
+    """Va chercher l'OG d'un lien et écrit le résultat. Best-effort : ne lève jamais.
+
+    Sur `failed`, on GARDE l'aperçu déjà en cache et on ne touche qu'au statut : une coupure
+    réseau ne doit pas effacer une card qui s'affichait très bien hier. Sur `ok`/`none`, le
+    résultat fait autorité et remplace tout — y compris en vidant une image disparue.
+    """
+    try:
+        url = (_row_get(row, "url_public", "") or "").strip()
+        uid = _row_get(row, "uid", "") or ""
+        lid = row["id"]
+        now = datetime.now(timezone.utc).isoformat()
+        if not url:
+            _og_delete_image(uid)
+            db.execute(
+                "UPDATE links SET og_title='', og_desc='', og_domain='', og_image='', "
+                "og_fetched_at='', og_status='' WHERE id=?", (lid,)
+            )
+            db.commit()
+            return
+        res = _fetch_og(url)
+        if res["status"] == "failed":
+            db.execute("UPDATE links SET og_status='failed', og_fetched_at=? WHERE id=?",
+                       (now, lid))
+            db.commit()
+            return
+        nom = _og_store_image(uid, res["image_bytes"]) if res["image_bytes"] else ""
+        if not nom:
+            _og_delete_image(uid)        # pas de vignette périmée sur une card rafraîchie
+        db.execute(
+            "UPDATE links SET og_title=?, og_desc=?, og_domain=?, og_image=?, "
+            "og_fetched_at=?, og_status=? WHERE id=?",
+            (res["title"], res["desc"], res["domain"], nom, now, res["status"], lid),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
+def _og_sweep(limit=200, pause=0.0):
+    """Ramasse les liens sans aperçu : jamais fetchés, `pending` posés par create/update, et
+    `failed` (on RETENTE — un échec est souvent une coupure passagère). Les `ok` et les `none`
+    sont SAUTÉS, sinon chaque passage re-taperait tous les sites du dashboard.
+
+    Idempotent et relançable sans danger : un fichier par lien, écrasé. Rend le nombre traité.
+    Ouvre sa propre connexion (il tourne aussi hors contexte Flask, depuis le thread daemon).
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+    except Exception:
+        return 0
+    fait = 0
+    try:
+        # Une ligne est à traiter si elle n'a jamais été touchée, ou si elle est `pending`/
+        # `failed` ET que sa dernière tentative est ASSEZ VIEILLE. Cette borne d'âge est la
+        # moitié utile de la protection multi-worker : elle écarte ce qu'un autre worker vient
+        # tout juste de réserver, et elle rend au sweep les lignes qu'un worker mort en plein
+        # téléchargement aurait sinon condamnées à ne plus jamais être reprises.
+        perime = (datetime.now(timezone.utc) - timedelta(seconds=OG_CLAIM_TTL)).isoformat()
+        rows = conn.execute(
+            "SELECT id, uid, url_public, og_fetched_at FROM links "
+            "WHERE COALESCE(url_public, '') <> '' "
+            "AND (COALESCE(og_fetched_at, '') = '' "
+            "     OR (COALESCE(og_status, '') IN ('pending', 'failed') "
+            "         AND og_fetched_at < ?)) "
+            "ORDER BY position, id LIMIT ?", (perime, limit)
+        ).fetchall()
+        for r in rows:
+            # [LINK-OG] CLAIM ATOMIQUE. Ce thread démarre à l'import du module, donc une fois
+            # PAR WORKER gunicorn — et le Dockerfile en lance deux. Sans réservation, les deux
+            # partaient chercher les mêmes liens : requêtes sortantes en double, et surtout deux
+            # processus écrivant la même vignette au même instant, donc un JPEG déchiré. C'est
+            # l'exigence que `_backup_loop` énonce déjà pour lui-même (« multi-workers OK »).
+            # Le premier qui bascule `og_fetched_at` prend la ligne ; l'autre, s'il l'avait lue
+            # au même instant, voit sa valeur attendue périmée et passe son chemin. Aucun état
+            # bloquant à la clé : la réservation ne touche PAS `og_status`, donc un worker qui
+            # meurt en plein téléchargement laisse la ligne en `pending`/`failed`, et la borne
+            # d'âge ci-dessus la rend au sweep passé `OG_CLAIM_TTL`.
+            pris = conn.execute(
+                "UPDATE links SET og_fetched_at = ? WHERE id = ? "
+                "AND COALESCE(og_fetched_at, '') = ?",
+                (datetime.now(timezone.utc).isoformat(), r["id"],
+                 _row_get(r, "og_fetched_at", "") or ""),
+            )
+            conn.commit()
+            if not pris.rowcount:
+                continue
+            _og_apply(conn, r)
+            fait += 1
+            if pause:
+                time.sleep(pause)
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return fait
+
+
+def _backfill_og():
+    """Thread daemon : le sweep au démarrage, comme `_backfill_derived`. Le sommeil initial
+    n'est pas décoratif — il laisse le worker servir la page avant de sortir sur le réseau, et
+    il garantit qu'aucune suite de tests (qui vit quelques secondes) ne le déclenche."""
+    time.sleep(30)
+    fait = _og_sweep(pause=0.5)
+    try:
+        app.logger.info("[LINK-OG] sweep : %d lien(s) traité(s)", fait)
+    except Exception:
+        pass
 
 
 def _save_uploaded_image(f, allowed_ext):
@@ -564,6 +947,11 @@ def init_db():
     if "tags" not in cols:
         conn.execute("ALTER TABLE links ADD COLUMN tags TEXT DEFAULT ''")
     for col in ("uid", "created_at", "updated_at"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE links ADD COLUMN {col} TEXT DEFAULT ''")
+    # [LINK-OG] colonnes DÉRIVÉES (recalculables depuis url_public) → jamais exportées,
+    # invariant 1 inchangé : APP_VERSION reste 27. Additif, jamais destructif.
+    for col in ("og_title", "og_desc", "og_domain", "og_image", "og_fetched_at", "og_status"):
         if col not in cols:
             conn.execute(f"ALTER TABLE links ADD COLUMN {col} TEXT DEFAULT ''")
     mcols = {r[1] for r in conn.execute("PRAGMA table_info(memos)").fetchall()}
@@ -1246,7 +1634,9 @@ def pwa_manifest():
 
 LINK_FIELDS = (
     "id, name, descr, url_public, url_local, memo, position, category_id, "
-    "uid, created_at, updated_at, tags"
+    "uid, created_at, updated_at, tags, "
+    # [LINK-OG] dérivés : servis au front, POPÉS de l'export (cf. `out_links`)
+    "og_title, og_desc, og_domain, og_image, og_fetched_at, og_status"
 )
 
 
@@ -1549,13 +1939,15 @@ def create_link():
     db = get_db()
     max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM links").fetchone()[0]
     now = datetime.now(timezone.utc).isoformat()
+    url_public = _normalize_url(data.get("url_public", ""))
     cur = db.execute(
         "INSERT INTO links (name, descr, url_public, url_local, memo, position, category_id, "
-        "uid, created_at, updated_at, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "uid, created_at, updated_at, tags, og_status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             name,
             data.get("descr", ""),
-            _normalize_url(data.get("url_public", "")),
+            url_public,
             _normalize_url(data.get("url_local", "")),
             data.get("memo", ""),
             max_pos + 1,
@@ -1564,6 +1956,9 @@ def create_link():
             now,
             now,
             _normalize_tags(data.get("tags", "")),
+            # [LINK-OG] on MARQUE, on ne fetch pas : un site lent ne fait jamais attendre un
+            # enregistrement. Le refresh explicite ou le sweep ira chercher la matière.
+            "pending" if url_public else "",
         ),
     )
     db.commit()
@@ -1590,13 +1985,14 @@ def update_link(link_id):
         if "tags" in data
         else (existing["tags"] or "")
     )
+    url_public = _normalize_url(data.get("url_public", existing["url_public"]))
     db.execute(
         "UPDATE links SET name=?, descr=?, url_public=?, url_local=?, memo=?, category_id=?, "
         "tags=?, updated_at=? WHERE id=?",
         (
             data.get("name", existing["name"]),
             data.get("descr", existing["descr"]),
-            _normalize_url(data.get("url_public", existing["url_public"])),
+            url_public,
             _normalize_url(data.get("url_local", existing["url_local"])),
             data.get("memo", existing["memo"]),
             category_id,
@@ -1605,6 +2001,16 @@ def update_link(link_id):
             link_id,
         ),
     )
+    # [LINK-OG] L'aperçu appartient à une URL, pas au lien : il n'est jeté que si cette URL
+    # change. Un renommage ou une étiquette ne doit surtout pas faire disparaître la card le
+    # temps qu'un sweep repasse. Ici non plus, aucun appel réseau — on repose `pending`.
+    if url_public != (existing["url_public"] or ""):
+        _og_delete_image(_row_get(existing, "uid", "") or "")
+        db.execute(
+            "UPDATE links SET og_title='', og_desc='', og_domain='', og_image='', "
+            "og_fetched_at='', og_status=? WHERE id=?",
+            ("pending" if url_public else "", link_id),
+        )
     db.commit()
     _favicon_cache.pop(link_id, None)
     row = db.execute(
@@ -1616,10 +2022,41 @@ def update_link(link_id):
 @app.route("/api/links/<int:link_id>", methods=["DELETE"])
 def delete_link(link_id):
     db = get_db()
+    row = db.execute("SELECT uid FROM links WHERE id = ?", (link_id,)).fetchone()
     db.execute("DELETE FROM links WHERE id = ?", (link_id,))
     db.commit()
+    _og_delete_image((_row_get(row, "uid", "") or "") if row else "")  # [LINK-OG] pas d'orphelin
     _favicon_cache.pop(link_id, None)
     return "", 204
+
+
+@app.route("/api/links/<int:link_id>/og-refresh", methods=["POST"])
+def link_og_refresh(link_id):
+    """[LINK-OG] Rafraîchir l'aperçu d'un lien. OWNER-ONLY (derrière Authelia) — aucune variante
+    sous `/share/*` : rien de public ne doit pouvoir déclencher un appel sortant depuis le
+    serveur (invariant 5). Best-effort : renvoie toujours le lien, à jour ou inchangé."""
+    db = get_db()
+    row = db.execute("SELECT id, uid, url_public FROM links WHERE id = ?", (link_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    _og_apply(db, row)
+    return jsonify(dict(db.execute(
+        f"SELECT {LINK_FIELDS} FROM links WHERE id = ?", (link_id,)
+    ).fetchone()))
+
+
+@app.route("/api/og-image/<name>")
+def og_image(name):
+    """[LINK-OG] Sert la vignette cachée. Le nom est un `<uid>.jpg` et rien d'autre : ni
+    traversée de chemin, ni extension exotique. Revalidation plutôt que cache figé — le fichier
+    garde son nom quand son contenu change (leçon [PHOTO-ROTATE-MEMCACHE]), le front y ajoute
+    `?v=og_fetched_at` pour que le premier affichage après un Rafraîchir soit le bon."""
+    name = os.path.basename(name)
+    if not SAFE_OG_NAME.match(name):
+        return "", 404
+    if not os.path.isfile(os.path.join(_og_dir(), name)):
+        return "", 404
+    return _image_response(_og_dir(), name)
 
 
 @app.route("/api/links/reorder", methods=["POST"])
@@ -10377,6 +10814,10 @@ def _build_export(db, root_id=None):
         d = dict(r)
         d.pop("id", None)
         d["category"] = cats.get(d.pop("category_id", None), "")
+        # [LINK-OG] données DÉRIVÉES (recalculables depuis url_public) → hors export, comme
+        # `created_by_display` ou les images de `derived/`. Invariant 1 : APP_VERSION reste 27.
+        for k in ("og_title", "og_desc", "og_domain", "og_image", "og_fetched_at", "og_status"):
+            d.pop(k, None)
         out_links.append(d)
     # [ATTACHMENTS] v22 : pièces jointes nichées par mémo (noms de fichiers seuls, jamais le binaire).
     att_by_id = {}
@@ -11525,4 +11966,5 @@ init_db()
 os.makedirs(DERIVED_DIR, exist_ok=True)  # [IMAGE-THUMBS] dossier des dérivées (même volume)
 threading.Thread(target=_backup_loop, daemon=True).start()
 threading.Thread(target=_backfill_image_meta, daemon=True).start()  # [PHOTO-MAP]
+threading.Thread(target=_backfill_og, daemon=True).start()  # [LINK-OG] sweep des aperçus manquants
 threading.Thread(target=_backfill_derived, daemon=True).start()  # [IMAGE-THUMBS]
