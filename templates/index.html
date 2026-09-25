@@ -10093,7 +10093,23 @@ function renderBoard() {
     return;
   }
 
-  const focusAddMemo = () => { const i = document.querySelector('#memo-add-bar input[type=text]'); if (i) i.focus(); };
+  /* [EMPTY-STATE-NEW-MEMO] « + Nouveau mémo » visait le champ de la barre de création… qui, sur
+     un board de DOSSIER, n'est monté que si l'outil « Mémo » du dock est ouvert ([TOOLS-DOCK],
+     replié par défaut). L'input n'existait pas, le `if (i)` avalait le geste, et aucune erreur
+     console ne le disait : un bouton d'apparence normale qui ne répond pas. Désormais, quand
+     l'outil est replié, on l'OUVRE — exactement ce que fait le bouton « Mémo » du dock, donc
+     même état mémorisé et même focus posé par le montage (`toolsDockFocusMemo`). Ailleurs
+     (« Tous les mémos », Inbox) la barre est toujours là : on focuse, rien d'autre ne bouge. */
+  const focusAddMemo = () => {
+    if (dockPid && !toolsDockState(dockPid).memo) {
+      toolsDockFocusMemo = true;
+      setToolsDock(dockPid, 'memo', true);
+      renderBoard();
+      return;
+    }
+    const i = document.querySelector('#memo-add-bar input[type=text]');
+    if (i) i.focus();
+  };
   if (state.memoFilter !== 'all') {
     sections = sections.filter(s => s.filter === state.memoFilter);
     if (!sections[0] || !sections[0].items.length) {
