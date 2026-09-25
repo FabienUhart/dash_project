@@ -1968,24 +1968,60 @@ dialog .actions {
 .guest-chip.rw { border-color: var(--green); color: var(--green); }
 .guest-chip.ro { border-color: var(--gray); }
 
+/* ===== [MOBILE-NAV] Panneau « Dossiers » (mobile) =====
+   Desktop : le bouton n'existe pas, et la feuille non plus — tout ce lot vit sous 900 px. */
+#folders-btn { display: none; }
+#home-btn .hb-court { display: none; }
+#folders-sheet {
+  border: none; padding: 0; margin: 0; max-width: none; max-height: none;
+  width: 100%; inset: auto 0 0 0; background: var(--panel); color: var(--text);
+  border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.45);
+  height: 86vh; box-sizing: border-box; display: flex; flex-direction: column;
+  padding: 0.5rem 0.9rem calc(0.9rem + env(safe-area-inset-bottom, 0px));
+}
+#folders-sheet::backdrop { background: rgba(0, 0, 0, 0.5); }
+#folders-sheet:not([open]) { display: none; }
+@keyframes fs-in { from { transform: translateY(14%); opacity: 0.6; } to { transform: none; opacity: 1; } }
+#folders-sheet[open] { animation: fs-in 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) { #folders-sheet[open] { animation-duration: 0.01s; } }
+#folders-sheet .fs-handle {
+  width: 44px; height: 4px; border-radius: 999px; background: var(--border);
+  margin: 0.15rem auto 0.5rem; cursor: pointer; flex: 0 0 auto;
+}
+#folders-sheet .fs-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex: 0 0 auto; }
+#folders-sheet .fs-title { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+#folders-sheet #fs-close { margin-left: auto; }
+#fs-shortcuts { display: flex; gap: 0.35rem; overflow-x: auto; padding-bottom: 0.4rem; flex: 0 0 auto; }
+#fs-shortcuts .cat-item { flex: 0 0 auto; margin-bottom: 0; }
+/* 16px pile : en dessous, iOS zoome sur le champ au focus et la feuille saute. */
+#fs-filter {
+  width: 100%; box-sizing: border-box; font-size: 16px; margin: 0.2rem 0 0.5rem;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); padding: 0.5rem 0.6rem; flex: 0 0 auto;
+}
+#fs-tree { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+#fs-tree .cat-item { margin-bottom: 0.1rem; }
+/* Dossier courant : matière + texte accent, jamais d'aplat ([[LUCIOLE]], invariant 9). */
+#fs-tree .cat-item.active { border-color: var(--accent); color: var(--accent); background: var(--panel-2); }
+#fs-tree .sb-proj-chev { display: inline-flex; width: 1.4rem; justify-content: center; flex: 0 0 auto; cursor: pointer; }
+#fs-foot { flex: 0 0 auto; padding-top: 0.5rem; }
+
 /* ---------- mobile ---------- */
 @media (max-width: 900px) {
   .layout { flex-direction: column; }
-  nav#sidebar {
-    width: 100%;
-    display: flex;
-    overflow-x: auto;
-    padding: 0.5rem 0.75rem;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    gap: 0.3rem;
-    /* Barre de navigation projets collante : reste épinglée juste sous le header
-       (hauteur du header mesurée en JS → --header-h) quand on fait défiler. */
-    position: sticky;
-    top: var(--header-h, 0px);
-    z-index: 9;
-    background: var(--panel);
-  }
+  /* [MOBILE-NAV] La bande horizontale de 60 entrées (8 236 px de large, mesurés) DISPARAÎT : on
+     atteignait « Voyage Japon » au bout de vingt écrans de glissement. Les dossiers vivent
+     désormais dans le panneau `#folders-sheet`, ouvert par 📁. La règle qui la couchait en bande
+     est RETIRÉE, pas surchargée — laisser deux règles se battre serait un piège pour la suite. */
+  nav#sidebar { display: none; }
+  /* En-tête sur UNE ligne : D · recherche · 📁 · 🔔 · ⚙. L'heure est déjà dans la barre système
+     du téléphone, et le thème a rejoint les Paramètres (une seule source de vérité, deux portes). */
+  #folders-btn { display: inline-flex; }
+  #home-btn .hb-long { display: none; }
+  #home-btn .hb-court { display: inline; }
+  #clock-wrap, #weather, #theme-btn, #sidebar-rail-btn, #sidebar-eye-btn { display: none !important; }
+  header { flex-wrap: nowrap; gap: 0.35rem; }
+  #search-wrap { flex: 1 1 auto; min-width: 0; }
   .cat-item { flex-shrink: 0; margin-bottom: 0; padding: 0.35rem 0.7rem; }
   .cat-item .count { margin-left: 0.3rem; }
   /* Barre horizontale : l'arbre vertical (connecteurs, chevrons) et les en-têtes de
@@ -2198,13 +2234,14 @@ dialog .actions {
   <symbol id="ic-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
   <symbol id="ic-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
   <symbol id="ic-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="ic-folder" viewBox="0 0 24 24"><path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z"/></symbol>
   <symbol id="ic-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
 </defs></svg>
 <div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 <header>
   <button id="sidebar-rail-btn" class="icon" title="Replier la barre latérale" aria-label="Replier la barre latérale" aria-expanded="true"><svg class="ic"><use href="#ic-menu"/></svg></button>
   <button id="sidebar-eye-btn" class="icon" title="Afficher / masquer la barre latérale" aria-label="Afficher / masquer la barre latérale"><svg class="ic"><use href="#ic-eye"/></svg></button>
-  <h1 id="home-btn" title="Revenir à l'accueil" role="button" tabindex="0" style="cursor:pointer">Dashboard</h1>
+  <h1 id="home-btn" title="Revenir à l'accueil" role="button" tabindex="0" style="cursor:pointer"><span class="hb-long">Dashboard</span><span class="hb-court">D</span></h1>
   <div id="search-wrap">
     <span style="color:var(--muted)"><svg class="ic"><use href="#ic-search"/></svg></span>
     <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off" aria-label="Rechercher">
@@ -2229,6 +2266,9 @@ dialog .actions {
   </div>
   <div id="weather" title="Météo Bayonne"></div>
   <button id="activity-btn" class="icon" title="Activité des invités" aria-label="Activité des invités"><svg class="ic"><use href="#ic-bell"/></svg><span id="activity-badge"></span></button>
+  <!-- [MOBILE-NAV] Porte des dossiers en mobile : la bande horizontale de 60 entrées disparaît
+       (CSS ≤900px), un panneau monte du bas. Icône TRAIT, jamais d'emoji dans l'en-tête. -->
+  <button id="folders-btn" class="icon" title="Dossiers" aria-label="Ouvrir les dossiers" aria-haspopup="dialog"><svg class="ic"><use href="#ic-folder"/></svg></button>
   <button id="theme-btn" class="icon" title="Thème clair / sombre" aria-label="Basculer le thème"><svg class="ic"><use href="#ic-moon"/></svg></button>
   <button id="settings-btn" class="icon" title="Paramètres" aria-label="Paramètres"><svg class="ic"><use href="#ic-settings"/></svg></button>
 </header>
@@ -2319,6 +2359,21 @@ dialog .actions {
 
 <!-- [LINK-REFS] v28 : picker UNIFIÉ « Relier … à … ». Un seul composant pour les trois portes
      (card du lien, board d'un dossier, éditeur d'un mémo) — trois pickers auraient divergé. -->
+<!-- [MOBILE-NAV] Panneau « Dossiers » : même gabarit que `#search-sheet` (plein écran par le bas,
+     coins arrondis en haut, ::backdrop). Invariant 8 : l'entrée est CSS, jamais du GSAP sur un
+     `<dialog>` — un transform GSAP le sortirait du top-layer et casserait centrage et backdrop. -->
+<dialog id="folders-sheet" aria-label="Dossiers">
+  <div class="fs-handle" role="button" tabindex="-1" aria-label="Fermer"></div>
+  <div class="fs-head">
+    <span class="fs-title">Dossiers</span>
+    <button type="button" id="fs-close" class="icon" title="Fermer" aria-label="Fermer"><svg class="ic"><use href="#ic-x"/></svg></button>
+  </div>
+  <div id="fs-shortcuts"></div>
+  <input type="text" id="fs-filter" placeholder="Filtrer les dossiers…" autocomplete="off" aria-label="Filtrer les dossiers">
+  <div id="fs-tree"></div>
+  <div id="fs-foot"><button type="button" id="fs-new" class="prio-btn">＋ Nouveau dossier</button></div>
+</dialog>
+
 <dialog id="link-ref-picker">
   <h3 id="lrp-title">Relier</h3>
   <div id="lrp-tabs" style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.5rem"></div>
@@ -2662,6 +2717,16 @@ dialog .actions {
   </div>
 
   <div class="settings-panel" data-panel="identity">
+    <!-- [MOBILE-NAV] Le thème quitte l'en-tête MOBILE (une ligne, place au champ de recherche) et
+         vit ici — visible sur les DEUX tailles. Même fonction `setTheme`, même clé `theme` :
+         une seule source de vérité, deux portes. -->
+    <div class="settings-section">
+      <h4>THÈME</h4>
+      <div class="settings-row">
+        <button type="button" id="theme-light" class="prio-btn">☀️ Clair</button>
+        <button type="button" id="theme-dark" class="prio-btn">🌙 Sombre</button>
+      </div>
+    </div>
     <div class="settings-section">
       <h4>IDENTITÉ</h4>
       <div class="settings-row">
@@ -3424,6 +3489,149 @@ function toggleSbSection(name) { localStorage.setItem('sbSection:' + name, sbSec
 function sbProjOpen(id) { return localStorage.getItem('sbProjOpen:' + id) !== '0'; }
 function toggleSbProj(id) { localStorage.setItem('sbProjOpen:' + id, sbProjOpen(id) ? '0' : '1'); }
 
+/* ===== [MOBILE-NAV] Panneau « Dossiers » (mobile) =====
+   Un seul état d'arbre, deux rendus : le panneau appelle les MÊMES `sbProjOpen`/`toggleSbProj`
+   que la sidebar — déplier au doigt se retrouve au clavier, et réciproquement. */
+
+// [MOBILE-NAV] `emojiIcon` était un local de `renderSidebar` : le panneau en a besoin aussi,
+// donc il est HISSÉ au module — une définition, deux usagers (jamais deux copies).
+function emojiIcon(em) { return el('span', { class: 'emoji', text: em }); }
+
+// Icône d'un dossier : emoji s'il en a un, sinon pastille de couleur. Partagée par la sidebar
+// et le panneau — c'était la seule vraie duplication visuelle entre les deux arbres.
+function projIconEl(p) {
+  if (p.emoji) return emojiIcon(p.emoji);
+  const d = el('span', { class: 'cat-dot' });
+  d.style.background = usableProjColor(p.color) || 'var(--gray)';
+  return d;
+}
+
+// Item d'arbre PARTAGÉ (décision 3 du brief) : la sidebar et le panneau le construisent ici,
+// jamais chacun de son côté. cfg = { depth, open, hasKids, active, onPick, onToggle }.
+function projectItemEl(p, cfg) {
+  const item = el('div', { class: 'cat-item sub' + (cfg.active ? ' active' : ''),
+    attrs: { 'data-proj-id': String(p.id), title: p.name } });
+  const chev = el('span', { class: 'sb-proj-chev' });
+  if (cfg.hasKids) {
+    chev.textContent = cfg.open ? '▾' : '▸';
+    chev.setAttribute('title', cfg.open ? 'Replier ce dossier' : 'Déplier ce dossier');
+    // ⚠ `stopPropagation` : plier un dossier est un geste d'EXPLORATION. Sans ça, le chevron
+    // vaudrait « ouvrir ce dossier » et ferait sortir du panneau à chaque essai.
+    chev.addEventListener('click', (e) => { e.stopPropagation(); if (cfg.onToggle) cfg.onToggle(); });
+  } else {
+    chev.style.cursor = 'default';
+  }
+  item.appendChild(chev);
+  item.appendChild(projIconEl(p));
+  item.appendChild(el('span', { class: 'cat-label', text: p.name, attrs: { title: p.name } }));
+  item.appendChild(el('span', { class: 'count', text: String(p.memo_count || 0) }));
+  if (cfg.depth) item.style.marginLeft = (cfg.depth * 18) + 'px';
+  if (cfg.onPick) item.addEventListener('click', cfg.onPick);
+  return item;
+}
+
+/* MÊME clef que la sidebar (`sbProjOpen:<id>`), donc un dépli fait au doigt se retrouve au
+   clavier et réciproquement — c'est l'état qui est partagé. Seul le DÉFAUT diffère, et c'est
+   assumé : le desktop a de la hauteur (la sidebar ouvre tout par défaut), un téléphone n'en a
+   pas — 41 dossiers dépliés d'entrée dans une feuille de 86vh, ce serait le mur qu'on cherche
+   justement à supprimer. Ici, seul un « déplié » EXPLICITE (`'1'`) ouvre. */
+function fsProjOpen(id) {
+  try { return localStorage.getItem('sbProjOpen:' + id) === '1'; } catch (e) { return false; }
+}
+// ⚠ La bascule se lit avec les yeux du panneau : utiliser `toggleSbProj` ici ferait écrire
+// « 0 » sur un dossier que le panneau montre déjà replié — le premier tap ne ferait rien.
+function fsToggleProj(id) {
+  try { localStorage.setItem('sbProjOpen:' + id, fsProjOpen(id) ? '0' : '1'); } catch (e) {}
+}
+
+function openFoldersSheet() {
+  const dlg = document.getElementById('folders-sheet');
+  document.getElementById('fs-filter').value = '';
+  renderFoldersSheet();
+  if (!dlg.open) dlg.showModal();
+}
+
+function closeFoldersSheet() {
+  const dlg = document.getElementById('folders-sheet');
+  if (dlg.open) dlg.close();
+}
+
+// Les raccourcis du panneau partagent leurs LIBELLÉS, COMPTEURS et ACTIONS avec la sidebar via
+// cette liste ; leurs extras desktop (glisser-déposer d'un dossier, étoiles de favoris) n'ont
+// pas de sens au doigt et restent côté sidebar.
+function navShortcutDefs() {
+  const enCours = state.memos.filter(m => !m.done).length;
+  return [
+    { emoji: '⭐', label: 'Favoris', count: (state.favorites || []).length,
+      go: () => { state.view = 'favorites'; } },
+    { emoji: '🔗', label: 'Partages', count: (state.shares || []).length,
+      go: () => { state.view = 'shares'; } },
+    { emoji: '📝', label: 'Mémos', count: enCours,
+      go: () => { state.view = 'memos'; state.memoProject = 'all'; } },
+    { emoji: '🌳', label: 'Plan', count: null, go: () => { state.view = 'tree'; } },
+    { emoji: '📆', label: 'Agenda', count: null,
+      go: () => { agendaFilterProj = null; agendaYM = null; agendaSelDay = null; state.view = 'agenda'; } },
+    { emoji: '🗑', label: 'Corbeille', count: (state.trash || []).length,
+      go: () => { state.view = 'trash'; } },
+  ];
+}
+
+function renderFoldersSheet() {
+  const dlg = document.getElementById('folders-sheet');
+  if (!dlg) return;
+  const short = document.getElementById('fs-shortcuts');
+  short.innerHTML = '';
+  navShortcutDefs().forEach(d => {
+    const it = el('div', { class: 'cat-item', attrs: { title: d.label } });
+    it.appendChild(emojiIcon(d.emoji));
+    it.appendChild(el('span', { class: 'cat-label', text: d.label }));
+    if (d.count != null) it.appendChild(el('span', { class: 'count', text: String(d.count) }));
+    it.addEventListener('click', () => { d.go(); closeFoldersSheet(); renderAll(); });
+    short.appendChild(it);
+  });
+
+  const box = document.getElementById('fs-tree');
+  box.innerHTML = '';
+  const q = searchFold(document.getElementById('fs-filter').value || '');
+  const mots = q ? q.split(' ').filter(Boolean) : [];
+  /* Un dossier dont un DESCENDANT correspond reste visible ET déplié : sinon le filtre cacherait
+     le chemin qui mène au résultat, ce qui revient à ne rien trouver. */
+  const correspond = (p) => searchMatch(mots, p.name);
+  const brancheOk = (p) => correspond(p) || projectChildren(p.id).some(brancheOk);
+
+  const inbox = el('div', { class: 'cat-item sub' + (state.memoProject === 'inbox' ? ' active' : ''),
+    attrs: { title: 'Inbox' } });
+  inbox.appendChild(el('span', { class: 'sb-proj-chev' }));
+  inbox.appendChild(emojiIcon('📥'));
+  inbox.appendChild(el('span', { class: 'cat-label', text: 'Inbox' }));
+  inbox.appendChild(el('span', { class: 'count',
+    text: String(state.memos.filter(m => !m.project_id && !m.done).length) }));
+  inbox.addEventListener('click', () => {
+    state.view = 'memos'; state.memoProject = 'inbox'; closeFoldersSheet(); renderAll();
+  });
+  if (!mots.length) box.appendChild(inbox);
+
+  const dessine = (p, depth) => {
+    if (mots.length && !brancheOk(p)) return;
+    const kids = projectChildren(p.id);
+    // En filtrant, on force l'ouverture du chemin — sans toucher à l'état mémorisé : le champ
+    // vidé doit retrouver EXACTEMENT le repli d'avant.
+    const ouvert = mots.length ? true : fsProjOpen(p.id);
+    box.appendChild(projectItemEl(p, {
+      depth: depth, open: ouvert, hasKids: kids.length > 0,
+      active: state.view === 'memos' && state.memoProject === p.id,
+      onToggle: () => { fsToggleProj(p.id); renderFoldersSheet(); },
+      onPick: () => { state.view = 'memos'; state.memoProject = p.id; closeFoldersSheet(); renderAll(); },
+    }));
+    if (kids.length && ouvert) kids.forEach(c => dessine(c, depth + 1));
+  };
+  state.projects.filter(p => !p.parent_id).forEach(p => dessine(p, 0));
+  if (!box.children.length) {
+    box.appendChild(el('div', { text: 'Aucun dossier ne correspond.', attrs: {
+      style: 'font-size:0.82rem;color:var(--muted);font-style:italic;padding:0.4rem' } }));
+  }
+}
+
 function renderSidebar() {
   const nav = document.getElementById('sidebar');
   nav.innerHTML = '';
@@ -3536,7 +3744,7 @@ function renderSidebar() {
     item.appendChild(el('span', { class: 'count', text: String(count) }));
     return item;
   };
-  const emojiIcon = (em) => el('span', { class: 'emoji', text: em });
+
   const catIcon = (cat, idx) => comboIcon(cat.emoji, cat.color, catEmoji(idx));
 
   // En-tête de section repliable (chevron ▸/▾ + bouton ＋).
@@ -3721,14 +3929,7 @@ function renderSidebar() {
     // cassaient l'alignement monospace). Chevron DANS la ligne, colonne fixe — les
     // feuilles gardent un span vide. UNE seule icône : emoji, sinon pastille couleur.
     const renderProjTree = (p, wrap) => {
-      const icon = p.emoji
-        ? emojiIcon(p.emoji)
-        : (() => {
-            const d = el('span', { class: 'cat-dot' });
-            d.style.background = usableProjColor(p.color) || 'var(--gray)';
-            return d;
-          })();
-      const item = mkProjItem(p.id, icon, p.name, p.memo_count, p.id, () => openCreateDialog('project', p));
+      const item = mkProjItem(p.id, projIconEl(p), p.name, p.memo_count, p.id, () => openCreateDialog('project', p));
       item.title = p.name + ' — double-clic ou clic droit pour modifier';
       const kids = projectChildren(p.id);
       const chev = el('span', { class: 'sb-proj-chev' });
@@ -10763,6 +10964,32 @@ const themeBtn = document.getElementById('theme-btn');
 setTheme((() => { try { return localStorage.getItem('theme'); } catch (e) { return null; } })() === 'light' ? 'light' : 'dark');
 if (themeBtn) themeBtn.addEventListener('click', () => setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
 
+/* ===== [MOBILE-NAV] branchements ===== */
+// L'interrupteur des Paramètres et le bouton de l'en-tête appellent la MÊME fonction : ils ne
+// peuvent pas diverger. `renderThemeSwitch` ne fait que refléter l'état courant.
+function renderThemeSwitch() {
+  const clair = document.documentElement.getAttribute('data-theme') === 'light';
+  const l = document.getElementById('theme-light'), d = document.getElementById('theme-dark');
+  if (l) l.classList.toggle('sel', clair);
+  if (d) d.classList.toggle('sel', !clair);
+}
+document.getElementById('theme-light').addEventListener('click', () => { setTheme('light'); renderThemeSwitch(); });
+document.getElementById('theme-dark').addEventListener('click', () => { setTheme('dark'); renderThemeSwitch(); });
+if (themeBtn) themeBtn.addEventListener('click', renderThemeSwitch);
+renderThemeSwitch();
+
+document.getElementById('folders-btn').addEventListener('click', openFoldersSheet);
+document.getElementById('fs-close').addEventListener('click', closeFoldersSheet);
+document.querySelector('#folders-sheet .fs-handle').addEventListener('click', closeFoldersSheet);
+document.getElementById('fs-filter').addEventListener('input', renderFoldersSheet);
+document.getElementById('fs-new').addEventListener('click', () => { closeFoldersSheet(); addProject(); });
+// Tap sur le FOND : un `<dialog>` modal reçoit le clic du backdrop sur lui-même.
+document.getElementById('folders-sheet').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('folders-sheet')) closeFoldersSheet();
+});
+
+
+
 // Hauteur réelle du header (qui se replie sur 2 lignes en mobile) → utilisée par la
 syncHeaderHeight();
 window.addEventListener('resize', syncHeaderHeight);
@@ -11293,9 +11520,24 @@ importFile.addEventListener('change', async (e) => {
 
 const memoDetails = document.getElementById('memo-details');
 const mq = window.matchMedia('(max-width: 900px)');
-function adaptMemoPanel() { memoDetails.open = !mq.matches; }
+/* [MOBILE-NAV] AVANT, cette ligne était `memoDetails.open = !mq.matches` : le bloc MÉMOS était
+   FORCÉ REPLIÉ sur téléphone, à chaque chargement et à chaque rotation. Avec 96 mémos en retard,
+   l'accueil s'ouvrait donc sur les liens et cachait le reste (point 4 de la passe mobile).
+   Désormais : le choix de l'utilisateur prime et il est mémorisé ; sans choix, le bloc est
+   OUVERT des deux côtés. Un seul propriétaire de cet état — deux endroits qui l'écrivent se
+   seraient écrasés l'un l'autre au boot. */
+function memoPanelPref() {
+  try { return localStorage.getItem('dash:memoPanelOpen'); } catch (e) { return null; }
+}
+function adaptMemoPanel() {
+  const p = memoPanelPref();
+  memoDetails.open = (p === '1' || p === '0') ? p === '1' : true;
+}
 adaptMemoPanel();
 mq.addEventListener('change', adaptMemoPanel);
+memoDetails.addEventListener('toggle', () => {
+  try { localStorage.setItem('dash:memoPanelOpen', memoDetails.open ? '1' : '0'); } catch (e) {}
+});
 
 _dangerSoftStyle();   // [DANGER-SOFT] feuille du danger discret posée dès le boot (helper partagé)
 // [WEB-CAPTURE] handleCapture après le 1er loadAll (openDialog a besoin des catégories chargées).

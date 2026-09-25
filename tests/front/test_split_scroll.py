@@ -65,8 +65,11 @@ def _semer(live_server, liens=26, memos=30):
 def _boot(page, live_server, viewport=BUREAU):
     page.set_viewport_size(viewport)
     page.goto(live_server + "/", wait_until="domcontentloaded")
-    page.wait_for_selector(".cat-item", timeout=10_000)
+    # ⚠ Depuis [MOBILE-NAV], la sidebar n'est plus affichée sous 900 px : attendre un `.cat-item`
+    # VISIBLE y pend jusqu'au timeout. On attend l'état rendu par un marqueur valable des deux
+    # côtés — ce que ce fichier mesure (défilement, summary, ⤓) n'a pas changé pour autant.
     page.wait_for_selector("#memo-panel", timeout=10_000)
+    page.wait_for_selector("#memo-details summary", timeout=10_000)
     page.wait_for_load_state("networkidle")
 
 

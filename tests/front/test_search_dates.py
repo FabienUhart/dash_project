@@ -293,7 +293,9 @@ def test_feuille_mobile_comprend_les_dates(page, live_server, console_errors, ur
     _semer(live_server)
     page.set_viewport_size(MOBILE)
     page.goto(live_server + "/", wait_until="domcontentloaded")
-    page.wait_for_selector(".cat-item", timeout=10_000)
+    # ⚠ Depuis [MOBILE-NAV] la sidebar est masquée sous 900 px : on attend le champ de recherche,
+    # qui est justement la porte de la feuille, plutôt qu'un `.cat-item` devenu invisible.
+    page.wait_for_selector("#search", timeout=10_000)
     page.wait_for_load_state("networkidle")
 
     page.locator("#search").click()
