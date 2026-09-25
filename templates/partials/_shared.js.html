@@ -4213,6 +4213,55 @@ function memoLinkChips(links, onOpen, max) {
   }
   return row;
 }
+/* [LINK-REFS] v28 — chip d'un LIEN relié, partagé owner/invité (ADR-001 : helper pur, même
+   corps partout). `ref` = {name, url_public, url_local?, og_domain, favicon?}.
+   cfg = { onOpen(), onRemove() }. Deux gestes, jamais d'ambiguïté (décision 1 du brief) :
+   le corps du chip fait `onOpen` (chez le propriétaire : la CARD du lien ; chez l'invité :
+   le site, il n'a pas de vue Liens), le ↗ ouvre TOUJOURS le site. Gabarit `.prio-btn` comme
+   les chips de liens mémo↔mémo : aucun langage visuel nouveau (invariant 9). */
+function linkRefChip(ref, cfg) {
+  cfg = cfg || {};
+  const url = (ref.url_public || '').trim();
+  const chip = el('span', { class: 'prio-btn lref-chip', attrs: {
+    'data-link-id': String(ref.link_id == null ? '' : ref.link_id),
+    title: 'Lien : ' + String(ref.name || '') + (ref.og_domain ? ' (' + ref.og_domain + ')' : ''),
+    style: 'display:inline-flex;align-items:center;gap:0.3rem;padding:0.1rem 0.4rem;font-size:0.72rem;max-width:14rem',
+  } });
+  const corps = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.25rem;'
+    + 'cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } });
+  if (ref.favicon) {
+    // Le favicon est un INDICE : s'il manque, l'icône trait prend le relais, jamais un carré cassé.
+    const img = el('img', { attrs: { src: ref.favicon, alt: '', width: '14', height: '14',
+      style: 'width:14px;height:14px;border-radius:3px;flex:0 0 auto' } });
+    img.addEventListener('error', () => { img.replaceWith(hdrIconAt('link', 13)); });
+    corps.appendChild(img);
+  } else {
+    corps.appendChild(hdrIconAt('link', 13));
+  }
+  corps.appendChild(el('span', { text: String(ref.name || ''),
+    attrs: { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+  corps.addEventListener('click', (e) => { e.stopPropagation(); if (cfg.onOpen) cfg.onOpen(ref); });
+  chip.appendChild(corps);
+  if (url) {
+    chip.appendChild(el('span', { attrs: { style: 'width:1px;align-self:stretch;background:var(--border)' } }));
+    const go = el('span', { class: 'lref-go', text: '↗', attrs: {
+      title: 'Ouvrir ' + url, role: 'button', tabindex: '0',
+      style: 'cursor:pointer;color:var(--muted);line-height:1' } });
+    go.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.open(url, '_blank', 'noopener');
+    });
+    chip.appendChild(go);
+  }
+  if (cfg.onRemove) {
+    const x = el('button', { class: 'lref-x', text: '×', attrs: { type: 'button', title: 'Délier',
+      style: 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.95rem;line-height:1;padding:0' } });
+    x.addEventListener('click', (e) => { e.stopPropagation(); cfg.onRemove(ref); });
+    chip.appendChild(x);
+  }
+  return chip;
+}
+
 // D2 — section « 🔗 Relié à » de l'éditeur (3 pages). cfg :
 //   { links, candidates:[{id,title,project_id,location,emoji}], current:{id,location,project_id},
 //     canEdit, onAdd(id), onRemove(id), onOpen(id) }

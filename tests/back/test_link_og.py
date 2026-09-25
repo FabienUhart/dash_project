@@ -490,7 +490,7 @@ def test_og_columns_are_never_exported(client, app_module, monkeypatch):
     client.post("/api/links/%d/og-refresh" % link["id"])
 
     exp = client.get("/api/export").get_json()
-    assert exp["version"] == 27, "le format d'export a bougé sans bump documenté"
+    assert exp["version"] == 28, "le format d'export a bougé sans bump documenté"
     assert exp["links"], "aucun lien exporté, le test ne prouve rien"
     for l in exp["links"]:
         fuites = [k for k in l if k.startswith("og_")]

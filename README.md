@@ -61,7 +61,7 @@ Table `links` :
 | `og_status`   | TEXT    | **[LINK-OG]** `''` (jamais tenté) · `pending` (posé par create/update) · `ok` · `none` (page muette) · `failed` (refus SSRF, réseau) — **dérivé** |
 
 > **[LINK-OG] Les colonnes `og_*` sont DÉRIVÉES** : recalculables depuis `url_public`, donc
-> **jamais exportées** (`APP_VERSION` reste **27**), au même titre que `data/uploads/derived/`.
+> **jamais exportées** (elles ne comptent pas dans `APP_VERSION`), au même titre que `data/uploads/derived/`.
 > Le fetch est **owner-only**, ne vise **que `url_public`** (`url_local` — le LAN — n'y entre
 > jamais), passe une **garde SSRF re-validée à chaque redirection**, et n'a **jamais lieu dans le
 > chemin de sauvegarde** : créer ou modifier un lien pose `pending` et répond tout de suite.
@@ -84,6 +84,8 @@ Table `priorities` : `id`, `name` (unique), `color`, `position`. Seedée au prem
 
 Table `projects` : `id`, `name` (unique), `color`, `position`, `tags` (même normalisation que les liens), `emoji`, `parent_id` (hiérarchie parent/enfants, anti-cycle), `description` (texte libre affiché sous le titre du board — éditable au clic — et sur la page partagée). Les projets organisent les mémos (façon Planify), indépendamment des catégories de liens. **Hiérarchie** : glisser un projet sur un autre dans la sidebar l'imbrique (le déposer sur "Mémos" le remet à la racine) ; l'arbre est indenté ; ouvrir un parent affiche aussi les mémos de ses descendants (badge du sous-projet) ; **partager un parent partage tout l'arbre** — un avertissement liste les sous-projets concernés à la création du lien. Supprimer un parent rend ses enfants racines.
 
+Table `link_refs` (**[LINK-REFS]**, export **v28**) : `id`, `link_id`, `kind` (`'memo'` ou `'project'`), `target_id`, `created_at`, `created_by` (`''` = propriétaire), unique `(link_id, kind, target_id)`. **Relier un LIEN à un mémo ou à un dossier** : la relation est portée par le lien mais **se lit des deux côtés** — chips 🔗 sur la card du mémo et ligne « Liens reliés » sur le board du dossier, chips 📝/📁 sur la card du lien, avec un picker unifié. Plafond **20 par lien et par cible** ; une cible inexistante ou **en corbeille** est refusée (404) ; un mémo mis à la corbeille voit ses relations **masquées mais conservées** (restauration = elles reviennent), la purge définitive — comme la suppression du lien ou du dossier — les supprime en cascade. Exportées **par uid** (`link_refs` top-level, jamais d'id), import tolérant et non destructif. Côté **invités** : exposition **consentie et en lecture seule**, par une **projection stricte `{name, url_public, og_domain}`** — jamais `url_local`, jamais la note ni les tags, et un lien sans `url_public` n'est pas exposé du tout ; aucune route `/share/*` nouvelle, aucune écriture invitée.
+
 Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La migration des anciennes bases est automatique au démarrage (`init_db`).
 
 ## API
@@ -97,6 +99,12 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | POST    | `/api/links/reorder`       | `{ids: [...]}` — réécrit les positions         |
 | GET     | `/api/links/status`        | `{id: {public, local}}` — ping côté serveur    |
 | POST    | `/api/links/<id>/og-refresh` | **[LINK-OG]** Rafraîchit l'aperçu OpenGraph (owner-only, aucune variante `/share/*`) |
+| POST    | `/api/links/<id>/refs`     | **[LINK-REFS]** Relie ce lien à un mémo ou un dossier (`{kind, target_id}`) |
+| DELETE  | `/api/links/<id>/refs/<kind>/<target_id>` | **[LINK-REFS]** Retire la relation |
+| POST    | `/api/memos/<id>/link-refs` | **[LINK-REFS]** Miroir : relie un lien à ce mémo (`{link_id}`) |
+| DELETE  | `/api/memos/<id>/link-refs/<link_id>` | **[LINK-REFS]** Retire la relation |
+| POST    | `/api/projects/<id>/link-refs` | **[LINK-REFS]** Miroir : relie un lien à ce dossier (`{link_id}`) |
+| DELETE  | `/api/projects/<id>/link-refs/<link_id>` | **[LINK-REFS]** Retire la relation |
 | GET     | `/api/categories`          | Liste avec `link_count`                        |
 | POST    | `/api/categories`          | Crée une catégorie (`{name}`)                  |
 | PUT     | `/api/categories/<id>`     | Renomme                                        |

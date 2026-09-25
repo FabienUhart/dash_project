@@ -1862,6 +1862,14 @@ dialog .actions {
    largeur sur sa propre ligne. */
 #links-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem; }
 #links-sort { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-left: auto; }
+/* [LINK-REFS] le filtre partage EXACTEMENT l'habillage du tri : même gabarit, même Luciole. */
+#links-refs-filter { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-left: auto; }
+#links-sort + #links-refs-filter, #links-refs-filter + #links-sort { margin-left: 0.6rem; }
+#links-refs-filter button[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--accent); background: var(--panel);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+#links-refs-filter button[aria-pressed="true"]:hover { background: var(--panel); border-color: var(--accent); }
 #links-sort button[aria-pressed="true"] {
   border-color: var(--accent); color: var(--accent); background: var(--panel);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.22);
@@ -2237,6 +2245,13 @@ dialog .actions {
            « juste à coller au design des autres boutons »). Même gabarit que les deux ci-dessus ;
            l'actif se dit en Luciole (matière + `aria-pressed`), cf. CSS. En mobile ≤900px, ce
            MÊME nœud est déplacé dans `#links-blockhead` par `placeLinkSort()`. -->
+      <!-- [LINK-REFS] addendum : « voir facilement les liens rattachés à des mémos ». Même
+           rangée que le tri, même gabarit de boutons (invariant 9). -->
+      <div id="links-refs-filter" role="group" aria-label="Filtrer les liens reliés">
+        <button type="button" data-reffilter="all" aria-pressed="true" title="Tous les liens">Tous</button>
+        <button type="button" data-reffilter="linked" aria-pressed="false" title="Liens rattachés à un mémo ou un dossier">Reliés</button>
+        <button type="button" data-reffilter="unlinked" aria-pressed="false" title="Liens sans rattachement">Non reliés</button>
+      </div>
       <div id="links-sort" role="group" aria-label="Trier les liens">
         <button type="button" data-sort="manual" aria-pressed="true" title="L'ordre que tu as posé à la main"><span class="ls-long">Manuel</span><span class="ls-court">Manuel</span></button>
         <button type="button" data-sort="newest" aria-pressed="false" title="Les liens ajoutés le plus récemment d'abord"><span class="ls-long">Plus récents</span><span class="ls-court">Récents</span></button>
@@ -2300,6 +2315,20 @@ dialog .actions {
       <button type="submit" id="link-save">Sauver</button>
     </div>
   </form>
+</dialog>
+
+<!-- [LINK-REFS] v28 : picker UNIFIÉ « Relier … à … ». Un seul composant pour les trois portes
+     (card du lien, board d'un dossier, éditeur d'un mémo) — trois pickers auraient divergé. -->
+<dialog id="link-ref-picker">
+  <h3 id="lrp-title">Relier</h3>
+  <div id="lrp-tabs" style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.5rem"></div>
+  <input type="text" id="lrp-search" placeholder="Chercher… (accents et ordre des mots indifférents)"
+         autocomplete="off" style="width:100%;box-sizing:border-box">
+  <div id="lrp-list" style="margin-top:0.5rem;max-height:22rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.15rem"></div>
+  <div class="actions">
+    <button type="button" id="lrp-cancel">Annuler</button>
+    <button type="button" id="lrp-ok">Relier</button>
+  </div>
 </dialog>
 
 <dialog id="lightbox"></dialog>
@@ -2818,6 +2847,8 @@ function textOn(hex) {
 
 // [LINK-SORT] déclaré AVANT `state` : `state.linkSort` l'appelle à l'initialisation (TDZ).
 const LINK_SORTS = ['manual', 'newest', 'oldest', 'name'];
+// [LINK-REFS] addendum : filtre « Reliés » de la vue Liens (front pur, jamais exporté).
+const LINK_REF_FILTERS = ['all', 'linked', 'unlinked'];
 // [MEMO-SORT-DATES] même raison, même place : `state.memoSort` appelle `loadMemoSort()`.
 const MEMO_SORTS = ['manual', 'newest', 'updated', 'due'];
 
@@ -2842,6 +2873,7 @@ const state = {
   tagFilter: null,  // [TAG-NAV] étiquette affichée dans la vue dédiée
   linkSort: loadLinkSort(),  // [LINK-SORT] tri de la vue Liens, réglage d'AFFICHAGE (localStorage)
   memoSort: loadMemoSort(),  // [MEMO-SORT-DATES] tri des mémos — UN réglage pour le board ET la colonne
+  linkRefsFilter: loadLinkRefsFilter(),  // [LINK-REFS] Tous / Reliés / Non reliés
 };
 
 /* ===== [LINK-SORT] Trier la vue Liens — une VUE, jamais une écriture =====
@@ -2912,6 +2944,31 @@ function renderLinkSort() {
 /* ===== [MEMO-SORT-DATES] Trier les mémos — même doctrine que [LINK-SORT] =====
    Un SEUL état pour deux surfaces : le board et la colonne MÉMOS lisent `state.memoSort`.
    Deux réglages jumeaux qui divergeraient seraient pires que pas de tri du tout. */
+function loadLinkRefsFilter() {
+  try {
+    const v = localStorage.getItem('dash:linkRefsFilter');
+    return LINK_REF_FILTERS.includes(v) ? v : 'all';
+  } catch (e) { return 'all'; }
+}
+
+function setLinkRefsFilter(mode) {
+  state.linkRefsFilter = LINK_REF_FILTERS.includes(mode) ? mode : 'all';
+  try { localStorage.setItem('dash:linkRefsFilter', state.linkRefsFilter); } catch (e) {}
+  renderAll();
+}
+
+// Le compteur porte sur TOUS les liens, jamais sur la liste filtrée : « Reliés (2) » doit dire
+// combien il y en a, pas combien il en reste après les autres filtres.
+function renderLinkRefsFilter() {
+  const n = (state.links || []).filter(l => (l.refs || []).length).length;
+  document.querySelectorAll('#links-refs-filter button[data-reffilter]').forEach(b => {
+    const k = b.dataset.reffilter;
+    b.setAttribute('aria-pressed', String(state.linkRefsFilter === k));
+    if (k === 'linked') b.textContent = 'Reliés (' + n + ')';
+    if (k === 'unlinked') b.textContent = 'Non reliés (' + ((state.links || []).length - n) + ')';
+  });
+}
+
 function loadMemoSort() {
   try {
     const v = localStorage.getItem('dash:memoSort');
@@ -3183,6 +3240,7 @@ function renderAll() {
   // uniquement (togglé par `hidden` comme #links-actions). Le CSS le masque sur desktop.
   document.getElementById('links-blockhead').hidden = v !== 'links';
   renderLinkSort();  // [LINK-SORT] état pressé + hôte (barre desktop / en-tête de bloc mobile)
+  renderLinkRefsFilter();  // [LINK-REFS] état pressé + compteurs (calculés sur tous les liens)
   renderMemoSortMenu();  // [MEMO-SORT-DATES] le ⇅ de la colonne reflète le mode courant
   if (v === 'memos') renderBoard();
   else if (v === 'shares') renderShares();
@@ -4415,7 +4473,14 @@ function tagQuery() {
 }
 
 function visibleLinks() {
-  let links = state.links;
+  // [LINK-REFS] le filtre « Reliés » se compose avec les autres : catégorie ∧ recherche ∧ reliés,
+  // puis le tri ([LINK-SORT]). `visibleLinks()` reste la seule source de vérité du filtrage.
+  const parRefs = (list) => {
+    if (state.linkRefsFilter === 'linked') return list.filter(l => (l.refs || []).length);
+    if (state.linkRefsFilter === 'unlinked') return list.filter(l => !(l.refs || []).length);
+    return list;
+  };
+  let links = parRefs(state.links);
   const { scope, q, words, date } = parseSearch();
   // [MEMO-SORT-DATES] `d#`/`c#` interrogent des ÉCHÉANCES : un lien n'en a pas. Sans cette
   // garde, une recherche par date (dont le texte est vide) rendrait la liste ENTIÈRE des liens.
@@ -4915,6 +4980,7 @@ function linkCardEl(link) {
   if (link.url_public) urls.appendChild(urlLink(link.url_public, '🌐', 'public'));
   if (link.url_local) urls.appendChild(urlLink(link.url_local, '🔒', 'local'));
   card.appendChild(urls);
+  card.appendChild(linkTargetsRow(link));  // [LINK-REFS] v28 « Relié à » (+ la porte « + relier »)
   card.appendChild(linkTagsRow(link));  // [TAG-NAV] toujours présent (porte le « + » même sans tag)
   const actions = el('div', { class: 'actions' });
   actions.appendChild(el('button', { icon: 'pencil', attrs: { title: 'Éditer' }, on: { click: () => openDialog(link) } }));
@@ -7459,6 +7525,217 @@ function renderMeContext(memo) {
   }
 }
 
+/* ===== [LINK-REFS] v28 — côté propriétaire ===== */
+
+/* Picker unifié. Deux usages symétriques, une seule pop-in :
+   - `openLinkRefPicker(lien)` → on choisit des MÉMOS et des DOSSIERS à relier à ce lien ;
+   - `openLinkRefPicker(null, cible)` → on choisit des LIENS à relier à ce mémo/dossier.
+   La recherche passe par `searchFold`/`searchMatch` ([SEARCH-FOLD]) : « eclipse » trouve
+   « Éclipse », et l'ordre des mots est indifférent. */
+let lrpState = null;
+
+function openLinkRefPicker(lien, cible) {
+  const dlg = document.getElementById('link-ref-picker');
+  lrpState = { lien: lien || null, cible: cible || null, kind: 'all', choisis: new Set() };
+  document.getElementById('lrp-title').textContent = lien
+    ? 'Relier « ' + lien.name + ' » à…'
+    : 'Relier un lien à « ' + (cible ? cible.name : '') + ' »…';
+  document.getElementById('lrp-search').value = '';
+  renderLrpTabs();
+  renderLrpList();
+  dlg.showModal();
+  setTimeout(() => { try { document.getElementById('lrp-search').focus(); } catch (e) {} }, 60);
+}
+
+function lrpKinds() {
+  // Depuis un lien on vise mémos et dossiers ; depuis un mémo/dossier on ne vise que des liens.
+  return lrpState && lrpState.lien
+    ? [['all', 'Tout'], ['memo', '📝 Mémos'], ['project', '📁 Dossiers']]
+    : [['link', '🔗 Liens']];
+}
+
+function renderLrpTabs() {
+  const box = document.getElementById('lrp-tabs');
+  box.innerHTML = '';
+  const kinds = lrpKinds();
+  if (lrpState && !lrpState.lien) lrpState.kind = 'link';
+  kinds.forEach(([k, label]) => {
+    const b = el('button', { class: 'prio-btn', text: label, attrs: {
+      type: 'button', 'data-pickkind': k, 'aria-pressed': String(lrpState.kind === k) } });
+    if (lrpState.kind === k) { b.style.background = 'var(--accent)'; b.style.color = '#10141a'; }
+    b.addEventListener('click', () => { lrpState.kind = k; renderLrpTabs(); renderLrpList(); });
+    box.appendChild(b);
+  });
+}
+
+function lrpCandidats() {
+  const q = searchFold(document.getElementById('lrp-search').value || '');
+  const mots = q ? q.split(' ').filter(Boolean) : [];
+  const out = [];
+  const veut = (k) => lrpState.kind === 'all' || lrpState.kind === k;
+  if (lrpState.lien) {
+    const deja = new Set((lrpState.lien.refs || []).map(r => r.kind + ':' + r.id));
+    if (veut('memo')) {
+      (state.memos || []).forEach(m => {
+        if (deja.has('memo:' + m.id)) return;
+        const titre = m.title || stripHTML(m.content).slice(0, 80);
+        if (!searchMatch(mots, titre, stripHTML(m.content))) return;
+        out.push({ kind: 'memo', id: m.id, label: (m.emoji ? m.emoji + ' ' : '📝 ') + titre,
+                   proche: m.project_id === state.memoProject });
+      });
+    }
+    if (veut('project')) {
+      (state.projects || []).forEach(p => {
+        if (deja.has('project:' + p.id)) return;
+        if (!searchMatch(mots, p.name)) return;
+        out.push({ kind: 'project', id: p.id, label: (p.emoji ? p.emoji + ' ' : '📁 ') + p.name,
+                   proche: p.id === state.memoProject });
+      });
+    }
+  } else {
+    const dejaL = new Set(((lrpState.cible && lrpState.cible.refs) || []).map(r => r.link_id));
+    (state.links || []).forEach(l => {
+      if (dejaL.has(l.id)) return;
+      if (!searchMatch(mots, l.name, l.descr, l.url_public, l.url_local, l.tags)) return;
+      out.push({ kind: 'link', id: l.id, label: '🔗 ' + l.name, proche: false });
+    });
+  }
+  // Proches d'abord (même dossier courant), puis alphabétique foldé — même doctrine que le
+  // picker des liens mémo↔mémo, pour que « le bon candidat » soit toujours en haut.
+  out.sort((a, b) => (b.proche - a.proche) || searchFold(a.label).localeCompare(searchFold(b.label)));
+  return out.slice(0, 60);
+}
+
+function renderLrpList() {
+  const box = document.getElementById('lrp-list');
+  box.innerHTML = '';
+  const cands = lrpCandidats();
+  if (!cands.length) {
+    box.appendChild(el('div', { text: 'Aucun candidat.', attrs: {
+      style: 'font-size:0.8rem;color:var(--muted);font-style:italic;padding:0.3rem' } }));
+    return;
+  }
+  cands.forEach(c => {
+    const clef = c.kind + ':' + c.id;
+    const row = el('button', { class: 'lrp-item', attrs: { type: 'button', 'data-pick': clef,
+      'aria-pressed': String(lrpState.choisis.has(clef)),
+      style: 'display:flex;align-items:center;gap:0.4rem;text-align:left;background:var(--panel-2);'
+        + 'border:1px solid ' + (lrpState.choisis.has(clef) ? 'var(--accent)' : 'var(--border)')
+        + ';border-radius:8px;padding:0.35rem 0.5rem;font-size:0.82rem;cursor:pointer' } });
+    row.appendChild(el('span', { text: lrpState.choisis.has(clef) ? '☑' : '☐' }));
+    row.appendChild(el('span', { text: c.label, attrs: {
+      style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } }));
+    row.addEventListener('click', () => {
+      if (lrpState.choisis.has(clef)) lrpState.choisis.delete(clef);
+      else lrpState.choisis.add(clef);
+      renderLrpList();
+    });
+    box.appendChild(row);
+  });
+}
+
+async function lrpValider() {
+  if (!lrpState || !lrpState.choisis.size) { document.getElementById('link-ref-picker').close(); return; }
+  const choix = [...lrpState.choisis];
+  try {
+    for (const clef of choix) {
+      const [kind, id] = clef.split(':');
+      if (lrpState.lien) {
+        await api('/api/links/' + lrpState.lien.id + '/refs',
+                  { method: 'POST', body: JSON.stringify({ kind: kind, target_id: Number(id) }) });
+      } else {
+        const c = lrpState.cible;
+        const route = c.kind === 'project' ? '/api/projects/' + c.id + '/link-refs'
+                                           : '/api/memos/' + c.id + '/link-refs';
+        await api(route, { method: 'POST', body: JSON.stringify({ link_id: Number(id) }) });
+      }
+    }
+  } catch (e) {
+    await notify('Erreur : ' + e.message, { error: true });
+  }
+  document.getElementById('link-ref-picker').close();
+  await loadAll();
+}
+
+
+// Rangée de chips 🔗 (null si rien : jamais de rangée vide, cf. décision 3 du brief).
+function linkRefsRow(refs, cfg) {
+  const list = refs || [];
+  if (!list.length) return null;
+  const row = el('div', { class: 'lrefs-row', attrs: {
+    style: 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;margin-top:0.35rem' } });
+  list.forEach(r => row.appendChild(linkRefChip(r, cfg)));
+  return row;
+}
+
+/* Aller à la CARD d'un lien : vue Liens, filtre de catégorie élargi SI la card y serait masquée
+   (sinon le clic mènerait à une page où l'on ne voit rien), puis scroll + flash — la même
+   mécanique que `scrollToMemo`, pour que « s'y rendre » veuille dire la même chose partout. */
+function goToLinkCard(linkId) {
+  const lien = (state.links || []).find(l => l.id === linkId);
+  state.view = 'links';
+  state.tagFilter = null;
+  if (lien && state.filterCat !== 'all') {
+    const masque = (state.filterCat === 'none') ? !!lien.category_id : lien.category_id !== state.filterCat;
+    if (masque) state.filterCat = 'all';
+  }
+  renderAll();
+  setTimeout(() => {
+    const card = document.querySelector('#links .card[data-id="' + linkId + '"]');
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('memo-flash');
+    void card.offsetWidth;
+    card.classList.add('memo-flash');
+    setTimeout(() => card.classList.remove('memo-flash'), 1100);
+  }, 60);
+}
+
+function goToProjectBoard(projectId) {
+  state.view = 'memos';
+  state.memoProject = projectId;
+  state.tagFilter = null;
+  renderAll();
+}
+
+// Chips 📝/📁 de la card d'un LIEN : « à quoi ce lien est-il rattaché ? ». Gabarit `.prio-btn`.
+function linkTargetsRow(link) {
+  const refs = link.refs || [];
+  const row = el('div', { class: 'lrefs-row', attrs: {
+    style: 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;margin-top:0.35rem' } });
+  refs.forEach(r => {
+    const chip = el('span', { class: 'prio-btn lref-target', attrs: {
+      'data-kind': r.kind, 'data-target-id': String(r.id),
+      title: (r.kind === 'memo' ? 'Mémo : ' : 'Dossier : ') + String(r.title || ''),
+      style: 'display:inline-flex;align-items:center;gap:0.3rem;padding:0.1rem 0.4rem;font-size:0.72rem;max-width:14rem',
+    } });
+    const corps = el('span', { attrs: { style: 'cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' } });
+    corps.textContent = (r.kind === 'memo' ? '📝 ' : '📁 ') + (r.emoji ? r.emoji + ' ' : '') + String(r.title || '');
+    corps.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (r.kind === 'project') { goToProjectBoard(r.id); return; }
+      const m = (state.memos || []).find(x => x.id === r.id);
+      if (m) openMemoEditor(m);
+    });
+    chip.appendChild(corps);
+    const x = el('button', { class: 'lref-x', text: '×', attrs: { type: 'button', title: 'Délier',
+      style: 'background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.95rem;line-height:1;padding:0' } });
+    x.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api('/api/links/' + link.id + '/refs/' + r.kind + '/' + r.id, { method: 'DELETE' });
+      await loadAll();
+    });
+    chip.appendChild(x);
+  row.appendChild(chip);
+  });
+  const add = el('button', { class: 'prio-btn lref-add', text: '+ relier', attrs: {
+    type: 'button', title: 'Relier ce lien à un mémo ou un dossier',
+    style: 'padding:0.1rem 0.45rem;font-size:0.72rem' } });
+  add.addEventListener('click', (e) => { e.stopPropagation(); openLinkRefPicker(link); });
+  row.appendChild(add);
+  return row;
+}
+
 // [MEMO-CARD-CLICK] helper RÉUTILISABLE (recherche/notifs à venir) : trouve la card du mémo dans la
 // liste rendue, déplie une section repliée (Terminés/Historique dans un <details>), scroll doux
 // centré + flash de surbrillance ~1 s (CSS `.memo-flash`, pas de GSAP). Renvoie true si trouvée.
@@ -8482,6 +8759,16 @@ function taskEl(memo) {
     if (target) openMemoEditor(target);
   });
   if (lrow) content.appendChild(lrow);
+  // [LINK-REFS] v28 : les liens RELIÉS rejoignent la même rangée que les mémos reliés — un seul
+  // endroit répond à « à quoi ce mémo est-il rattaché ? ». Clic = la CARD du lien, ↗ = le site.
+  const rrow = linkRefsRow(memo.link_refs, {
+    onOpen: (ref) => goToLinkCard(ref.link_id),
+    onRemove: async (ref) => {
+      await api('/api/memos/' + memo.id + '/link-refs/' + ref.link_id, { method: 'DELETE' });
+      await loadAll();
+    },
+  });
+  if (rrow) content.appendChild(rrow);
   const vrow = voteRowEl(memo);
   if (vrow) content.appendChild(vrow);
   row.appendChild(content);
@@ -9107,6 +9394,7 @@ function renderBoard() {
   // [UI-POLISH-BOARD] drop-zone fichiers + 🎤 Vocal du dossier : capturés ici, appendés plus bas
   // (juste au-dessus du 1er en-tête de section / état vide, collés à la liste — pas près du titre).
   let pendingFolderAttach = null, pendingFolderAttachCfg = null;
+  let pendingBoardLinkRefs = null;   // [LINK-REFS] v28 : la ligne « Liens reliés », si elle existe
   if (state.memoProject !== 'all' && state.memoProject !== 'inbox') {
     const proj = state.projects.find(p => p.id === state.memoProject);
     if (proj) {
@@ -9119,6 +9407,29 @@ function renderBoard() {
         text: proj.description || '+ Ajouter une description…',
       });
       if (!proj.description) desc.style.opacity = '0.55';
+      // [LINK-REFS] v28 : ligne « Liens reliés », SEULEMENT s'il y en a (jamais de rangée vide).
+      const pRefs = proj.link_refs || [];
+      if (pRefs.length) {
+        const lr = el('div', { attrs: { id: 'board-link-refs',
+          style: 'display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;margin:-0.2rem 0 0.8rem' } });
+        lr.appendChild(el('span', { text: 'Liens reliés', attrs: {
+          style: 'font-size:0.72rem;color:var(--muted)' } }));
+        pRefs.forEach(r => lr.appendChild(linkRefChip(r, {
+          onOpen: (ref) => goToLinkCard(ref.link_id),
+          onRemove: async (ref) => {
+            await api('/api/projects/' + proj.id + '/link-refs/' + ref.link_id, { method: 'DELETE' });
+            await loadAll();
+          },
+        })));
+        const add = el('button', { class: 'prio-btn lref-add', text: '+ relier', attrs: {
+          type: 'button', title: 'Relier un lien à ce dossier',
+          style: 'padding:0.1rem 0.45rem;font-size:0.72rem' } });
+        add.addEventListener('click', () => openLinkRefPicker(null, { kind: 'project', id: proj.id, name: proj.name }));
+        lr.appendChild(add);
+        pendingBoardLinkRefs = lr;
+      } else {
+        pendingBoardLinkRefs = null;
+      }
       desc.addEventListener('click', () => {
         if (desc.querySelector('textarea')) return;
         const ta = el('textarea', { attrs: { rows: '2', placeholder: 'Description du projet…' } });
@@ -9140,6 +9451,7 @@ function renderBoard() {
         });
       });
       board.appendChild(desc);
+      if (pendingBoardLinkRefs) board.appendChild(pendingBoardLinkRefs);  // [LINK-REFS] v28
       // [FOLDER-ATTACHMENTS] Fichiers rattachés au dossier lui-même. [UI-POLISH-BOARD] appendé
       // plus bas (au-dessus de la 1re section), pas ici sous la description.
       // [TOOLS-DOCK] `hideVoice` : le 🎤 sort de la section Fichiers (bascule « Vocal » propre au
@@ -10293,9 +10605,16 @@ document.getElementById('add-link').addEventListener('click', () => openDialog()
 document.getElementById('add-cat-page').addEventListener('click', () => addCategory());
 // [LINK-SORT] Délégation : le groupe déménage entre la barre et l'en-tête de bloc, l'écouteur
 // posé sur lui le suit. Un redimensionnement autour de 900px le remet au bon endroit.
+document.getElementById('lrp-cancel').addEventListener('click', () => document.getElementById('link-ref-picker').close());
+document.getElementById('lrp-ok').addEventListener('click', lrpValider);
+document.getElementById('lrp-search').addEventListener('input', renderLrpList);
 document.getElementById('links-sort').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-sort]');
   if (b) setLinkSort(b.dataset.sort);
+});
+document.getElementById('links-refs-filter').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-reffilter]');
+  if (b) setLinkRefsFilter(b.dataset.reffilter);
 });
 window.addEventListener('resize', placeLinkSort);
 

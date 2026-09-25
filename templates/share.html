@@ -3702,6 +3702,17 @@ function render() {
       if (target && canEditMemo(target)) openEditor(target, el('span', ''), el('span', ''));
     });
     if (_lk) content.appendChild(_lk);
+    // [LINK-REFS] v28 : projection consentie par le propriétaire — LECTURE SEULE (ni « + relier »
+    // ni ✕) et clic = le site, l'invité n'a pas de vue Liens où aller (tranche C, invariant 5).
+    const _lr = (memo.link_refs || []);
+    if (_lr.length) {
+      const _lrw = el('div', { class: 'lrefs-row' });
+      _lrw.style.cssText = 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;margin-top:0.35rem';
+      _lr.forEach(r => _lrw.appendChild(linkRefChip(r, { onOpen: (x) => {
+        if (x.url_public) window.open(x.url_public, '_blank', 'noopener');
+      } })));
+      content.appendChild(_lrw);
+    }
     const _vr = shareVoteRow(memo);
     if (_vr) content.appendChild(_vr);
     row.appendChild(content);

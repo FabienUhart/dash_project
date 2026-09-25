@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maquette — [LINK-REFS] relier un lien à un mémo ou un dossier</title>
+<style>
+  :root{
+    --bg:#0b0f14;--panel:#111823;--panel2:#16202b;--card:#0f151e;--border:#1e2a38;--border2:#26374a;
+    --muted:#8493a3;--muted2:#63717f;--txt:#dce6f0;--accent:#4aa3ff;
+    --red:#e5726b;--green:#5fcf80;--pink:#ec5c8d;--orange:#e08a4a;--violet:#b892ff;--yellow:#e8c25a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#eef2f7;color:var(--txt);font:15px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 18px 90px}
+  h1{color:#12222f;font-size:1.4rem;margin:.2rem 0 .1rem}
+  .sub{color:#5a6b7a;margin:0 0 18px;max-width:900px}
+  .legend{background:#fff;border:1px solid #dbe4ee;border-radius:12px;padding:14px 16px;margin:0 0 22px;color:#33454f}
+  .legend b{color:#12222f}.legend ul{margin:.5rem 0 0;padding-left:1.1rem}.legend li{margin:.3rem 0}
+  .toggle{display:inline-flex;gap:0;border:1px solid #c9d6e3;border-radius:8px;overflow:hidden;margin-left:8px;vertical-align:middle}
+  .toggle button{border:0;background:#fff;color:#33454f;padding:3px 10px;font-size:.8rem;cursor:pointer}
+  .toggle button.on{background:#1c66c9;color:#fff}
+  .demoh{margin:26px 0 6px;color:#12222f;font-size:1.02rem;font-weight:800}
+  .demoh .k{color:#7a8a98;font-weight:600;font-size:.85rem}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:12px;box-shadow:0 6px 22px rgba(20,40,60,.12);transition:box-shadow .3s}
+  .panel.flash{box-shadow:0 0 0 3px var(--accent),0 6px 22px rgba(20,40,60,.12)}
+  .plabel{font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:#7a8a98;font-weight:700;margin:0 0 8px}
+
+  /* card mémo */
+  .card{position:relative;background:var(--card);border:1px solid var(--border);border-radius:13px;padding:11px 13px 9px 15px;overflow:hidden;transition:box-shadow .3s}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
+  .card.c-green::before{background:var(--green)}.card.c-violet::before{background:var(--violet)}
+  .card.flash{box-shadow:0 0 0 2px var(--accent)}
+  .crow{display:flex;align-items:flex-start;gap:10px}
+  .cb{flex:0 0 auto;width:19px;height:19px;border-radius:999px;border:2px solid #3a4c5e;margin-top:2px}
+  .cmain{flex:1 1 auto;min-width:0}
+  .ctitle{font-weight:700;color:#fff;font-size:.97rem}
+  .cdesc{color:var(--muted);font-size:.89rem;margin:.22rem 0 0}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:.5rem 0 0;align-items:center}
+  .bdg{display:inline-flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:2px 8px;font-size:.77rem;color:var(--muted)}
+  .foot{display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:9px;border-top:1px solid var(--border)}
+  .cat{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:.81rem}
+  .dot{width:8px;height:8px;border-radius:999px;background:var(--green);flex:0 0 auto}
+  .acts{margin-left:auto;display:inline-flex;gap:6px}
+  .abtn{width:34px;height:30px;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;font-size:.85rem}
+
+  /* chips de relation — LE composant du lot */
+  .refs{display:flex;flex-wrap:wrap;gap:6px;margin:.55rem 0 0;align-items:center}
+  .refs .lbl{font-size:.72rem;color:var(--muted2);text-transform:uppercase;letter-spacing:.04em;margin-right:2px}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:3px 9px 3px 6px;font-size:.8rem;color:var(--txt);cursor:pointer;user-select:none;max-width:240px}
+  .chip:hover{border-color:var(--accent);color:#fff}
+  .chip .k{font-size:.85rem;line-height:1}
+  .chip .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip .fav{width:14px;height:14px;border-radius:3px;background:linear-gradient(135deg,#5fcf80,#2a7c4a);flex:0 0 auto}
+  .chip .fav.actual{background:linear-gradient(135deg,#b892ff,#5b3fa8)}
+  .chip .ext{color:var(--muted2);font-size:.75rem;margin-left:2px;padding-left:5px;border-left:1px solid var(--border)}
+  .chip .ext:hover{color:var(--accent)}
+  .chip.add{border-style:dashed;color:var(--muted)}
+  .chip.lien{border-color:#2a4a6a}
+  .chip.dossier .k{color:var(--yellow)}
+
+  /* card lien */
+  .lcard{background:var(--card);border:1px solid var(--border);border-radius:13px;padding:12px 14px;transition:box-shadow .3s}
+  .lcard.flash{box-shadow:0 0 0 2px var(--accent)}
+  .lhead{display:flex;align-items:center;gap:9px}
+  .lfav{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,#5fcf80,#2a7c4a)}
+  .lfav.actual{background:linear-gradient(135deg,#b892ff,#5b3fa8)}
+  .lname{font-weight:700;color:#fff;font-size:1rem}
+  .ldesc{color:var(--muted);font-size:.86rem;margin:.25rem 0 0}
+  .og{display:flex;margin:.55rem 0 0;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0c1420}
+  .og-img{flex:0 0 auto;width:74px;background:linear-gradient(135deg,#33475c,#1a2735)}
+  .og-b{padding:8px 10px;min-width:0}
+  .og-dom{font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted2)}
+  .og-s{color:var(--muted);font-size:.78rem;margin:.12rem 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pills{display:flex;gap:6px;margin:.6rem 0 0}
+  .pill{display:inline-flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:.8rem}
+
+  /* board dossier */
+  .bhead{display:flex;align-items:center;gap:10px}
+  .bname{font-weight:800;color:#fff;font-size:1.15rem}
+  .bdesc{color:var(--muted2);font-size:.85rem;margin:.25rem 0 0}
+  .brow{display:flex;gap:8px;margin:.6rem 0 0;flex-wrap:wrap}
+  .bb{border:1px solid var(--border);border-radius:9px;padding:4px 10px;font-size:.8rem;color:var(--muted);background:transparent}
+  .sect{font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--muted2);font-weight:700;margin:14px 0 6px}
+  .mini{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:9px;padding:8px 10px;font-size:.86rem;margin:6px 0;color:var(--txt);cursor:pointer}
+  .mini:hover{border-color:var(--accent)}
+  .mini .m{color:var(--muted);font-size:.78rem;margin-top:2px}
+
+  /* éditeur + picker */
+  .dlg{background:var(--panel);border:1px solid var(--border2);border-radius:14px;padding:14px;box-shadow:0 20px 60px #0008}
+  .dt{font-weight:700;color:#fff;margin:0 0 10px;font-size:.95rem}
+  .field{display:block;font-size:.74rem;color:var(--muted2);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 4px}
+  .inp{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--txt);font:inherit;font-size:.9rem}
+  .tabs{display:flex;gap:4px;margin:8px 0}
+  .tab{border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:8px;padding:3px 10px;font-size:.8rem;cursor:pointer}
+  .tab.on{background:var(--panel2);color:#fff;border-color:var(--border2)}
+  .res{max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:9px;padding:4px}
+  .r{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;cursor:pointer;font-size:.86rem}
+  .r:hover{background:var(--panel2)}
+  .r .kind{width:18px;text-align:center}
+  .r .sub{color:var(--muted2);font-size:.75rem;margin-left:auto;white-space:nowrap}
+  .r input{accent-color:var(--accent)}
+  .r.hid{display:none}
+  .dact{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+  .btn{border:1px solid var(--border2);background:transparent;color:var(--txt);border-radius:9px;padding:6px 14px;font:inherit;font-size:.86rem;cursor:pointer}
+  .btn.pri{border-color:#2b5b8a;background:#13273a;color:#cfe6ff}
+  .hint{font-size:.76rem;color:var(--muted2);margin:6px 0 0}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#12222f;color:#fff;padding:8px 14px;border-radius:10px;font-size:.85rem;box-shadow:0 8px 24px #0006;opacity:0;transition:opacity .25s;pointer-events:none}
+  .toast.on{opacity:1}
+  .guest{opacity:.55}
+</style></head><body><div class="wrap">
+
+<h1>[LINK-REFS] — relier un <b>lien</b> à un <b>mémo</b> ou un <b>dossier</b>, dans les deux sens</h1>
+<p class="sub">Maquette cliquable. Tout est faux mais tout se clique : les chips naviguent d'un écran à l'autre (le panneau visé s'allume), le picker « Relié à » cherche avec la recherche SEARCH-FOLD (accents et ordre indifférents), et tu peux essayer les deux comportements du clic sur un chip lien.</p>
+
+<div class="legend">
+  <b>Ce que ça introduit</b>
+  <ul>
+    <li><b>Une relation lien ↔ (mémo | dossier)</b>, symétrique, stockée dans une table `link_refs` — exportée par uid, donc <b>export v28</b>. Un mémo garde ses liens mémo↔mémo (v27) tels quels ; on n'y touche pas.</li>
+    <li><b>Sur une card mémo</b> : une rangée « Relié à » où les liens apparaissent avec leur favicon — le chip emmène à la <b>card du lien</b>, le petit <b>↗</b> ouvre le site. <span class="toggle" id="mode"><button class="on" data-m="card">clic chip → card du lien</button><button data-m="site">clic chip → le site</button></span></li>
+    <li><b>Sur une card lien</b> : même rangée, avec 📝 mémos et 📁 dossiers. Clic mémo → sa fiche d'édition ; clic dossier → son board.</li>
+    <li><b>Sur le board d'un dossier</b> : une ligne « Liens reliés » sous la description — les services qui vont avec ce dossier.</li>
+    <li><b>Un seul picker « Relié à »</b> (dans l'éditeur du mémo <i>et</i> dans l'édition du lien), à onglets Tout / Mémos / Dossiers / Liens, préfixes `m#` `p#` `l#`, recherche foldée.</li>
+    <li><b>Invités : rien en V1.</b> Les liens ne leur sont pas exposés (verrouillé par LINK-OG) ; sur share/hub un mémo n'affiche pas ses chips liens — comme un lien mémo hors scope. Tranche B possible plus tard.</li>
+  </ul>
+</div>
+
+<div class="demoh">1 · Depuis un mémo <span class="k">— card « Déclarer les loyers », dossier Finance</span></div>
+<div class="grid">
+  <div class="panel" id="p-memo">
+    <p class="plabel">Board · Finance · card mémo</p>
+    <div class="card c-green" id="card-memo">
+      <div class="crow"><div class="cb"></div><div class="cmain">
+        <div class="ctitle">Déclarer les loyers (LMNP)</div>
+        <div class="cdesc">Sortir le récap Rentila du trimestre, vérifier les charges, envoyer à Angeline.</div>
+        <div class="badges"><span class="bdg">📅 15 oct.</span><span class="bdg">🔁 trimestriel</span><span class="bdg">👤 @Fabien</span></div>
+        <div class="refs"><span class="lbl">Relié à</span>
+          <span class="chip" onclick="go('p-memo2','card-memo2')"><span class="k">📝</span><span class="t">Relevé Rentila T3</span></span>
+          <span class="chip lien" onclick="chipLink(event,'Rentila')"><span class="fav"></span><span class="t">Rentila</span><span class="ext" onclick="ext(event,'rentila.com')">↗</span></span>
+          <span class="chip lien" onclick="chipLink(event,'Actual')"><span class="fav actual"></span><span class="t">Actual</span><span class="ext" onclick="ext(event,'actual.homebayonne…')">↗</span></span>
+          <span class="chip add" onclick="openPicker('memo')">+ relier</span>
+        </div>
+      </div></div>
+      <div class="foot"><span class="cat"><span class="dot"></span>Finance</span><span class="acts"><span class="abtn">👁</span><span class="abtn">✎</span><span class="abtn">✕</span></span></div>
+    </div>
+    <p class="hint">Le chip 🔗 porte la favicon du lien (déjà en cache serveur) — monochrome, sans aplat, gabarit `.bdg`. Le ↗ est un second geste, séparé par un filet.</p>
+  </div>
+
+  <div class="panel" id="p-memo2">
+    <p class="plabel">Autre card mémo (cible d'un lien mémo↔mémo existant, v27)</p>
+    <div class="card c-violet" id="card-memo2">
+      <div class="crow"><div class="cb"></div><div class="cmain">
+        <div class="ctitle">Relevé Rentila T3</div>
+        <div class="cdesc">Export PDF des loyers juillet → septembre.</div>
+        <div class="refs"><span class="lbl">Relié à</span>
+          <span class="chip" onclick="go('p-memo','card-memo')"><span class="k">📝</span><span class="t">Déclarer les loyers (LMNP)</span></span>
+          <span class="chip lien" onclick="chipLink(event,'Rentila')"><span class="fav"></span><span class="t">Rentila</span><span class="ext" onclick="ext(event,'rentila.com')">↗</span></span>
+        </div>
+      </div></div>
+      <div class="foot"><span class="cat"><span class="dot"></span>Finance</span><span class="acts"><span class="abtn">👁</span><span class="abtn">✎</span><span class="abtn">✕</span></span></div>
+    </div>
+    <p class="hint">Rien ne change pour les liens mémo↔mémo : même rangée, les 🔗 s'y ajoutent simplement.</p>
+  </div>
+</div>
+
+<div class="demoh">2 · Depuis un lien <span class="k">— vue Liens, card « Rentila »</span></div>
+<div class="grid">
+  <div class="panel" id="p-link">
+    <p class="plabel">Vue Liens · card lien (avec l'aperçu OG de LINK-OG)</p>
+    <div class="lcard" id="card-link">
+      <div class="lhead"><div class="lfav"></div><div class="lname">Rentila</div></div>
+      <div class="ldesc">Gestion locative — loyers, quittances, régularisation de charges.</div>
+      <div class="og"><div class="og-img"></div><div class="og-b"><div class="og-dom">rentila.com</div><div class="og-s">Logiciel de gestion locative gratuit pour propriétaires bailleurs.</div></div></div>
+      <div class="refs"><span class="lbl">Relié à</span>
+        <span class="chip" onclick="go('p-memo','card-memo')"><span class="k">📝</span><span class="t">Déclarer les loyers (LMNP)</span></span>
+        <span class="chip" onclick="go('p-memo2','card-memo2')"><span class="k">📝</span><span class="t">Relevé Rentila T3</span></span>
+        <span class="chip dossier" onclick="go('p-board')"><span class="k">📁</span><span class="t">Finance</span></span>
+        <span class="chip add" onclick="openPicker('link')">+ relier</span>
+      </div>
+      <div class="pills"><span class="pill">🟢 🌐</span><span class="pill">🟢 🔒</span></div>
+    </div>
+    <p class="hint">Clic 📝 → la fiche du mémo s'ouvre (comme le 👁 d'une card). Clic 📁 → le board du dossier. Le « + relier » ouvre le même picker que côté mémo.</p>
+  </div>
+
+  <div class="panel" id="p-board">
+    <p class="plabel">Board du dossier · Finance</p>
+    <div class="bhead"><span style="font-size:1.3rem">💶</span><div><div class="bname">Finance</div><div class="bdesc">Loyers, impôts, LMNP, banque.</div></div></div>
+    <div class="refs" style="margin-top:.7rem"><span class="lbl">Liens reliés</span>
+      <span class="chip lien" onclick="chipLink(event,'Rentila')"><span class="fav"></span><span class="t">Rentila</span><span class="ext" onclick="ext(event,'rentila.com')">↗</span></span>
+      <span class="chip lien" onclick="chipLink(event,'Actual')"><span class="fav actual"></span><span class="t">Actual</span><span class="ext" onclick="ext(event,'actual.homebayonne…')">↗</span></span>
+      <span class="chip add" onclick="openPicker('folder')">+ relier</span>
+    </div>
+    <div class="brow"><span class="bb">Modifier</span><span class="bb">Partager</span><span class="bb">Photos</span><span class="bb">Fichiers</span></div>
+    <div class="sect">À venir (2)</div>
+    <div class="mini" onclick="go('p-memo','card-memo')">Déclarer les loyers (LMNP)<div class="m">📅 15 oct. · 🔗 2 liens</div></div>
+    <div class="mini" onclick="go('p-memo2','card-memo2')">Relevé Rentila T3<div class="m">📅 30 sept. · 🔗 1 lien</div></div>
+    <p class="hint">La ligne « Liens reliés » ne s'affiche que si le dossier a au moins un lien relié (sinon rien, pas de rangée vide).</p>
+  </div>
+</div>
+
+<div class="demoh">3 · Le picker « Relié à » <span class="k">— un seul composant, éditeur de mémo ET édition de lien</span></div>
+<div class="grid">
+  <div class="panel" id="p-picker">
+    <p class="plabel">Pop-in · Relier à…</p>
+    <div class="dlg">
+      <p class="dt" id="pk-title">Relier « Déclarer les loyers » à…</p>
+      <input class="inp" id="pk-q" placeholder="Chercher un mémo, un dossier, un lien… (m# p# l#)" oninput="filter()">
+      <div class="tabs" id="pk-tabs">
+        <button class="tab on" data-k="all" onclick="tab(this)">Tout</button>
+        <button class="tab" data-k="memo" onclick="tab(this)">📝 Mémos</button>
+        <button class="tab" data-k="folder" onclick="tab(this)">📁 Dossiers</button>
+        <button class="tab" data-k="link" onclick="tab(this)">🔗 Liens</button>
+      </div>
+      <div class="res" id="pk-res">
+        <label class="r" data-k="link" data-t="rentila gestion locative"><input type="checkbox" checked><span class="kind">🔗</span>Rentila<span class="sub">rentila.com</span></label>
+        <label class="r" data-k="link" data-t="actual budget"><input type="checkbox" checked><span class="kind">🔗</span>Actual<span class="sub">actual.homebayonne…</span></label>
+        <label class="r" data-k="link" data-t="boondmanager"><input type="checkbox"><span class="kind">🔗</span>boondmanager<span class="sub">ui.boondmanager.com</span></label>
+        <label class="r" data-k="link" data-t="navidrome musique"><input type="checkbox"><span class="kind">🔗</span>Navidrome<span class="sub">LAN</span></label>
+        <label class="r" data-k="folder" data-t="finance"><input type="checkbox"><span class="kind">📁</span>Finance<span class="sub">Mine</span></label>
+        <label class="r" data-k="folder" data-t="lmnp bayonne locations"><input type="checkbox"><span class="kind">📁</span>locations Bayonne<span class="sub">racine</span></label>
+        <label class="r" data-k="memo" data-t="releve rentila t3"><input type="checkbox" checked><span class="kind">📝</span>Relevé Rentila T3<span class="sub">Finance</span></label>
+        <label class="r" data-k="memo" data-t="assurance pno echeance"><input type="checkbox"><span class="kind">📝</span>Assurance PNO — échéance<span class="sub">Finance</span></label>
+        <label class="r" data-k="memo" data-t="taxe fonciere"><input type="checkbox"><span class="kind">📝</span>Taxe foncière<span class="sub">Finance</span></label>
+      </div>
+      <p class="hint" id="pk-hint">Essaie « rentila », « RENTILA », « locative gestion », « l#actual » ou « échéance » sans accent.</p>
+      <div class="dact"><button class="btn" onclick="toast('Annulé')">Annuler</button><button class="btn pri" onclick="toast('Relations enregistrées (maquette)')">Relier</button></div>
+    </div>
+  </div>
+
+  <div class="panel guest" id="p-guest">
+    <p class="plabel">Côté invité (share / hub) — V1</p>
+    <div class="card c-green">
+      <div class="crow"><div class="cb"></div><div class="cmain">
+        <div class="ctitle">Déclarer les loyers (LMNP)</div>
+        <div class="cdesc">Sortir le récap Rentila du trimestre, vérifier les charges, envoyer à Angeline.</div>
+        <div class="badges"><span class="bdg">📅 15 oct.</span></div>
+        <div class="refs"><span class="lbl">Relié à</span>
+          <span class="chip"><span class="k">📝</span><span class="t">Relevé Rentila T3</span></span>
+        </div>
+      </div></div>
+      <div class="foot"><span class="cat"><span class="dot"></span>Finance</span></div>
+    </div>
+    <p class="hint">Les chips 🔗 sont <b>omis</b> pour un invité : la table des liens n'est pas dans son périmètre (invariant 5). Le lien mémo↔mémo reste, s'il est dans le scope.</p>
+  </div>
+</div>
+
+<div class="demoh">4 · Ce qui est tranché / à trancher</div>
+<div class="legend">
+  <ul>
+    <li><b>Tranché (reco)</b> : relation symétrique, une ligne par paire, plafond 20 par lien et par cible ; `created_by` façon v19 ; purge en cascade (suppression du lien, purge définitive du mémo, suppression du dossier) ; mémo en corbeille → chips masqués mais conservés.</li>
+    <li><b>Tranché (reco)</b> : export v28 = liste top-level `link_refs` `[{link_uid, kind, target_uid, created_at, created_by}]`, import uid-d'abord tolérant, ré-import = 0 doublon. Sans ça, une restauration perdrait tes rapports.</li>
+    <li><b>À toi</b> : le clic sur un chip 🔗 depuis un mémo → <b>card du lien</b> (reco) ou <b>le site</b> ? Le toggle en haut te fait essayer les deux.</li>
+    <li><b>À toi</b> : la ligne « Liens reliés » sur le board d'un dossier — tu la veux, ou seulement les chips sur les cards ?</li>
+    <li><b>Hors V1</b> : invités, relier depuis la card sans ouvrir l'éditeur ([CARD-MEMO-LINK], déjà « à voir plus tard »), suggestion automatique « ce mémo cite rentila.com → relier ? » (jolie V2).</li>
+  </ul>
+</div>
+
+</div>
+<div class="toast" id="toast"></div>
+<script>
+  let mode='card';
+  document.querySelectorAll('#mode button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;document.querySelectorAll('#mode button').forEach(x=>x.classList.toggle('on',x===b));toast('Clic sur un chip lien → '+(mode==='card'?'card du lien':'ouvre le site'));});
+  function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),1800);}
+  function flash(id){const e=document.getElementById(id);if(!e)return;e.classList.add('flash');setTimeout(()=>e.classList.remove('flash'),1400);}
+  function go(panel,card){const p=document.getElementById(panel);p.scrollIntoView({behavior:'smooth',block:'center'});flash(panel);if(card)flash(card);}
+  function chipLink(ev,name){ev.stopPropagation();if(mode==='site'){toast('↗ ouvre '+name+' dans un nouvel onglet');return;}go('p-link','card-link');toast('→ card « '+name+' » (vue Liens, surbrillance)');}
+  function ext(ev,host){ev.stopPropagation();toast('↗ ouvre https://'+host+' dans un nouvel onglet');}
+  function openPicker(from){const t={memo:'Relier « Déclarer les loyers » à…',link:'Relier « Rentila » à…',folder:'Relier le dossier « Finance » à…'}[from];document.getElementById('pk-title').textContent=t;go('p-picker');document.getElementById('pk-q').focus();}
+  const fold=s=>String(s||'').normalize('NFD').replace(/\p{M}/gu,'').toLowerCase().replace(/[’‘]/g,"'").replace(/\s+/g,' ').trim();
+  let kind='all';
+  function tab(b){kind=b.dataset.k;document.querySelectorAll('#pk-tabs .tab').forEach(x=>x.classList.toggle('on',x===b));filter();}
+  function filter(){let q=fold(document.getElementById('pk-q').value);let k=kind;const m=q.match(/^([mpl])[#:](.*)$/);if(m){k={m:'memo',p:'folder',l:'link'}[m[1]];q=m[2].trim();}
+    const words=q.split(' ').filter(Boolean);let n=0;
+    document.querySelectorAll('#pk-res .r').forEach(r=>{const hay=fold(r.dataset.t+' '+r.textContent);const ok=(k==='all'||r.dataset.k===k)&&words.every(w=>hay.includes(w));r.classList.toggle('hid',!ok);if(ok)n++;});
+    document.getElementById('pk-hint').textContent=n?n+' résultat'+(n>1?'s':'')+' — accents et ordre des mots indifférents':'Aucun résultat';}
+</script>
+</body></html>

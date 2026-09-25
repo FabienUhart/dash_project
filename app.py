@@ -68,7 +68,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "27"  # X = version du format d'export (invariant 1) — v27 = [MEMO-LINKS] liens entre mémos ; v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "28"  # X = version du format d'export (invariant 1) — v28 = [LINK-REFS] un lien relié à un mémo ou un dossier ; v27 = [MEMO-LINKS] liens entre mémos ; v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -1274,6 +1274,26 @@ def init_db():
         "CASE WHEN src_memo_id < dst_memo_id THEN src_memo_id ELSE dst_memo_id END, "
         "CASE WHEN src_memo_id < dst_memo_id THEN dst_memo_id ELSE src_memo_id END)"
     )
+    # ───────────── [LINK-REFS] v28 : un LIEN relié à un mémo ou à un dossier ─────────────
+    # Table ADDITIVE (`CREATE TABLE IF NOT EXISTS`), jamais destructive (invariant 1). La
+    # relation est orientée en base (le lien la porte) mais se LIT des deux côtés : c'est une
+    # relation, pas un champ. `kind` borne les cibles à deux familles — un CHECK plutôt qu'une
+    # convention, pour qu'une faute de frappe ne crée pas une troisième famille silencieuse.
+    # `created_by` = pattern v19 ('' = propriétaire). UNIQUE(link_id, kind, target_id) : reposer
+    # la même relation est idempotent, jamais un doublon.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS link_refs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            link_id INTEGER NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('memo', 'project')),
+            target_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            created_by TEXT NOT NULL DEFAULT '',
+            UNIQUE(link_id, kind, target_id)
+        )
+        """
+    )
     # ───────────── [GUEST-ROLES V2 · T1] rôles et surcharges par (invité × dossier) ─────────────
     # Spec §8 : une ligne = le rôle et/ou les surcharges d'UN invité sur UN dossier, hérités par
     # tous ses descendants ; absence de ligne = on hérite du dossier ancêtre le plus proche, sinon
@@ -1922,12 +1942,17 @@ def _normalize_tags(value):
 
 @app.route("/api/links", methods=["GET"])
 def list_links():
-    rows = (
-        get_db()
-        .execute(f"SELECT {LINK_FIELDS} FROM links ORDER BY position, id")
-        .fetchall()
-    )
-    return jsonify([dict(r) for r in rows])
+    db = get_db()
+    rows = db.execute(f"SELECT {LINK_FIELDS} FROM links ORDER BY position, id").fetchall()
+    # [LINK-REFS] v28 : `refs` est RUNTIME-ONLY (l'export porte `link_refs` par uid), au même
+    # titre que `links` sur un mémo. Toujours présent, à [] — le front somme sans garde.
+    refs = _link_refs_for_links(db, [r["id"] for r in rows])
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["refs"] = refs.get(r["id"], [])
+        out.append(d)
+    return jsonify(out)
 
 
 @app.route("/api/links", methods=["POST"])
@@ -2023,6 +2048,8 @@ def update_link(link_id):
 def delete_link(link_id):
     db = get_db()
     row = db.execute("SELECT uid FROM links WHERE id = ?", (link_id,)).fetchone()
+    # [LINK-REFS] v28 : les relations partent avec leur porteur — jamais de ref orpheline.
+    db.execute("DELETE FROM link_refs WHERE link_id = ?", (link_id,))
     db.execute("DELETE FROM links WHERE id = ?", (link_id,))
     db.commit()
     _og_delete_image((_row_get(row, "uid", "") or "") if row else "")  # [LINK-OG] pas d'orphelin
@@ -2209,6 +2236,7 @@ def list_projects():
     proj_att = {}
     for a in db.execute("SELECT * FROM attachments WHERE project_id IS NOT NULL ORDER BY id").fetchall():
         proj_att.setdefault(a["project_id"], []).append(_attach_row_dict(a, _owner_attach_url(a)))
+    prmap = _link_refs_by_target(db, "project", [r["id"] for r in rows])  # [LINK-REFS] v28
     out = []
     for r in rows:
         d = dict(r)
@@ -2221,6 +2249,7 @@ def list_projects():
         d["vote_create_resolved"] = _resolve_vote_create(db, r["id"])
         d["can_create_vote"] = True  # owner crée toujours
         d["attachments"] = proj_att.get(r["id"], [])  # [FOLDER-ATTACHMENTS]
+        d["link_refs"] = prmap.get(r["id"], [])  # [LINK-REFS] v28 (runtime-only)
         out.append(d)
     return jsonify(out)
 
@@ -2697,6 +2726,8 @@ def delete_project(project_id):
     db.execute("DELETE FROM vote_options WHERE vote_id IN (SELECT id FROM votes WHERE project_id = ?)", (project_id,))
     db.execute("DELETE FROM votes WHERE project_id = ?", (project_id,))
     db.execute("DELETE FROM favorites WHERE kind = 'project' AND ref = ?", (str(project_id),))  # [FAVORITES] purge en cascade
+    # [LINK-REFS] v28 : les relations portées par ce dossier partent avec lui (pas d'orphelin).
+    db.execute("DELETE FROM link_refs WHERE kind = 'project' AND target_id = ?", (project_id,))
     # [FOLDER-ATTACHMENTS] purge en cascade des fichiers du dossier (binaires + lignes).
     for a in db.execute("SELECT filename FROM attachments WHERE project_id = ?", (project_id,)).fetchall():
         _delete_attachment_file(a["filename"])
@@ -3918,9 +3949,190 @@ def _delete_memo_link(db, a, b):
     db.commit()
 
 
+LINK_REFS_MAX = 20  # [LINK-REFS] plafond par lien ET par cible (400 explicite au-delà)
+
+
+def _ref_int(v):
+    """Un id venu du JSON : entier ou rien. Une chaîne, un null, un objet → 0, donc « cible
+    introuvable » (404) plutôt qu'une exception à 500."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _link_ref_target_ok(db, kind, target_id):
+    """La cible existe-t-elle VRAIMENT ? Un mémo en corbeille n'est pas une cible (invariant 7)."""
+    if kind == "memo":
+        return db.execute(
+            "SELECT id FROM memos WHERE id = ? AND COALESCE(deleted_at, '') = ''", (target_id,)
+        ).fetchone()
+    if kind == "project":
+        return db.execute("SELECT id FROM projects WHERE id = ?", (target_id,)).fetchone()
+    return None
+
+
+def _link_ref_rows(db, link_ids=None, kind=None, target_ids=None):
+    """Relations vivantes. Les mémos en CORBEILLE sont exclus — masqués partout, conservés en
+    base : restaurer le mémo rend ses relations, comme pour les liens mémo↔mémo de v27 (D1)."""
+    where, args = ["1=1"], []
+    if link_ids is not None:
+        ids = [int(i) for i in link_ids]
+        if not ids:
+            return []
+        where.append("r.link_id IN (%s)" % ",".join("?" * len(ids)))
+        args += ids
+    if kind:
+        where.append("r.kind = ?")
+        args.append(kind)
+    if target_ids is not None:
+        ids = [int(i) for i in target_ids]
+        if not ids:
+            return []
+        where.append("r.target_id IN (%s)" % ",".join("?" * len(ids)))
+        args += ids
+    return db.execute(
+        "SELECT r.* FROM link_refs r "
+        "WHERE " + " AND ".join(where) + " AND ("
+        "  r.kind = 'project' OR EXISTS (SELECT 1 FROM memos m WHERE m.id = r.target_id "
+        "                                AND COALESCE(m.deleted_at, '') = '')) "
+        "ORDER BY r.id",
+        args,
+    ).fetchall()
+
+
+def _link_ref_chip(row):
+    """De quoi DESSINER le chip d'un lien, pas le lien : nom, favicon, URLs, domaine OG."""
+    return {
+        "link_id": row["id"],
+        "name": row["name"],
+        "favicon": "/api/favicon/%d" % row["id"],
+        "url_public": row["url_public"] or "",
+        "url_local": row["url_local"] or "",
+        "og_domain": _row_get(row, "og_domain", "") or "",
+    }
+
+
+def _link_refs_for_links(db, link_ids):
+    """{link_id: [{kind, id, uid, title, emoji, project_id}]} — le côté « vu depuis le lien »."""
+    rows = _link_ref_rows(db, link_ids=link_ids)
+    if not rows:
+        return {}
+    mids = [r["target_id"] for r in rows if r["kind"] == "memo"]
+    pids = [r["target_id"] for r in rows if r["kind"] == "project"]
+    memos, projs = {}, {}
+    if mids:
+        ph = ",".join("?" * len(mids))
+        memos = {m["id"]: m for m in db.execute(
+            f"SELECT * FROM memos WHERE id IN ({ph})", mids).fetchall()}
+    if pids:
+        ph = ",".join("?" * len(pids))
+        projs = {p["id"]: p for p in db.execute(
+            f"SELECT id, name, emoji, parent_id, uid FROM projects WHERE id IN ({ph})", pids).fetchall()}
+    out = {}
+    for r in rows:
+        if r["kind"] == "memo":
+            m = memos.get(r["target_id"])
+            if not m:
+                continue
+            out.setdefault(r["link_id"], []).append({
+                "kind": "memo", "id": m["id"], "uid": _row_get(m, "uid", "") or "",
+                # Titre TEXTE seulement, jamais de HTML (même garde que `_memo_link_title`).
+                "title": _memo_link_title(m), "emoji": _row_get(m, "emoji", "") or "",
+                "project_id": _row_get(m, "project_id", None),
+            })
+        else:
+            p = projs.get(r["target_id"])
+            if not p:
+                continue
+            out.setdefault(r["link_id"], []).append({
+                "kind": "project", "id": p["id"], "uid": _row_get(p, "uid", "") or "",
+                "title": p["name"], "emoji": _row_get(p, "emoji", "") or "",
+                "project_id": _row_get(p, "parent_id", None),
+            })
+    return out
+
+
+def _link_refs_by_target(db, kind, target_ids):
+    """{target_id: [chip]} — le côté « vu depuis le mémo ou le dossier »."""
+    rows = _link_ref_rows(db, kind=kind, target_ids=target_ids)
+    if not rows:
+        return {}
+    lids = sorted({r["link_id"] for r in rows})
+    ph = ",".join("?" * len(lids))
+    liens = {l["id"]: l for l in db.execute(
+        f"SELECT {LINK_FIELDS} FROM links WHERE id IN ({ph})", lids).fetchall()}
+    out = {}
+    for r in rows:
+        l = liens.get(r["link_id"])
+        if l:
+            out.setdefault(r["target_id"], []).append(_link_ref_chip(l))
+    return out
+
+
+def _share_link_refs(chips):
+    """[LINK-REFS] PROJECTION STRICTE pour les invités (tranche C, invariant 5).
+
+    Relier un lien à un mémo partagé est un acte du PROPRIÉTAIRE : c'est son consentement à
+    montrer ce lien, pas à ouvrir la table `links`. L'invité reçoit donc trois champs et pas un
+    de plus — jamais `url_local` (un service du LAN n'a rien à faire chez lui), jamais la note
+    `memo`, jamais les tags, jamais d'id. Un lien SANS `url_public` n'est pas exposé du tout :
+    il n'existe que sur le réseau de Fabien, le montrer ne servirait qu'à frustrer.
+    """
+    out = []
+    for c in chips or []:
+        if not (c.get("url_public") or "").strip():
+            continue
+        out.append({
+            "name": c.get("name", ""),
+            "url_public": c.get("url_public", ""),
+            "og_domain": c.get("og_domain", "") or "",
+        })
+    return out
+
+
+def _link_ref_add(db, link_id, kind, target_id, created_by=""):
+    """Pose la relation. UNE seule fonction d'écriture, quel que soit le côté d'où l'on écrit."""
+    if kind not in ("memo", "project"):
+        return {"error": "kind invalide"}, 400
+    if not db.execute("SELECT id FROM links WHERE id = ?", (link_id,)).fetchone():
+        return {"error": "lien introuvable"}, 404
+    if not _link_ref_target_ok(db, kind, target_id):
+        return {"error": "cible introuvable"}, 404
+    if db.execute(
+        "SELECT id FROM link_refs WHERE link_id = ? AND kind = ? AND target_id = ?",
+        (link_id, kind, target_id),
+    ).fetchone():
+        return {"ok": True, "already": True}, 200
+    n_lien = db.execute("SELECT COUNT(*) FROM link_refs WHERE link_id = ?", (link_id,)).fetchone()[0]
+    n_cible = db.execute(
+        "SELECT COUNT(*) FROM link_refs WHERE kind = ? AND target_id = ?", (kind, target_id)
+    ).fetchone()[0]
+    if n_lien >= LINK_REFS_MAX or n_cible >= LINK_REFS_MAX:
+        return {"error": f"Déjà {LINK_REFS_MAX} relations (maximum)."}, 400
+    db.execute(
+        "INSERT OR IGNORE INTO link_refs (link_id, kind, target_id, created_at, created_by) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (link_id, kind, target_id, datetime.now(timezone.utc).isoformat(), created_by or ""),
+    )
+    db.commit()
+    return {"ok": True}, 201
+
+
+def _link_ref_del(db, link_id, kind, target_id):
+    db.execute(
+        "DELETE FROM link_refs WHERE link_id = ? AND kind = ? AND target_id = ?",
+        (link_id, kind, target_id),
+    )
+    db.commit()
+
+
 def _memo_dict(row, owner_name=None, links=None):
     d = dict(row)
     d["links"] = links or []  # [MEMO-LINKS] runtime-only, JAMAIS exporté (l'export a `memo_links`)
+    # [LINK-REFS] v28 : idem, runtime-only (l'export porte `link_refs` par uid). Posée ici pour
+    # que TOUS les payloads mémo aient la même forme — un `undefined` côté front serait un piège.
+    d["link_refs"] = []
     cb = (d.get("created_by") or "").strip()
     # '' = propriétaire (résolu à l'affichage, survit au renommage owner) ;
     # chaîne non vide = identité invité « Nom <email> ».
@@ -4148,10 +4360,12 @@ def list_memos():
     amap = _attachments_map(db, [r["id"] for r in rows], lambda r: "/api/attachments/" + str(r["id"]))  # [ATTACHMENTS]
     hmap = _hearts_map(db)  # [FESTIVAL-VOTE] ❤️ par mémo
     lmap = _links_map(db, [r["id"] for r in rows])  # [MEMO-LINKS] owner = tout (mono-base)
+    rrmap = _link_refs_by_target(db, "memo", [r["id"] for r in rows])  # [LINK-REFS] v28
     gmap = _geo_photo_counts(db, [r["id"] for r in rows])  # [MAP-PHOTO-COUNT]
     out = []
     for row in rows:
         d = _memo_dict(row, owner_name, lmap.get(row["id"], []))
+        d["link_refs"] = rrmap.get(row["id"], [])  # [LINK-REFS] v28
         d["attachments"] = amap.get(d["id"], [])  # [ATTACHMENTS]
         d.update(_heart_fields(hmap.get(d["id"], []), "", owner_name))  # [FESTIVAL-VOTE] owner = voter ''
         g = guest_last.get(d["id"])
@@ -4503,6 +4717,53 @@ def _purge_memo_row(db, memo_id):
     # [MEMO-LINKS] purge en cascade des liens (les deux sens) — la corbeille les MASQUE,
     # la purge définitive les supprime (D1).
     db.execute("DELETE FROM memo_links WHERE src_memo_id = ? OR dst_memo_id = ?", (memo_id, memo_id))
+    # [LINK-REFS] v28 : même doctrine — la corbeille MASQUE, la purge définitive supprime.
+    db.execute("DELETE FROM link_refs WHERE kind = 'memo' AND target_id = ?", (memo_id,))
+
+
+# [LINK-REFS] v28 — owner uniquement (derrière Authelia). AUCUNE route sous `/share/*` :
+# relier est un acte du propriétaire, l'invité ne fait que LIRE la projection (invariant 5).
+# La lecture passe par les payloads existants (links / memos / projects), aucune route neuve.
+@app.route("/api/links/<int:link_id>/refs", methods=["POST"])
+def add_link_ref(link_id):
+    data = request.get_json(silent=True) or {}
+    payload, code = _link_ref_add(
+        get_db(), link_id, (data.get("kind") or "").strip(), _ref_int(data.get("target_id")))
+    return jsonify(payload), code
+
+
+@app.route("/api/links/<int:link_id>/refs/<kind>/<int:target_id>", methods=["DELETE"])
+def del_link_ref(link_id, kind, target_id):
+    _link_ref_del(get_db(), link_id, kind, target_id)
+    return "", 204
+
+
+# Miroirs de confort : écrire depuis le mémo ou le dossier, sans que le front ait à retourner
+# la relation dans l'autre sens. MÊME fonction d'écriture, mêmes gardes — jamais dupliquée.
+@app.route("/api/memos/<int:memo_id>/link-refs", methods=["POST"])
+def add_memo_link_ref(memo_id):
+    data = request.get_json(silent=True) or {}
+    payload, code = _link_ref_add(get_db(), _ref_int(data.get("link_id")), "memo", memo_id)
+    return jsonify(payload), code
+
+
+@app.route("/api/memos/<int:memo_id>/link-refs/<int:link_id>", methods=["DELETE"])
+def del_memo_link_ref(memo_id, link_id):
+    _link_ref_del(get_db(), link_id, "memo", memo_id)
+    return "", 204
+
+
+@app.route("/api/projects/<int:project_id>/link-refs", methods=["POST"])
+def add_project_link_ref(project_id):
+    data = request.get_json(silent=True) or {}
+    payload, code = _link_ref_add(get_db(), _ref_int(data.get("link_id")), "project", project_id)
+    return jsonify(payload), code
+
+
+@app.route("/api/projects/<int:project_id>/link-refs/<int:link_id>", methods=["DELETE"])
+def del_project_link_ref(project_id, link_id):
+    _link_ref_del(get_db(), link_id, "project", project_id)
+    return "", 204
 
 
 # [MEMO-LINKS] D4 — owner : tout (mono-base). Pose et retrait du lien ; la LECTURE passe par
@@ -6370,7 +6631,7 @@ def _send_share_recap(cfg, to_email, guest_name, owner_name, kind, target, share
     _smtp_send(cfg, msg)
 
 
-def _share_memo_dict(row, links=None):
+def _share_memo_dict(row, links=None, link_refs=None):
     d = _memo_dict(row, None, links)
     return {
         "id": d["id"],
@@ -6394,6 +6655,9 @@ def _share_memo_dict(row, links=None):
         "created_at": d.get("created_at", "") or "",
         "vote_excluded": bool(d.get("vote_excluded")),  # [VOTE-EXCLUDE] lecture invité (badge)
         "links": d.get("links", []),  # [MEMO-LINKS] déjà borné au scope par l'appelant (D4)
+        # [LINK-REFS] v28 : projection STRICTE {name, url_public, og_domain}, rien d'autre —
+        # la table `links` reste hors du périmètre invité (invariant 5, cf. `_share_link_refs`).
+        "link_refs": _share_link_refs(link_refs),
     }
 
 
@@ -8925,12 +9189,14 @@ def hub_data(hub_token):
             pr["attachments"] = [_attach_row_dict(a, "/share/" + tok + "/attachment/" + str(a["id"])) for a in pamap.get(pr["id"], [])]
     memos = []
     hub_links = _links_map(db, list(rows_by_id.keys()), scope_ids=list(rows_by_id.keys()))  # [MEMO-LINKS]
+    hub_refs = _link_refs_by_target(db, "memo", list(rows_by_id.keys()))  # [LINK-REFS] v28
     for mid, r in rows_by_id.items():
         covering = _cover_memo(r["project_id"], mid)
         if not covering:
             continue  # sécurité : jamais un mémo hors des shares de l'e-mail
         win = _hub_winner(covering)
-        d = _share_memo_dict(r, hub_links.get(mid, []))  # [MEMO-LINKS] borné aux mémos du hub
+        # [MEMO-LINKS] borné aux mémos du hub ; [LINK-REFS] projeté strictement (3 champs).
+        d = _share_memo_dict(r, hub_links.get(mid, []), hub_refs.get(mid, []))
         d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(mid, [])
         d["share_token"] = win["token"]
@@ -9237,8 +9503,9 @@ def share_data(token):
     # [MEMO-LINKS] liens BORNÉS au scope du partage : un lien vers un mémo hors scope est
     # simplement omis (jamais de titre-fantôme — D4, invariant 5).
     lmap = _links_map(db, memo_ids, scope_ids=memo_ids)
+    rrmap = _link_refs_by_target(db, "memo", memo_ids)  # [LINK-REFS] v28 (projection stricte)
     for r in rows:
-        d = _share_memo_dict(r, lmap.get(r["id"], []))
+        d = _share_memo_dict(r, lmap.get(r["id"], []), rrmap.get(r["id"], []))
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
             d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(r["id"], [])
@@ -10934,8 +11201,31 @@ def _build_export(db, root_id=None):
                 "src_uid": su, "dst_uid": du,
                 "created_at": r["created_at"], "created_by": r["created_by"] or "",
             })
+    # [LINK-REFS] v28 : relations lien↔(mémo|dossier) par UID, jamais d'id — un id n'a aucun
+    # sens dans une autre base. BORNÉES aux objets exportés (sous-arbre [EXPORT-SUBTREE] inclus) :
+    # une relation vers un mémo ou un dossier hors périmètre est OMISE, sinon l'export porterait
+    # un uid que rien, dans ce même fichier, ne permet de résoudre. Mémos en corbeille exclus
+    # (ils ne sont pas exportés). Absent chez un importeur v1→v27 = aucune relation.
+    link_uid_by_id = {r["id"]: (_row_get(r, "uid", "") or "") for r in links}
+    out_link_refs = []
+    if link_uid_by_id:
+        ph_r = ",".join("?" * len(link_uid_by_id))
+        for r in db.execute(
+            f"SELECT * FROM link_refs WHERE link_id IN ({ph_r}) ORDER BY id",
+            list(link_uid_by_id.keys()),
+        ).fetchall():
+            lu = link_uid_by_id.get(r["link_id"], "")
+            tu = (memo_uid_by_id.get(r["target_id"], "") if r["kind"] == "memo"
+                  else proj_uids.get(r["target_id"], "") if r["target_id"] in set(
+                      p["id"] for p in projects) else "")
+            if not lu or not tu:
+                continue
+            out_link_refs.append({
+                "link_uid": lu, "kind": r["kind"], "target_uid": tu,
+                "created_at": r["created_at"], "created_by": r["created_by"] or "",
+            })
     result = {
-        "version": int(APP_VERSION),  # [MEMO-LINKS] v27 (source unique = APP_VERSION)
+        "version": int(APP_VERSION),  # [LINK-REFS] v28 (source unique = APP_VERSION)
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "categories": [dict(r) for r in categories],
         "projects": out_projects,
@@ -10945,6 +11235,7 @@ def _build_export(db, root_id=None):
         "history": [dict(r) for r in history],
         "comments": out_comments,
         "memo_links": out_memo_links,  # [MEMO-LINKS] v27
+        "link_refs": out_link_refs,  # [LINK-REFS] v28
     }
     # [REACTION-PALETTE] v21 : palette custom exportée avec les réglages (comme les priorités).
     # Émise SEULEMENT si l'owner a configuré une palette (clé présente) → un export par défaut
@@ -11946,6 +12237,44 @@ def import_links():
         )
         imported_memo_links += 1
 
+    # [LINK-REFS] v28 : relations lien↔(mémo|dossier), résolues UID-D'ABORD et TOLÉRANTES —
+    # un uid inconnu (export partiel, sous-arbre) fait IGNORER la relation, jamais un 400.
+    # `INSERT OR IGNORE` sur la clé unique → ré-import v28 = 0 doublon. ADDITIF NON DESTRUCTIF :
+    # une relation locale n'est jamais retirée. Absent (v1→v27) = aucune relation (invariant 2).
+    imported_link_refs = 0
+    if data.get("link_refs"):
+        liens_par_uid = {
+            r["uid"]: r["id"] for r in db.execute(
+                "SELECT id, uid FROM links WHERE COALESCE(uid, '') <> ''").fetchall()
+        }
+        proj_par_uid = {
+            r["uid"]: r["id"] for r in db.execute(
+                "SELECT id, uid FROM projects WHERE COALESCE(uid, '') <> ''").fetchall()
+        }
+        for lr in data["link_refs"]:
+            if not isinstance(lr, dict):
+                continue
+            kind = (lr.get("kind") or "").strip()
+            if kind not in ("memo", "project"):
+                continue
+            lid = liens_par_uid.get((lr.get("link_uid") or "").strip())
+            tu = (lr.get("target_uid") or "").strip()
+            if kind == "memo":
+                row = memos_by_uid.get(tu)
+                tid = row["id"] if row else None
+            else:
+                tid = proj_par_uid.get(tu)
+            if not lid or not tid:
+                continue
+            cur = db.execute(
+                "INSERT OR IGNORE INTO link_refs (link_id, kind, target_id, created_at, created_by) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (lid, kind, tid, (lr.get("created_at") or "").strip() or now,
+                 str(lr.get("created_by") or "")[:200]),
+            )
+            if cur.rowcount:
+                imported_link_refs += 1
+
     db.commit()
     return jsonify(
         {
@@ -11958,6 +12287,7 @@ def import_links():
             "imported_history": imported_history,
             "imported_comments": imported_comments,
             "imported_memo_links": imported_memo_links,  # [MEMO-LINKS] v27
+            "imported_link_refs": imported_link_refs,  # [LINK-REFS] v28
         }
     )
 

@@ -200,6 +200,6 @@ def test_geo_photo_count_is_not_exported(client, geo):
     _upload(c, mid)
 
     export = c.get("/api/export").get_json()
-    assert export["version"] == 27
+    assert export["version"] == 28
     for m in export["memos"]:
         assert "geo_photo_count" not in m, "un compteur dérivé n'a rien à faire dans l'export"

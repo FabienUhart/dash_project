@@ -32,11 +32,11 @@ def _memos(c):
     return sorted(m.get("content", "") for m in r.get_json().get("memos", []))
 
 
-# --- Format d'export figé v27 --------------------------------------------
+# --- Format d'export figé v28 --------------------------------------------
 
-def test_export_version_is_27(client):
+def test_export_version_is_28(client):
     v = client.get("/api/version").get_json()
-    assert v["export"] == 27, "Format d'export modifié sans bump de version majeure."
+    assert v["export"] == 28, "Format d'export modifié sans bump de version majeure."
 
 
 def test_export_has_stable_top_level_keys(client):

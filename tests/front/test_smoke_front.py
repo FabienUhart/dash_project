@@ -117,7 +117,7 @@ def _pourquoi_absent(page, texte, console_errors):
 def test_api_version_reachable(live_server, page):
     resp = page.request.get(live_server + "/api/version")
     assert resp.ok
-    assert resp.json()["export"] == 27
+    assert resp.json()["export"] == 28
 
 
 def test_root_page_renders(live_server, page):
