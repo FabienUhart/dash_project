@@ -7468,15 +7468,124 @@ function searchMatch(words, ...fields) {
 // [SEARCH-FOLD] `q` sort désormais FOLDÉ (plus seulement en minuscules) et s'accompagne de
 // `words`, sa découpe en mots — les deux formes servent : `q` pour le `#tag` (match exact) et
 // les tests de préfixe, `words` pour `searchMatch`.
-function parseSearchPrefix(raw, scope) {
+function parseSearchPrefix(raw, scope, opts) {
   let q = String(raw == null ? '' : raw).trim();
   const m = q.match(/^([plm])[#:](.*)$/i);
   if (m) {
     scope = { p: 'projects', l: 'links', m: 'memos' }[m[1].toLowerCase()];
     q = m[2].trim();
   }
+  /* [MEMO-SORT-DATES] `d#`/`c#` : un INTERVALLE de dates, plus un reste de texte.
+     Reconnu ici pour que les trois pages parlent la même grammaire — mais seule la page
+     propriétaire l'APPLIQUE aujourd'hui (share/hub reçoivent `date` et l'ignorent : une
+     future parité ne redéfinira pas le parseur, ADR-001). Forme non reconnue → on ne
+     touche à rien et le texte est cherché tel quel : jamais de liste vide silencieuse. */
+  /* ⚠ L'analyse est OPT-IN (`opts.dates`), et ce n'est pas de la prudence gratuite : une page
+     qui reconnaîtrait `d#2026-11` sans l'APPLIQUER se retrouverait avec un `q` vide, donc
+     « aucun filtre » — et afficherait TOUT au lieu de rien. Share et hub n'appliquent pas les
+     dates : chez eux le préfixe doit rester du texte, exactement comme avant ce lot. */
+  let date = null;
+  if (opts && opts.dates && scope !== 'links' && scope !== 'projects') {
+    const d = parseDatePrefix(q);   // chercher un LIEN ou un DOSSIER n'a pas de date
+    if (d) { date = d; q = d.rest; }
+  }
   q = searchFold(q);
-  return { scope: scope, q: q, words: q ? q.split(' ').filter(Boolean) : [] };
+  return { scope: scope, q: q, words: q ? q.split(' ').filter(Boolean) : [], date: date };
+}
+
+/* ===== [MEMO-SORT-DATES] `d#` (échéance) et `c#` (création) — parseur PUR =====
+   `parseDatePrefix(raw, todayIso)` rend `{kind:'due'|'created', from, to, label, rest}` ou
+   `null`. `todayIso` est FOURNI (défaut : le jour local) — c'est ce qui rend les formes
+   relatives (« semaine », « demain ») testables sans dépendre du calendrier du jour.
+   Toute l'arithmétique passe par `Date.UTC` : une date de calendrier n'a pas d'heure, et la
+   faire passer par l'heure locale la ferait glisser d'un jour selon le fuseau. */
+function _isoUTC(y, m, d) {
+  return new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
+}
+function _isoShift(iso, jours) {
+  const t = Date.parse(iso + 'T00:00:00Z');
+  return new Date(t + jours * 86400000).toISOString().slice(0, 10);
+}
+function _finDeMois(y, m) {
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();   // jour 0 du mois suivant = dernier du mois
+}
+// Une écriture isolée → [from, to]. Sert aussi aux deux bouts d'une plage `a..b`.
+function _dateToken(tok, todayIso) {
+  let mm;
+  if ((mm = tok.match(/^(\d{4})-(\d{2})-(\d{2})$/))) {
+    const iso = mm[1] + '-' + mm[2] + '-' + mm[3];
+    return isNaN(Date.parse(iso + 'T00:00:00Z')) ? null : { from: iso, to: iso };
+  }
+  if ((mm = tok.match(/^(\d{2})\/(\d{2})\/(\d{4})$/))) {        // 07/11/2026 (FR)
+    return _dateToken(mm[3] + '-' + mm[2] + '-' + mm[1], todayIso);
+  }
+  if ((mm = tok.match(/^(\d{4})-(\d{2})$/))) {
+    const y = +mm[1], m = +mm[2];
+    if (m < 1 || m > 12) return null;
+    return { from: _isoUTC(y, m, 1), to: _isoUTC(y, m, _finDeMois(y, m)) };
+  }
+  if ((mm = tok.match(/^(\d{2})\/(\d{4})$/))) {                  // 11/2026 (FR)
+    return _dateToken(mm[2] + '-' + mm[1], todayIso);
+  }
+  if ((mm = tok.match(/^(\d{4})$/))) {
+    return { from: mm[1] + '-01-01', to: mm[1] + '-12-31' };
+  }
+  if (tok === 'aujourdhui') return { from: todayIso, to: todayIso };
+  if (tok === 'demain') { const j = _isoShift(todayIso, 1); return { from: j, to: j }; }
+  if (tok === 'hier') { const j = _isoShift(todayIso, -1); return { from: j, to: j }; }
+  if (tok === 'semaine') {
+    // Semaine ISO : lundi → dimanche. `getUTCDay()` rend 0 pour dimanche, d'où le report à 7.
+    const jour = new Date(Date.parse(todayIso + 'T00:00:00Z')).getUTCDay() || 7;
+    const lundi = _isoShift(todayIso, 1 - jour);
+    return { from: lundi, to: _isoShift(lundi, 6) };
+  }
+  if (tok === 'mois') {
+    const y = +todayIso.slice(0, 4), m = +todayIso.slice(5, 7);
+    return { from: _isoUTC(y, m, 1), to: _isoUTC(y, m, _finDeMois(y, m)) };
+  }
+  return null;
+}
+// Libellé LISIBLE de l'intervalle, déduit de ses bornes (jamais de la forme tapée) : un jour,
+// un mois entier, une année entière, sinon une plage. « d#mois » et « d#2026-11 » disent donc
+// la même chose — c'est le même intervalle.
+function _labelIntervalle(from, to) {
+  if (from === to) return fmtDayLong(from);
+  const y = +from.slice(0, 4), m = +from.slice(5, 7);
+  if (from === _isoUTC(y, m, 1) && to === _isoUTC(y, m, _finDeMois(y, m))) {
+    return new Date(from + 'T00:00:00Z').toLocaleDateString('fr-FR',
+      { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  }
+  if (from === y + '-01-01' && to === y + '-12-31') return String(y);
+  return fmtDateRange(from, to) + ' ' + to.slice(0, 4);
+}
+function fmtDayLong(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  return new Date(iso + 'T00:00:00Z').toLocaleDateString('fr-FR',
+    { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+function parseDatePrefix(raw, todayIso) {
+  const brut = String(raw == null ? '' : raw).trim();
+  const m = brut.match(/^([dc])[#:](\S+)(.*)$/i);
+  if (!m) return null;
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(String(todayIso || ''))
+    ? todayIso
+    : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  // Foldé (accents, majuscules) PUIS apostrophes retirées : « Aujourd'hui » = « aujourdhui ».
+  const tok = searchFold(m[2]).replace(/['’]/g, '');
+  const bornes = tok.indexOf('..') > 0
+    ? (() => {
+        const parts = tok.split('..');
+        const a = _dateToken(parts[0], today), b = _dateToken(parts[1], today);
+        return (a && b && parts.length === 2) ? { from: a.from, to: b.to } : null;
+      })()
+    : _dateToken(tok, today);
+  if (!bornes || bornes.from > bornes.to) return null;
+  return {
+    kind: m[1].toLowerCase() === 'd' ? 'due' : 'created',
+    from: bornes.from, to: bornes.to,
+    label: _labelIntervalle(bornes.from, bornes.to),
+    rest: (m[3] || '').trim(),
+  };
 }
 
 // Vrai sur mobile / pointeur grossier : c'est là que la feuille remplace la saisie inline.
@@ -7724,8 +7833,12 @@ function attachSearchUI(cfg) {
       sRes.appendChild(el('div', { class: 'ss-empty', text: 'Tape pour chercher — les résultats s\'affichent en direct.' }));
       return;
     }
-    const parsed = parseSearchPrefix(q, cur);
-    const hits = call(() => cfg.results(parsed.q, parsed.scope), []) || [];
+    /* [MEMO-SORT-DATES] La feuille analyse avec les MÊMES options que sa page (`cfg.dates`) et
+       transmet l'intervalle au fournisseur : sans ça, elle et la barre inline ne parleraient pas
+       de la même requête. Le drapeau reste opt-in — share et hub n'appliquent pas les dates,
+       chez eux le préfixe doit rester du texte (cf. la garde de `parseSearchPrefix`). */
+    const parsed = parseSearchPrefix(q, cur, { dates: !!cfg.dates });
+    const hits = call(() => cfg.results(parsed.q, parsed.scope, parsed.date), []) || [];
     if (!hits.length) {
       sRes.appendChild(el('div', { class: 'ss-empty', text: 'Aucun résultat pour « ' + q + ' »' }));
       return;

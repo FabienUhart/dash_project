@@ -173,7 +173,8 @@ header h1#home-btn:focus-visible { outline: 2px solid var(--accent); outline-off
 /* [SEARCH-IN-FOLDER] chip de portée « dans : 🗻 Voyage Japon ✕ ». Tokens existants, gabarit des
    petites pastilles (fond --panel-2, bordure --border, texte --muted) — invariant 9, rien de
    bespoke. `max-width` + ellipse : un nom long ne pousse jamais le champ de saisie. */
-#search-chip {
+#search-chip,
+#search-date-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -187,13 +188,15 @@ header h1#home-btn:focus-visible { outline: 2px solid var(--accent); outline-off
   color: var(--muted);
   white-space: nowrap;
 }
-#search-chip[hidden] { display: none; }
-#search-chip .sc-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-#search-chip .sc-x {
+#search-chip[hidden], #search-date-chip[hidden] { display: none; }
+#search-chip .sc-name, #search-date-chip .sc-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#search-chip .sc-x,
+#search-date-chip .sc-x {
   background: none; border: none; color: var(--muted); cursor: pointer;
   font-size: 0.7rem; line-height: 1; padding: 0.15rem 0.3rem; border-radius: 999px;
 }
-#search-chip .sc-x:hover, #search-chip .sc-x:focus-visible { color: var(--text); background: var(--panel); }
+#search-chip .sc-x:hover, #search-chip .sc-x:focus-visible,
+#search-date-chip .sc-x:hover, #search-date-chip .sc-x:focus-visible { color: var(--text); background: var(--panel); }
 #search-wrap kbd {
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -274,7 +277,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
    `:focus-within` (pseudo-classe) sont PLUS spécifiques que `#search-wrap` seul, une seule règle
    ne suffirait pas — au premier focus la barre repartirait à 620 px et recouvrirait l'heure. */
 @media (max-width: 900px), (pointer: coarse) {
-  #search-scope, #search-wrap kbd, #search-chip { display: none; }
+  #search-scope, #search-wrap kbd, #search-chip, #search-date-chip { display: none; }
   #search-wrap,
   #search-wrap.has-chip,
   #search-wrap:focus-within,
@@ -1865,6 +1868,18 @@ dialog .actions {
 }
 #links-sort button[aria-pressed="true"]:hover { background: var(--panel); border-color: var(--accent); }
 #links-sort button .ls-court { display: none; }  /* le libellé court n'existe qu'en mobile */
+/* [MEMO-SORT-DATES] Mini-menu de tri de la colonne MÉMOS : gabarit `.card-menu` / `.mini-add-btn`
+   existants (invariant 9), simplement ancrés. L'entrée active se dit par la matière + le ✓. */
+#memo-sort-wrap { position: relative; display: inline-flex; }
+#memo-sort-menu { min-width: 11rem; }
+#memo-sort-menu button.on { color: var(--accent); }
+/* Un tri actif se voit sur le bouton fermé, sinon la colonne semble désordonnée sans raison. */
+#memo-sort-btn.on { border-color: var(--accent); color: var(--accent); background: var(--panel); }
+/* La ligne « Tri » et la ligne d'aide réutilisent `.cover-disp` (tokens, gabarit) : seule leur
+   justification change — l'une porte deux groupes, l'autre une phrase qui se lit à gauche. */
+#memo-sort-bar { justify-content: flex-start; flex-wrap: wrap; }
+#memo-sort-bar #memo-sort-seg { margin-right: auto; }
+#memo-date-help { justify-content: flex-start; margin-top: -0.3rem; }
 #memo-add-btn { display: inline-flex; }          /* [MEMO-QUICK-STICKY] révélé desktop aussi (ouvre/scroll/focus) */
 .block-head { align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
 .block-head-label { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
@@ -2187,7 +2202,7 @@ dialog .actions {
     <input id="search" type="text" placeholder="Rechercher… (#tag, p# projets)" autocomplete="off" aria-label="Rechercher">
     <!-- [SEARCH-IN-FOLDER] chip de portée : visible seulement quand on cherche DEPUIS un dossier.
          Le ✕ élargit au global (l'ancien comportement reste donc à un clic). -->
-    <span id="search-chip" hidden></span>
+    <span id="search-chip" hidden></span><span id="search-date-chip" hidden></span>
     <select id="search-scope" title="Portée de la recherche (raccourcis : p# l# m#)">
       <option value="all">Tout</option>
       <option value="links">Liens</option>
@@ -2253,7 +2268,7 @@ dialog .actions {
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
-      <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span><button type="button" id="memo-jump-btn" class="mini-add-btn" title="Aller en bas" aria-label="Aller en bas de la colonne mémos">⤓</button><button type="button" id="memo-add-btn" class="mini-add-btn" title="Ajouter un mémo" aria-label="Ajouter un mémo">＋</button></summary>
+      <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span><button type="button" id="memo-jump-btn" class="mini-add-btn" title="Aller en bas" aria-label="Aller en bas de la colonne mémos">⤓</button><span id="memo-sort-wrap"><button type="button" id="memo-sort-btn" class="mini-add-btn" title="Trier les mémos" aria-label="Trier les mémos" aria-haspopup="true">⇅</button><div id="memo-sort-menu" class="card-menu" hidden></div></span><button type="button" id="memo-add-btn" class="mini-add-btn" title="Ajouter un mémo" aria-label="Ajouter un mémo">＋</button></summary>
       <div id="memos"></div>
       <div id="memo-quick-wrap"><textarea id="memo-quick" rows="2" placeholder="+ Note rapide… (Entrée pour ajouter)"></textarea></div>
     </details>
@@ -2803,6 +2818,8 @@ function textOn(hex) {
 
 // [LINK-SORT] déclaré AVANT `state` : `state.linkSort` l'appelle à l'initialisation (TDZ).
 const LINK_SORTS = ['manual', 'newest', 'oldest', 'name'];
+// [MEMO-SORT-DATES] même raison, même place : `state.memoSort` appelle `loadMemoSort()`.
+const MEMO_SORTS = ['manual', 'newest', 'updated', 'due'];
 
 const state = {
   links: [],
@@ -2824,6 +2841,7 @@ const state = {
   favorites: [],  // [FAVORITES] ids de projets épinglés (ordre serveur)
   tagFilter: null,  // [TAG-NAV] étiquette affichée dans la vue dédiée
   linkSort: loadLinkSort(),  // [LINK-SORT] tri de la vue Liens, réglage d'AFFICHAGE (localStorage)
+  memoSort: loadMemoSort(),  // [MEMO-SORT-DATES] tri des mémos — UN réglage pour le board ET la colonne
 };
 
 /* ===== [LINK-SORT] Trier la vue Liens — une VUE, jamais une écriture =====
@@ -2862,6 +2880,26 @@ function sortLinks(links, mode) {
 }
 
 // L'état sélectionné se lit sur `aria-pressed` (et le CSS s'y accroche) : une seule source.
+// [MEMO-SORT-DATES] Le mini-menu de la colonne est RECONSTRUIT à chaque rendu : il montre le
+// mode courant (✓ + matière), qu'il ait été choisi ici ou sur le board — un seul état, deux portes.
+function renderMemoSortMenu() {
+  const menu = document.getElementById('memo-sort-menu');
+  const btn = document.getElementById('memo-sort-btn');
+  if (!menu || !btn) return;
+  menu.innerHTML = '';
+  MEMO_SORT_LABELS.forEach(([mode, label, titre]) => {
+    const actif = state.memoSort === mode;
+    menu.appendChild(el('button', {
+      class: actif ? 'on' : '', text: (actif ? '✓ ' : '\u00a0\u00a0 ') + label,
+      attrs: { type: 'button', title: titre, 'data-msort': mode },
+      on: { click: (e) => { e.stopPropagation(); menu.hidden = true; if (!actif) setMemoSort(mode); } },
+    }));
+  });
+  btn.classList.toggle('on', state.memoSort !== 'manual');
+  btn.setAttribute('title', state.memoSort === 'manual' ? 'Trier les mémos'
+    : 'Tri : ' + (MEMO_SORT_LABELS.find(x => x[0] === state.memoSort) || [, ''])[1]);
+}
+
 function renderLinkSort() {
   document.querySelectorAll('#links-sort button[data-sort]').forEach(b => {
     b.setAttribute('aria-pressed', String(b.dataset.sort === state.linkSort));
@@ -2871,6 +2909,70 @@ function renderLinkSort() {
 
 // Un seul jeu de boutons dans le DOM (pas de doublon d'id) : en mobile ≤900px la barre
 // `#links-actions` disparaît, le groupe déménage donc dans l'en-tête de bloc, à gauche du ＋.
+/* ===== [MEMO-SORT-DATES] Trier les mémos — même doctrine que [LINK-SORT] =====
+   Un SEUL état pour deux surfaces : le board et la colonne MÉMOS lisent `state.memoSort`.
+   Deux réglages jumeaux qui divergeraient seraient pires que pas de tri du tout. */
+function loadMemoSort() {
+  try {
+    const v = localStorage.getItem('dash:memoSort');
+    return MEMO_SORTS.includes(v) ? v : 'manual';
+  } catch (e) { return 'manual'; }
+}
+
+function setMemoSort(mode) {
+  state.memoSort = MEMO_SORTS.includes(mode) ? mode : 'manual';
+  try { localStorage.setItem('dash:memoSort', state.memoSort); } catch (e) {}
+  renderAll();
+}
+
+/* Rend une NOUVELLE liste triée — jamais en place : `state.memos` garde l'ordre du serveur,
+   c'est ce qui permet au retour en « Manuel » de retrouver l'ordre d'origine sans recharger.
+   ⚠ `manual` veut dire « exactement ce qu'on voyait avant ce lot », et ce n'est pas la même
+   chose des deux côtés : la colonne rend l'ordre de l'API (`position, id`), le board garde son
+   tri intra-section par date/heure (`byTime`). C'est la décision n° 1 du brief — rien ne bouge
+   tant qu'on ne clique pas —, donc l'appelant décide de ce que vaut `manual` chez lui. */
+function sortMemos(memos, mode) {
+  const arr = memos.slice();
+  if (mode === 'newest') arr.sort((a, b) => cmpIso(b.created_at, a.created_at) || (b.id - a.id));
+  else if (mode === 'updated') arr.sort((a, b) => cmpIso(b.updated_at, a.updated_at) || (b.id - a.id));
+  else if (mode === 'due') {
+    /* Échéance : la plus proche d'abord, une PLAGE classée par son début. Un mémo SANS date
+       n'est pas « le 0000-00-00 » : il n'a pas d'échéance, il descend en bas — et entre eux,
+       ces mémos gardent l'ordre manuel (tri stable, aucune clé inventée). */
+    const sans = arr.filter(m => !m.due_date);
+    const avec = arr.filter(m => m.due_date);
+    avec.sort((a, b) =>
+      cmpIso(a.due_date, b.due_date)
+      || ((a.due_time ? 1 : 0) - (b.due_time ? 1 : 0))
+      || cmpIso(a.due_time, b.due_time)
+      || (a.id - b.id));
+    return avec.concat(sans);
+  }
+  return arr;
+}
+
+// Le segment « Tri » du board. Gabarit `.cover-seg` de la bascule Immersif/Compact (partial) :
+// aucune classe nouvelle, l'actif se dit par la MATIÈRE (`.on`) — invariant 9.
+function memoSortSeg() {
+  const seg = el('div', { attrs: { id: 'memo-sort-seg', class: 'cover-seg' } });
+  MEMO_SORT_LABELS.forEach(([mode, label, titre]) => {
+    const actif = state.memoSort === mode;
+    seg.appendChild(el('button', {
+      class: 'cover-seg-btn' + (actif ? ' on' : ''), text: label,
+      attrs: { type: 'button', title: titre, 'data-msort': mode, 'aria-pressed': String(actif) },
+      on: { click: () => { if (!actif) setMemoSort(mode); } },
+    }));
+  });
+  return seg;
+}
+
+const MEMO_SORT_LABELS = [
+  ['manual', 'Manuel', "L'ordre que tu as posé à la main"],
+  ['newest', 'Plus récents', 'Les mémos créés le plus récemment d\u2019abord'],
+  ['updated', 'Modifiés', 'Les mémos modifiés le plus récemment d\u2019abord'],
+  ['due', 'Échéance', "L'échéance la plus proche d'abord ; sans date en bas"],
+];
+
 function placeLinkSort() {
   const grp = document.getElementById('links-sort');
   if (!grp) return;
@@ -2883,7 +2985,13 @@ function placeLinkSort() {
 
 // [SEARCH-SHARED] le parseur de préfixes (`p#`/`l#`/`m#`) vit désormais dans le partial —
 // même corps pour les 3 pages. Ici on ne garde que la liaison à l'état de la page.
-function parseSearch() { return parseSearchPrefix(state.search, state.searchScope); }
+// [MEMO-SORT-DATES] `dates: true` : la page propriétaire est la seule à APPLIQUER `d#`/`c#`,
+// donc la seule à les faire reconnaître (cf. la garde opt-in dans le partial).
+function parseSearch() { return parseSearchPrefix(state.search, state.searchScope, { dates: true }); }
+/* [MEMO-SORT-DATES] « une recherche est-elle en cours ? » ne se lit plus sur le seul texte :
+   `d#2026-11` a un intervalle et AUCUN mot. Sans ce prédicat, le board se croirait au repos et
+   n'appliquerait jamais le filtre de date. Un seul endroit décide, comme `boardScopeFilter`. */
+function searchActiveNow() { const s = parseSearch(); return !!(s.q || s.date); }
 
 /* ===== [SEARCH-IN-FOLDER] la recherche respecte le dossier où l'on se trouve =====
    Avant : dès qu'une recherche était active, le board abandonnait le scope du dossier
@@ -2908,8 +3016,8 @@ function searchScopeSet() {
    « Projets »/« Liens » exprime la même intention que `p#`/`l#` et mérite le même traitement. */
 const SEARCH_WIDE_SCOPES = ['projects', 'links'];
 function searchIsScoped() {
-  const { q, scope } = parseSearch();
-  if (!q) return false;
+  const { q, scope, date } = parseSearch();
+  if (!q && !date) return false;   // [MEMO-SORT-DATES] `d#`/`c#` restent bornés au dossier
   if (SEARCH_WIDE_SCOPES.indexOf(scope) >= 0) return false;
   if (state.memoProject === 'all' || state.memoProject === 'inbox') return false;
   return !(searchWide && searchWideProj === state.memoProject);
@@ -2918,7 +3026,7 @@ function searchIsScoped() {
    commentaire d'origine exige « mêmes mémos que la liste affichée → jamais de point fantôme »,
    donc scoper la liste seule aurait désynchronisé la carte. Un seul endroit décide. */
 function boardScopeFilter() {
-  const searchActive = !!parseSearch().q;
+  const searchActive = searchActiveNow();
   const scoped = searchIsScoped();
   const scope = searchScopeSet();
   return (m) => {
@@ -3075,6 +3183,7 @@ function renderAll() {
   // uniquement (togglé par `hidden` comme #links-actions). Le CSS le masque sur desktop.
   document.getElementById('links-blockhead').hidden = v !== 'links';
   renderLinkSort();  // [LINK-SORT] état pressé + hôte (barre desktop / en-tête de bloc mobile)
+  renderMemoSortMenu();  // [MEMO-SORT-DATES] le ⇅ de la colonne reflète le mode courant
   if (v === 'memos') renderBoard();
   else if (v === 'shares') renderShares();
   else if (v === 'trash') renderTrash();
@@ -4307,7 +4416,10 @@ function tagQuery() {
 
 function visibleLinks() {
   let links = state.links;
-  const { scope, q, words } = parseSearch();
+  const { scope, q, words, date } = parseSearch();
+  // [MEMO-SORT-DATES] `d#`/`c#` interrogent des ÉCHÉANCES : un lien n'en a pas. Sans cette
+  // garde, une recherche par date (dont le texte est vide) rendrait la liste ENTIÈRE des liens.
+  if (date) return [];
   if (q) {
     if (scope === 'memos' || scope === 'projects') return [];
     const tag = q.startsWith('#') && q.length > 1 ? q.slice(1) : null;
@@ -4597,7 +4709,7 @@ function openProjectZip(proj) {
 function boardMapPoints() {
   // Mêmes mémos que la liste affichée (recherche + filtre + projet) → la carte
   // reste cohérente avec ce qu'on voit, jamais de point « fantôme ».
-  const searchActive = !!parseSearch().q;
+  const searchActive = searchActiveNow();
   const scoped = searchIsScoped();            // [SEARCH-IN-FOLDER]
   const scope = searchScopeSet();
   const memos = visibleMemos().filter(boardScopeFilter());
@@ -4980,8 +5092,36 @@ let dragMemoId = null;
 const expandedMemos = new Set();
 let doneOpen = false;
 
+/* [MEMO-SORT-DATES] Le mémo tombe-t-il dans l'intervalle demandé ?
+   `d#` = INTERSECTION de la plage [due_date .. due_end] avec [from .. to] — un séjour du 6 au
+   8 novembre doit sortir pour `d#2026-11-07`, un jour où il ne commence ni ne finit ; c'est
+   tout l'intérêt de `due_end` ([MEMO-DATE-RANGE]). Un mémo sans date ne matche jamais.
+   `c#` = jour LOCAL de création : `created_at` est un ISO UTC, le comparer tel quel ferait
+   basculer de mois un mémo créé le 1er octobre à 00 h 30 à Paris (stocké le 30/09 à 22 h 30 Z). */
+function memoInDateRange(m, date) {
+  if (!date) return true;
+  if (date.kind === 'created') {
+    const t = Date.parse(m.created_at || '');
+    if (isNaN(t)) return false;
+    const jour = dateStr(new Date(t));
+    return jour >= date.from && jour <= date.to;
+  }
+  if (!m.due_date) return false;
+  return m.due_date <= date.to && memoDueEndDay(m) >= date.from;
+}
+
 function visibleMemos() {
-  const { scope, q, words } = parseSearch();
+  const { scope, q, words, date } = parseSearch();
+  if (date) {
+    const dans = state.memos.filter(m => memoInDateRange(m, date));
+    if (!q) return dans;
+    if (scope === 'links') return [];
+    return dans.filter(m => searchMatch(
+      words, m.title, stripHTML(m.content),
+      (m.assignees || []).join(' '),
+      (m.subtasks || []).map(st => st.content).join(' ')
+    ));
+  }
   if (!q) return state.memos;
   if (scope === 'links') return [];
   // [SEARCH-FOLD] Un dossier trouvé apporte son SOUS-ARBRE, pas ses seuls mémos directs.
@@ -8513,6 +8653,7 @@ function taskEl(memo) {
       e.stopPropagation();
       return;
     }
+    if (state.memoSort !== 'manual') return;   // [MEMO-SORT-DATES] réordonner : Manuel seulement
     if (!dragMemoId || dragMemoId === memo.id) return;
     e.preventDefault();
     const dragging = document.querySelector('#memo-board .task.dragging');
@@ -8842,11 +8983,12 @@ function renderBoard() {
   // [VOTE-GROUPS] sélection de scrutin / mode création non persistés : reset au changement de projet.
   if (voteBoardProj !== state.memoProject) { selectedVoteId = null; voteCreate = null; voteBoardProj = state.memoProject; }
 
-  const searchActive = !!parseSearch().q;
+  const searchActive = searchActiveNow();
   const searchScoped = searchIsScoped();       // [SEARCH-IN-FOLDER]
   const projScope = searchScopeSet();
   // Changer de dossier passe par renderAll (pas par refreshSearch) : le chip doit suivre.
   if (typeof renderSearchChip === 'function') renderSearchChip();
+  if (typeof renderSearchDateChip === 'function') renderSearchDateChip();
   const allMemos = visibleMemos().filter(boardScopeFilter());
   const todayD = dateStr(new Date());
 
@@ -9332,7 +9474,23 @@ function renderBoard() {
       hasPhotos: allMemos.some(m => (m.images || []).length),
       onChange: renderBoard,
     });
-    if (cov.bar) board.appendChild(cov.bar);
+    /* [MEMO-SORT-DATES] UNE seule ligne de réglages d'affichage : le tri à gauche, la bascule
+       Immersif/Compact à droite. La bascule n'existe QUE si un mémo porte une photo — le tri,
+       lui, doit toujours être là : c'est donc la rangée de tri qui porte la ligne, et la
+       bascule vient s'y ranger quand elle a lieu d'être. */
+    const rang = el('div', { attrs: { id: 'memo-sort-bar', class: 'cover-disp' } });
+    rang.appendChild(el('span', { class: 'cover-disp-lbl', text: 'Tri' }));
+    rang.appendChild(memoSortSeg());
+    if (cov.bar) while (cov.bar.firstChild) rang.appendChild(cov.bar.firstChild);
+    board.appendChild(rang);
+    // Ligne d'aide des préfixes de date : informative, jamais cliquable (leçon [SEARCH-FOLD] —
+    // une ligne qui pré-remplirait le champ le viderait au premier clic).
+    const aide = el('div', { attrs: { id: 'memo-date-help', class: 'cover-disp' } });
+    aide.appendChild(el('span', {
+      class: 'cover-disp-lbl',
+      text: 'Dates : d#2026-11 · d#2026-11-03..2026-11-09 · d#semaine · c#2026-09 (créés)',
+    }));
+    board.appendChild(aide);
   }
 
   // [BOARD-SUBHIDE] / [SUBHIDE-V2] cadre « SOUS-DOSSIERS » collé à la liste (après Fichiers/Vocal,
@@ -9392,7 +9550,13 @@ function renderBoard() {
     (a.due_date || '').localeCompare(b.due_date || '') ||
     ((a.due_time ? 1 : 0) - (b.due_time ? 1 : 0)) ||
     (a.due_time || '').localeCompare(b.due_time || '');
-  sections.forEach(s => s.items.sort(byTime));
+  /* [MEMO-SORT-DATES] Le tri choisi s'applique DANS chaque section (les sections, elles, ne
+     bougent pas : elles disent « en retard / aujourd'hui / à venir », pas un ordre). En
+     « Manuel », on garde `byTime` — le tri intra-section qui existait avant ce lot. */
+  sections.forEach(s => {
+    if (state.memoSort === 'manual') s.items.sort(byTime);
+    else s.items = sortMemos(s.items, state.memoSort);
+  });
 
   if (state.memoFilter === 'done') {
     const wrap = el('div', { class: 'memo-section' });
@@ -9488,6 +9652,10 @@ function renderBoard() {
 
 document.getElementById('memo-board').addEventListener('drop', async (e) => {
   e.preventDefault();
+  /* [MEMO-SORT-DATES] Ce handler reconstruit l'ordre GLOBAL à partir du DOM : sur une liste
+     triée, il recopierait le tri dans `position` — exactement ce que « le tri est une vue »
+     interdit. Déplacer un mémo dans un DOSSIER passe par la sidebar et reste actif partout. */
+  if (state.memoSort !== 'manual') return;
   if (!dragMemoId) return;
   const visibleIds = [...document.querySelectorAll('#memo-board .task')].map(n => Number(n.dataset.memoId));
   const globalIds = state.memos.map(m => m.id);
@@ -9497,7 +9665,7 @@ document.getElementById('memo-board').addEventListener('drop', async (e) => {
   await api('/api/memos/reorder', { method: 'POST', body: JSON.stringify({ ids: merged }) });
   await loadAll();
 });
-document.getElementById('memo-board').addEventListener('dragover', (e) => { if (dragMemoId) e.preventDefault(); });
+document.getElementById('memo-board').addEventListener('dragover', (e) => { if (dragMemoId && state.memoSort === 'manual') e.preventDefault(); });
 
 function visibleHistory() {
   const { q } = parseSearch();
@@ -9564,7 +9732,9 @@ function renderHistory(board) {
 function renderMemos() {
   const wrap = document.getElementById('memos');
   wrap.innerHTML = '';
-  const pending = visibleMemos().filter(m => !m.done);
+  // [MEMO-SORT-DATES] ici `manual` = l'ordre reçu de l'API (`position, id`), donc `sortMemos`
+  // rend la liste inchangée — c'est exactement ce qu'on voyait avant le lot.
+  const pending = sortMemos(visibleMemos().filter(m => !m.done), state.memoSort);
   const doneCount = state.memos.filter(m => m.done).length;
   document.getElementById('memo-count').textContent = pending.length ? `(${pending.length})` : '';
   pending.forEach((memo) => {
@@ -9759,6 +9929,35 @@ function renderSearchChip() {
     on: { click: () => { searchWide = true; searchWideProj = state.memoProject; refreshSearch(); } },
   }));
 }
+
+/* [MEMO-SORT-DATES] Chip de l'intervalle de dates, au gabarit du chip de portée (invariant 9).
+   Il ne s'affiche QUE si le préfixe a été reconnu : c'est le signal qu'une forme inconnue a été
+   laissée au texte, plutôt qu'un silence qui rendrait une liste vide inexplicable. Son ✕ retire
+   le préfixe et GARDE le texte libre — on ne détruit pas la moitié de la requête. */
+function renderSearchDateChip() {
+  const chip = document.getElementById('search-date-chip');
+  if (!chip) return;
+  const { date } = parseSearch();
+  if (!date) { chip.hidden = true; chip.innerHTML = ''; return; }
+  chip.innerHTML = '';
+  chip.hidden = false;
+  const quoi = date.kind === 'due' ? '📅 échéance :' : '🕓 créés :';
+  chip.title = (date.kind === 'due' ? 'Mémos dont l\u2019échéance tombe entre le '
+                                    : 'Mémos créés entre le ') + date.from + ' et le ' + date.to;
+  chip.appendChild(el('span', { text: quoi }));
+  chip.appendChild(el('span', { class: 'sc-name', text: date.label }));
+  chip.appendChild(el('button', {
+    class: 'sc-x', text: '✕',
+    attrs: { type: 'button', title: 'Retirer le filtre de date',
+             'aria-label': 'Retirer le filtre de date' },
+    on: { click: () => {
+      const inp = document.getElementById('search');
+      state.search = date.rest;
+      if (inp) inp.value = date.rest;
+      refreshSearch();
+    } },
+  }));
+}
 /* ===== [SEARCH-SHARED] aide desktop + feuille mobile = composant du partial =====
    Le panneau d'aide (ex-[SEARCH-DESK-UX], qui vivait ici) et la feuille de recherche mobile sont
    désormais fournis par `attachSearchUI()` — MÊME composant sur owner/share/hub. Cette page
@@ -9770,9 +9969,18 @@ function renderSearchChip() {
    (`visibleMemos`, `visibleLinks`, `boardScopeFilter`). C'est ce qui garantit que la feuille et le
    board montrent exactement les mêmes mémos — jamais un résultat fantôme, même exigence que la
    carte et la frise ([SEARCH-IN-FOLDER]). */
-function ownerSearchResults() {
-  const { scope, q } = parseSearch();
-  if (!q) return [];
+function ownerSearchResults(q, scope, date) {
+  /* ⚠️ [MEMO-SORT-DATES] `if (!q) return []` était FAUX depuis ce lot, et la feuille mobile
+     l'a payé : avec `d#2026-11`, le texte EST vide alors que la requête est parfaitement
+     valide — la feuille annonçait « Aucun résultat » quand le board en listait 49. Une
+     recherche ne se résume pas à ses mots ; c'est `searchActiveNow()` qui en décide, comme
+     partout ailleurs. (Même défaut que celui rattrapé côté partage, deux fois la même leçon.)
+     Les arguments restent volontairement ignorés — la feuille a DÉJÀ écrit `state.search`
+     avant d'appeler, donc repasser par les fonctions du board est ce qui garantit qu'elle et
+     le board montrent exactement les mêmes mémos. */
+  if (!searchActiveNow()) return [];
+  const { scope: _s, q: _q } = parseSearch();
+  scope = _s; q = _q;
   const projLabel = (id) => {
     const p = state.projects.find(x => x.id === id);
     return p ? ((p.emoji ? p.emoji + ' ' : '') + p.name) : '📥 Inbox';
@@ -9811,6 +10019,8 @@ const searchUI = attachSearchUI({
     { k: 'l#', fill: 'l#', d: 'Chercher un <b>lien</b> — <i>l#navidrome</i>' },
     { k: '#…', fill: '#',  d: 'Par <b>étiquette</b> — <i>#japon</i>, <i>#notes</i>' },
     { k: 'éÉ', d: '<b>Accents et ordre des mots</b> indifférents — <i>sanjo kyoto</i> trouve <i>Kyoto · Sanjo</i>' },
+    { k: 'd#', fill: 'd#', d: 'Par <b>échéance</b> — <i>d#2026-11</i>, <i>d#2026-11-03..2026-11-09</i>, <i>d#semaine</i>' },
+    { k: 'c#', fill: 'c#', d: 'Par date de <b>création</b> — <i>c#2026-09</i>, <i>c#aujourd\u2019hui</i>' },
   ],
   helpFoot: [['/', 'ouvre la recherche'], ['Entrée', 'ouvre le premier lien'], ['Échap', 'efface et ferme']],
   scopeNote: () => {
@@ -9851,6 +10061,9 @@ const searchUI = attachSearchUI({
   getScope: () => state.searchScope,
   setScope: (v) => { state.searchScope = v; if (searchScopeSel) searchScopeSel.value = v; },
   results: ownerSearchResults,
+  // [MEMO-SORT-DATES] La feuille mobile parle la même grammaire que la barre inline de CETTE
+  // page : elle seule applique `d#`/`c#` (share et hub gardent le préfixe en texte).
+  dates: true,
   onChange: () => refreshSearch(),
 });
 // Conservé sous son nom d'origine : `refreshSearch()` l'appelle déjà, la ligne ne bouge pas.
@@ -9861,8 +10074,11 @@ function refreshSearch() {
   searchScopeSel.classList.toggle('scoped', scope !== 'all');
   // Vider la recherche remet la portée par défaut : un élargissement ponctuel ne doit pas
   // contaminer la recherche suivante.
-  if (!q) { searchWide = false; searchWideProj = null; }
+  // [MEMO-SORT-DATES] `q` peut être vide alors qu'une recherche par DATE est en cours
+  // (`d#2026-11` n'a aucun mot) : ne pas relâcher l'élargissement dans ce cas.
+  if (!searchActiveNow()) { searchWide = false; searchWideProj = null; }
   renderSearchChip();
+  renderSearchDateChip();
   refreshSearchHelp();   // [SEARCH-DESK-UX]
   if (q && scope === 'projects' && state.view !== 'memos') {
     state.view = 'memos';
@@ -10099,6 +10315,25 @@ window.addEventListener('resize', placeLinkSort);
   // « + » du bloc Mémos : ouvre le <details> si replié, puis scroll + focus #memo-quick.
   // ⚠️ Le bouton est dans un <summary> : sans preventDefault+stopPropagation, le clic toggle
   // le <details> (même précaution que #memo-open).
+  /* [MEMO-SORT-DATES] ⇅ « Trier » de la colonne MÉMOS. Même pattern `.card-menu` que le ＋ de
+     la vue Liens, et mêmes précautions que ses voisins : le bouton vit dans un `<summary>`, donc
+     sans `preventDefault` + `stopPropagation` le clic (dé)plierait le `<details>` et basculerait
+     la vue. Le menu lit et écrit le MÊME état que le segment du board. */
+  const memoSortBtn = document.getElementById('memo-sort-btn');
+  const memoSortMenu = document.getElementById('memo-sort-menu');
+  memoSortBtn.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    memoSortMenu.hidden = !memoSortMenu.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    if (!memoSortMenu.hidden && !memoSortMenu.contains(e.target) && e.target !== memoSortBtn) {
+      memoSortMenu.hidden = true;
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !memoSortMenu.hidden) memoSortMenu.hidden = true;
+  });
+
   const memoAddBtn = document.getElementById('memo-add-btn');
   memoAddBtn.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();
