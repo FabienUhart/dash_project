@@ -16,6 +16,27 @@ la suite cesse de dépendre d'une connexion.
 """
 import pytest
 
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args):
+    """[E2E-SW-GUARD] Service worker BLOQUÉ dans les e2e.
+
+    À la première visite d'un contexte neuf — donc à CHAQUE test — la page enregistre `/sw.js` au
+    `load` ; le SW fait `clients.claim()`, la page reçoit `controllerchange` et se recharge
+    (`location.reload()`, index.html, bloc [OFFLINE]). Ce rechargement tombe n'importe quand après
+    le chargement : sur un runner lent il détruisait le contexte JS au milieu d'un `evaluate`
+    (« Execution context was destroyed » — test_rotate_and_save_a_photo le 25/09, test_link_refs
+    le 28/09, deploy bloqué). On teste l'app, pas le SW : il a son test dédié
+    (`test_service_worker.py`), dans un contexte qui l'autorise explicitement.
+
+    Bonus : Playwright ne voit pas passer les requêtes émises PAR un service worker — la garde
+    « zéro réseau » ci-dessous n'est étanche que SW bloqué.
+
+    Chaîné : un fichier qui surcharge encore `browser_context_args` (fuseau de
+    test_search_dates) part de ce dictionnaire, donc hérite du blocage.
+    """
+    return {**browser_context_args, "service_workers": "block"}
+
+
 # Ce que la page a le droit d'atteindre : elle-même, et rien d'autre.
 _SCHEMES_LOCAUX = ("data:", "blob:", "about:", "chrome-error:")
 
