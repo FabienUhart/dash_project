@@ -2658,6 +2658,8 @@ function setTheme(t) {
   if (u) u.setAttribute('href', light ? '#ic-sun' : '#ic-moon');
 }
 
+const STAGGER_MAX = 24;       // [STAGGER-CAP] nœuds animés au plus
+const STAGGER_AMOUNT = 0.35;  // [STAGGER-CAP] écart total de la cascade (s)
 function stagger(sel, opts) {
   // Autonome : calcule g (GSAP) et le reduced-motion lui-même (pas de dépendance
   // au contexte de page — cf. fix [SHARED-HELPERS], les locaux g/reduce des
@@ -2665,15 +2667,30 @@ function stagger(sel, opts) {
   const g = window.gsap;
   if (!g) return;
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const nodes = document.querySelectorAll(sel);
+  const nodes = [...document.querySelectorAll(sel)];
   if (!nodes.length) return;
   g.killTweensOf(nodes);
-  g.fromTo(nodes,
+  // [STAGGER-CAP] Seuls les nœuds DANS le viewport (au plus STAGGER_MAX) entrent en fondu ;
+  // les autres sont visibles d'emblée. Et l'écart total de la cascade est borné (amount) :
+  // sinon 0.045 s × 336 mémos = 15 s d'écran noir avant la dernière card.
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const anim = [], rest = [];
+  nodes.forEach(n => {
+    const r = n.getBoundingClientRect();
+    const inView = r.width > 0 && r.bottom > 0 && r.top < vh;
+    (inView && anim.length < STAGGER_MAX ? anim : rest).push(n);
+  });
+  if (rest.length) g.set(rest, { clearProps: 'transform,opacity,visibility' });
+  if (!anim.length) return;
+  const o = Object.assign({}, opts || {});
+  const each = typeof o.stagger === 'number' ? o.stagger : 0.045;
+  o.stagger = { amount: Math.min(STAGGER_AMOUNT, each * (anim.length - 1)) };
+  g.fromTo(anim,
     { autoAlpha: 0, y: 14 },
     Object.assign({
       autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out',
-      stagger: 0.045, overwrite: true, clearProps: 'transform,opacity,visibility',
-    }, opts || {}));
+      overwrite: true, clearProps: 'transform,opacity,visibility',
+    }, o));
 }
 
 function announce(msg) {
