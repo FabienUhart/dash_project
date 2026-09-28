@@ -2688,6 +2688,18 @@ function syncHeaderHeight() {
   if (h) document.documentElement.style.setProperty('--header-h', h.offsetHeight + 'px');
 }
 
+// [HEADER-H-OBSERVE] Le header peut grandir SANS resize de fenêtre (3e ligne d'horloge
+// #clock-extra, titre qui passe sur deux lignes…). Load/resize ne suffisent pas : un
+// ResizeObserver recale --header-h à chaque changement de hauteur, sinon tout ce qui est
+// collé sur --header-h (sidebar, colonne MÉMOS) glisse sous le header.
+function watchHeaderHeight() {
+  syncHeaderHeight();
+  window.addEventListener('resize', syncHeaderHeight);
+  window.addEventListener('load', syncHeaderHeight);
+  const h = document.querySelector('header');
+  if (h && window.ResizeObserver) new ResizeObserver(syncHeaderHeight).observe(h);
+}
+
 // [UNDO-DELETE] Toast « … supprimé — Annuler » (~5 s) après une suppression douce. Générique :
 // `onUndo` est le callback de restauration (route propre à la page). Élément flottant créé à la
 // volée, tokens CSS, pas de GSAP (invariant 8). Un seul toast à la fois (remplace le précédent).

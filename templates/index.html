@@ -30,6 +30,7 @@
 <script src="/static/gsap.min.js" defer></script>
 <style>
 :root {
+  --footer-h: 2.4rem;  /* [HEADER-H-OBSERVE] hauteur du footer, réservée en bas de main */
   --bg: #0e1217;
   --panel: #161d25;
   --panel-2: #212b35;
@@ -646,7 +647,9 @@ button.icon { padding: 0.45rem 0.6rem; }
 .share-row button { padding: 0.15rem 0.5rem; font-size: 0.8rem; flex-shrink: 0; }
 
 /* ---------- layout ---------- */
-.layout { display: flex; min-height: calc(100dvh - 57px); }
+/* [HEADER-H-OBSERVE] --header-h (mesuré) et non plus 57px en dur : le header réel en fait 59,
+   et ces 2 px suffisaient à faire défiler la fenêtre. */
+.layout { display: flex; min-height: calc(100dvh - var(--header-h, 57px)); }
 
 nav#sidebar {
   width: clamp(180px, 16vw, 240px);
@@ -1945,7 +1948,15 @@ dialog .actions {
   cursor: pointer;
 }
 
+/* [HEADER-H-OBSERVE] Footer DANS main, épinglé à son bas : main est étiré à la hauteur de
+   #layout (flex, align stretch), donc le footer tombe en bas de l'écran quand le contenu est
+   court, et au fond de la page quand il est long — sans jamais allonger la page. main réserve sa
+   hauteur en padding-bottom (--footer-h) pour qu'il ne recouvre jamais la dernière card.
+   Pleine largeur : main ne porte pas de marge, left/right 0 couvrent son padding. */
+main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
 #app-footer {
+  position: absolute; left: 0; right: 0; bottom: 0; box-sizing: border-box;
+  height: var(--footer-h);
   text-align: center;
   color: var(--gray);
   font-size: 0.72rem;
@@ -2044,7 +2055,7 @@ dialog .actions {
   #memo-details[open] summary::before { content: "▾ "; }
   #memo-details summary { position: static; }  /* [MEMO-JUMP-BOTTOM] pas de sticky en mobile */
   #clock-date { display: none; }
-  main { padding: 0.75rem; }
+  main { padding: 0.75rem; padding-bottom: calc(0.75rem + var(--footer-h)); }
   /* === Overrides mémos mobile (placés APRÈS les règles de base pour gagner la cascade :
      les @media n'augmentent pas la spécificité, c'est l'ordre qui tranche) === */
   .task .task-row { flex-wrap: wrap; }
@@ -2320,6 +2331,9 @@ dialog .actions {
     <div id="agenda-board" hidden></div>
     <div id="favorites-board" hidden></div>
     <div id="tag-board" hidden></div>
+    <!-- [HEADER-H-OBSERVE] Le footer vit DANS main (posé en bas par le CSS) : hors de #layout,
+         il allongeait la page de sa hauteur et faisait remonter les colonnes sticky sous le header. -->
+    <footer id="app-footer">Dashboard v{{ version }} · créé par Fabien U.</footer>
   </main>
   <aside id="memo-panel">
     <details id="memo-details" open>
@@ -2329,8 +2343,6 @@ dialog .actions {
     </details>
   </aside>
 </div>
-
-<footer id="app-footer">Dashboard v{{ version }} · créé par Fabien U.</footer>
 
 <dialog id="link-dialog">
   <h3 id="dialog-title">Nouveau lien</h3>
@@ -11007,9 +11019,7 @@ document.getElementById('folders-sheet').addEventListener('click', (e) => {
 
 
 // Hauteur réelle du header (qui se replie sur 2 lignes en mobile) → utilisée par la
-syncHeaderHeight();
-window.addEventListener('resize', syncHeaderHeight);
-window.addEventListener('load', syncHeaderHeight);
+watchHeaderHeight();
 
 /* ---- barre latérale : eye (montre/cache tout) + hamburger (rail icônes) ----
    GSAP optionnel : dégrade en bascule de classe instantanée si absent ou reduced-motion.
