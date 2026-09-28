@@ -1298,6 +1298,32 @@ const MAP_OVERLAYS = {
   },
 };
 
+// [MAP-DIALOG-WIDE] Mise en page de la pop-in Carte/Frise, commune owner/invité (même DOM,
+// rendu par runMapDialog). Injectée une fois, comme _voiceStyle. Les `!important` battent les
+// styles INLINE du markup et des chips (hauteur de carte, nowrap de la bande des jours).
+// DESKTOP : carte ≥ 60vh, liste 320 px, bande des jours sur 2 lignes (wrap) aux boutons ≥ 32 px —
+// fini la barre de défilement horizontale qui recouvrait les boutons et le « Jour 19 » hors cadre.
+// MOBILE : carte 45vh, sous-projets et groupes repliés derrière « Filtres » (331 px de chips
+// avant la carte) ; la bande des jours y reste sur une ligne balayable (elle convenait).
+function _mapWideStyle() {
+  if (document.getElementById('map-wide-style')) return;
+  const st = document.createElement('style'); st.id = 'map-wide-style';
+  st.textContent = '#map-dialog .map-frise-strip{scrollbar-gutter:stable}'
+    + '@media (min-width:901px){'
+    + '#map-el{height:max(60vh,320px)!important}'
+    + '#map-list{width:320px!important;max-height:max(60vh,320px)!important}'
+    + '#map-dialog .map-days-band{flex-wrap:wrap!important;overflow-x:hidden!important;overflow-y:auto!important;'
+    + 'max-height:calc(64px + 0.25rem + 2px);scrollbar-gutter:stable;padding-bottom:0!important}'
+    + '#map-dialog .map-days-band .prio-btn{min-height:32px;font-size:0.74rem!important;padding:0.15rem 0.6rem!important}'
+    + '#map-filters-btn,#map-filterbar{display:none!important}'
+    + '}'
+    + '@media (max-width:900px){'
+    + '#map-el{height:45vh!important}'
+    + '#map-dialog:not(.map-filters-open) #map-subbar,#map-dialog:not(.map-filters-open) #map-groupbar{display:none!important}'
+    + '}';
+  document.head.appendChild(st);
+}
+
 function runMapDialog(cfg) {
   if (typeof L === 'undefined') {
     notify('Carte non disponible : fichiers Leaflet manquants dans static/ (voir README).', { error: true });
@@ -1315,7 +1341,14 @@ function runMapDialog(cfg) {
   const UNGROUPED = ' none';
 
   document.getElementById('map-title').textContent = '🗺 ' + cfg.title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
-  document.getElementById('map-dialog').showModal();
+  _mapWideStyle();
+  const mapDlg = document.getElementById('map-dialog');
+  mapDlg.classList.remove('map-filters-open');   // filtres repliés à chaque ouverture (mobile)
+  mapDlg.showModal();
+  // [MAP-DIALOG-WIDE] Un <dialog> GARDE son scrollTop entre close() et showModal() : rouvrir la
+  // carte la montrait déjà défilée (barre Voix/Photos/Frise et chips cachées au-dessus). Toujours
+  // repartir du haut.
+  mapDlg.scrollTop = 0;
   // [MAP-TRIP-POLISH fix carte noire] démontage robuste : si une exception a laissé une
   // instance à moitié initialisée, remove() peut jeter et le conteneur rester marqué
   // (« Map container is being reused ») → try/catch + purge du marqueur Leaflet orphelin.
@@ -2163,11 +2196,19 @@ function runMapDialog(cfg) {
       if (!box || !child) return;
       box.scrollLeft = Math.max(0, Math.min(child.offsetLeft - (box.clientWidth - child.offsetWidth) / 2, box.scrollWidth - box.clientWidth));
     };
+    // [MAP-DIALOG-WIDE] idem sur les DEUX axes : en desktop la bande des jours passe à la ligne
+    // (défilement vertical), en mobile elle reste une rangée balayable (horizontal).
+    const revealIn = (box, child) => {
+      if (!box || !child) return;
+      const b = box.getBoundingClientRect(), c = child.getBoundingClientRect();
+      box.scrollLeft += (c.left - b.left) - (box.clientWidth - c.width) / 2;
+      box.scrollTop += (c.top - b.top) - (box.clientHeight - c.height) / 2;
+    };
     const scrollToToday = () => {
       if (!todayInRange) return;
       const tlx = document.getElementById('map-timeline'); if (!tlx) return;
       const bandx = tlx.querySelector('.map-days-band');
-      if (bandx) centerH(bandx, bandx.querySelector('[data-day-iso="' + tlToday + '"]'));
+      if (bandx) revealIn(bandx, bandx.querySelector('[data-day-iso="' + tlToday + '"]'));
       const stripx = tlx.querySelector('.map-frise-strip');
       if (stripx) centerH(stripx, stripx.querySelector('[data-day="' + tlToday + '"]') || [...stripx.children].find(x => x.getAttribute && x.getAttribute('title') === 'Aujourd\'hui'));
     };
@@ -2443,10 +2484,36 @@ function runMapDialog(cfg) {
     subbar.parentNode.insertBefore(bar, subbar);
   }
 
+  // [MAP-DIALOG-WIDE] Mobile : sous-projets et groupes repliés derrière « Filtres (n) », n = filtres
+  // ACTIFS (un filtre replié se voit quand même). Le repli est du CSS (classe sur le dialog) ; en
+  // desktop le bouton est masqué et les barres restent affichées.
+  const oldFb = document.getElementById('map-filterbar');
+  if (oldFb) oldFb.remove();
+  const filtersBtn = el('button', {
+    class: 'prio-btn',
+    attrs: { type: 'button', id: 'map-filters-btn', 'aria-expanded': 'false', style: 'padding:0.1rem 0.5rem',
+      title: 'Afficher les filtres par sous-projet et par groupe' },
+    on: { click: () => { mapDlg.classList.toggle('map-filters-open'); syncFiltersBtn(); } },
+  });
+  const toolbarEl = document.getElementById('map-toolbar');
+  const filterBar = toolbarEl ? null : el('div', { attrs: { id: 'map-filterbar', style: 'display:flex;margin:0 0 0.45rem' } }, filtersBtn);
+  if (toolbarEl) toolbarEl.appendChild(filtersBtn);
+  else subbar.parentNode.insertBefore(filterBar, subbar);
+  function syncFiltersBtn() {
+    const any = subbar.style.display !== 'none' || groupbar.style.display !== 'none';
+    const open = mapDlg.classList.contains('map-filters-open');
+    const n = active.size + subActive.size;
+    filtersBtn.style.display = any ? '' : 'none';
+    if (filterBar) filterBar.style.display = any ? 'flex' : 'none';
+    filtersBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    filtersBtn.textContent = open ? 'Masquer les filtres' : 'Filtres' + (n ? ' (' + n + ')' : '');
+  }
+
   function refresh(fit) {
     renderVoteBar();  // [VOTE-MAP] chips de scrutin (masqué si aucun scrutin)
     renderSubbar();
     renderGroupbar();
+    syncFiltersBtn();
     renderSelbar();
     draw(current, fit);
     // [MAP-TIMELINE] frise + tracé voyage suivent le même focus que les marqueurs.
