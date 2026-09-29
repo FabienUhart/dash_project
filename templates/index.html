@@ -3499,6 +3499,24 @@ function catEmoji(idx) { return CAT_EMOJIS[(idx + 1) % CAT_EMOJIS.length]; }
 function sbSectionOpen(name) { return localStorage.getItem('sbSection:' + name) !== '0'; }
 function toggleSbSection(name) { localStorage.setItem('sbSection:' + name, sbSectionOpen(name) ? '0' : '1'); }
 function sbProjOpen(id) { return localStorage.getItem('sbProjOpen:' + id) !== '0'; }
+
+/* [SIDEBAR-COLLAPSE] « 👥 Invités » : dossier SYSTÈME (espaces perso des invités, [GUEST-HOME]).
+   Identifié comme côté serveur (app.py GUEST_HOME_ROOT_NAME) : par NOM + RACINE, jamais par id.
+   Il n'est pas un dossier de Fabien : rendu en dernier derrière un filet, hors compteur, non
+   déplaçable — dans la sidebar ET dans le panneau mobile. */
+const GUEST_HOME_ROOT_NAME = 'Invités';
+function isGuestHomeRoot(p) { return !!p && !p.parent_id && p.name === GUEST_HOME_ROOT_NAME; }
+// Racines dans l'ordre d'affichage : les dossiers de Fabien, puis Invités.
+function orderedRootProjects() {
+  const roots = state.projects.filter(p => !p.parent_id);
+  return roots.filter(p => !isGuestHomeRoot(p)).concat(roots.filter(isGuestHomeRoot));
+}
+// Retrait visuel d'Invités : le filet est un `div.sidebar-sep` EXISTANT posé juste avant (inv. 9) ;
+// l'opacité va sur les ENFANTS — ⚠ l'entrée GSAP de la sidebar fait `clearProps: 'all'` sur les
+// items, un style inline posé sur l'item lui-même disparaîtrait au premier rendu animé.
+function markGuestHomeRoot(item) {
+  [...item.children].forEach(c => { c.style.opacity = '0.85'; });
+}
 function toggleSbProj(id) { localStorage.setItem('sbProjOpen:' + id, sbProjOpen(id) ? '0' : '1'); }
 
 /* ===== [MOBILE-NAV] Panneau « Dossiers » (mobile) =====
@@ -3635,9 +3653,13 @@ function renderFoldersSheet() {
       onToggle: () => { fsToggleProj(p.id); renderFoldersSheet(); },
       onPick: () => { state.view = 'memos'; state.memoProject = p.id; closeFoldersSheet(); renderAll(); },
     }));
+    if (!depth && isGuestHomeRoot(p)) {
+      markGuestHomeRoot(box.lastChild);
+      box.insertBefore(el('div', { class: 'sidebar-sep' }), box.lastChild);
+    }
     if (kids.length && ouvert) kids.forEach(c => dessine(c, depth + 1));
   };
-  state.projects.filter(p => !p.parent_id).forEach(p => dessine(p, 0));
+  orderedRootProjects().forEach(p => dessine(p, 0));
   if (!box.children.length) {
     box.appendChild(el('div', { text: 'Aucun dossier ne correspond.', attrs: {
       style: 'font-size:0.82rem;color:var(--muted);font-style:italic;padding:0.4rem' } }));
@@ -3821,6 +3843,7 @@ function renderSidebar() {
     const item = el('div', {
       class: 'cat-item sub' + (state.view === 'memos' && state.memoProject === key ? ' active' : ''),
     });
+    if (projId) item.setAttribute('data-proj-id', String(projId));
     const select = () => { state.view = 'memos'; state.memoProject = key; renderAll(); };
     if (editFn) {
       let timer = null;
@@ -3936,6 +3959,39 @@ function renderSidebar() {
     inboxItem.insertBefore(el('span', { class: 'sb-proj-chev' }), inboxItem.firstChild);
     nav.appendChild(inboxItem);
 
+    /* [SIDEBAR-COLLAPSE] En-tête « 📂 Dossiers » : l'arbre se replie comme les autres sections
+       (même `div.sb-section-head`, même `sbSection:<nom>`). Inbox reste AU-DESSUS, toujours visible :
+       c'est la boîte d'entrée. Replié, le total des mémos de l'arbre (hors Invités) s'affiche. */
+    const guestIds = new Set();
+    state.projects.filter(isGuestHomeRoot).forEach(g => {
+      guestIds.add(g.id); projectDescendants(g.id).forEach(id => guestIds.add(id));
+    });
+    const dOpen = secOpen('dossiers');
+    const dHead = el('div', { class: 'sb-section-head',
+      attrs: { 'data-section': 'dossiers', title: dOpen ? 'Replier les dossiers' : 'Déplier les dossiers' } });
+    dHead.appendChild(el('span', { class: 'sb-chevron', text: dOpen ? '▾' : '▸' }));
+    dHead.appendChild(el('span', { class: 'sb-section-label', text: '📂 Dossiers' }));
+    if (!dOpen) {
+      const total = state.projects.filter(p => !guestIds.has(p.id))
+        .reduce((n, p) => n + (p.memo_count || 0), 0);
+      dHead.appendChild(el('span', { class: 'count', text: String(total) }));
+    }
+    // ⇅ : un dossier à enfants encore ouvert → tout replier ; sinon tout déplier. Écrit les clés
+    // `sbProjOpen:<id>`, celles que le panneau mobile lit aussi : il suit.
+    const withKids = state.projects.filter(p => projectChildren(p.id).length);
+    const anyOpen = withKids.some(p => sbProjOpen(p.id));
+    dHead.appendChild(el('button', {
+      class: 'sb-section-add', text: '⇅',
+      attrs: { type: 'button', title: anyOpen ? 'Tout replier' : 'Tout déplier' },
+      on: { click: (e) => {
+        e.stopPropagation();   // ⇅ plie les dossiers, pas la section
+        withKids.forEach(p => { try { localStorage.setItem('sbProjOpen:' + p.id, anyOpen ? '0' : '1'); } catch (_) {} });
+        renderSidebar();
+      } },
+    }));
+    dHead.addEventListener('click', () => { toggleSbSection('dossiers'); renderSidebar(); });
+    nav.appendChild(dHead);
+
     // [SIDEBAR-TREE] Arbre à indentation fixe : les enfants vont dans un conteneur
     // .sb-kids (ligne guide CSS, ~17px/niveau), plus de connecteurs texte (les emojis
     // cassaient l'alignement monospace). Chevron DANS la ligne, colonne fixe — les
@@ -3954,12 +4010,18 @@ function renderSidebar() {
         chev.style.cursor = 'default';
       }
       item.insertBefore(chev, item.firstChild);
-      item.setAttribute('draggable', 'true');
-      item.addEventListener('dragstart', (e) => {
-        dragProjId = p.id;
-        e.dataTransfer.effectAllowed = 'move';
-      });
-      item.addEventListener('dragend', () => { dragProjId = null; });
+      if (isGuestHomeRoot(p)) {
+        // [SIDEBAR-COLLAPSE] dossier système : filet avant, pas déplaçable
+        markGuestHomeRoot(item);
+        wrap.appendChild(el('div', { class: 'sidebar-sep' }));
+      } else {
+        item.setAttribute('draggable', 'true');
+        item.addEventListener('dragstart', (e) => {
+          dragProjId = p.id;
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        item.addEventListener('dragend', () => { dragProjId = null; });
+      }
       wrap.appendChild(item);
       if (kids.length && projOpen(p.id)) {
         const kw = el('div', { class: 'sb-kids' });
@@ -3967,8 +4029,7 @@ function renderSidebar() {
         wrap.appendChild(kw);
       }
     };
-    const roots = state.projects.filter(p => !p.parent_id);
-    roots.forEach(p => renderProjTree(p, nav));
+    if (dOpen) orderedRootProjects().forEach(p => renderProjTree(p, nav));
   }
 
   // ===== Section ÉTIQUETTES [TAG-NAV] — owner-only. Sources : tags des liens (v7) + projets (v8).
@@ -9592,12 +9653,17 @@ function renderBoard() {
     const mapName = state.memoProject === 'all' ? 'Tous les mémos'
       : state.memoProject === 'inbox' ? 'Inbox'
       : ((state.projects.find(p => p.id === state.memoProject) || {}).name || 'Carte');
-    tb.add({ icon: 'map', label: 'Carte', count: mapPoints.length + photoGeo,
+    const mapN = mapPoints.length + photoGeo;
+    const mapBtn = tb.add({ icon: 'map', label: 'Carte', count: mapN,
       title: 'Voir les points géolocalisés de cette vue (mémos et photos) sur une carte',
       // Sans point-mémo, `runMapDialog` refuserait de s'ouvrir (« Aucun élément géolocalisé ») :
       // on demande donc l'ouverture directe sur le calque photo, qui est justement ce qu'on a.
       onClick: () => openMapDialog(mapName, boardMapPoints(), boardMapPoints,
         mapPoints.length ? {} : { autoPhoto: true }) }); tbCount++;
+    // [SIDEBAR-COLLAPSE] la pastille dit ce qu'elle compte. Pas de « Carte · n » : la pastille
+    // affiche déjà n, le libellé le répéterait.
+    const mapPill = mapBtn.querySelector('.hdr-count');
+    if (mapPill) mapPill.title = mapN + (mapN > 1 ? ' points géolocalisés' : ' point géolocalisé');
   }
   // [HEADER-TOOLBAR v3] ordre du header : titre SEUL (plus rien à droite) → description → rangée
   // d'infos → barre d'actions. La barre + les contrôles de vote-dossier sont appendés APRÈS le bloc
@@ -9813,19 +9879,23 @@ function renderBoard() {
   };
   const filters = el('div', { attrs: { id: 'memo-filters' } });
   [
-    ['all', 'f-inbox', '📥', 'En cours'],
+    // [SIDEBAR-COLLAPSE] icône trait ≠ 📥 : Inbox = mémos SANS dossier, « En cours » = tous les
+    // non terminés — même icône = contresens (Fabien, 29 sept.).
+    ['all', 'f-inbox', icon('checklist'), 'En cours'],
     ['today', 'f-today', '⭐', "Aujourd'hui"],
     ['scheduled', 'f-scheduled', '📅', 'Planifiés'],
     ['overdue', 'f-overdue', '⚠️', 'En retard'],
     ['done', 'f-done', '✅', 'Terminés'],
     ['history', 'f-history', '📜', 'Historique'],
-  ].forEach(([key, cls, icon, label]) => {
+  ].forEach(([key, cls, ico, label]) => {
     const tile = el('div', {
       class: 'mfilter ' + cls + (state.memoFilter === key ? ' active' : ''),
       on: { click: () => { state.memoFilter = key; renderBoard(); } },
     });
     const top = el('div', { class: 'mf-top' });
-    top.appendChild(el('span', { class: 'mf-icon', text: icon }));
+    const ic = el('span', { class: 'mf-icon' });
+    if (typeof ico === 'string') ic.textContent = ico; else ic.appendChild(ico);
+    top.appendChild(ic);
     top.appendChild(el('span', { class: 'mf-count', text: String(counts[key]) }));
     tile.appendChild(top);
     tile.appendChild(el('span', { class: 'mf-label', text: label }));
