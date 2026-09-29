@@ -4943,8 +4943,88 @@ function _photoSecStyle() {
        (fond plein) au SURVOL seulement, quand le geste est engagé. */
     + '.mp-del{position:absolute;top:-6px;right:-6px;width:1.3rem;height:1.3rem;min-height:0;padding:0;font-size:0.7rem;line-height:1;border-radius:50%;background:var(--panel);color:var(--muted);border:1px solid var(--border);cursor:pointer;display:none;align-items:center;justify-content:center}'
     + '.mp-thumb:hover .mp-del{display:inline-flex}'
-    + '.mp-del:hover{background:var(--red,var(--danger));color:#fff;border-color:var(--red,var(--danger))}';
+    + '.mp-del:hover{background:var(--red,var(--danger));color:#fff;border-color:var(--red,var(--danger))}'
+    /* [PASTE-IMAGE] vignette d'attente : même gabarit 64 px, sans croix ni zoom. */
+    + '.mp-pending{height:64px;width:64px;border-radius:6px;border:1px solid var(--border);background:var(--panel-2);display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:var(--muted)}';
   document.head.appendChild(st);
+}
+
+// [PASTE-IMAGE] ⌘V / Ctrl+V / « Coller » mobile d'une image → « 📷 Photos » du mémo en cours
+// d'édition. UN SEUL écouteur global (capture), posé une fois : il vise la DERNIÈRE section
+// éditable rendue (`_pasteSec`). Pas d'écouteur par section : ouvrir/fermer l'éditeur n'en
+// empile jamais, et la section n'est pas encore dans le DOM quand on la construit (pas de
+// `closest('dialog')` possible à ce moment). La capture passe AVANT le presse-papiers de Quill,
+// qui abandonne sur `defaultPrevented` (sinon il insérerait l'image en base64 dans le corps).
+let _pasteSec = null;
+function _pasteHasText(cd) {
+  if ((cd.getData('text/plain') || '').trim()) return true;
+  // Chrome « Copier l'image » dépose aussi un `<img src=…>` : du HTML SANS texte n'en est pas.
+  const html = cd.getData('text/html');
+  if (!html) return false;
+  const tpl = document.createElement('template'); tpl.innerHTML = html;
+  return !!(tpl.content.textContent || '').trim();
+}
+function _pasteName(type, now, i) {
+  const ext = { 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }[type] || 'png';
+  const p = (n) => String(n).padStart(2, '0');
+  return 'Collage ' + now.getFullYear() + '-' + p(now.getMonth() + 1) + '-' + p(now.getDate())
+    + ' ' + p(now.getHours()) + 'h' + p(now.getMinutes()) + (i ? '-' + (i + 1) : '') + '.' + ext;
+}
+async function _onPasteImage(e) {
+  const sec = _pasteSec;
+  if (!sec || !sec.wrap.isConnected || !e.clipboardData) return;
+  const dlg = sec.wrap.closest('dialog');
+  if (dlg && !dlg.open) return;   // éditeur fermé : le board ne crée rien par surprise
+  // Une autre pop-in par-dessus (confirmation, visionneuse) : ce collage n'est pas pour nous.
+  if (dlg && e.target instanceof Node && e.target !== document.body && !dlg.contains(e.target)) return;
+  const files = [...(e.clipboardData.files || [])].filter((f) => (f.type || '').indexOf('image/') === 0);
+  if (!files.length || _pasteHasText(e.clipboardData)) return;
+  e.preventDefault();
+  await _pasteUpload(sec, files);
+}
+// Chemin commun du collage (⌘V) et du bouton « Coller une image » : renommage, vignette
+// d'attente, envoi par la cfg de la page, re-rendu.
+async function _pasteUpload(sec, files) {
+  const now = new Date();
+  const named = files.map((f, i) => new File([f], _pasteName(f.type, now, i), { type: f.type }));
+  let grid = sec.wrap.querySelector('.mp-grid');
+  if (!grid) { grid = el('div', { class: 'mp-grid' }); sec.wrap.insertBefore(grid, sec.wrap.children[1] || null); }
+  const pend = named.map(() => grid.appendChild(el('div', { class: 'mp-thumb mp-pending', text: '⏳', attrs: { 'aria-label': 'Envoi en cours' } })));
+  try {
+    await sec.cfg.onUpload(named);   // les refus serveur sont notifiés par la page (message serveur)
+  } catch (err) {
+    pend.forEach((p) => p.remove());
+    await notify('Collage impossible : ' + ((err && err.message) || 'erreur réseau'), { error: true });
+    return;
+  }
+  pend.forEach((p) => p.remove());
+  await sec.cfg.onChange();
+}
+// [PASTE-IMAGE addendum] Bouton « Coller une image » : lit le presse-papiers au clic (API
+// asynchrone, contexte sécurisé seulement — absente → pas de bouton). Pour qui ne pense pas à
+// ⌘V, et sur mobile où « Coller » exige un champ focalisé.
+function _pasteClipBtn(wrap, cfg) {
+  if (!(navigator.clipboard && typeof navigator.clipboard.read === 'function')) return null;
+  const b = el('button', { class: 'prio-btn', attrs: { type: 'button', style: 'display:inline-flex;align-items:center;gap:0.3rem;margin-top:0.3rem' } });
+  b.appendChild(hdrIconAt('clipboard', 14));
+  b.appendChild(el('span', { text: 'Coller une image' }));
+  b.addEventListener('click', async () => {
+    let items;
+    try { items = await navigator.clipboard.read(); }
+    catch (err) { await notify('Presse-papiers inaccessible : ' + ((err && err.message) || 'accès refusé'), { error: true }); return; }
+    const files = [];
+    for (const it of items || []) {
+      const t = (it.types || []).find((x) => x.indexOf('image/') === 0);
+      if (t) { const blob = await it.getType(t); files.push(new File([blob], 'image', { type: t })); }
+    }
+    if (!files.length) { await notify('Aucune image dans le presse-papiers.'); return; }
+    await _pasteUpload({ wrap, cfg }, files);
+  });
+  return b;
+}
+function _armPasteImage(wrap, cfg) {
+  if (!window._pasteImageArmed) { window._pasteImageArmed = true; document.addEventListener('paste', _onPasteImage, true); }
+  _pasteSec = { wrap, cfg };
 }
 function renderMemoPhotos(cfg) {
   const images = cfg.images || [];
@@ -4993,7 +5073,8 @@ function renderMemoPhotos(cfg) {
     wrap.appendChild(grid);
   }
   if (cfg.canEdit) {
-    const f = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg', multiple: 'true', style: 'display:none' } });
+    // [PASTE-IMAGE] gif/webp aussi : le serveur les accepte (ALLOWED_IMG_EXT).
+    const f = el('input', { attrs: { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: 'true', style: 'display:none' } });
     f.addEventListener('change', async () => {
       if (f.files && f.files.length) { await cfg.onUpload([...f.files]); await cfg.onChange(); }
       f.value = '';
@@ -5001,8 +5082,11 @@ function renderMemoPhotos(cfg) {
     { const add = plusBtn('Ajouter une photo');   // [EDITOR-FILES-MONO] ＋ en icône trait
       add.style.marginTop = '0.3rem';
       add.addEventListener('click', () => f.click());
-      wrap.appendChild(add); }
+      wrap.appendChild(add);
+      const clip = _pasteClipBtn(wrap, cfg);
+      if (clip) { clip.style.marginLeft = '0.4rem'; wrap.appendChild(clip); } }
     wrap.appendChild(f);
+    _armPasteImage(wrap, cfg);
   }
   return wrap;
 }
