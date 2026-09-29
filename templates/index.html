@@ -743,7 +743,8 @@ nav#sidebar.sb-rail .fav-star { display: none; }
 /* [SIDEBAR-TREE] enfants d'un projet dans un conteneur : indentation fixe ~17px/niveau
    + ligne guide verticale CSS (fini la dérive des connecteurs texte avec les emojis). */
 .sb-kids { margin-left: 0.8rem; padding-left: 0.25rem; border-left: 1px solid var(--border); }
-nav#sidebar.sb-rail .sb-kids { display: contents; }
+/* [RAIL-LABELS] le rail garde la STRUCTURE de l'arbre (replis respectés), sans l'indentation. */
+nav#sidebar.sb-rail .sb-kids { margin: 0; padding: 0; border: 0; }
 nav#sidebar.sb-rail .sb-section-head,
 nav#sidebar.sb-rail .sb-tree,
 nav#sidebar.sb-rail .sb-proj-chev { display: none; }
@@ -786,8 +787,16 @@ nav#sidebar.sb-rail .sb-proj-chev { display: none; }
 }
 .sidebar-sep { border-top: 1px solid var(--border); margin: 0.6rem 0.3rem; }
 /* toggles barre latérale (eye = masquer, hamburger = rail icônes) */
+/* [RAIL-LABELS] rail DÉFILABLE : un `overflow: hidden` global écrasait l'`overflow-y: auto` desktop
+   (derniers dossiers inatteignables). Barre de défilement masquée : l'icône reste centrée dans 64 px. */
+nav#sidebar.sb-rail { width: 64px; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; }
+nav#sidebar.sb-rail::-webkit-scrollbar { width: 0; }
+/* Les lanceurs flottants (#qm-launch, #fx-launch, #pomo-launch : fixed, left 1rem, ~154 px depuis
+   le bas) recouvrent le bas de la barre, en rail COMME en mode normal : cette marge laisse le
+   dernier item défiler AU-DESSUS d'eux. */
+nav#sidebar:not(.sb-hidden) { padding-bottom: 10.5rem; }
+/* [RAIL-LABELS] ⚠ APRÈS `.sb-rail` (même spécificité) : sinon l'œil ne masquait rien en rail. */
 nav#sidebar.sb-hidden { width: 0; padding-left: 0; padding-right: 0; overflow: hidden; border-right: none; }
-nav#sidebar.sb-rail { width: 64px; overflow: hidden; }
 nav#sidebar.sb-rail .cat-label,
 nav#sidebar.sb-rail .count,
 nav#sidebar.sb-rail #add-cat,
@@ -802,6 +811,30 @@ nav#sidebar.sb-rail .cat-item {
   padding-right: 0 !important;
 }
 nav#sidebar.sb-rail .cat-item > * { flex-shrink: 0; }
+/* [RAIL-LABELS] initiale d'un dossier sans emoji, posée en JS en rail seulement. */
+nav#sidebar.sb-rail .cat-dot {
+  width: 22px; height: 22px; margin: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 600 11px system-ui, sans-serif; color: #0b0f14;
+}
+/* [RAIL-LABELS] infobulle unique du rail (nom + compteur), style Luciole. */
+#rail-tip {
+  position: fixed; left: 72px; top: 0; z-index: 1000;
+  padding: 0.3rem 0.6rem; border-radius: 8px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  font-size: 0.82rem; white-space: nowrap; pointer-events: none;
+  opacity: 0; visibility: hidden; transform: translate(-4px, -50%);
+  transition: opacity 0.12s var(--ease), transform 0.12s var(--ease), visibility 0s linear 0.12s;
+}
+#rail-tip.show { opacity: 1; visibility: visible; transform: translate(0, -50%); transition-delay: 0s; }
+#rail-tip::before {
+  content: ''; position: absolute; left: -5px; top: 50%; width: 8px; height: 8px;
+  background: var(--panel); border-left: 1px solid var(--accent); border-bottom: 1px solid var(--accent);
+  transform: translateY(-50%) rotate(45deg);
+}
+#rail-tip .rt-count { margin-left: 0.45rem; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { #rail-tip { transition: none; } }
 .icon.toggle-on { color: var(--accent); }
 @media (max-width: 900px) { #sidebar-eye-btn, #sidebar-rail-btn { display: none; } }
 /* [SIDEBAR-TREE] 1rem (au lieu de 2) : la colonne chevron + l'indentation .sb-kids
@@ -3672,9 +3705,13 @@ function renderSidebar() {
   // En mode rail (icônes 64px) ET en mobile (barre horizontale, en-têtes masqués) on
   // ignore les replis pour que tous les items restent visibles/atteignables.
   const rail = nav.classList.contains('sb-rail');
-  const flat = rail || window.matchMedia('(max-width: 900px)').matches;
+  const mobileFlat = window.matchMedia('(max-width: 900px)').matches;
+  const flat = rail || mobileFlat;
+  // Sections : forcées ouvertes en rail/mobile (pas d'en-têtes, un rail tout replié serait vide).
   const secOpen = (name) => flat || sbSectionOpen(name);
-  const projOpen = (id) => flat || sbProjOpen(id);
+  // [RAIL-LABELS] Dossiers : le rail RESPECTE les replis (il aplatissait 47 sous-dossiers) ;
+  // seule la bande horizontale mobile force encore tout ouvert.
+  const projOpen = (id) => mobileFlat || sbProjOpen(id);
   const uncat = state.links.filter(l => !l.category_id).length;
   const pendingMemoCount = state.memos.filter(m => !m.done).length;
 
@@ -4071,6 +4108,26 @@ function renderSidebar() {
       });
     }
   }
+  if (rail) railDecorate(nav);
+}
+
+/* [RAIL-LABELS] En rail, le nom n'est plus affiché : l'infobulle `#rail-tip` le porte. On retire
+   donc les `title` natifs (sinon double bulle, et ils étaient absents ou verbeux), on rend chaque
+   item atteignable au clavier (l'infobulle suit le focus) et on pose l'initiale d'un dossier sans
+   emoji sur sa pastille. Hors rail, `renderSidebar` reconstruit tout : rien à défaire. */
+function railDecorate(nav) {
+  nav.querySelectorAll('.cat-item').forEach(item => {
+    const lab = item.querySelector('.cat-label');
+    const name = lab ? lab.textContent.trim() : '';
+    item.removeAttribute('title');
+    item.querySelectorAll('[title]').forEach(n => { if (n.tagName !== 'BUTTON') n.removeAttribute('title'); });
+    if (name) item.setAttribute('aria-label', name);
+    // Focalisable même quand `renderSidebar` tourne SEUL (bascule rail) : `applyA11y` ne passe
+    // qu'après `renderAll`. Entrée = clic est déjà géré globalement (keydown sur `.cat-item`).
+    item.tabIndex = 0;
+    const dot = item.querySelector('.cat-dot');
+    if (dot && name) dot.textContent = (Array.from(name)[0] || '').toUpperCase();
+  });
 }
 
 /* ------------------------------------------------ [AGENDA] vue calendrier mensuelle
@@ -11114,12 +11171,16 @@ watchHeaderHeight();
     eyeBtn.querySelector('use').setAttribute('href', hidden ? '#ic-eye-off' : '#ic-eye');
     railBtn.classList.toggle('toggle-on', rail);
     railBtn.setAttribute('aria-expanded', String(!rail));
+    // [RAIL-LABELS] barre masquée → le hamburger n'a plus d'objet : escamoté, rétabli à la
+    // réouverture (l'état rail, lui, est conservé dans `sbRail`).
+    railBtn.hidden = hidden;
   }
 
   // EYE : back.in en sortie, back.out à l'entrée
   function setHidden(next, animate) {
     hidden = next; save('sbHidden', next); syncBtns();
     if (next) {
+      hideTip();
       if (anim(animate)) {
         g.to(sb, { width: 0, paddingLeft: 0, paddingRight: 0, autoAlpha: 0, x: -24,
           duration: 0.32, ease: 'back.in(1.4)', overwrite: true,
@@ -11158,6 +11219,36 @@ watchHeaderHeight();
       }
     }
   }
+
+  /* [RAIL-LABELS] Infobulle du rail : UN élément, rempli au survol / focus d'un item. Délégation
+     sur la barre (les items sont reconstruits à chaque rendu). Actif en rail desktop seulement. */
+  const tip = el('div', { attrs: { id: 'rail-tip', role: 'tooltip', 'aria-hidden': 'true' } });
+  document.body.appendChild(tip);
+  const tipOn = () => sb.classList.contains('sb-rail') && !sb.classList.contains('sb-hidden') && !mobile();
+  const showTip = (item) => {
+    const lab = item.querySelector('.cat-label');
+    if (!lab) return;
+    const cnt = item.querySelector('.count');
+    tip.innerHTML = '';
+    tip.appendChild(document.createTextNode(lab.textContent.trim()));
+    if (cnt && cnt.textContent.trim()) tip.appendChild(el('span', { class: 'rt-count', text: cnt.textContent.trim() }));
+    const r = item.getBoundingClientRect();
+    tip.style.left = (sb.getBoundingClientRect().right + 8) + 'px';
+    tip.style.top = (r.top + r.height / 2) + 'px';
+    tip.classList.add('show');
+  };
+  const hideTip = () => tip.classList.remove('show');
+  sb.addEventListener('mouseover', (e) => {
+    const item = e.target.closest('.cat-item');
+    if (item && tipOn()) showTip(item); else hideTip();
+  });
+  sb.addEventListener('mouseleave', hideTip);
+  sb.addEventListener('focusin', (e) => {
+    const item = e.target.closest('.cat-item');
+    if (item && tipOn()) showTip(item);
+  });
+  sb.addEventListener('focusout', hideTip);
+  sb.addEventListener('scroll', hideTip, { passive: true });
 
   eyeBtn.addEventListener('click', () => setHidden(!hidden, true));
   railBtn.addEventListener('click', () => setRail(!rail, true));
