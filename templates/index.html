@@ -11555,13 +11555,19 @@ const mq = window.matchMedia('(max-width: 900px)');
 function memoPanelPref() {
   try { return localStorage.getItem('dash:memoPanelOpen'); } catch (e) { return null; }
 }
+/* [MEMO-PANEL-DESKTOP] La préférence est MOBILE SEULEMENT. En desktop (> 900 px) la colonne est
+   toujours ouverte — le clic sur le summary y bascule la vue Mémos et ne la rouvrirait jamais —
+   et la clé n'est ni lue ni écrite : un « 0 » posé depuis un téléphone sur le même navigateur
+   laissait sinon une colonne vide coincée. */
 function adaptMemoPanel() {
+  if (!mq.matches) { memoDetails.open = true; return; }
   const p = memoPanelPref();
   memoDetails.open = (p === '1' || p === '0') ? p === '1' : true;
 }
 adaptMemoPanel();
 mq.addEventListener('change', adaptMemoPanel);
 memoDetails.addEventListener('toggle', () => {
+  if (!mq.matches) return;   // 'toggle' est asynchrone : la réouverture forcée desktop n'écrit rien
   try { localStorage.setItem('dash:memoPanelOpen', memoDetails.open ? '1' : '0'); } catch (e) {}
 });
 
