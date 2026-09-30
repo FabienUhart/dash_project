@@ -352,8 +352,23 @@ def test_recherche_puis_tri(page, live_server, console_errors, urls_404):
     a, b, c, d = ids
     _boot(page, live_server)
     _trier(page, "newest")
-    page.fill("#search", "eclipse")
+    # [SEARCH-ALL] en portée « Tout », la recherche ouvre la vue Résultats : dans la vue Liens,
+    # le filtre se demande désormais par `l#`.
+    page.fill("#search", "l#eclipse")
     page.wait_for_timeout(300)
     assert _ids_affiches(page) == [c, b], "les deux « eclipse », le plus récent d'abord"
     assert _noms(page) == [NOM_C, NOM_B]
+    # Même règle dans la vue Résultats : le tri choisi s'applique à la section Liens.
+    page.fill("#search", "eclipse")
+    page.wait_for_timeout(300)
+    assert page.evaluate("() => state.view") == "search"
+    res = page.evaluate("""ids => [...document.querySelectorAll('#search-board .sr-link')]
+      .map(r => Number(r.dataset.linkId)).filter(id => ids.includes(id))""", ids)
+    assert res == [c, b], "vue Résultats : le tri des liens n'est pas appliqué (%r)" % res
+    # « Plus anciens » discrimine vraiment : l'ordre manuel (C, A, D, B) donnerait encore [c, b].
+    page.evaluate("() => setLinkSort('oldest')")
+    page.wait_for_timeout(200)
+    res = page.evaluate("""ids => [...document.querySelectorAll('#search-board .sr-link')]
+      .map(r => Number(r.dataset.linkId)).filter(id => ids.includes(id))""", ids)
+    assert res == [b, c], "vue Résultats : « Plus anciens » ignoré (%r)" % res
     assert _erreurs_js(console_errors, urls_404) == []

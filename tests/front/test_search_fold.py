@@ -138,9 +138,12 @@ def _chercher(page, texte):
     page.wait_for_timeout(250)
 
 
+# [SEARCH-ALL] En portée « Tout », les résultats vivent dans la vue Résultats (#search-board) :
+# section « Mémos » = les mémos, section « Dossiers » = l'ex-ligne PROJETS. Les lecteurs suivent la
+# vue VISIBLE, pour que les mêmes assertions valent avant et après la bascule.
 _LIRE_MEMOS = """() => {
   const out = [];
-  document.querySelectorAll('#memo-board .memo-section').forEach(sec => {
+  document.querySelectorAll('#memo-board:not([hidden]) .memo-section, #search-board:not([hidden]) .sr-sec[data-sec="memos"]').forEach(sec => {
     const h = sec.querySelector('h2');
     if (h && h.textContent.trim().startsWith('PROJETS')) return;   // la section dossiers
     sec.querySelectorAll('.task .task-content').forEach(c => out.push(c.textContent.trim()));
@@ -149,6 +152,11 @@ _LIRE_MEMOS = """() => {
 }"""
 
 _LIRE_PROJETS = """() => {
+  const res = document.querySelector('#search-board:not([hidden]) .sr-sec[data-sec="folders"]');
+  if (res) return [...res.querySelectorAll('.sr-folder')].map(t => ({
+    nom: (t.querySelector('.task-title') || {}).textContent.trim(),
+    badges: [...t.querySelectorAll('.sr-open')].map(b => b.textContent.trim()),
+  }));
   const secs = [...document.querySelectorAll('#memo-board .memo-section')];
   const sec = secs.find(s => { const h = s.querySelector('h2');
                                return h && h.textContent.trim().startsWith('PROJETS'); });
@@ -393,7 +401,7 @@ def test_no_result_names_folder_and_widens(live_server, page, console_errors, ur
     _chercher(page, "eclipse")
 
     assert _memos_owner(page) == [], "le seed place un « eclipse » dans le dossier : test faussé"
-    vide = page.locator("#memo-board .empty-state")
+    vide = page.locator("#memo-board:not([hidden]) .empty-state, #search-board:not([hidden]) .empty-state")
     assert vide.count() == 1, "aucun état vide rendu"
     hint = vide.locator(".es-hint").inner_text()
     assert "dans" in hint.lower() and "Voyage Japon" in hint, \

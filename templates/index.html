@@ -1648,6 +1648,29 @@ aside#memo-panel {
   #memo-quick-wrap { padding-bottom: 0.75rem; }
 }
 
+/* [SEARCH-ALL] vue Résultats : tokens seuls (invariant 9), aucun style de bouton inventé. */
+.sr-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 0.8rem; margin-bottom: 0.9rem; }
+.sr-title { font-size: 1.1rem; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sr-sum { color: var(--muted); font-size: 0.85rem; }
+.sr-clear { margin-left: auto; }
+.sr-sec { margin-bottom: 1.2rem; }
+.sr-sec h2 .sr-count { color: var(--muted); }
+.sr-empty { color: var(--muted); font-size: 0.85rem; padding: 0.2rem 0 0.4rem; }
+.sr-link { display: flex; align-items: center; gap: 0.6rem; min-width: 0; padding: 0.45rem 0.6rem; margin-bottom: 0.35rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.sr-link:hover, .sr-link:focus-visible { background: var(--panel-2); }
+.sr-link .sr-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+.sr-link .sr-url { flex: 1; min-width: 0; color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-folder { cursor: pointer; }
+.sr-ftxt { flex: 1; min-width: 0; }
+.sr-path { color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+.sr-path b { color: var(--text); font-weight: 600; }
+.sr-open { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+.sr-memo { margin-bottom: 0.55rem; }
+.sr-hit { font-size: 0.8rem; color: var(--muted); padding: 0.25rem 0.6rem 0 2.1rem; overflow-wrap: anywhere; }
+.sr-where { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; margin-right: 0.45rem; color: var(--text); opacity: 0.75; }
+#search-board mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+
 /* ---------- contenu riche ---------- */
 .task-content p { margin: 0 0 0.15rem; }
 .task-content p:last-child { margin-bottom: 0; }
@@ -2389,6 +2412,7 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
     <div id="agenda-board" hidden></div>
     <div id="favorites-board" hidden></div>
     <div id="tag-board" hidden></div>
+        <div id="search-board" hidden></div>
     <!-- [HEADER-H-OBSERVE] Le footer vit DANS main (posé en bas par le CSS) : hors de #layout,
          il allongeait la page de sa hauteur et faisait remonter les colonnes sticky sous le header. -->
     <footer id="app-footer">Dashboard v{{ version }} · créé par Fabien U.</footer>
@@ -3358,6 +3382,9 @@ async function loadAll() {
 }
 
 function renderAll() {
+  // [SEARCH-ALL] Échap / champ vidé passent par ici : la vue Résultats n'a plus d'objet → on
+  // revient à la vue d'où l'on venait (l'ENTRÉE, elle, n'a lieu qu'en tapant : refreshSearch).
+  if (state.view === 'search' && !searchAllActive()) leaveSearchView();
   renderSidebar();
   const v = state.view;
   document.getElementById('links').style.display = v === 'links' ? '' : 'none';
@@ -3368,6 +3395,7 @@ function renderAll() {
   document.getElementById('agenda-board').hidden = v !== 'agenda';
   document.getElementById('favorites-board').hidden = v !== 'favorites';  // [FAVORITES] vue mobile
   document.getElementById('tag-board').hidden = v !== 'tag';  // [TAG-NAV] vue dédiée par étiquette
+  document.getElementById('search-board').hidden = v !== 'search';  // [SEARCH-ALL]
   document.getElementById('memo-panel').style.display = v === 'links' ? '' : 'none';
   // [LINK-ADD-RELOCATE] La barre « + Ajouter un lien » vit dans la vue Liens → visible seulement là.
   document.getElementById('links-actions').style.display = v === 'links' ? '' : 'none';
@@ -3384,6 +3412,7 @@ function renderAll() {
   else if (v === 'agenda') renderAgendaView();
   else if (v === 'favorites') renderFavoritesView();
   else if (v === 'tag') renderTagView();  // [TAG-NAV]
+  else if (v === 'search') renderSearchView();  // [SEARCH-ALL]
   else renderLinks();
   renderMemos();
   applyA11y();
@@ -10688,6 +10717,183 @@ function renderSearchDateChip() {
    (`visibleMemos`, `visibleLinks`, `boardScopeFilter`). C'est ce qui garantit que la feuille et le
    board montrent exactement les mêmes mémos — jamais un résultat fantôme, même exigence que la
    carte et la frise ([SEARCH-IN-FOLDER]). */
+/* ===== [SEARCH-ALL] portée « Tout » = une vraie page de résultats au milieu =====
+   Avant, « Tout » filtrait la vue COURANTE : depuis Liens, « newss » (un dossier) répondait
+   « Aucun lien » alors que 3 dossiers et 5 mémos correspondaient. Désormais une recherche en
+   portée Tout ouvre `state.view = 'search'` (Liens · Dossiers · Mémos, avec pour chaque mémo
+   l'endroit où le mot a matché) ; l'effacer ramène à la vue d'où l'on venait. Les préfixes
+   `l#`/`m#`/`p#`, le `#tag` et `d#`/`c#` gardent leur comportement (filtre de la vue).
+   Le moteur est UN : `searchHits()` repasse par les prédicats du board (`visibleMemos`,
+   `boardScopeFilter`, `matchingProjects`, `visibleLinks`) et la feuille mobile le consomme. */
+function searchAllActive() {
+  const { scope, q, date } = parseSearch();
+  // `d#…`/`c#…` non reconnu (`d#nimporte`) reste de la grammaire de date : on ne bascule pas.
+  return !!q && scope === 'all' && !date && q.charAt(0) !== '#' && !/^[dc][#:]/.test(q);
+}
+let srShowAll = false;
+const SR_MAX_MEMOS = 200;
+function enterSearchView() {
+  state.searchReturn = { view: state.view, memoProject: state.memoProject };
+  // Seule la vue d'un dossier borne la recherche (chip « dans : … ») ; ailleurs, `memoProject`
+  // est un reste de navigation qui ne doit pas restreindre silencieusement les résultats.
+  if (state.view !== 'memos') state.memoProject = 'all';
+  state.view = 'search';
+  srShowAll = false;
+}
+function leaveSearchView() {
+  const r = state.searchReturn || { view: 'links', memoProject: state.memoProject };
+  state.searchReturn = null;
+  state.view = r.view;
+  state.memoProject = r.memoProject;
+}
+function projectPathNames(id) {
+  const names = [];
+  const seen = new Set();
+  let p = state.projects.find(x => x.id === id);
+  while (p && !seen.has(p.id)) {
+    seen.add(p.id);
+    names.unshift(p.name);
+    p = p.parent_id ? state.projects.find(x => x.id === p.parent_id) : null;
+  }
+  return names;
+}
+function openFolderFromSearch(id) {
+  // Même geste que la ligne « PROJETS » du board : on ouvre le dossier ET on quitte la recherche.
+  state.memoProject = id;
+  state.search = '';
+  searchInput.value = '';
+  state.searchReturn = null;
+  state.view = 'memos';
+  document.getElementById('search-scope').classList.remove('scoped');
+  renderAll();
+}
+function searchHits() {
+  const { q, words } = parseSearch();
+  const scoped = searchIsScoped();
+  const scope = searchScopeSet();
+  return {
+    // Un lien n'est dans aucun dossier ; le tri choisi dans la vue Liens s'applique ([LINK-SORT]).
+    links: scoped ? [] : sortLinks(visibleLinks(), state.linkSort),
+    folders: matchingProjects(q).filter(p => !scoped || scope.has(p.id)),
+    memos: visibleMemos().filter(boardScopeFilter())
+      .map(m => ({ memo: m, hit: searchWhere(m, words, stripHTML(m.content)) })),
+  };
+}
+const SR_WHERE = { content: '¶ CONTENU', subtask: '☑ SOUS-TÂCHE', assignee: '@ ASSIGNÉ', folder: '📁 DOSSIER' };
+function renderSearchView() {
+  const board = document.getElementById('search-board');
+  board.innerHTML = '';
+  renderSearchChip();
+  const raw = (state.search || '').trim();
+  const { words } = parseSearch();
+  const hits = searchHits();
+  const nL = hits.links.length, nF = hits.folders.length, nM = hits.memos.length;
+  const plur = (n, un, plusieurs) => n + ' ' + (n > 1 ? plusieurs : un);
+
+  const head = el('div', { class: 'sr-head' });
+  head.appendChild(el('h2', { class: 'sr-title', text: '🔍 Résultats pour « ' + raw + ' »' }));
+  head.appendChild(el('span', { class: 'sr-sum',
+    text: [plur(nL, 'lien', 'liens'), plur(nF, 'dossier', 'dossiers'), plur(nM, 'mémo', 'mémos')].join(' · ') }));
+  head.appendChild(lucioleize(el('button', { class: 'sr-clear', text: 'Effacer la recherche · Échap',
+    attrs: { type: 'button', title: 'Effacer la recherche et revenir à la vue précédente' },
+    on: { click: clearSearch } }), 'luc-neutral'));
+  board.appendChild(head);
+  /* Zéro résultat DANS un dossier : même message et même sortie que le board ([SEARCH-FOLD]) —
+     nommer le dossier, proposer « Chercher partout » (la bascule du ✕ du chip). */
+  if (!nL && !nF && !nM && searchIsScoped()) {
+    const proj = state.projects.find(p => p.id === state.memoProject);
+    if (proj) board.appendChild(emptyState({
+      icon: '🔍', title: 'Aucun résultat',
+      hint: 'Rien ne correspond à « ' + raw + ' » dans ' + (proj.emoji ? proj.emoji + ' ' : '') + proj.name + '.',
+      actionLabel: 'Chercher partout',
+      onAction: () => { searchWide = true; searchWideProj = state.memoProject; refreshSearch(); },
+      action2Label: 'Effacer la recherche', onAction2: clearSearch,
+    }));
+  }
+
+  const section = (key, label, n, vide) => {
+    const w = el('section', { class: 'memo-section sr-sec', attrs: { 'data-sec': key } });
+    const h = el('h2', { text: label + ' ' });
+    h.appendChild(el('b', { class: 'sr-count', text: String(n) }));
+    w.appendChild(h);
+    if (!n) w.appendChild(el('div', { class: 'sr-empty', text: vide }));
+    board.appendChild(w);
+    return w;
+  };
+  const activable = (row, go) => {
+    row.addEventListener('click', go);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  };
+
+  const sL = section('links', '🔗 LIENS', nL, 'Aucun lien ne contient « ' + raw + ' ».');
+  hits.links.forEach(l => {
+    const u = l.url_public || l.url_local || '';
+    const row = el('div', { class: 'sr-link', attrs: { role: 'link', tabindex: '0', 'data-link-id': l.id, title: u ? 'Ouvrir ' + u : l.name } });
+    row.appendChild(faviconEl(l));
+    const name = el('span', { class: 'sr-name', text: l.name });
+    searchMarkIn(name, words);
+    row.appendChild(name);
+    row.appendChild(el('span', { class: 'sr-url', text: u }));
+    const cat = state.categories.find(c => c.id === l.category_id);
+    if (cat) row.appendChild(el('span', { class: 'badge', text: cat.name }));
+    activable(row, () => { if (u) window.open(u, '_blank', 'noopener'); });
+    sL.appendChild(row);
+  });
+
+  const sF = section('folders', '📁 DOSSIERS', nF, 'Aucun dossier ne s’appelle « ' + raw + ' ».');
+  hits.folders.forEach(p => {
+    const row = el('div', { class: 'task sr-folder', attrs: { role: 'button', tabindex: '0', title: 'Ouvrir le dossier' } });
+    const r1 = el('div', { class: 'task-row', attrs: { style: 'align-items:center' } });
+    r1.appendChild(comboIcon(p.emoji, usableProjColor(p.color), '📁'));
+    const txt = el('div', { class: 'sr-ftxt' });
+    const name = el('div', { class: 'task-title', text: p.name });
+    searchMarkIn(name, words);
+    txt.appendChild(name);
+    const names = projectPathNames(p.id);
+    const path = el('div', { class: 'sr-path' });
+    names.forEach((n, i) => {
+      if (i) path.appendChild(document.createTextNode(' › '));
+      path.appendChild(i === names.length - 1 ? el('b', { text: n }) : document.createTextNode(n));
+    });
+    txt.appendChild(path);
+    r1.appendChild(txt);
+    const nDeep = projectDeepCount(p.id);
+    r1.appendChild(el('span', { class: 'sr-open', text: plur(nDeep, 'mémo', 'mémos') + ' · ouvrir →' }));
+    row.appendChild(r1);
+    activable(row, () => openFolderFromSearch(p.id));
+    sF.appendChild(row);
+  });
+
+  const sM = section('memos', '📝 MÉMOS', nM, 'Aucun mémo ne contient « ' + raw + ' ».');
+  (srShowAll ? hits.memos : hits.memos.slice(0, SR_MAX_MEMOS)).forEach(({ memo, hit }) => {
+    const w = el('div', { class: 'sr-memo', attrs: { 'data-memo-id': memo.id } });
+    const card = taskEl(memo);
+    w.appendChild(card);
+    if (hit.where === 'title') {
+      searchMarkIn(card.querySelector('.task-title'), words);
+    } else {
+      // Texte BRUT inséré en nœuds texte : un contenu « <img onerror> » reste une chaîne lisible.
+      const line = el('div', { class: 'sr-hit' });
+      line.appendChild(el('span', { class: 'sr-where', text: SR_WHERE[hit.where] }));
+      if (hit.where === 'folder') {
+        const names = memo.project_id ? projectPathNames(memo.project_id) : [];
+        line.appendChild(document.createTextNode('dans le dossier ' + (names.length ? names.join(' › ') : 'Inbox')));
+      } else {
+        const sn = searchSnippet(hit.text, hit.start, hit.end);
+        line.appendChild(document.createTextNode(sn.pre));
+        line.appendChild(el('mark', { text: sn.hit }));
+        line.appendChild(document.createTextNode(sn.post));
+      }
+      w.appendChild(line);
+    }
+    sM.appendChild(w);
+  });
+  if (!srShowAll && nM > SR_MAX_MEMOS) {
+    sM.appendChild(el('button', { class: 'prio-btn', text: 'Afficher les ' + (nM - SR_MAX_MEMOS) + ' autres…',
+      attrs: { type: 'button' }, on: { click: () => { srShowAll = true; renderSearchView(); } } }));
+  }
+}
+
 function ownerSearchResults(q, scope, date) {
   /* ⚠️ [MEMO-SORT-DATES] `if (!q) return []` était FAUX depuis ce lot, et la feuille mobile
      l'a payé : avec `d#2026-11`, le texte EST vide alors que la requête est parfaitement
@@ -10705,6 +10911,26 @@ function ownerSearchResults(q, scope, date) {
     return p ? ((p.emoji ? p.emoji + ' ' : '') + p.name) : '📥 Inbox';
   };
   const out = [];
+  /* [SEARCH-ALL] Portée « Tout » : la feuille lit le MÊME moteur que la vue Résultats
+     (`searchHits`), dans le même ordre (Liens · Dossiers · Mémos) — mêmes comptes, garanti. */
+  if (searchAllActive()) {
+    const hits = searchHits();
+    hits.links.forEach(l => out.push({
+      emoji: '🔗', title: l.name, sub: l.descr || l.url_public || l.url_local || '',
+      onOpen: () => { const u = l.url_public || l.url_local; if (u) window.open(u, '_blank', 'noopener'); },
+    }));
+    hits.folders.forEach(p => out.push({
+      emoji: p.emoji || '📁', title: p.name, sub: 'Dossier · ' + projectPathNames(p.id).join(' › '),
+      onOpen: () => openFolderFromSearch(p.id),
+    }));
+    hits.memos.forEach(({ memo: m }) => out.push({
+      emoji: m.emoji || '📝',
+      title: m.title || stripHTML(m.content).slice(0, 80) || '(sans titre)',
+      sub: projLabel(m.project_id),
+      onOpen: () => openMemoEditor(m),
+    }));
+    return out;
+  }
   if (scope === 'projects') {
     matchingProjects(q).forEach(p => out.push({
       emoji: p.emoji || '📁', title: p.name, sub: 'Dossier',
@@ -10799,6 +11025,22 @@ function refreshSearch() {
   renderSearchChip();
   renderSearchDateChip();
   refreshSearchHelp();   // [SEARCH-DESK-UX]
+  // [SEARCH-ALL] portée « Tout » → la vue Résultats ; toute autre forme (préfixe, #tag, d#/c#,
+  // champ vidé) → retour à la vue précédente, qui filtre comme avant.
+  if (searchAllActive()) {
+    if (state.view !== 'search') { enterSearchView(); renderAll(); return; }
+    renderSidebar();
+    renderSearchView();
+    renderMemos();
+    return;
+  }
+  if (state.view === 'search') {
+    leaveSearchView();
+    if (q && scope === 'projects') state.view = 'memos';
+    renderAll();
+    if (state.view === 'links') loadStatus();
+    return;
+  }
   if (q && scope === 'projects' && state.view !== 'memos') {
     state.view = 'memos';
     renderAll();
@@ -10827,8 +11069,8 @@ searchScopeSel.addEventListener('change', () => {
   refreshSearch();
 });
 searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && state.view === 'links') {
-    const first = visibleLinks()[0];
+  if (e.key === 'Enter' && (state.view === 'links' || state.view === 'search')) {
+    const first = state.view === 'search' ? searchHits().links[0] : visibleLinks()[0];
     if (first) {
       const url = first.url_public || first.url_local;
       if (url) window.open(url, '_blank', 'noopener');

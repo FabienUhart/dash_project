@@ -7710,6 +7710,82 @@ function searchMatch(words, ...fields) {
   return words.every(w => hay.indexOf(w) >= 0);
 }
 
+/* ===== [SEARCH-ALL] « où ça a matché » — helpers PURS, réutilisables côté share plus tard =====
+   `searchFoldMap` plie un texte comme `searchFold` (accents, casse, guillemets) mais caractère
+   par caractère, SANS fusionner les espaces : `map[i]` donne l'indice du caractère d'origine, ce
+   qui permet de surligner le texte AFFICHÉ à partir d'un match trouvé sur le texte plié. */
+function searchFoldMap(s) {
+  s = String(s == null ? '' : s);
+  let f = '';
+  const map = [];
+  for (let i = 0; i < s.length; i++) {
+    let c = s[i];
+    const cp = s.codePointAt(i);
+    if (cp > 0xffff) { c = s.slice(i, i + 2); }
+    let n = c.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+      .replace(/[\u2018\u2019\u201B]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s/g, ' ');
+    for (let k = 0; k < n.length; k++) { f += n[k]; map.push(i); }
+    if (cp > 0xffff) i++;
+  }
+  return { f, map };
+}
+// Premier match (le plus à gauche) d'un des `words` (déjà pliés) dans `text` → indices d'ORIGINE.
+function searchFirstHit(text, words) {
+  const { f, map } = searchFoldMap(text);
+  let best = null;
+  (words || []).forEach(w => {
+    if (!w) return;
+    const i = f.indexOf(w);
+    if (i >= 0 && (!best || i < best.fi)) best = { fi: i, start: map[i], end: map[i + w.length - 1] + 1 };
+  });
+  return best ? { start: best.start, end: best.end } : null;
+}
+/* Où un mémo a-t-il matché ? Un seul indice, priorité titre > contenu > sous-tâche > assigné ;
+   rien de tout ça → il est là par son DOSSIER ([SEARCH-FOLD] : un dossier trouvé apporte son
+   sous-arbre). Renvoie `{ where, text, start, end }` (texte BRUT, jamais de HTML : l'appelant
+   l'insère en nœuds texte) ou `{ where: 'folder' }`. `plain` = contenu déjà débarrassé du HTML. */
+function searchWhere(memo, words, plain) {
+  const champs = [
+    ['title', memo.title || ''],
+    ['content', plain == null ? '' : plain],
+    ['subtask', (memo.subtasks || []).map(st => st.content).join(' · ')],
+    ['assignee', (memo.assignees || []).join(', ')],
+  ];
+  for (const [where, text] of champs) {
+    if (!text) continue;
+    const h = searchFirstHit(text, words);
+    if (h) return { where, text, start: h.start, end: h.end };
+  }
+  return { where: 'folder' };
+}
+// Extrait autour d'un match : `avant` caractères avant, `apres` après, points de suspension.
+function searchSnippet(text, start, end, avant, apres) {
+  const a = Math.max(0, start - (avant == null ? 40 : avant));
+  const b = Math.min(text.length, end + (apres == null ? 70 : apres));
+  return {
+    pre: (a > 0 ? '…' : '') + text.slice(a, start).replace(/\s+/g, ' '),
+    hit: text.slice(start, end),
+    post: text.slice(end, b).replace(/\s+/g, ' ') + (b < text.length ? '…' : ''),
+  };
+}
+// Surligne (en place) la 1re occurrence d'un des `words` dans chaque nœud texte de `root`.
+// Aucun innerHTML : on coupe le nœud texte et on insère un <mark> — le contenu reste du texte.
+function searchMarkIn(root, words) {
+  if (!root || !words || !words.length) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    const h = searchFirstHit(node.nodeValue, words);
+    if (!h) return;
+    const hitNode = node.splitText(h.start);
+    hitNode.splitText(h.end - h.start);
+    const mk = document.createElement('mark');
+    hitNode.parentNode.replaceChild(mk, hitNode);
+    mk.appendChild(hitNode);
+  });
+}
+
 // Parseur PUR des préfixes de portée `p#` / `l#` / `m#` (aussi `p:`), identique aux 3 pages.
 // Rien d'autre n'est interprété : le `#tag` reste dans `q`, chaque page le traite comme avant.
 // [SEARCH-FOLD] `q` sort désormais FOLDÉ (plus seulement en minuscules) et s'accompagne de
