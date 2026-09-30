@@ -1,12 +1,12 @@
 """[GUEST-SEARCH-GRAMMAR] La recherche invitée (partage + hub) parle la grammaire de l'owner.
 
-Brief : `docs/briefs/GUEST-SEARCH-GRAMMAR.md` (cible V28.9.276). Constat Cowork
+Brief : `docs/briefs/GUEST-SEARCH-GRAMMAR.md` (livré V28.11.278). Constat Cowork
 (`docs/tests/test-page-invite.md` § 3) : côté invité, `d#2026-09` répond « Aucun » alors qu'un
 mémo est daté en septembre, les sous-tâches ne sont pas cherchées, `#mot` n'est pas compris.
 
-⚠ SQUELETTE posé le 30 sept. 2026, AVANT le code : chaque scénario est marqué `skip` (« GSG —
-code à venir »). La séance d'implémentation commence par retirer les skips et les voir ROUGES
-(doctrine TDD), puis écrit le code. Les numéros de scénario suivent le § 4 du brief ; le n° 8
+Squelette posé le 30 sept. 2026 AVANT le code (scénarios en `skip`) ; le même jour, les skips
+ont été retirés et les 18 cas vus ROUGES sur V28.10.277 (doctrine TDD), puis le code écrit jusqu'au
+vert. Les numéros de scénario suivent le § 4 du brief ; le n° 8
 (non-régression owner) est porté par `test_search_dates.py` / `test_search_fold.py` inchangés, le
 n° 9 (zéro erreur console) est une assertion de CHAQUE test ci-dessous.
 
@@ -21,7 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.e2e
 
-SKIP = pytest.mark.skip(reason="GSG — code à venir")
+# (les skips « GSG — code à venir » ont été retirés le 30 sept. 2026 : séance d’implémentation)
 BUREAU = {"width": 1280, "height": 800}
 MOBILE = {"width": 412, "height": 915}
 PAGES = ["share", "hub"]
@@ -181,7 +181,6 @@ def _aide_desktop(page):
 # ------------------------------------------------------------------ scénarios (§ 4 du brief)
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_10_bug_origine_d_septembre(page, live_server, console_errors, ou):
     """§ 4.10 — rouge-avant : `d#2026-09` répondait « Aucun » (cherché comme TEXTE)."""
@@ -192,7 +191,6 @@ def test_10_bug_origine_d_septembre(page, live_server, console_errors, ou):
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_01_d_echeance_plage_et_chip(page, live_server, console_errors, ou):
     """§ 4.1 — `d#2026-11` → kyoto seul (racine) ; un jour DANS la plage suffit ; chip + ✕."""
@@ -211,7 +209,6 @@ def test_01_d_echeance_plage_et_chip(page, live_server, console_errors, ou):
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_02_c_creation_jour_local(page, live_server, console_errors, ou):
     """§ 4.2 — `c#2026-10` : « tardif » (30/09 22 h 30 Z = 1er oct. à Paris) y est, « août » non."""
@@ -225,7 +222,6 @@ def test_02_c_creation_jour_local(page, live_server, console_errors, ou):
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_03_date_et_texte_et_forme_invalide(page, live_server, console_errors, ou):
     """§ 4.3 — `d#2026-11 kyoto` = intervalle ET mots ; `d#nimporte` = texte, sans chip."""
@@ -241,7 +237,6 @@ def test_03_date_et_texte_et_forme_invalide(page, live_server, console_errors, o
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_04_sous_taches(page, live_server, console_errors, ou):
     """§ 4.4 — `wasabi` (seulement dans une sous-tâche) → « courses » ; `m#wasabi` idem."""
@@ -254,7 +249,6 @@ def test_04_sous_taches(page, live_server, console_errors, ou):
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_05_hashtag_exact(page, live_server, console_errors, ou):
     """§ 4.5 — `#resa` → « resa » seul ; `#resas` ne répond pas à `#resa` (borne de fin)."""
@@ -265,7 +259,6 @@ def test_05_hashtag_exact(page, live_server, console_errors, ou):
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_06_predicat_pas_le_texte(page, live_server, console_errors, ou):
     """§ 4.6 — `d#` SANS mot : borné au sous-dossier (chip « dans : »), ✕ → élargi ; la carte /
@@ -275,15 +268,26 @@ def test_06_predicat_pas_le_texte(page, live_server, console_errors, ou):
     _aller_sous_dossier(page, ou, d)
     _chercher(page, "d#2026-11")
     assert _titres(page, d["k"]) == ["GSG sous kyoto"], "d# sans mot doit rester borné au dossier"
-    # TODO séance : lire le chip « dans : » de CHAQUE page (sélecteur à confirmer : share/hub
-    # n'ont pas le `#search-chip` owner), cliquer son ✕, puis :
-    #   assert _titres(page, d["k"]) == ["GSG kyoto", "GSG sous kyoto"]
-    # TODO séance : carte/agenda — comparer les ids de `shareMapPoints()`/`shareDatedPoints()`
-    # (share) et de l'agenda hub (`focusedMemos()`) aux cards affichées.
+    # Le prédicat « bornée au dossier » de chaque page doit être VRAI (texte vide, date présente).
+    borne = page.evaluate("() => %s()" % ("shareSearchScoped" if ou == "share" else "hubSearchScoped"))
+    assert borne is True, "d# sans mot : la page doit se savoir bornée au dossier"
+    # Carte / agenda / frise passent par le MÊME périmètre que la liste : jamais un point sans sa card.
+    dated = page.evaluate("() => %s().map(p => p.title)" % ("shareDatedPoints" if ou == "share" else "hubDatedPoints"))
+    assert any("GSG sous kyoto" in t for t in dated) and not any("GSG kyoto " in t for t in dated), dated
+    # Élargir (= le geste du chip dossier de la feuille, `onToggle`) : share/hub n'ont pas de chip
+    # « dans : » inline en desktop, la bascule est l'état `*SearchWide` que ce chip actionne.
+    page.evaluate("() => { %s = true; %s(); }" % (("shareSearchWide", "shareRefreshSearch") if ou == "share"
+                                                  else ("hubSearchWide", "hubRefreshSearch")))
+    page.wait_for_timeout(200)
+    assert _titres(page, d["k"]) == ["GSG kyoto", "GSG sous kyoto"], "élargi : le dossier ne borne plus"
+    # Vider la recherche remet la portée par défaut — par le PRÉDICAT : `d#` seul (texte vide)
+    # doit la remettre à zéro aussi (mutation « .q » sur *RefreshSearch → chip jamais réinitialisé).
+    _chercher(page, "")
+    _chercher(page, "d#2026-11")
+    assert _titres(page, d["k"]) == ["GSG sous kyoto"], "après avoir vidé, la recherche est de nouveau bornée"
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_06b_feuille_mobile_meme_resultat(page, live_server, console_errors, ou):
     """§ 4.6 (mobile 412 px) — la feuille ne doit plus répondre vide sur `d#` (`if (!q) return []`)."""
@@ -296,10 +300,25 @@ def test_06b_feuille_mobile_meme_resultat(page, live_server, console_errors, ou)
     titres = page.locator("#search-sheet .ss-item .ss-t").all_inner_texts()
     assert any("GSG kyoto " + d["k"] in t for t in titres), titres
     assert page.locator("#search-sheet .ss-empty").count() == 0
+    # Depuis le sous-dossier : le chip dossier de la feuille (allumé) borne `d#` ; son clic élargit.
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    _aller_sous_dossier(page, ou, d)
+    page.locator("#search").click()
+    page.wait_for_selector("#search-sheet[open]", timeout=5_000)
+    page.fill("#search-sheet input[type=text]", "d#2026-11")
+    page.wait_for_timeout(300)
+    chip = page.locator("#search-sheet .ss-chip", has_text="GSG sous")
+    assert chip.count() == 1 and "on" in (chip.get_attribute("class") or ""), "chip dossier allumé"
+    titres = page.locator("#search-sheet .ss-item .ss-t").all_inner_texts()
+    assert any("GSG sous kyoto " + d["k"] in t for t in titres) and not any("GSG kyoto " + d["k"] in t for t in titres), titres
+    chip.click()
+    page.wait_for_timeout(300)
+    titres = page.locator("#search-sheet .ss-item .ss-t").all_inner_texts()
+    assert any("GSG kyoto " + d["k"] in t for t in titres), "chip éteint → élargi : %s" % titres
     assert _erreurs_js(console_errors) == []
 
 
-@SKIP
 @pytest.mark.parametrize("ou", PAGES)
 def test_07_11_aide_invitee(page, live_server, console_errors, ou):
     """§ 4.7 — l'aide liste `d#`, `c#`, `#…` ; § 4.11 — ni `l#` ni la vue « Résultats » (owner-only)."""

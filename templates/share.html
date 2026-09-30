@@ -103,6 +103,20 @@ header .gs-gear { margin-left: auto; }   /* [GUEST-SETTINGS] l'engrenage prend l
 }
 #search-wrap:focus-within { max-width: 520px; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,195,247,0.15); }
 #search { flex: 1; min-width: 5rem; background: none; border: none; outline: none; color: var(--text); font: inherit; font-size: 0.88rem; }
+/* [GUEST-SEARCH-GRAMMAR] chip de l'intervalle de dates — MÊMES règles que l'owner (tokens
+   existants, gabarit des petites pastilles, invariant 9). Un libellé long n'écrase jamais le champ. */
+#search-date-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem; flex: none; max-width: 13rem;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.1rem 0.15rem 0.1rem 0.45rem; font-size: 0.72rem; color: var(--muted); white-space: nowrap;
+}
+#search-date-chip[hidden] { display: none; }
+#search-date-chip .sc-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#search-date-chip .sc-x {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 0.7rem; line-height: 1; padding: 0.15rem 0.3rem; border-radius: 999px;
+}
+#search-date-chip .sc-x:hover, #search-date-chip .sc-x:focus-visible { color: var(--text); background: var(--panel); }
 /* [SEARCH-MOBILE-HEADER] Même traitement qu'à l'owner : pas de sélecteur inline ici (les portées
    vivent dans la feuille), mais la barre gardait ses largeurs de bureau et bousculait le titre et
    le badge de mode. Bornée, et l'élargissement au focus neutralisé — sur mobile le focus ouvre la
@@ -110,6 +124,7 @@ header .gs-gear { margin-left: auto; }   /* [GUEST-SETTINGS] l'engrenage prend l
 @media (max-width: 900px), (pointer: coarse) {
   #search-wrap, #search-wrap:focus-within { flex: 1 1 7rem; max-width: 12rem; min-width: 0; margin-left: 0.4rem; }
   #search { min-width: 0; }
+  #search-date-chip { display: none; }   /* comme l'owner : sur mobile la feuille porte la requête */
 }
 button.icon { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; padding: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: background 0.15s var(--ease), transform 0.1s var(--ease); }
 button.icon:hover { background: var(--bg-elev); }
@@ -983,6 +998,9 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <!-- [SEARCH-SHARED] barre de recherche du partage (la loupe vient du jeu d'icônes du partial). -->
   <div id="search-wrap">
     <input id="search" type="text" placeholder="Rechercher…" autocomplete="off" aria-label="Rechercher">
+    <!-- [GUEST-SEARCH-GRAMMAR] chip « 📅 échéance : … ✕ » / « 🕓 créés : … ✕ », rendu par
+         `renderDateChip` (partial) : même composant que l'owner. -->
+    <span id="search-date-chip" hidden></span>
   </div>
   <!-- [GUEST-SETTINGS] la lune a disparu : le thème vit dans la pop-in Paramètres, ouverte
        par l'engrenage posé ici au boot (icône Tabler du partial). -->
@@ -2428,7 +2446,11 @@ function projDescendants(pid) {
 let shareSearchScope = 'all';
 let shareSearchWide = false;
 function shareSearchRaw() { const i = document.getElementById('search'); return i ? i.value : ''; }
-function shareSearch() { return parseSearchPrefix(shareSearchRaw(), shareSearchScope); }
+/* [GUEST-SEARCH-GRAMMAR] `dates: true` : la page APPLIQUE `d#`/`c#` (`memoInDateRange` du partial),
+   elle demande donc au parseur de les reconnaître — même grammaire que l'owner. */
+function shareSearch() { return parseSearchPrefix(shareSearchRaw(), shareSearchScope, { dates: true }); }
+// « Une recherche est-elle en cours ? » — texte OU date, par le prédicat partagé. Jamais `.q` seul.
+function shareSearchActive() { return searchIsActive(shareSearch()); }
 function shareMatchingProjects(q) {
   if (!q) return [];
   const n = q.charAt(0) === '#' ? q.slice(1) : q;
@@ -2437,24 +2459,36 @@ function shareMatchingProjects(q) {
   const words = searchFold(n).split(' ').filter(Boolean);
   return (DATA.projects || []).filter(p => searchMatch(words, p.name, p.tags));
 }
-function shareSearchScoped() { return PFILTER !== 'all' && !!shareSearch().q && !shareSearchWide; }
+function shareSearchScoped() { return PFILTER !== 'all' && shareSearchActive() && !shareSearchWide; }
 function scopedMemos() {
-  const { scope, q, words } = shareSearch();
+  const { scope, q, words, date } = shareSearch();
+  const active = shareSearchActive();
   let ms = DATA.memos || [];
   // Dossier courant : borné au dossier + descendants, sauf si le chip a été éteint (recherche large).
-  if (PFILTER !== 'all' && !(q && shareSearchWide)) {
+  if (PFILTER !== 'all' && !(active && shareSearchWide)) {
     const set = new Set([PFILTER, ...projDescendants(PFILTER)]);
     ms = ms.filter(m => set.has(m.project_id));
   }
+  if (!active) return ms;
+  /* [GUEST-SEARCH-GRAMMAR] même ordre que `visibleMemos` owner : la DATE d'abord (`d#`/`c#`,
+     helper du partial), puis le texte s'il reste des mots. `d#2026-11` sans mot = l'intervalle
+     seul ; `d#nimporte` n'est pas reconnu et reste du texte (jamais de liste vide silencieuse). */
+  if (date) ms = ms.filter(m => memoInDateRange(m, date));
   if (!q) return ms;
   if (scope === 'projects') {
     const ids = new Set(shareMatchingProjects(q).map(p => p.id));
     return ms.filter(m => ids.has(m.project_id));
   }
+  // `#mot` = le #mot ÉCRIT dans un mémo, match exact (`#resa` ne trouve pas `#resas`). Pas les
+  // étiquettes de dossier : elles ne sont pas exposées aux invités ([SHARE-SCOPE-SHEET]).
+  const tag = q.charAt(0) === '#' && q.length > 1 ? q.slice(1) : null;
+  if (tag) return ms.filter(m => memoHasHashtag(m, tag));
   // [SEARCH-FOLD] `searchMatch` prend les champs ENSEMBLE : un mot dans le titre et un autre
-  // dans le contenu suffisent. Aucune fusion de sous-arbre ici — c'est owner seulement.
+  // dans le contenu suffisent. Les SOUS-TÂCHES comptent, comme chez l'owner (`_share_memo_dict`
+  // les expose déjà). Aucune fusion de sous-arbre ici — c'est owner seulement.
   return ms.filter(m => searchMatch(words, m.title, stripTags(m.content),
-                                    (m.assignees || []).join(' ')));
+                                    (m.assignees || []).join(' '),
+                                    (m.subtasks || []).map(st => st.content).join(' ')));
 }
 
 // [PHOTO-BATCH-DOWNLOAD] Fichiers d'un dossier partagé (+ sous-dossiers) — scope borné à
@@ -4057,20 +4091,32 @@ _dangerSoftStyle();   // [DANGER-SOFT] feuille du danger discret posée dès le 
    pas les données, il ne peut donc rien montrer hors du partage (invariant 5 : le serveur borne
    déjà `share_data`, on ne fait que présenter ce qui est là). Zéro route nouvelle. */
 function shareRefreshSearch() {
-  if (!shareSearch().q) shareSearchWide = false;   // vider remet la portée par défaut
+  if (!shareSearchActive()) shareSearchWide = false;   // vider remet la portée par défaut (texte OU date)
+  // [GUEST-SEARCH-GRAMMAR] chip « 📅 échéance : » / « 🕓 créés : » ; son ✕ rend le texte libre au champ.
+  renderDateChip(document.getElementById('search-date-chip'), shareSearch().date, (rest) => {
+    const inp = document.getElementById('search');
+    if (inp) inp.value = rest;
+    shareRefreshSearch();
+  });
   if (shareSearchUI) shareSearchUI.refreshHelp();
   render();
 }
 const shareSearchUI = attachSearchUI({
   input: document.getElementById('search'),
   anchor: document.getElementById('search-wrap'),
-  placeholder: 'Rechercher… (p# dossiers)',
+  placeholder: 'Rechercher… (p# dossiers, d# dates)',
+  // [GUEST-SEARCH-GRAMMAR] même grammaire que l'owner — SAUF `l#` (les liens ne sont pas partagés)
+  // et la vue « Résultats » ([SEARCH-ALL], owner-only) : l'aide invitée reste invitée.
   helpRows: [
     { k: 'p#', fill: 'p#', d: 'Chercher un <b>dossier</b> — <i>p#hôtels</i>' },
     { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#train</i>' },
+    { k: '#…', fill: '#',  d: 'Un <b>#mot</b> écrit dans un mémo — <i>#resa</i>' },
     { k: 'éÉ', d: '<b>Accents et ordre des mots</b> indifférents — <i>sanjo kyoto</i> trouve <i>Kyoto · Sanjo</i>' },
+    { k: 'd#', fill: 'd#', d: 'Par <b>échéance</b> — <i>d#2026-11</i>, <i>d#semaine</i>' },
+    { k: 'c#', fill: 'c#', d: 'Par date de <b>création</b> — <i>c#2026-09</i>' },
   ],
   helpFoot: [['Échap', 'efface et ferme']],
+  dates: true,   // la feuille analyse `d#`/`c#` comme la barre inline
   scopeNote: () => {
     const p = PFILTER !== 'all' ? (DATA.projects || []).find(x => x.id === PFILTER) : null;
     return p ? 'Dans « ' + p.name + ' », la recherche y reste bornée — le chip du dossier élargit à tout le partage.' : '';
@@ -4089,9 +4135,11 @@ const shareSearchUI = attachSearchUI({
   setScope: (v) => { shareSearchScope = v; },
   results: () => {
     const { scope, q } = shareSearch();
-    if (!q) return [];
+    // `d#2026-11` a un intervalle et AUCUN mot : la feuille décide par le prédicat, pas par `q`
+    // (sinon elle répondrait « Aucun résultat » quand le board en liste — piège déjà payé).
+    if (!shareSearchActive()) return [];
     const label = (id) => { const p = (DATA.projects || []).find(x => x.id === id); return p ? ((p.emoji ? p.emoji + ' ' : '') + p.name) : ''; };
-    if (scope === 'projects') {
+    if (scope === 'projects' && q) {
       return shareMatchingProjects(q).map(p => ({ emoji: p.emoji || '📁', title: p.name, sub: 'Dossier',
         onOpen: () => { PFILTER = p.id; render(); } }));
     }

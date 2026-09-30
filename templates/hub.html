@@ -80,11 +80,26 @@ header h1 { font-size: 1.05rem; margin: 0; flex-shrink: 0; }
 header .spacer { flex: 1; }
 #search { background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   color: var(--text); padding: 0.4rem 0.6rem; min-width: 8rem; }
+/* [GUEST-SEARCH-GRAMMAR] chip de l'intervalle de dates — MÊMES règles que l'owner (tokens
+   existants, gabarit des petites pastilles, invariant 9). Un libellé long n'écrase jamais le champ. */
+#search-date-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem; flex: none; max-width: 13rem;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.1rem 0.15rem 0.1rem 0.45rem; font-size: 0.72rem; color: var(--muted); white-space: nowrap;
+}
+#search-date-chip[hidden] { display: none; }
+#search-date-chip .sc-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#search-date-chip .sc-x {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 0.7rem; line-height: 1; padding: 0.15rem 0.3rem; border-radius: 999px;
+}
+#search-date-chip .sc-x:hover, #search-date-chip .sc-x:focus-visible { color: var(--text); background: var(--panel); }
 /* [SEARCH-MOBILE-HEADER] Le hub n'a ni sélecteur inline ni « / », mais son champ portait un
    plancher de 8rem qui, avec le titre du hub, débordait du bandeau sur petit écran. Borné ; la
    feuille de recherche (ouverte au focus) reste la vraie surface de saisie sur mobile. */
 @media (max-width: 900px), (pointer: coarse) {
   #search { flex: 1 1 6rem; min-width: 0; max-width: 12rem; }
+  #search-date-chip { display: none; }   /* comme l'owner : sur mobile la feuille porte la requête */
 }
 .layout { display: flex; align-items: flex-start; gap: 0; }
 #sidebar { width: 240px; flex-shrink: 0; padding: 0.8rem 0.6rem; border-right: 1px solid var(--border);
@@ -560,6 +575,9 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <header>
     <h1 id="dash-name">📂 Mes dossiers</h1>
     <input id="search" type="text" placeholder="Rechercher…" autocomplete="off">
+    <!-- [GUEST-SEARCH-GRAMMAR] chip « 📅 échéance : … ✕ » / « 🕓 créés : … ✕ », rendu par
+         `renderDateChip` (partial) : même composant que l'owner et le partage. -->
+    <span id="search-date-chip" hidden></span>
     <span class="spacer"></span>
     <!-- [GUEST-SETTINGS] la lune a disparu : le thème vit dans la pop-in Paramètres,
          ouverte par l'engrenage posé ici au boot (icône Tabler du partial). -->
@@ -858,7 +876,11 @@ function openHubFiles(proj) {
 let hubSearchScope = 'all';
 let hubSearchWide = false;
 function hubSearchRaw() { const i = document.getElementById('search'); return i ? i.value : ''; }
-function hubSearch() { return parseSearchPrefix(hubSearchRaw(), hubSearchScope); }
+/* [GUEST-SEARCH-GRAMMAR] `dates: true` : la page APPLIQUE `d#`/`c#` (`memoInDateRange` du partial),
+   elle demande donc au parseur de les reconnaître — même grammaire que l'owner. */
+function hubSearch() { return parseSearchPrefix(hubSearchRaw(), hubSearchScope, { dates: true }); }
+// « Une recherche est-elle en cours ? » — texte OU date, par le prédicat partagé. Jamais `.q` seul.
+function hubSearchActive() { return searchIsActive(hubSearch()); }
 function hubMatchingProjects(q) {
   if (!q) return [];
   const n = q.charAt(0) === '#' ? q.slice(1) : q;
@@ -869,23 +891,34 @@ function hubMatchingProjects(q) {
 // Filtre de recherche appliqué aux mémos — UN seul endroit, réutilisé par le board ET l'agenda
 // (sinon la grille et la liste ne montreraient pas les mêmes mémos).
 function hubMemoFilter(ms) {
-  const { scope, q, words } = hubSearch();
+  const { scope, q, words, date } = hubSearch();
+  if (!hubSearchActive()) return ms;
+  /* [GUEST-SEARCH-GRAMMAR] même ordre que `visibleMemos` owner : la DATE d'abord (`d#`/`c#`,
+     helper du partial), puis le texte s'il reste des mots. `d#2026-11` sans mot = l'intervalle
+     seul ; `d#nimporte` n'est pas reconnu et reste du texte (jamais de liste vide silencieuse). */
+  if (date) ms = ms.filter(m => memoInDateRange(m, date));
   if (!q) return ms;
   if (scope === 'projects') {
     const ids = new Set(hubMatchingProjects(q).map(p => p.id));
     return ms.filter(m => ids.has(m.project_id));
   }
-  // [SEARCH-FOLD] accents et ordre des mots indifférents. Pas de fusion de sous-arbre : le hub
-  // agrège des accès existants, il n'élargit rien (invariant 5).
+  // `#mot` = le #mot ÉCRIT dans un mémo, match exact (`#resa` ne trouve pas `#resas`). Pas les
+  // étiquettes de dossier : elles ne sont pas exposées aux invités ([SHARE-SCOPE-SHEET]).
+  const tag = q.charAt(0) === '#' && q.length > 1 ? q.slice(1) : null;
+  if (tag) return ms.filter(m => memoHasHashtag(m, tag));
+  // [SEARCH-FOLD] accents et ordre des mots indifférents. Les SOUS-TÂCHES comptent, comme chez
+  // l'owner. Pas de fusion de sous-arbre : le hub agrège des accès existants, il n'élargit rien
+  // (invariant 5).
   return ms.filter(m => searchMatch(words, m.title, stripTags(m.content),
-                                    (m.assignees || []).join(' ')));
+                                    (m.assignees || []).join(' '),
+                                    (m.subtasks || []).map(st => st.content).join(' ')));
 }
 function hubSearchScoped() {   // vrai quand la recherche est effectivement bornée au dossier focalisé
-  return FOCUS != null && !!hubSearch().q && !hubSearchWide;
+  return FOCUS != null && hubSearchActive() && !hubSearchWide;
 }
 function focusedMemos() {
   let ms = DATA.memos || [];
-  const wide = !!hubSearch().q && hubSearchWide;   // chip « ce dossier » éteint → on cherche partout
+  const wide = hubSearchActive() && hubSearchWide;   // chip « ce dossier » éteint → on cherche partout
   if (FOCUS != null && !wide) { const set = new Set([FOCUS, ...projDescendants(FOCUS)]); ms = ms.filter(m => set.has(m.project_id)); }
   return hubMemoFilter(ms);
 }
@@ -2643,7 +2676,13 @@ document.getElementById('btn-plan').addEventListener('click', () => { VIEW = VIE
 // et [AGENDA-SMART-MONTH] ouvre toujours sur le mois courant.
 document.getElementById('btn-agenda').addEventListener('click', () => { hubAgendaFilter = null; agendaYM = null; agendaSelDay = null; VIEW = VIEW === 'agenda' ? 'board' : 'agenda'; syncViewBtns(); render(); });
 function hubRefreshSearch() {
-  if (!hubSearch().q) hubSearchWide = false;   // vider la recherche remet la portée par défaut
+  if (!hubSearchActive()) hubSearchWide = false;   // vider remet la portée par défaut (texte OU date)
+  // [GUEST-SEARCH-GRAMMAR] chip « 📅 échéance : » / « 🕓 créés : » ; son ✕ rend le texte libre au champ.
+  renderDateChip(document.getElementById('search-date-chip'), hubSearch().date, (rest) => {
+    const inp = document.getElementById('search');
+    if (inp) inp.value = rest;
+    hubRefreshSearch();
+  });
   if (hubSearchUI) hubSearchUI.refreshHelp();
   if (VIEW === 'plan') renderPlan(); else if (VIEW === 'agenda') renderAgendaHub(); else renderBoard();
 }
@@ -2657,13 +2696,19 @@ document.getElementById('search').addEventListener('keydown', (e) => {
 const hubSearchUI = attachSearchUI({
   input: document.getElementById('search'),
   anchor: document.getElementById('search'),
-  placeholder: 'Rechercher… (p# dossiers)',
+  placeholder: 'Rechercher… (p# dossiers, d# dates)',
+  // [GUEST-SEARCH-GRAMMAR] même grammaire que l'owner — SAUF `l#` (les liens ne sont pas partagés)
+  // et la vue « Résultats » ([SEARCH-ALL], owner-only) : l'aide invitée reste invitée.
   helpRows: [
     { k: 'p#', fill: 'p#', d: 'Chercher un <b>dossier</b> — <i>p#japon</i>' },
     { k: 'm#', fill: 'm#', d: 'Chercher dans les <b>mémos</b> — <i>m#hôtel</i>' },
+    { k: '#…', fill: '#',  d: 'Un <b>#mot</b> écrit dans un mémo — <i>#resa</i>' },
     { k: 'éÉ', d: '<b>Accents et ordre des mots</b> indifférents — <i>sanjo kyoto</i> trouve <i>Kyoto · Sanjo</i>' },
+    { k: 'd#', fill: 'd#', d: 'Par <b>échéance</b> — <i>d#2026-11</i>, <i>d#semaine</i>' },
+    { k: 'c#', fill: 'c#', d: 'Par date de <b>création</b> — <i>c#2026-09</i>' },
   ],
   helpFoot: [['Échap', 'efface et ferme']],
+  dates: true,   // la feuille analyse `d#`/`c#` comme la barre inline
   scopeNote: () => {
     const p = FOCUS != null ? projById(FOCUS) : null;
     return p ? 'Dans « ' + p.name +' », la recherche y reste bornée — le chip du dossier élargit à tous tes dossiers.' : '';
@@ -2682,9 +2727,11 @@ const hubSearchUI = attachSearchUI({
   setScope: (v) => { hubSearchScope = v; },
   results: () => {
     const { scope, q } = hubSearch();
-    if (!q) return [];
+    // `d#2026-11` a un intervalle et AUCUN mot : la feuille décide par le prédicat, pas par `q`
+    // (sinon elle répondrait « Aucun résultat » quand le board en liste — piège déjà payé).
+    if (!hubSearchActive()) return [];
     const label = (id) => { const p = projById(id); return p ? ((p.emoji ? p.emoji + ' ' : '') + p.name) : ''; };
-    if (scope === 'projects') {
+    if (scope === 'projects' && q) {
       return hubMatchingProjects(q).map(p => ({ emoji: p.emoji || '📁', title: p.name, sub: 'Dossier',
         onOpen: () => { FOCUS = p.id; VIEW = 'board'; syncViewBtns(); render(); } }));
     }

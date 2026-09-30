@@ -3206,8 +3206,9 @@ function placeLinkSort() {
 function parseSearch() { return parseSearchPrefix(state.search, state.searchScope, { dates: true }); }
 /* [MEMO-SORT-DATES] « une recherche est-elle en cours ? » ne se lit plus sur le seul texte :
    `d#2026-11` a un intervalle et AUCUN mot. Sans ce prédicat, le board se croirait au repos et
-   n'appliquerait jamais le filtre de date. Un seul endroit décide, comme `boardScopeFilter`. */
-function searchActiveNow() { const s = parseSearch(); return !!(s.q || s.date); }
+   n'appliquerait jamais le filtre de date. Un seul endroit décide, comme `boardScopeFilter`.
+   [GUEST-SEARCH-GRAMMAR] le corps est `searchIsActive` (partial) — même prédicat que share/hub. */
+function searchActiveNow() { return searchIsActive(parseSearch()); }
 
 /* ===== [SEARCH-IN-FOLDER] la recherche respecte le dossier où l'on se trouve =====
    Avant : dès qu'une recherche était active, le board abandonnait le scope du dossier
@@ -5553,23 +5554,8 @@ let dragMemoId = null;
 const expandedMemos = new Set();
 let doneOpen = false;
 
-/* [MEMO-SORT-DATES] Le mémo tombe-t-il dans l'intervalle demandé ?
-   `d#` = INTERSECTION de la plage [due_date .. due_end] avec [from .. to] — un séjour du 6 au
-   8 novembre doit sortir pour `d#2026-11-07`, un jour où il ne commence ni ne finit ; c'est
-   tout l'intérêt de `due_end` ([MEMO-DATE-RANGE]). Un mémo sans date ne matche jamais.
-   `c#` = jour LOCAL de création : `created_at` est un ISO UTC, le comparer tel quel ferait
-   basculer de mois un mémo créé le 1er octobre à 00 h 30 à Paris (stocké le 30/09 à 22 h 30 Z). */
-function memoInDateRange(m, date) {
-  if (!date) return true;
-  if (date.kind === 'created') {
-    const t = Date.parse(m.created_at || '');
-    if (isNaN(t)) return false;
-    const jour = dateStr(new Date(t));
-    return jour >= date.from && jour <= date.to;
-  }
-  if (!m.due_date) return false;
-  return m.due_date <= date.to && memoDueEndDay(m) >= date.from;
-}
+// [MEMO-SORT-DATES] `memoInDateRange(m, date)` vit dans le partial depuis [GUEST-SEARCH-GRAMMAR]
+// (même corps, jour local par `localIsoDay`) : share et hub l'appliquent aussi.
 
 function visibleMemos() {
   const { scope, q, words, date } = parseSearch();
@@ -5592,10 +5578,10 @@ function visibleMemos() {
   }
   const tag = q.startsWith('#') && q.length > 1 ? q.slice(1) : null;
   if (tag) {
-    const re = new RegExp('#' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9_-])', 'i');
-    // Le contenu est foldé AVANT le test : `#eclipse` trouve un `#éclipse` écrit dans le corps.
-    // La borne de fin reste stricte — c'est ce qui garde `#note` distinct de `#notes`.
-    return state.memos.filter(m => re.test(searchFold(stripHTML(m.content))) || projScope.has(m.project_id));
+    // Le `#mot` écrit dans le corps (`memoHasHashtag`, partial — même règle côté invité : foldé,
+    // borne de fin stricte, `#note` ≠ `#notes`) OU un dossier ÉTIQUETÉ `mot` (owner seulement :
+    // les étiquettes de dossier ne sont pas exposées aux invités, cf. [SHARE-SCOPE-SHEET]).
+    return state.memos.filter(m => memoHasHashtag(m, tag) || projScope.has(m.project_id));
   }
   const parTexte = state.memos.filter(m => searchMatch(
     words, m.title, stripHTML(m.content),
@@ -10693,28 +10679,14 @@ function renderSearchChip() {
    laissée au texte, plutôt qu'un silence qui rendrait une liste vide inexplicable. Son ✕ retire
    le préfixe et GARDE le texte libre — on ne détruit pas la moitié de la requête. */
 function renderSearchDateChip() {
-  const chip = document.getElementById('search-date-chip');
-  if (!chip) return;
-  const { date } = parseSearch();
-  if (!date) { chip.hidden = true; chip.innerHTML = ''; return; }
-  chip.innerHTML = '';
-  chip.hidden = false;
-  const quoi = date.kind === 'due' ? '📅 échéance :' : '🕓 créés :';
-  chip.title = (date.kind === 'due' ? 'Mémos dont l\u2019échéance tombe entre le '
-                                    : 'Mémos créés entre le ') + date.from + ' et le ' + date.to;
-  chip.appendChild(el('span', { text: quoi }));
-  chip.appendChild(el('span', { class: 'sc-name', text: date.label }));
-  chip.appendChild(el('button', {
-    class: 'sc-x', text: '✕',
-    attrs: { type: 'button', title: 'Retirer le filtre de date',
-             'aria-label': 'Retirer le filtre de date' },
-    on: { click: () => {
-      const inp = document.getElementById('search');
-      state.search = date.rest;
-      if (inp) inp.value = date.rest;
-      refreshSearch();
-    } },
-  }));
+  // [GUEST-SEARCH-GRAMMAR] rendu par le helper sans état du partial (même chip sur share et hub) ;
+  // seule la liaison à l'état de la page reste ici.
+  renderDateChip(document.getElementById('search-date-chip'), parseSearch().date, (rest) => {
+    const inp = document.getElementById('search');
+    state.search = rest;
+    if (inp) inp.value = rest;
+    refreshSearch();
+  });
 }
 /* ===== [SEARCH-SHARED] aide desktop + feuille mobile = composant du partial =====
    Le panneau d'aide (ex-[SEARCH-DESK-UX], qui vivait ici) et la feuille de recherche mobile sont

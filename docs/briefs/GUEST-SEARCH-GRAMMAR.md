@@ -6,6 +6,8 @@
 > mémo est daté du jour, la recherche ignore les sous-tâches, et l'aide ne liste que `p#`/`m#`.
 > Doctrine TDD. Cible **V28.11.278**. Brief écrit par CC le 30 sept., § 2.4 tranché par Fabien le
 > même jour. **Code : pas avant le GO explicite de Fabien.**
+>
+> **Livré en LOCAL le 30 sept. 2026 (tard), V28.11.278** sur GO Fabien : 18/18 rouges avant → verts, owner inchangé vert, 8 mutations tuées, `make test` vert (voir `REALISATION.md` [V28.11.278] pour les 2 écarts assumés : pas de chip « dans : » inline sur share/hub, `shareSearchScoped()` sans appelant). Attend passe Cowork (share + hub, desktop + mobile 412) puis GO commit.
 
 ## 0. Ce qui change, en une phrase
 

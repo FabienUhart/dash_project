@@ -7954,8 +7954,8 @@ function parseSearchPrefix(raw, scope, opts) {
      touche à rien et le texte est cherché tel quel : jamais de liste vide silencieuse. */
   /* ⚠ L'analyse est OPT-IN (`opts.dates`), et ce n'est pas de la prudence gratuite : une page
      qui reconnaîtrait `d#2026-11` sans l'APPLIQUER se retrouverait avec un `q` vide, donc
-     « aucun filtre » — et afficherait TOUT au lieu de rien. Share et hub n'appliquent pas les
-     dates : chez eux le préfixe doit rester du texte, exactement comme avant ce lot. */
+     « aucun filtre » — et afficherait TOUT au lieu de rien. [GUEST-SEARCH-GRAMMAR] : share et
+     hub l'APPLIQUENT désormais (`memoInDateRange` du partial) et le demandent donc aussi. */
   let date = null;
   if (opts && opts.dates && scope !== 'links' && scope !== 'projects') {
     const d = parseDatePrefix(q);   // chercher un LIEN ou un DOSSIER n'a pas de date
@@ -8058,6 +8058,79 @@ function parseDatePrefix(raw, todayIso) {
     label: _labelIntervalle(bornes.from, bornes.to),
     rest: (m[3] || '').trim(),
   };
+}
+
+/* ===== [GUEST-SEARCH-GRAMMAR] la recherche invitée parle la grammaire de l'owner =====
+   Quatre helpers PURS (ADR-001 : sans état, sans `state`/`DATA`), appelés par les 3 pages.
+   Avant ce lot, `memoInDateRange`, le test du `#mot` et le chip de date vivaient dans
+   `index.html` seulement : côté share/hub, `d#2026-09` était cherché comme du TEXTE et répondait
+   « Aucun » alors qu'un mémo était daté du mois (`docs/tests/test-page-invite.md` § 3). */
+
+/* « Une recherche est-elle en cours ? » se lit sur le texte OU l'intervalle de dates — jamais
+   sur `q` seul : `d#2026-11` a un intervalle et AUCUN mot. Chaque test `.q` qui décidait « pas de
+   recherche » a déjà coûté trois bugs (feuille owner, share, board) ; désormais UN prédicat
+   décide, sur les 3 pages. Règle : aucun `.q` seul ne décide si l'on cherche. */
+function searchIsActive(parsed) { return !!(parsed && (parsed.q || parsed.date)); }
+
+// Jour LOCAL (fuseau du navigateur) en ISO `AAAA-MM-JJ`. ⚠ Pas `dateStr` : ce nom est owner
+// (`index.html`) et une 2e déclaration `function` écraserait la 1re sans erreur.
+function localIsoDay(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/* [MEMO-SORT-DATES] Le mémo tombe-t-il dans l'intervalle demandé ?
+   `d#` = INTERSECTION de la plage [due_date .. due_end] avec [from .. to] — un séjour du 6 au
+   8 novembre doit sortir pour `d#2026-11-07`, un jour où il ne commence ni ne finit ; c'est
+   tout l'intérêt de `due_end` ([MEMO-DATE-RANGE]). Un mémo sans date ne matche jamais.
+   `c#` = jour LOCAL de création : `created_at` est un ISO UTC, le comparer tel quel ferait
+   basculer de mois un mémo créé le 1er octobre à 00 h 30 à Paris (stocké le 30/09 à 22 h 30 Z).
+   Côté invité, le fuseau est celui de SON navigateur — c'est « son » aujourd'hui. */
+function memoInDateRange(m, date) {
+  if (!date) return true;
+  if (date.kind === 'created') {
+    const t = Date.parse(m.created_at || '');
+    if (isNaN(t)) return false;
+    const jour = localIsoDay(new Date(t));
+    return jour >= date.from && jour <= date.to;
+  }
+  if (!m.due_date) return false;
+  return m.due_date <= date.to && memoDueEndDay(m) >= date.from;
+}
+
+/* Le `#mot` ÉCRIT dans le contenu d'un mémo (le titre n'est pas lu). Le contenu est foldé AVANT
+   le test : `#eclipse` trouve un `#éclipse` écrit dans le corps. La borne de fin reste stricte —
+   c'est ce qui garde `#note` distinct de `#notes`. Le HTML est retiré ici même (template DOM,
+   sans script exécuté) pour que le helper n'ait besoin d'aucun `stripHTML`/`stripTags` de page. */
+function memoHasHashtag(m, tag) {
+  if (!tag) return false;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = (m && m.content) || '';
+  const texte = (tpl.content.textContent || '').replace(/\s+/g, ' ');
+  const re = new RegExp('#' + tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9_-])', 'i');
+  return re.test(searchFold(texte));
+}
+
+/* Chip de l'intervalle de dates, au gabarit du chip de portée (invariant 9), rendu SANS état :
+   la page fournit l'élément, l'intervalle (`parsed.date`) et ce que fait le ✕. Il ne s'affiche
+   QUE si le préfixe a été reconnu : c'est le signal qu'une forme inconnue a été laissée au texte,
+   plutôt qu'un silence qui rendrait une liste vide inexplicable. Le ✕ rend `date.rest` (le texte
+   libre) à `onClear` — on ne détruit pas la moitié de la requête. */
+function renderDateChip(chip, date, onClear) {
+  if (!chip) return;
+  if (!date) { chip.hidden = true; chip.innerHTML = ''; return; }
+  chip.innerHTML = '';
+  chip.hidden = false;
+  const quoi = date.kind === 'due' ? '📅 échéance :' : '🕓 créés :';
+  chip.title = (date.kind === 'due' ? 'Mémos dont l’échéance tombe entre le '
+                                    : 'Mémos créés entre le ') + date.from + ' et le ' + date.to;
+  chip.appendChild(el('span', { text: quoi }));
+  chip.appendChild(el('span', { class: 'sc-name', text: date.label }));
+  chip.appendChild(el('button', {
+    class: 'sc-x', text: '✕',
+    attrs: { type: 'button', title: 'Retirer le filtre de date',
+             'aria-label': 'Retirer le filtre de date' },
+    on: { click: () => { if (onClear) onClear(date.rest || ''); } },
+  }));
 }
 
 // Vrai sur mobile / pointeur grossier : c'est là que la feuille remplace la saisie inline.
