@@ -5056,6 +5056,16 @@ function openMapDialog(title, points, recompute, extra) {
     loadPhotos: realProject ? (() => fetch('/api/projects/' + state.memoProject + '/photos').then(r => r.json())) : null,
     openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => '/uploads/' + x, downloadUrl: x => '/uploads/' + x, exifUrl: x => '/api/image-exif/' + x }),
     passageInfo: mapPassageInfo,  // [FESTIVAL-FRISE-FOCUS] données du passage pour le popup frise (mémo sans point → scène)
+    // [FRISE-STEP-NOGPS] bulle « Pas de position » d'un chip de frise : géocodage + pose de la
+    // position par les routes owner EXISTANTES (/api/geocode, PUT /api/memos/<id>). Le partial ne
+    // connaît aucune URL (invariant 5). Premier résultat Nominatim ; null = introuvable.
+    geocode: async (q) => { const d = await api('/api/geocode?q=' + encodeURIComponent(q)); return (d.results && d.results[0]) || null; },
+    saveLocation: async (p, loc) => {
+      const r = await api('/api/memos/' + p.id, { method: 'PUT', body: JSON.stringify({ location: loc }) });
+      const m = state.memos.find(x => x.id === p.id);
+      if (m) m.location = (r && r.location && r.location.lat != null) ? r.location : loc;
+      return m ? m.location : loc;
+    },
     // [FESTIVAL-FRISE-FOCUS #2] « 📝 Ouvrir le mémo » : ALLER-RETOUR. Ferme la carte (état mémorisé
     // dans `snap`), ouvre la pop-in mémo ; à SA fermeture, ROUVRE la carte restaurée (vue/jour/chip/
     // bulle, compteurs rafraîchis). Un seul niveau, réservé au parcours carte→mémo. Pas de dialogs empilés.

@@ -1340,7 +1340,10 @@ function runMapDialog(cfg) {
   const curId = cfg.currentProjectId;
   const UNGROUPED = ' none';
 
-  document.getElementById('map-title').textContent = '🗺 ' + cfg.title + ' (' + points.length + ' point' + (points.length > 1 ? 's' : '') + ')';
+  // [FRISE-STEP-NOGPS] titre recalculé à chaque refresh : un point ajouté depuis la bulle
+  // « Pas de position » (recompute) doit s'y compter tout de suite.
+  const setMapTitle = (pts) => { document.getElementById('map-title').textContent = '🗺 ' + cfg.title + ' (' + pts.length + ' point' + (pts.length > 1 ? 's' : '') + ')'; };
+  setMapTitle(points);
   _mapWideStyle();
   const mapDlg = document.getElementById('map-dialog');
   mapDlg.classList.remove('map-filters-open');   // filtres repliés à chaque ouverture (mobile)
@@ -1421,6 +1424,10 @@ function runMapDialog(cfg) {
   // [FESTIVAL-FRISE-FOCUS] chip de frise sélectionné (mémo) + popup ouvert sur le pin du projet
   // porteur, pour un passage SANS point propre. Non persisté ; re-clic/clic ailleurs = ferme.
   let tlSelId = null, tlSelEl = null, passagePopup = null;
+  // [FRISE-STEP-NOGPS] bulle « Pas de position » ancrée sur un chip (div dans le dialog, jamais un
+  // <dialog> — invariant 8). Une seule à la fois ; fermée à chaque re-rendu de la frise.
+  let posBubble = null;
+  ['frise-pos-bubble', 'frise-pos-toast'].forEach(id => { const o = document.getElementById(id); if (o) o.remove(); });
   const markersByKey = {};
   let routeLine = null;
   const ACCENT = (getComputedStyle(document.documentElement).getPropertyValue('--accent') || '#4fc3f7').trim() || '#4fc3f7';
@@ -1929,6 +1936,7 @@ function runMapDialog(cfg) {
         }));
       }
       row.style.borderLeft = '3px solid transparent';  // [MAP-POPUP-HOVER] réserve le liseré de sélection
+      row.dataset.mapRow = pkey(p);
       rowsByKey[pkey(p)] = row;
       listEl.appendChild(row);
     }
@@ -1953,6 +1961,28 @@ function runMapDialog(cfg) {
       }
       byProj.get(t).forEach(p => buildRow(p, proj, multi));
     });
+    // [FRISE-STEP-NOGPS] section « Sans position · n » : mémos datés du périmètre (même focus)
+    // sans point propre ni porteur géolocalisé. Même ligne épurée, sans pastille ; clic = même
+    // comportement que le chip (jour, sélection, bulle ancrée sur le chip — ou sur la ligne si
+    // la frise est masquée).
+    if (cfg.datedPoints) {
+      const seen = new Set();
+      const nogps = datedAll().filter(p => isFocused(p) && hasNoPos(p) && !seen.has(p.id) && seen.add(p.id));
+      if (nogps.length) {
+        const head = el('div', { attrs: { 'data-nogps-section': '1', style: 'display:flex;align-items:center;gap:0.35rem;font-size:0.74rem;color:var(--muted);font-weight:600;margin-top:0.5rem;padding:0.1rem 0.2rem 0.1rem 0.35rem;border-left:3px solid var(--border)' } });
+        head.appendChild(hdrIconAt('map-pin-off', 13));
+        head.appendChild(el('span', { text: 'Sans position · ' + nogps.length }));
+        listEl.appendChild(head);
+        nogps.forEach(p => {
+          const row = el('button', { attrs: { type: 'button', 'data-nogps-row': String(p.id), title: 'Ajouter une position',
+            style: 'display:flex;flex-direction:column;align-items:flex-start;gap:0.1rem;width:100%;text-align:left;background:none;border:none;border-left:3px solid transparent;padding:0.35rem 0.5rem;color:inherit;font:inherit;font-size:0.8rem;cursor:pointer' } });
+          row.appendChild(el('strong', { text: p.title || '' }));
+          row.appendChild(el('span', { text: new Date(p.due_date + 'T00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }), attrs: { style: 'color:var(--muted);font-size:0.72rem' } }));
+          row.addEventListener('click', () => openPassageOnPorter(p, row));
+          listEl.appendChild(row);
+        });
+      }
+    }
 
     if (fit) {
       setTimeout(() => {
@@ -2024,8 +2054,16 @@ function runMapDialog(cfg) {
   // « aujourd'hui » = barre de progression + repère entre passé et futur ; passées
   // estompées ✓, étape du jour halo accent, sans-GPS non centrable (style discret).
   // [FESTIVAL-FRISE-FOCUS] sélection visuelle du chip cliqué (anneau accent) + fermeture.
-  function clearStepSel() { if (tlSelEl) { tlSelEl.style.boxShadow = ''; tlSelEl = null; } }
-  function selectStep(elm, id) { clearStepSel(); tlSelEl = elm; tlSelId = id; if (elm) elm.style.boxShadow = '0 0 0 2px ' + ACCENT; }
+  function clearStepSel() { if (tlSelEl) { tlSelEl.style.boxShadow = ''; delete tlSelEl.dataset.stepSel; tlSelEl = null; } }
+  function selectStep(elm, id) { clearStepSel(); tlSelEl = elm; tlSelId = id; if (elm) { elm.style.boxShadow = '0 0 0 2px ' + ACCENT; elm.dataset.stepSel = '1'; } }
+  // [FRISE-STEP-NOGPS] position de repli d'un mémo sans point propre = pin du dossier porteur
+  // (ou plus proche ancêtre géolocalisé), via cfg.passageInfo. null = « sans position » pour de bon.
+  function porterLl(p) {
+    if (!cfg.passageInfo) return null;
+    const inf = cfg.passageInfo(p.id);
+    return (inf && inf.ll) ? inf.ll : null;
+  }
+  function hasNoPos(p) { return !(p.lat != null && p.lng != null) && !porterLl(p); }
   function closePassagePopup() { if (passagePopup) { activeMap.closePopup(passagePopup); } clearStepSel(); tlSelId = null; }
   // Contenu du popup d'un passage — hiérarchie typo soignée (titre marqué, horaires contrastés +
   // 🕒, pastille couleur de scène = même que la liste de droite via provenanceColor). [FESTIVAL-FRISE-FOCUS #4]
@@ -2114,15 +2152,108 @@ function runMapDialog(cfg) {
     passagePopup.on('remove', () => { clearStepSel(); tlSelId = null; passagePopup = null; });  // clic ailleurs = fermeture
   }
   // Ouvre le popup d'un passage SANS point propre sur le pin de son projet porteur (flyTo).
-  function openPassageOnPorter(p) {
-    if (tlSelId === p.id && passagePopup) { closePassagePopup(); return; }  // re-clic = fermer
-    if (!cfg.passageInfo) return;
-    const inf = cfg.passageInfo(p.id);
-    if (!inf || !inf.ll) return;  // pas de porteur géolocalisé → no-op propre
+  // [FRISE-STEP-NOGPS] `anchor` = élément de repli pour ancrer la bulle « Pas de position » quand
+  // le chip n'est pas dans la frise (ligne de la section « Sans position », frise masquée).
+  function openPassageOnPorter(p, anchor) {
+    if (tlSelId === p.id && (passagePopup || posBubble)) { closePassagePopup(); closePosBubble(); return; }  // re-clic = fermer
+    // [FRISE-STEP-NOGPS] la bascule de jour et la sélection viennent AVANT tout test de position :
+    // un chip sans porteur géolocalisé (bug « nol kyoto sanjo ») bascule le jour comme les autres.
     const cur = switchDayThenLocate(p);  // bascule éventuelle du filtre de jour + re-localise le chip
     selectStep(cur || null, p.id);
+    const inf = cfg.passageInfo ? cfg.passageInfo(p.id) : null;
+    if (!inf || !inf.ll) { openPosBubble(p, cur || anchor || null); return; }  // sans position → inviter
     activeMap.flyTo(inf.ll, 16, { duration: 0.6 });
     showPassagePopup(p, inf, inf.ll, true);
+  }
+  // [FRISE-STEP-NOGPS] Bulle « Pas de position » ancrée SOUS le chip (div absolu dans le dialog,
+  // classes existantes — invariant 9, pas de <dialog> — invariant 8). Éditeur (cfg.geocode +
+  // cfg.saveLocation fournis par la page et `editable`) : champ adresse (Entrée) + « Ma position » ;
+  // lecteur : le constat seul. Échap / clic ailleurs = fermer. Aucune URL ici (invariant 5).
+  function closePosBubble(keepSel) {
+    if (!posBubble) return;
+    posBubble.remove(); posBubble = null;
+    document.removeEventListener('keydown', posBubbleKey, true);
+    mapDlg.removeEventListener('mousedown', posBubbleOutside, true);
+    if (!keepSel) { clearStepSel(); tlSelId = null; }
+  }
+  function posBubbleKey(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePosBubble(); } }
+  function posBubbleOutside(e) {
+    if (!posBubble) return;
+    if (posBubble.contains(e.target) || (tlSelEl && tlSelEl.contains(e.target))) return;
+    closePosBubble();
+  }
+  function posToast(text) {
+    const old = document.getElementById('frise-pos-toast'); if (old) old.remove();
+    const t = el('div', { class: 'badge', text, attrs: { id: 'frise-pos-toast', role: 'status',
+      style: 'position:absolute;right:1rem;bottom:1rem;z-index:30;background:var(--panel);border:1px solid var(--border);color:var(--text);padding:0.35rem 0.7rem;border-radius:9px;font-size:0.8rem;box-shadow:0 2px 8px rgba(0,0,0,0.25)' } });
+    mapDlg.appendChild(t);
+    setTimeout(() => { if (t.parentNode) t.remove(); }, 2500);
+  }
+  function openPosBubble(p, anchor) {
+    closePosBubble(true);  // une autre bulle ouverte (activation clavier) : on la remplace, sélection du chip courant gardée
+    const canPlace = editable && typeof cfg.geocode === 'function' && typeof cfg.saveLocation === 'function';
+    const box = el('div', { attrs: { id: 'frise-pos-bubble', role: 'dialog', 'aria-label': 'Pas de position',
+      style: 'position:absolute;z-index:31;min-width:14rem;max-width:min(22rem,90vw);background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:0.5rem 0.6rem;box-shadow:0 4px 14px rgba(0,0,0,0.3);font-size:0.8rem' } });
+    const head = el('div', { attrs: { style: 'display:flex;align-items:center;gap:0.35rem;color:var(--muted);font-weight:600' } });
+    head.appendChild(hdrIconAt('map-pin-off', 14));
+    head.appendChild(el('span', { text: 'Pas de position' }));
+    box.appendChild(head);
+    const msg = el('div', { attrs: { id: 'frise-pos-msg', style: 'color:var(--muted);font-size:0.74rem;margin-top:0.25rem;min-height:0' } });
+    if (canPlace) {
+      const row = el('div', { attrs: { style: 'display:flex;gap:0.35rem;margin-top:0.4rem;align-items:center' } });
+      const input = el('input', { attrs: { id: 'frise-pos-input', type: 'text', placeholder: '📍 Adresse… (Entrée)', 'aria-label': 'Adresse',
+        style: 'flex:1;min-width:8rem;background:var(--panel-2);border:1px solid var(--border);border-radius:7px;color:var(--text);padding:0.25rem 0.45rem;font:inherit;font-size:0.8rem' } });
+      const mine = lucioleize(el('button', { class: 'prio-btn', text: 'Ma position', attrs: { type: 'button', title: 'Utiliser la position de cet appareil', style: 'flex-shrink:0;padding:0.2rem 0.5rem' } }));
+      let busy = false;
+      const apply = async (loc) => {
+        if (busy) return; busy = true; msg.textContent = 'Enregistrement…';
+        try {
+          const saved = await cfg.saveLocation(p, loc);
+          const fin = (saved && saved.lat != null) ? saved : loc;
+          closePosBubble();
+          current = recompute(); refresh(false);
+          activeMap.setView([fin.lat, fin.lng], 15);
+          const mk = markersByKey['memo:' + p.id];
+          if (mk) mk.marker.openPopup();
+          posToast('Position ajoutée');
+        } catch (e) { msg.textContent = (e && e.message) || 'Enregistrement impossible'; }
+        busy = false;
+      };
+      input.addEventListener('keydown', async (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault(); e.stopPropagation();
+        const q = input.value.trim(); if (q.length < 3) return;
+        if (busy) return; busy = true; msg.textContent = 'Recherche…';
+        let loc = null;
+        try { loc = await cfg.geocode(q); } catch (err) { loc = null; }
+        busy = false;
+        if (!loc || loc.lat == null) { msg.textContent = 'Adresse introuvable'; return; }
+        apply({ lat: loc.lat, lng: loc.lng, label: loc.label || q });
+      });
+      mine.addEventListener('click', () => {
+        if (!navigator.geolocation) { msg.textContent = 'Géolocalisation non disponible'; return; }
+        msg.textContent = 'Localisation…';
+        navigator.geolocation.getCurrentPosition(
+          pos => apply({ lat: pos.coords.latitude, lng: pos.coords.longitude, label: '' }),
+          () => { msg.textContent = 'Position refusée ou indisponible'; },
+          { enableHighAccuracy: true, timeout: 10000 });
+      });
+      row.appendChild(input); row.appendChild(mine);
+      box.appendChild(row);
+    }
+    box.appendChild(msg);
+    mapDlg.appendChild(box);
+    posBubble = box;
+    // Ancrage sous le chip, dans le repère du dialog (qui peut défiler en mobile).
+    const dr = mapDlg.getBoundingClientRect();
+    const ar = anchor ? anchor.getBoundingClientRect() : { left: dr.left + 16, bottom: dr.top + 16 };
+    let left = ar.left - dr.left + mapDlg.scrollLeft, top = ar.bottom - dr.top + mapDlg.scrollTop + 6;
+    const maxLeft = mapDlg.clientWidth - box.offsetWidth - 8;
+    if (left > maxLeft) left = Math.max(8, maxLeft);
+    box.style.left = left + 'px'; box.style.top = top + 'px';
+    document.addEventListener('keydown', posBubbleKey, true);
+    setTimeout(() => { if (posBubble === box) mapDlg.addEventListener('mousedown', posBubbleOutside, true); }, 0);
+    if (canPlace) { const i = box.querySelector('#frise-pos-input'); if (i) i.focus(); }
   }
   // [FESTIVAL-FRISE-FOCUS #2] Ré-ouvre la bulle d'un passage SANS flyTo (la vue est restaurée à part) ;
   // compteurs ❤️/🗳 rafraîchis (passageInfo relu, l'utilisateur a pu voter/commenter depuis le mémo).
@@ -2158,6 +2289,7 @@ function runMapDialog(cfg) {
   }
 
   function renderTimeline() {
+    closePosBubble();  // [FRISE-STEP-NOGPS] les chips sont recréés : une bulle ancrée n'a plus de repère
     tlEl.innerHTML = '';
     clearStepSel();  // les éléments de chips sont recréés → oublier l'ancienne réf (le popup reste)
     const dated = datedAll().filter(p => isFocused(p));
@@ -2297,6 +2429,7 @@ function runMapDialog(cfg) {
       const isPast = day < tlToday;
       const isToday = day === tlToday;
       const hasGps = p.lat != null && p.lng != null;
+      const noPos = !hasGps && !porterLl(p);  // [FRISE-STEP-NOGPS] ni point propre, ni porteur géolocalisé
       const d = new Date(day + 'T00:00');
       // Heure = check-in → sur la 1re nuit seulement (jour === due_date), pas sur chaque nuit.
       const dayLbl = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ((p.due_time && day === p.due_date) ? ' ' + fmtMemoTime(p.due_time) : '');
@@ -2311,12 +2444,12 @@ function runMapDialog(cfg) {
           'data-memo-id': p.id,  // [FESTIVAL-FRISE-FOCUS] re-trouver le chip après un re-render (bascule de jour)
           // [FESTIVAL-FRISE-FOCUS] un passage sans point PROPRE reste cliquable si un projet
           // porteur géolocalisé existe (cfg.passageInfo fourni) → pin de la scène.
-          title: (p.title || '') + (hasGps ? '' : (cfg.passageInfo ? ' — voir la scène sur la carte' : ' — sans position (non centrable)')),
+          title: (p.title || '') + (hasGps ? '' : (noPos ? ' — pas de position' : ' — voir la scène sur la carte')),
           // overflow:hidden : les titres longs restent DANS leur étape (pas de chevauchement).
           style: 'flex-shrink:0;max-width:9.5rem;overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;gap:0.08rem;'
             + 'background:var(--panel-2);border:1px ' + (hasGps ? 'solid' : 'dashed') + ' var(--border);border-radius:8px;'
             + 'padding:0.25rem 0.45rem;color:inherit;font:inherit;font-size:0.7rem;text-align:left;'
-            + 'cursor:' + ((hasGps || cfg.passageInfo) ? 'pointer' : 'default') + ';'
+            + 'cursor:pointer;'  // [FRISE-STEP-NOGPS] tout chip agit (jour, sélection, bulle)
             + (dimOtherDay ? 'opacity:0.35;' : (isPast ? 'opacity:0.45;' : ''))
             + ((isActiveDay || isToday) ? 'box-shadow:0 0 0 2px ' + ACCENT + ';' : ''),
         },
@@ -2324,7 +2457,15 @@ function runMapDialog(cfg) {
       // [MAP-TRIP-POLISH] miniature de la photo du mémo dans l'étape (si dispo).
       const col = el('span', { attrs: { style: 'display:flex;flex-direction:column;gap:0.08rem;min-width:0' } });
       col.appendChild(el('span', { text: (isPast ? '✓ ' : '') + dayLbl, attrs: { style: 'color:var(--muted);font-size:0.64rem;white-space:nowrap' } }));
-      col.appendChild(el('span', { text: p.title || '(mémo)', attrs: { style: 'max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600' } }));
+      const ttl = el('span', { attrs: { style: 'display:flex;align-items:center;gap:0.25rem;max-width:100%;min-width:0' } });
+      ttl.appendChild(el('span', { text: p.title || '(mémo)', attrs: { style: 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600' } }));
+      if (noPos) {  // [FRISE-STEP-NOGPS] glyphe discret « sans position » (icône trait, atténuée)
+        const g = hdrIconAt('map-pin-off', 12); g.classList.add('frise-nogps');
+        g.setAttribute('aria-label', 'Pas de position'); g.style.cssText += ';flex-shrink:0;color:var(--muted);opacity:0.7';
+        ttl.appendChild(g);
+        step.dataset.nogps = '1';
+      }
+      col.appendChild(ttl);
       if (p.imgUrl) {
         const rowWrap = el('span', { attrs: { style: 'display:flex;align-items:center;gap:0.35rem;min-width:0' } });
         rowWrap.appendChild(el('img', { attrs: { src: p.imgUrl, loading: 'lazy', alt: '', style: 'width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border)' } }));
@@ -2345,9 +2486,10 @@ function runMapDialog(cfg) {
           activeMap.setView([p.lat, p.lng], 15);
           if (mk) mk.marker.openPopup();
         });
-      } else if (cfg.passageInfo) {
-        // [FESTIVAL-FRISE-FOCUS] mémo sans point propre → pin du projet porteur (scène) + popup.
-        step.addEventListener('click', () => openPassageOnPorter(p));
+      } else {
+        // [FESTIVAL-FRISE-FOCUS] mémo sans point propre → pin du projet porteur (scène) + popup ;
+        // [FRISE-STEP-NOGPS] sans porteur → bascule du jour + bulle « Pas de position » (même chemin).
+        step.addEventListener('click', () => openPassageOnPorter(p, step));
       }
       strip.appendChild(step);
     });
@@ -2514,6 +2656,7 @@ function runMapDialog(cfg) {
   }
 
   function refresh(fit) {
+    setMapTitle(current);
     renderVoteBar();  // [VOTE-MAP] chips de scrutin (masqué si aucun scrutin)
     renderSubbar();
     renderGroupbar();
@@ -7122,6 +7265,8 @@ const HDR_ICONS = {
   link: ['M9 15l6 -6', 'M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464', 'M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463'],
   sitemap: ['M3 15m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M15 15m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M9 5m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M6 15v-1a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v1', 'M12 9v3'],
   'map-pin': ['M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0', 'M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z'],
+  // [FRISE-STEP-NOGPS] épingle barrée = « sans position » (chip de frise, section de liste).
+  'map-pin-off': ['M9.172 9.172a3 3 0 0 0 4.243 4.243', 'M6.756 6.756a8 8 0 0 0 -.058 11.244l4.243 4.243a2 2 0 0 0 2.828 0l3.887 -3.887m2.24 -2.242a8 8 0 0 0 -3.281 -11.3c-2.8 -1.406 -5.888 -1.24 -8.324 .148', 'M3 3l18 18'],
   trash: ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12', 'M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3'],
   photo: ['M15 8h.01', 'M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12z', 'M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5', 'M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3'],
   music: ['M6 17m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M16 15m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0', 'M9 17v-13h10v13', 'M9 8h10'],

@@ -2857,6 +2857,25 @@ function openShareMap(extra) {
     loadPhotos: () => fetch(API + '/photos', { headers: { 'X-Guest-Token': guestToken() } }).then(r => r.json()),
     openImage: (n) => runImageViewer({ images: [n], startIndex: 0, imageUrl: x => API + '/image/' + x, downloadUrl: x => API + '/image/' + x, exifUrl: x => API + '/image-exif/' + x }),
     passageInfo: shareMapPassageInfo,  // [FESTIVAL-FRISE-FOCUS] données du passage pour le popup frise
+    // [FRISE-STEP-NOGPS] bulle « Pas de position » : routes share EXISTANTES (/share/<t>/geocode,
+    // PUT /share/<t>/memo/<id>), invité approuvé + can_edit seulement (canEditNow) ; le serveur
+    // revalide (403 → message dans la bulle). Lecteur : cfg absentes → bulle sans champ.
+    geocode: canEditNow() ? async (q) => {
+      const r = await fetch(API + '/geocode?q=' + encodeURIComponent(q), { headers: { 'X-Guest-Token': guestToken() } });
+      const d = r.ok ? await r.json() : { results: [] };
+      return (d.results && d.results[0]) || null;
+    } : null,
+    saveLocation: canEditNow() ? async (p, loc) => {
+      const r = await fetch(API + '/memo/' + p.id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() },
+        body: JSON.stringify({ location: loc }),
+      });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'non autorisé'); }
+      const m = await r.json().catch(() => ({}));
+      const obj = (DATA.memos || []).find(x => x.id === p.id);
+      if (obj) obj.location = (m && m.location && m.location.lat != null) ? m.location : loc;
+      return obj ? obj.location : loc;
+    } : null,
     // [MAP-MEMO-ROUNDTRIP] « Ouvrir le mémo » invité (pas de modal — détails/commentaires/réactions
     // vivent inline sur la card). Mémorise l'état carte (restauré au retour), ferme la carte, va au
     // board du dossier, DÉPLIE la card cible (contenu déclampé via shareOpenMemo) + surlignage accent
