@@ -6761,6 +6761,7 @@ function initQuickMemo(cfg) {
     const txt = (titleEl && titleEl.value.trim()) || (textEl && textEl.value.trim());
     goEl.disabled = !(txt || hasMedia());
   }
+  const folderSt = { shown: null, userPicked: false };   // [GUEST-ADD-FOLDER] cf. pickFolder
   function fillFolders() {
     if (!folderEl) return;
     const cur = folderEl.value;
@@ -6778,9 +6779,7 @@ function initQuickMemo(cfg) {
         folderEl.appendChild(g);
       } else { addOpt(folderEl, it); }
     });
-    const want = cur || (cfg.defaultFolder ? String(cfg.defaultFolder() || '') : '');
-    const has = [].some.call(folderEl.options, o => o.value === want);
-    folderEl.value = has ? want : (folderEl.options[0] ? folderEl.options[0].value : '');
+    pickFolder(folderEl, cfg.defaultFolder ? String(cfg.defaultFolder() || '') : '', cur, folderSt);
   }
   /* ---- photos : vignettes 44 px, retirables une à une ------------------------------------ */
   function renderShots() {
@@ -7017,6 +7016,7 @@ function initQuickMemo(cfg) {
     titleEl = el('input', { class: 'qm-title', attrs: { type: 'text', placeholder: 'Titre (optionnel)', 'aria-label': 'Titre' } });
     textEl = el('textarea', { class: 'qm-text', attrs: { rows: '3', placeholder: 'Note…', 'aria-label': 'Contenu' } });
     folderEl = el('select', { class: 'qm-folder', attrs: { 'aria-label': 'Dossier de destination' } });
+    folderEl.addEventListener('change', () => { folderSt.userPicked = true; });
     // [BUTTONS-AUDIT V2] gabarit Luciole (`lucioleize`, pas une classe dédiée comme `.pomo-start`) :
     // ce bouton ne réécrit JAMAIS son libellé — seul `disabled` bascule pendant l'envoi — la lueur
     // survit donc au cycle de soumission. `buildPanel()` reconstruit le panneau, chaque bouton neuf
@@ -7431,6 +7431,20 @@ function lucioleize(btn, variant) {
            allowMeta, onCreate({title, projectValue, meta}) → bool }.
    Gardes client v24/v18 (jamais de 400) : la fin exige une date, la fin est exclusive de la
    récurrence, vider la date vide la fin ET l'heure. */
+// [GUEST-ADD-FOLDER] Le sélecteur de dossier d'une création SUIT le dossier affiché, sauf si
+// l'utilisateur l'a changé lui-même depuis la dernière navigation (`st.userPicked`, posé sur
+// `change`, remis à faux dès que le dossier affiché change). `st` = { shown, userPicked } propre à
+// chaque composant. Avant : la barre restaurait la valeur précédente et la Note rapide préférait
+// la valeur courante → mémo créé à la racine alors qu'on regardait un sous-dossier.
+function pickFolder(sel, wanted, prev, st) {
+  wanted = wanted == null ? '' : String(wanted);
+  if (wanted !== st.shown) { st.shown = wanted; st.userPicked = false; }
+  const has = v => [].some.call(sel.options, o => o.value === v);
+  if (st.userPicked && has(prev)) sel.value = prev;
+  else if (has(wanted)) sel.value = wanted;
+  else sel.value = sel.options[0] ? sel.options[0].value : '';
+}
+
 function guestMemoAddBar(cfg) {
   const bar = el('div', { class: 'mab-bar' });
   const row1 = el('div', { class: 'mab-row1' });
@@ -7480,11 +7494,14 @@ function guestMemoAddBar(cfg) {
   const projGroup = el('div', { class: 'mab-group' });
   projGroup.appendChild(el('span', { class: 'mab-lbl', text: 'Dossier' }));
   const projSel = el('select', { attrs: { title: 'Dossier de destination' } });
+  const folderSt = { shown: null, userPicked: false };
+  const shownOf = (folders) => { const f = (folders || []).find(x => x.selected); return f ? String(f.value) : ''; };
   (cfg.folders || []).forEach(f => {
     const o = el('option', { attrs: { value: String(f.value) }, text: f.label });
-    if (f.selected) o.selected = true;
     projSel.appendChild(o);
   });
+  pickFolder(projSel, shownOf(cfg.folders), '', folderSt);
+  projSel.addEventListener('change', () => { folderSt.userPicked = true; });
   projGroup.appendChild(projSel);
   details.append(whenGroup, prioGroup, recurGroup);
   if (cfg.showFolder !== false && (cfg.folders || []).length > 1) details.appendChild(projGroup);
@@ -7542,10 +7559,9 @@ function guestMemoAddBar(cfg) {
     projSel.innerHTML = '';
     (folders || []).forEach(f => {
       const o = el('option', { attrs: { value: String(f.value) }, text: f.label });
-      if (f.selected) o.selected = true;
       projSel.appendChild(o);
     });
-    if (prev && [...projSel.options].some(o => o.value === prev)) projSel.value = prev;
+    pickFolder(projSel, shownOf(folders), prev, folderSt);
     const many = (folders || []).length > 1;
     if (cfg.showFolder !== false && many && !projGroup.isConnected) details.appendChild(projGroup);
     if ((!many || cfg.showFolder === false) && projGroup.isConnected) projGroup.remove();

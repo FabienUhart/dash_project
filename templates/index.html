@@ -2139,7 +2139,9 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
   #links-sort button .ls-long { display: none; }
   #links-sort button .ls-court { display: inline; }
   #memo-add-btn { display: inline-flex; }
-  .task .task-badges { order: 2; flex-basis: 100%; max-width: 100%; margin-left: 2.1rem; }
+  /* [GUEST-ADD-FOLDER] 100 % PLUS la marge de 2.1rem débordait de la rangée (8 px avec le badge
+     invité « 👤 Nom ») : la largeur retranche la marge. */
+  .task .task-badges { order: 2; flex-basis: calc(100% - 2.1rem); max-width: calc(100% - 2.1rem); margin-left: 2.1rem; }
   /* Carte visible d'emblée (le survol n'existe pas au doigt). */
   .card .actions { opacity: 1; }
   /* En mobile, la barre de projets du haut n'affiche pas le crayon : il fait doublon
