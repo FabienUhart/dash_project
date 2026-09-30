@@ -1861,7 +1861,10 @@ function runMapDialog(cfg) {
       // [MAP-POPUP-HOVER] bulle riche (titre, lieu, bouton « Ouvrir le mémo ») au survol ET au clic
       // (épingle). autoClose Leaflet = UNE bulle à la fois ; l'épingle est restaurée au mouseout
       // (wireMarkerPopup). Remplace le tooltip texte de V23.10.107.
-      marker.bindPopup(buildMarkerPopup(p));
+      // [MAP-NO-AUTOPAN] autoPan coupé : la bulle s'ouvre au SURVOL, et l'autoPan par défaut de
+      // Leaflet faisait glisser la carte dès qu'un point frôlait un bord. Le recadrage reste un
+      // geste volontaire (clic sur la ligne de liste → setView). Bulle partiellement hors cadre admise.
+      marker.bindPopup(buildMarkerPopup(p), { autoPan: false });
       // [MAP-MARKER-DAY-SYNC] le clic garde applyDay (sync frise « Jour N ») ; wireMarkerPopup ajoute
       // survol = ouvrir la bulle (délai 150 ms) et clic = épingler + sélectionner la ligne de liste.
       wireMarkerPopup(marker, p);
@@ -2379,7 +2382,8 @@ function runMapDialog(cfg) {
       const target = (focused || !photoGreyLayer) ? photoLayer : photoGreyLayer;
       L.marker([ph.lat, ph.lng], { icon, zIndexOffset: 1000 })
         .addTo(target)
-        .bindPopup('<strong>📷 ' + (ph.label || '').replace(/</g, '&lt;') + '</strong>' + (ph.taken_at ? '<br>' + fmtTaken(ph.taken_at) : ''))
+        // [MAP-NO-AUTOPAN] même règle que les points-mémo : ouvrir une bulle ne déplace jamais la carte.
+        .bindPopup('<strong>📷 ' + (ph.label || '').replace(/</g, '&lt;') + '</strong>' + (ph.taken_at ? '<br>' + fmtTaken(ph.taken_at) : ''), { autoPan: false })
         .on('click', () => cfg.openImage(ph.filename));
     });
   }
