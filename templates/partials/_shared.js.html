@@ -2787,6 +2787,7 @@ function watchHeaderHeight() {
 // [UNDO-DELETE] Toast « … supprimé — Annuler » (~5 s) après une suppression douce. Générique :
 // `onUndo` est le callback de restauration (route propre à la page). Élément flottant créé à la
 // volée, tokens CSS, pas de GSAP (invariant 8). Un seul toast à la fois (remplace le précédent).
+// [QUICK-NOTE-SEND] `onUndo` falsy → toast d'information seul, sans bouton (non bloquant, ≠ notify).
 function undoToast(msg, onUndo, ms) {
   const prev = document.getElementById('undo-toast');
   if (prev) { clearTimeout(prev._t); prev.remove(); }
@@ -2806,7 +2807,8 @@ function undoToast(msg, onUndo, ms) {
   btn.style.cssText = 'background:var(--accent);border-color:var(--accent);color:#10141a;padding:0.15rem 0.6rem';
   const close = () => { clearTimeout(t._t); t.remove(); };
   btn.addEventListener('click', async () => { close(); try { await onUndo(); } catch (e) {} });
-  t.appendChild(label); t.appendChild(btn);
+  t.appendChild(label);
+  if (onUndo) t.appendChild(btn);
   document.body.appendChild(t);
   t._t = setTimeout(close, ms || 5000);
   return t;

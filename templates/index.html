@@ -1596,6 +1596,20 @@ aside#memo-panel {
   outline: none;
 }
 #memo-quick:focus { border-color: var(--yellow); border-style: solid; }
+/* [QUICK-NOTE-SEND] bouton « Ajouter » à droite du champ, masqué tant que le champ est vide. */
+#memo-quick-wrap { display: flex; align-items: flex-end; gap: 0.4rem; }
+#memo-quick { flex: 1; min-width: 0; }
+#memo-quick-send { flex-shrink: 0; }
+#memo-quick-send[hidden] { display: none; }
+/* Card du mémo qui vient d'être ajouté : liseré accent qui s'éteint en 2 s (CSS seul, pas de GSAP). */
+@keyframes memo-new-glow {
+  from { box-shadow: 0 0 0 2px var(--accent); }
+  to   { box-shadow: 0 0 0 2px transparent; }
+}
+.memo-note.is-new { animation: memo-new-glow 2s ease-out forwards; }
+@media (prefers-reduced-motion: reduce) {
+  .memo-note.is-new { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+}
 /* [MEMO-QUICK-STICKY] la note rapide reste collée en bas de la colonne mémos, quel que soit le
    scroll (fond opaque panel + z-index pour que les cards ne transparaissent pas dessous). */
 #memo-quick-wrap {
@@ -2087,6 +2101,15 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
   #memo-details summary::before { content: "▸ "; }
   #memo-details[open] summary::before { content: "▾ "; }
   #memo-details summary { position: static; }  /* [MEMO-JUMP-BOTTOM] pas de sticky en mobile */
+  /* [QUICK-NOTE-SEND] le champ collé en bas passait sous les lanceurs fixes du bord gauche
+     (left 0, bas de l'écran). Marge = largeur de ce qui est affiché + 6 px : languettes ✏️ ¥€ ⏱
+     (1.5rem, widgets masqués) ou lanceurs ronds (left 1rem + 2.6rem). Desktop : rien ne bouge. */
+  body:has(#qm-reshow:not([hidden]), #fx-reshow:not([hidden]), #pomo-reshow:not([hidden])) #memo-quick-wrap {
+    padding-left: calc(1.5rem + 6px);
+  }
+  body:has(#qm-launch:not([hidden]), #fx-launch:not([hidden]), #pomo-launch:not([hidden])) #memo-quick-wrap {
+    padding-left: calc(3.6rem + 6px);
+  }
   #clock-date { display: none; }
   main { padding: 0.75rem; padding-bottom: calc(0.75rem + var(--footer-h)); }
   /* === Overrides mémos mobile (placés APRÈS les règles de base pour gagner la cascade :
@@ -2372,7 +2395,7 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
     <details id="memo-details" open>
       <summary title="Ouvrir la vue Mémos">📝 MÉMOS <span id="memo-count"></span><span id="memo-open">⤢</span><button type="button" id="memo-jump-btn" class="mini-add-btn" title="Aller en bas" aria-label="Aller en bas de la colonne mémos">⤓</button><span id="memo-sort-wrap"><button type="button" id="memo-sort-btn" class="mini-add-btn" title="Trier les mémos" aria-label="Trier les mémos" aria-haspopup="true">⇅</button><div id="memo-sort-menu" class="card-menu" hidden></div></span><button type="button" id="memo-add-btn" class="mini-add-btn" title="Ajouter un mémo" aria-label="Ajouter un mémo">＋</button></summary>
       <div id="memos"></div>
-      <div id="memo-quick-wrap"><textarea id="memo-quick" rows="2" placeholder="+ Note rapide… (Entrée pour ajouter)"></textarea></div>
+      <div id="memo-quick-wrap"><textarea id="memo-quick" rows="2" enterkeyhint="send" placeholder="+ Note rapide…" aria-label="Note rapide (Entrée pour ajouter, Maj+Entrée pour un retour à la ligne)"></textarea><button type="button" id="memo-quick-send" title="Ajouter la note (Entrée)" hidden>Ajouter</button></div>
     </details>
   </aside>
 </div>
@@ -10459,22 +10482,48 @@ document.getElementById('memo-details').querySelector('summary').addEventListene
 });
 
 const memoQuick = document.getElementById('memo-quick');
-memoQuick.addEventListener('keydown', async (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    const content = memoQuick.value.trim();
-    if (!content) return;
-    memoQuick.value = '';
-    // [OFFLINE] hors ligne → file locale + rejeu idempotent au retour réseau (Inbox uniquement).
-    if (isOffline) { enqueueNote(content); renderPendingNotes(); return; }
-    try {
-      await api('/api/memos', { method: 'POST', body: JSON.stringify({ content }) });
-      await loadAll();
-    } catch (_) {
-      enqueueNote(content); setOffline(true); renderPendingNotes();
-    }
+const memoQuickSend = document.getElementById('memo-quick-send');
+memoQuickSend.prepend(hdrIconAt('plus', 14));
+lucioleize(memoQuickSend, 'luc-primary');
+const syncQuickSend = () => { memoQuickSend.hidden = !memoQuick.value.trim(); };
+// [QUICK-NOTE-SEND] UNE seule implémentation pour Entrée ET le bouton « Ajouter » (file hors ligne
+// comprise). Retour visuel : toast non bloquant (pas `notify`, modal, qui volerait le focus à chaque
+// note) + card surlignée `.is-new`, ramenée dans le viewport en mobile (le mémo neuf peut arriver
+// tout en haut de la colonne alors qu'on tape tout en bas).
+async function quickAddNote() {
+  const content = memoQuick.value.trim();
+  if (!content) return;
+  memoQuick.value = '';
+  syncQuickSend();
+  const enAttente = () => {
+    enqueueNote(content); renderPendingNotes();
+    undoToast('Note en attente — envoyée au retour du réseau', null, 3500);
+  };
+  // [OFFLINE] hors ligne → file locale + rejeu idempotent au retour réseau (Inbox uniquement).
+  if (isOffline) { enAttente(); return; }
+  let memo;
+  try {
+    memo = await api('/api/memos', { method: 'POST', body: JSON.stringify({ content }) });
+  } catch (_) {
+    setOffline(true); enAttente(); return;
   }
+  await loadAll();
+  undoToast('Note ajoutée dans Inbox', null, 2500);
+  const card = memo && memo.id != null
+    ? document.querySelector('#memos .memo-note[data-memo-id="' + memo.id + '"]') : null;
+  if (!card) return;   // filtrée par la recherche en cours : rien à surligner
+  card.classList.add('is-new');
+  if (window.matchMedia('(max-width: 900px)').matches) {
+    // La card neuve est souvent la DERNIÈRE : `nearest` la laisserait sous le champ collé en bas.
+    card.style.scrollMarginBottom = (document.getElementById('memo-quick-wrap').offsetHeight + 8) + 'px';
+    card.scrollIntoView({ block: 'nearest' });
+  }
+}
+memoQuick.addEventListener('input', syncQuickSend);
+memoQuick.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); quickAddNote(); }
 });
+memoQuickSend.addEventListener('click', () => { quickAddNote(); memoQuick.focus(); });
 
 /* ------------------------------------------------ [OFFLINE] mode hors ligne (owner) */
 // SW network-first versionné (/sw.js) + bandeau + file de notes Inbox idempotente. Dégrade
