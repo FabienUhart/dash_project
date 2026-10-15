@@ -6,7 +6,7 @@ pytestmark = pytest.mark.unit
 def test_version_endpoint(client):
     r = client.get("/api/version")
     assert r.status_code == 200
-    assert r.get_json()["export"] == 28
+    assert r.get_json()["export"] == 29
 
 
 def test_create_memo_minimal(client):

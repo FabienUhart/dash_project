@@ -618,6 +618,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
   <label class="me-label">Images</label>
   <div id="ed-images" style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center"></div>
   <div id="ed-attachments"></div>
+  <div id="ed-urls"></div><!-- [MEMO-URLS] v29 section « Liens » (rendue par renderEdUrls) -->
   <div id="ed-links"></div><!-- [MEMO-LINKS] section « 🔗 Relié à » (rendue par renderEdLinks) -->
   <label class="me-label">Commentaires</label>
   <div id="ed-comments"></div>
@@ -911,7 +912,8 @@ function hubMemoFilter(ms) {
   // (invariant 5).
   return ms.filter(m => searchMatch(words, m.title, stripTags(m.content),
                                     (m.assignees || []).join(' '),
-                                    (m.subtasks || []).map(st => st.content).join(' ')));
+                                    (m.subtasks || []).map(st => st.content).join(' '),
+                                    (m.urls || []).map(u => (u.label || '') + ' ' + u.url).join(' ')));   // [MEMO-URLS]
 }
 function hubSearchScoped() {   // vrai quand la recherche est effectivement bornée au dossier focalisé
   return FOCUS != null && hubSearchActive() && !hubSearchWide;
@@ -1306,6 +1308,7 @@ function hubCoverKey() { return 'hubBoardCover:' + FOCUS; }
 
 function memoCard(m) {
   const task = el('div', { class: 'task' + (m.done ? ' done' : '') });
+  task.dataset.memoId = m.id;   // [MEMO-URLS] cible stable (tests, scroll) — comme share/owner
   // [CARD-COVER] 1re photo en couverture quand le board est en Immersif (le hub n'a pas d'état
   // « déplié » : la card reste une carte d'appel, le détail vit dans la fiche 👁 / l'éditeur).
   const coverName = (cardCoverOn(hubCoverKey()) && (m.images || []).length) ? m.images[0] : '';
@@ -1382,6 +1385,9 @@ function memoCard(m) {
       } })));
       content.appendChild(_lrw);
     }
+    // [MEMO-URLS] v29 : liens attachés (projection invitée) + URL du texte, clic = le site.
+    const _ur = urlsRow(m.urls, detectedUrlsNotAttached(m.content, m.urls));
+    if (_ur) content.appendChild(_ur);
 
   content.addEventListener('click', () => openEditor(m));
   row.appendChild(content);
@@ -2300,6 +2306,7 @@ function openEditor(m) {
   renderEdPeople(ro);
   renderEdImages(m, ro);
   renderEdAttachments(m, ro);  // [ATTACHMENTS]
+  renderEdUrls(m, ro);         // [MEMO-URLS] v29
   renderEdLinks(m, ro);        // [MEMO-LINKS]
   renderEdComments(m, ro);
   document.getElementById('ed-save').style.display = ro ? 'none' : '';
@@ -2385,6 +2392,33 @@ function renderEdAttachments(m, ro) {
     onChange: async () => { await reload(); const fresh = (DATA.memos || []).find((x) => x.id === m.id); if (fresh) renderEdAttachments(fresh, !fresh.can_edit); },
     openImage: (a) => { if (typeof runImageViewer === 'function') runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }); else window.open(a.url, '_blank', 'noopener'); },
   }));
+}
+// [MEMO-URLS] v29 — Section « Liens » de l'éditeur hub (scopée au share du dossier, routes
+// /share/<token>/memo/<id>/urls — invariant 5, le serveur revalide tout).
+function renderEdUrls(m, ro) {
+  const box = document.getElementById('ed-urls');
+  if (!box) return;
+  const hadFocus = box.contains(document.activeElement);   // rendre le focus au champ URL après un ajout
+  box.innerHTML = '';
+  const fresh = (DATA.memos || []).find((x) => x.id === m.id) || m;
+  const _after = async () => { await reload(); const f = (DATA.memos || []).find((x) => x.id === m.id); if (f) renderEdUrls(f, !f.can_edit); flashSaved(true); };
+  const sec = renderMemoUrls({
+    urls: fresh.urls || [],
+    content: fresh.content || '',
+    canEdit: !ro,
+    onAdd: async (url, label) => {
+      const r = await api(m.share_token, '/memo/' + m.id + '/urls', { method: 'POST', body: JSON.stringify({ url, label }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Impossible d’ajouter ce lien.'); }
+      await _after();
+    },
+    onRemove: async (u) => {
+      const r = await api(m.share_token, '/memo/' + m.id + '/urls', { method: 'DELETE', body: JSON.stringify({ url: u.url }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); notify(e.error || 'Impossible de retirer ce lien.', { error: true }); return; }
+      await _after();
+    },
+  });
+  if (sec) box.appendChild(sec);
+  if (hadFocus) { const f = box.querySelector('.murl-url'); if (f) f.focus(); }
 }
 // [MEMO-EDITOR-IMAGES] Section « 📷 Photos » de l'éditeur hub (scopée au share du dossier, routes
 // /share existantes — AUCUNE route nouvelle, invariant 5). Helper partagé : visionneuse = toutes les

@@ -1109,6 +1109,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
   <div id="q-meta"></div>
   <div id="q-photos"></div>
   <div id="q-attachments"></div>
+  <div id="q-urls"></div><!-- [MEMO-URLS] v29 section « Liens » (rendue par renderQUrls) -->
   <div id="q-links"></div><!-- [MEMO-LINKS] section « 🔗 Relié à » (rendue par renderQLinks) -->
   </div><!-- /.dlg-scroll -->
   <div class="dlg-actions">
@@ -2003,6 +2004,35 @@ function renderQAttachments(memo) {
   }));
 }
 
+// [MEMO-URLS] v29 — Section « Liens » de l'éditeur invité (scopée au partage). Le serveur
+// revalide tout (approuvé + capacité + mémo dans le scope) sous /share/* (invariant 5).
+function renderQUrls(memo) {
+  const box = document.getElementById('q-urls');
+  if (!box) return;
+  const hadFocus = box.contains(document.activeElement);   // rendre le focus au champ URL après un ajout
+  box.innerHTML = '';
+  const fresh = (DATA.memos || []).find((x) => x.id === memo.id) || memo;
+  const _hdr = () => ({ 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() });
+  const _after = async () => { await load(); const m = (DATA.memos || []).find((x) => x.id === memo.id); if (m) renderQUrls(m); flashSaved(true); };
+  const sec = renderMemoUrls({
+    urls: fresh.urls || [],
+    content: fresh.content || '',
+    canEdit: canEditMemo(fresh),
+    onAdd: async (url, label) => {
+      const r = await fetch(API + '/memo/' + memo.id + '/urls', { method: 'POST', headers: _hdr(), body: JSON.stringify({ url, label }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Impossible d’ajouter ce lien.'); }
+      await _after();
+    },
+    onRemove: async (u) => {
+      const r = await fetch(API + '/memo/' + memo.id + '/urls', { method: 'DELETE', headers: _hdr(), body: JSON.stringify({ url: u.url }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); await notify(e.error || 'Impossible de retirer ce lien.', { error: true }); return; }
+      await _after();
+    },
+  });
+  if (sec) box.appendChild(sec);
+  if (hadFocus) { const f = box.querySelector('.murl-url'); if (f) f.focus(); }
+}
+
 // [MEMO-LINKS] D2/D4 — section « 🔗 Relié à » côté invité. Le picker ne propose QUE les mémos
 // du scope du partage (DATA.memos, déjà borné serveur) et le lien n'est posable que si l'invité
 // peut éditer LES DEUX mémos (matrice [GUEST-ROLES]) ; le serveur revalide tout (invariant 5) —
@@ -2138,6 +2168,7 @@ function openEditor(memo, contentEl, taskEl) {
   renderQMeta(memo);         // [LESS-BUTTONS] échéance / priorité / position
   renderQPhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderQAttachments(memo);  // [ATTACHMENTS]
+  renderQUrls(memo);         // [MEMO-URLS] v29
   renderQLinks(memo);        // [MEMO-LINKS]
   const titleEl = document.getElementById('q-title');
   if (titleEl) titleEl.value = memo.title || '';
@@ -2488,7 +2519,8 @@ function scopedMemos() {
   // les expose déjà). Aucune fusion de sous-arbre ici — c'est owner seulement.
   return ms.filter(m => searchMatch(words, m.title, stripTags(m.content),
                                     (m.assignees || []).join(' '),
-                                    (m.subtasks || []).map(st => st.content).join(' ')));
+                                    (m.subtasks || []).map(st => st.content).join(' '),
+                                    (m.urls || []).map(u => (u.label || '') + ' ' + u.url).join(' ')));   // [MEMO-URLS]
 }
 
 // [PHOTO-BATCH-DOWNLOAD] Fichiers d'un dossier partagé (+ sous-dossiers) — scope borné à
@@ -3764,6 +3796,9 @@ function render() {
       } })));
       content.appendChild(_lrw);
     }
+    // [MEMO-URLS] v29 : liens attachés (projection invitée) + URL du texte, clic = le site.
+    const _ur = urlsRow(memo.urls, detectedUrlsNotAttached(memo.content, memo.urls));
+    if (_ur) content.appendChild(_ur);
     const _vr = shareVoteRow(memo);
     if (_vr) content.appendChild(_vr);
     row.appendChild(content);

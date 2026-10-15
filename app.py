@@ -68,7 +68,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "28"  # X = version du format d'export (invariant 1) — v28 = [LINK-REFS] un lien relié à un mémo ou un dossier ; v27 = [MEMO-LINKS] liens entre mémos ; v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "29"  # X = version du format d'export (invariant 1) — v29 = [MEMO-URLS] liens attachés au mémo (table memo_urls) ; v28 = [LINK-REFS] un lien relié à un mémo ou un dossier ; v27 = [MEMO-LINKS] liens entre mémos ; v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -770,6 +770,135 @@ def _import_project_attachments(db, project_id, att_list, now):
         have.add(fn)
 
 
+# ─────────────────────────── [MEMO-URLS] liens attachés au mémo (v29) ───────────────────────────
+# Même modèle que les pièces jointes : table additive par mémo, section dans l'éditeur, rangée en
+# pied de card, parité invités — ici sans binaire. Un lien de suivi de colis appartient AU MÉMO :
+# il n'a rien à faire dans la curation de la vue Liens (link_refs v28), et noyé dans le texte il
+# devient introuvable. Les URL DÉTECTÉES dans le contenu sont calculées au rendu, jamais stockées.
+MEMO_URLS_MAX = 20          # plafond par mémo (400 explicite au-delà)
+MEMO_URL_MAX_LEN = 2048
+MEMO_URL_LABEL_MAX = 120
+
+
+def _clean_memo_url(value):
+    """`http://` ou `https://` UNIQUEMENT (jamais `javascript:`/`data:`), ≤ 2048, espaces trimés,
+    **pas de normalisation agressive** : la query d'un lien de suivi en dépend. '' = invalide."""
+    u = str(value or "").strip()
+    if not u or len(u) > MEMO_URL_MAX_LEN or any(c in u for c in "\r\n\t <>\"'"):
+        return ""
+    try:
+        parsed = urlparse(u)
+    except Exception:
+        return ""
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    return u
+
+
+def _clean_url_label(value):
+    """Texte brut (échappé au rendu, jamais filtré ni interprété), une ligne, ≤ 120."""
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:MEMO_URL_LABEL_MAX]
+
+
+def _memo_url_dict(r, owner_name=None):
+    cb = (r["created_by"] or "").strip()
+    return {
+        "id": r["id"], "url": r["url"], "label": r["label"] or "", "position": r["position"] or 0,
+        "og_title": r["og_title"] or "", "og_domain": r["og_domain"] or "",
+        "created_at": r["created_at"] or "", "created_by": cb,
+        "created_by_display": cb if cb else (owner_name or ""),
+    }
+
+
+def _memo_urls_map(db, memo_ids, owner_name=None):
+    """{memo_id: [url_dict]} pour un lot de mémos, ordre `position, id`."""
+    ids = [i for i in memo_ids if i is not None]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    out = {}
+    for r in db.execute(
+        f"SELECT * FROM memo_urls WHERE memo_id IN ({ph}) ORDER BY position, id", ids
+    ).fetchall():
+        out.setdefault(r["memo_id"], []).append(_memo_url_dict(r, owner_name))
+    return out
+
+
+def _share_memo_urls(urls):
+    """PROJECTION STRICTE pour les invités (invariant 5) : `{url, label, og_title, og_domain}` —
+    pas d'id, pas de `created_by`, pas de `position` (l'ordre de la liste suffit)."""
+    return [{"url": u["url"], "label": u.get("label", "") or "",
+             "og_title": u.get("og_title", "") or "", "og_domain": u.get("og_domain", "") or ""}
+            for u in (urls or [])]
+
+
+def _memo_url_og(url):
+    """(og_title, og_domain, fetched_at) — le domaine est PUR (urlparse, toujours rempli) ; le
+    titre vient de `_fetch_og` (SSRF-safe, [LINK-OG]) et son échec est SILENCIEUX : l'aperçu est
+    un bonus, jamais un blocage de l'ajout."""
+    domain = _og_domain(url)
+    title = ""
+    try:
+        meta = _fetch_og(url) or {}
+        title = str(meta.get("title") or "")[:300]
+    except Exception:
+        title = ""
+    return title, domain, datetime.now(timezone.utc).isoformat()
+
+
+def _insert_memo_url(db, memo, url, label, created_by, now):
+    """Insère une URL (déjà validée) en fin de liste, aperçu compris. Rend (row, err_json, code)."""
+    n = db.execute("SELECT COUNT(*) FROM memo_urls WHERE memo_id = ?", (memo["id"],)).fetchone()[0]
+    if n >= MEMO_URLS_MAX:
+        return None, {"error": f"Déjà {MEMO_URLS_MAX} liens sur ce mémo (maximum)."}, 400
+    if db.execute("SELECT 1 FROM memo_urls WHERE memo_id = ? AND url = ?", (memo["id"], url)).fetchone():
+        return None, {"error": "Ce lien est déjà attaché à ce mémo."}, 409
+    pos = db.execute("SELECT COALESCE(MAX(position), -1) + 1 FROM memo_urls WHERE memo_id = ?", (memo["id"],)).fetchone()[0]
+    og_title, og_domain, fetched = _memo_url_og(url)
+    cur = db.execute(
+        "INSERT INTO memo_urls (memo_id, memo_uid, url, label, position, created_at, created_by, og_title, og_domain, og_fetched_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (memo["id"], memo["uid"] or "", url, label, pos, now, created_by, og_title, og_domain, fetched),
+    )
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (now, memo["id"]))
+    return db.execute("SELECT * FROM memo_urls WHERE id = ?", (cur.lastrowid,)).fetchone(), None, None
+
+
+def _import_memo_urls(db, memo_id, memo_uid, url_list, now):
+    """[MEMO-URLS] v29 : import ADDITIF non destructif, TOLÉRANT. URL invalide ignorée (jamais de
+    400), `INSERT OR IGNORE` sur `UNIQUE(memo_id, url)` (ré-import = 0 doublon), une URL locale
+    n'est jamais retirée, un libellé local non vide n'est jamais écrasé par un vide. `og_domain`
+    est recalculé (pur) ; `og_title` restera vide jusqu'à un prochain aperçu — c'est une dérivée.
+    Rend le nombre de lignes AJOUTÉES."""
+    if not isinstance(url_list, list):
+        return 0
+    added = 0
+    for i, u in enumerate(url_list):
+        if not isinstance(u, dict):
+            continue
+        url = _clean_memo_url(u.get("url"))
+        if not url:
+            continue
+        label = _clean_url_label(u.get("label"))
+        try:
+            pos = int(u.get("position", i))
+        except (TypeError, ValueError):
+            pos = i
+        existing = db.execute("SELECT id, label FROM memo_urls WHERE memo_id = ? AND url = ?", (memo_id, url)).fetchone()
+        if existing:
+            if label and not (existing["label"] or "").strip():
+                db.execute("UPDATE memo_urls SET label = ? WHERE id = ?", (label, existing["id"]))
+            continue
+        db.execute(
+            "INSERT OR IGNORE INTO memo_urls (memo_id, memo_uid, url, label, position, created_at, created_by, og_title, og_domain, og_fetched_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, NULL)",
+            (memo_id, memo_uid or "", url, label, pos, (str(u.get("created_at") or "")).strip() or now,
+             str(u.get("created_by") or "").strip()[:200], _og_domain(url)),
+        )
+        added += 1
+    return added
+
+
 def get_db():
     db = getattr(g, "_database", None)
     if db is None:
@@ -1203,6 +1332,28 @@ def init_db():
     acols = {r[1] for r in conn.execute("PRAGMA table_info(attachments)").fetchall()}
     if "project_id" not in acols:
         conn.execute("ALTER TABLE attachments ADD COLUMN project_id INTEGER")
+    # [MEMO-URLS] v29 : des LIENS attachés au mémo, comme les fichiers — sans binaire. Table
+    # additive, `CREATE TABLE IF NOT EXISTS`, jamais destructive (invariant 1). `og_*` = dérivées
+    # (aperçu [LINK-OG], recalculables) → jamais exportées. `UNIQUE(memo_id, url)` = la dédup
+    # qui rend le ré-import idempotent. `created_by` = pattern v19 ('' owner, sinon « Nom <email> »).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memo_urls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memo_id INTEGER NOT NULL,
+            memo_uid TEXT DEFAULT '',
+            url TEXT NOT NULL,
+            label TEXT DEFAULT '',
+            position INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT '',
+            created_by TEXT DEFAULT '',
+            og_title TEXT DEFAULT '',
+            og_domain TEXT DEFAULT '',
+            og_fetched_at TEXT,
+            UNIQUE(memo_id, url)
+        )
+        """
+    )
     # [PHOTO-MAP] Métadonnées EXIF des images, donnée DÉRIVÉE des fichiers (jamais
     # exportée, pas de bump de version) : remplie à l'upload + backfill, pour que la
     # carte du projet lise les lieux/dates sans re-parser/re-géocoder à chaque ouverture.
@@ -4133,6 +4284,7 @@ def _memo_dict(row, owner_name=None, links=None):
     # [LINK-REFS] v28 : idem, runtime-only (l'export porte `link_refs` par uid). Posée ici pour
     # que TOUS les payloads mémo aient la même forme — un `undefined` côté front serait un piège.
     d["link_refs"] = []
+    d["urls"] = []  # [MEMO-URLS] v29 : rempli par les routes de liste (même forme partout)
     cb = (d.get("created_by") or "").strip()
     # '' = propriétaire (résolu à l'affichage, survit au renommage owner) ;
     # chaîne non vide = identité invité « Nom <email> ».
@@ -4362,10 +4514,12 @@ def list_memos():
     lmap = _links_map(db, [r["id"] for r in rows])  # [MEMO-LINKS] owner = tout (mono-base)
     rrmap = _link_refs_by_target(db, "memo", [r["id"] for r in rows])  # [LINK-REFS] v28
     gmap = _geo_photo_counts(db, [r["id"] for r in rows])  # [MAP-PHOTO-COUNT]
+    umap = _memo_urls_map(db, [r["id"] for r in rows], owner_name)  # [MEMO-URLS] v29
     out = []
     for row in rows:
         d = _memo_dict(row, owner_name, lmap.get(row["id"], []))
         d["link_refs"] = rrmap.get(row["id"], [])  # [LINK-REFS] v28
+        d["urls"] = umap.get(d["id"], [])  # [MEMO-URLS] v29
         d["attachments"] = amap.get(d["id"], [])  # [ATTACHMENTS]
         d.update(_heart_fields(hmap.get(d["id"], []), "", owner_name))  # [FESTIVAL-VOTE] owner = voter ''
         g = guest_last.get(d["id"])
@@ -4703,6 +4857,7 @@ def _purge_memo_row(db, memo_id):
     for a in db.execute("SELECT filename FROM attachments WHERE memo_id = ?", (memo_id,)).fetchall():
         _delete_attachment_file(a["filename"])
     db.execute("DELETE FROM attachments WHERE memo_id = ?", (memo_id,))
+    db.execute("DELETE FROM memo_urls WHERE memo_id = ?", (memo_id,))  # [MEMO-URLS] v29 : cascade
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     _purge_shares_for(db, "memo", memo_id)   # [CASCADE-SHARES] partages ET leurs invités
     # [COMMENT-REACTIONS] purge des réactions AVANT les commentaires (comment_id → orphelin sinon).
@@ -5195,6 +5350,86 @@ def delete_attachment(att_id):
     if memo:
         _attach_log_comment(db, memo, False, [r["orig_name"] or r["filename"]], "moi", None)  # [ATTACHMENTS-COMMENT]
     db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), r["memo_id"]))
+    db.commit()
+    return "", 204
+
+
+# ─────────────────────────── [MEMO-URLS] routes owner (v29) ───────────────────────────
+def _live_memo(db, memo_id):
+    """Le mémo s'il existe ET n'est pas en corbeille (un mémo en corbeille ne répond plus ses
+    liens — invariant 7 : masqués, conservés)."""
+    return db.execute(
+        "SELECT id, uid, project_id FROM memos WHERE id = ? AND COALESCE(deleted_at, '') = ''", (memo_id,)
+    ).fetchone()
+
+
+@app.route("/api/memos/<int:memo_id>/urls", methods=["GET"])
+def list_memo_urls(memo_id):
+    db = get_db()
+    if not _live_memo(db, memo_id):
+        return jsonify({"error": "not found"}), 404
+    return jsonify(_memo_urls_map(db, [memo_id], _owner_name(db)).get(memo_id, []))
+
+
+@app.route("/api/memos/<int:memo_id>/urls", methods=["POST"])
+def add_memo_url(memo_id):
+    db = get_db()
+    memo = _live_memo(db, memo_id)
+    if not memo:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    url = _clean_memo_url(data.get("url"))
+    if not url:
+        return jsonify({"error": "Seules les adresses http(s) sont acceptées (2048 caractères max)."}), 400
+    row, err, code = _insert_memo_url(db, memo, url, _clean_url_label(data.get("label")), "",
+                                      datetime.now(timezone.utc).isoformat())
+    if err:
+        return jsonify(err), code
+    db.commit()
+    return jsonify(_memo_url_dict(row, _owner_name(db))), 201
+
+
+@app.route("/api/memos/<int:memo_id>/urls/<int:url_id>", methods=["PUT"])
+def update_memo_url(memo_id, url_id):
+    """`label` et/ou `position`. L'URL elle-même ne se modifie pas (retirer puis rattacher :
+    c'est ce qui garde la dédup et l'aperçu cohérents)."""
+    db = get_db()
+    if not _live_memo(db, memo_id):
+        return jsonify({"error": "not found"}), 404
+    r = db.execute("SELECT * FROM memo_urls WHERE id = ? AND memo_id = ?", (url_id, memo_id)).fetchone()
+    if not r:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    if "label" in data:
+        db.execute("UPDATE memo_urls SET label = ? WHERE id = ?", (_clean_url_label(data.get("label")), url_id))
+    if "position" in data:
+        try:
+            pos = max(0, int(data.get("position")))
+        except (TypeError, ValueError):
+            pos = r["position"] or 0
+        # Réordonne la liste entière : l'item visé prend `pos`, les autres se resserrent (0..n-1).
+        others = [x["id"] for x in db.execute(
+            "SELECT id FROM memo_urls WHERE memo_id = ? AND id != ? ORDER BY position, id", (memo_id, url_id)
+        ).fetchall()]
+        others.insert(min(pos, len(others)), url_id)
+        for i, uid_ in enumerate(others):
+            db.execute("UPDATE memo_urls SET position = ? WHERE id = ?", (i, uid_))
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), memo_id))
+    db.commit()
+    fresh = db.execute("SELECT * FROM memo_urls WHERE id = ?", (url_id,)).fetchone()
+    return jsonify(_memo_url_dict(fresh, _owner_name(db)))
+
+
+@app.route("/api/memos/<int:memo_id>/urls/<int:url_id>", methods=["DELETE"])
+def delete_memo_url(memo_id, url_id):
+    db = get_db()
+    if not _live_memo(db, memo_id):
+        return jsonify({"error": "not found"}), 404
+    r = db.execute("SELECT id FROM memo_urls WHERE id = ? AND memo_id = ?", (url_id, memo_id)).fetchone()
+    if not r:
+        return jsonify({"error": "not found"}), 404
+    db.execute("DELETE FROM memo_urls WHERE id = ?", (url_id,))
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), memo_id))
     db.commit()
     return "", 204
 
@@ -6631,7 +6866,7 @@ def _send_share_recap(cfg, to_email, guest_name, owner_name, kind, target, share
     _smtp_send(cfg, msg)
 
 
-def _share_memo_dict(row, links=None, link_refs=None):
+def _share_memo_dict(row, links=None, link_refs=None, urls=None):
     d = _memo_dict(row, None, links)
     return {
         "id": d["id"],
@@ -6658,6 +6893,8 @@ def _share_memo_dict(row, links=None, link_refs=None):
         # [LINK-REFS] v28 : projection STRICTE {name, url_public, og_domain}, rien d'autre —
         # la table `links` reste hors du périmètre invité (invariant 5, cf. `_share_link_refs`).
         "link_refs": _share_link_refs(link_refs),
+        # [MEMO-URLS] v29 : projection STRICTE {url, label, og_title, og_domain} (invariant 5).
+        "urls": _share_memo_urls(urls),
     }
 
 
@@ -9190,13 +9427,14 @@ def hub_data(hub_token):
     memos = []
     hub_links = _links_map(db, list(rows_by_id.keys()), scope_ids=list(rows_by_id.keys()))  # [MEMO-LINKS]
     hub_refs = _link_refs_by_target(db, "memo", list(rows_by_id.keys()))  # [LINK-REFS] v28
+    hub_urls = _memo_urls_map(db, list(rows_by_id.keys()))  # [MEMO-URLS] v29 (projeté)
     for mid, r in rows_by_id.items():
         covering = _cover_memo(r["project_id"], mid)
         if not covering:
             continue  # sécurité : jamais un mémo hors des shares de l'e-mail
         win = _hub_winner(covering)
         # [MEMO-LINKS] borné aux mémos du hub ; [LINK-REFS] projeté strictement (3 champs).
-        d = _share_memo_dict(r, hub_links.get(mid, []), hub_refs.get(mid, []))
+        d = _share_memo_dict(r, hub_links.get(mid, []), hub_refs.get(mid, []), hub_urls.get(mid, []))
         d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(mid, [])
         d["share_token"] = win["token"]
@@ -9504,8 +9742,9 @@ def share_data(token):
     # simplement omis (jamais de titre-fantôme — D4, invariant 5).
     lmap = _links_map(db, memo_ids, scope_ids=memo_ids)
     rrmap = _link_refs_by_target(db, "memo", memo_ids)  # [LINK-REFS] v28 (projection stricte)
+    umap = _memo_urls_map(db, memo_ids)  # [MEMO-URLS] v29 (projeté dans _share_memo_dict)
     for r in rows:
-        d = _share_memo_dict(r, lmap.get(r["id"], []), rrmap.get(r["id"], []))
+        d = _share_memo_dict(r, lmap.get(r["id"], []), rrmap.get(r["id"], []), umap.get(r["id"], []))
         if share["kind"] == "project" and r["project_id"] != share["target_id"]:
             d["project"] = proj_names.get(r["project_id"], "")
         d["comments"] = comments_by_memo.get(r["id"], [])
@@ -9997,6 +10236,71 @@ def share_add_attachment(token, memo_id):
     db.commit()
     url_fn = lambda r: "/share/" + token + "/attachment/" + str(r["id"])
     return jsonify(_attachments_map(db, [memo_id], url_fn).get(memo_id, [])), 201
+
+
+# ─────────────────────────── [MEMO-URLS] routes invité (sous /share/*) ───────────────────────────
+# Invariant 5 : écrire = invité APPROUVÉ + capacité (même matrice que les pièces jointes : ajouter =
+# `create`, retirer = `own` → éditeur tout, contributeur ses propres liens) + mémo DANS le scope
+# (404 avant 403, jamais de fuite). Lecture : projection stricte via `_share_memo_dict`.
+def _share_memo_urls_payload(db, memo_id):
+    return _share_memo_urls(_memo_urls_map(db, [memo_id]).get(memo_id, []))
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/urls", methods=["POST"])
+def share_add_memo_url(token, memo_id):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    scope = {r["id"]: r for r in _share_scope_memos(db, share)}
+    if memo_id not in scope:
+        return jsonify({"error": "not found"}), 404
+    guest, err = _role_gate(db, share, "create", guest=guest, project_id=_row_get(scope[memo_id], "project_id", None))
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    url = _clean_memo_url(data.get("url"))
+    if not url:
+        return jsonify({"error": "Seules les adresses http(s) sont acceptées (2048 caractères max)."}), 400
+    memo = db.execute("SELECT id, uid FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    by = f"{guest['name'] or guest['email']} <{guest['email']}>"
+    row, err, code = _insert_memo_url(db, memo, url, _clean_url_label(data.get("label")), by,
+                                      datetime.now(timezone.utc).isoformat())
+    if err:
+        return jsonify(err), code
+    db.commit()
+    return jsonify(_share_memo_urls_payload(db, memo_id)), 201
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/urls", methods=["DELETE"])
+def share_delete_memo_url(token, memo_id):
+    """Retrait PAR URL (corps `{url}`) : la projection invitée n'a pas d'id, et l'URL exacte est
+    déjà la clé unique du mémo."""
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    scope = {r["id"]: r for r in _share_scope_memos(db, share)}
+    if memo_id not in scope:
+        return jsonify({"error": "not found"}), 404
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url") or "").strip()
+    r = db.execute("SELECT * FROM memo_urls WHERE memo_id = ? AND url = ?", (memo_id, url)).fetchone() if url else None
+    if not r:
+        return jsonify({"error": "not found"}), 404
+    guest, err = _role_gate(db, share, "own", guest=guest, memo_row=r, project_id=_row_get(scope[memo_id], "project_id", None))
+    if err:
+        return err
+    db.execute("DELETE FROM memo_urls WHERE id = ?", (r["id"],))
+    db.execute("UPDATE memos SET updated_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), memo_id))
+    db.commit()
+    return "", 204
 
 
 # [FOLDER-ATTACHMENTS] Upload invité d'un fichier sur un DOSSIER : partage de projet only, dossier
@@ -11099,10 +11403,23 @@ def _build_export(db, root_id=None):
                 "mime": a["mime"] or "", "size": a["size"] or 0,
                 "preview": 1 if a["preview"] else 0, "created_at": a["created_at"], "created_by": a["created_by"] or "",
             })
+    # [MEMO-URLS] v29 : liens attachés nichés par mémo — JAMAIS les dérivées `og_*`.
+    urls_by_id = {}
+    if memos:
+        ph_u = ",".join("?" * len(memos))
+        for u in db.execute(
+            "SELECT memo_id, url, label, position, created_at, created_by "
+            f"FROM memo_urls WHERE memo_id IN ({ph_u}) ORDER BY position, id", [m["id"] for m in memos]
+        ).fetchall():
+            urls_by_id.setdefault(u["memo_id"], []).append({
+                "url": u["url"], "label": u["label"] or "", "position": u["position"] or 0,
+                "created_at": u["created_at"] or "", "created_by": u["created_by"] or "",
+            })
     out_memos = []
     for r in memos:
         d = _memo_dict(r)
         mid = d.pop("id", None)
+        d.pop("urls", None)  # runtime-only ici : la liste exportée est reconstruite sans og_*
         d.pop("created_by_display", None)  # runtime-only, jamais exporté ; created_by (brut) reste
         d.pop("links", None)  # [MEMO-LINKS] runtime-only : les liens voyagent dans `memo_links` (uid)
         d.pop("end_time", None)  # [FESTIVAL-VOTE] non exporté (export reste v23, comme les voix)
@@ -11112,6 +11429,7 @@ def _build_export(db, root_id=None):
         d["project"] = proj_names.get(_pid, "")
         d["project_uid"] = proj_uids.get(_pid, "")  # [PROJECT-NAME-PER-FOLDER] v25 (résolution uid-d'abord)
         d["attachments"] = att_by_id.get(mid, [])  # [ATTACHMENTS] v22
+        d["urls"] = urls_by_id.get(mid, [])  # [MEMO-URLS] v29
         out_memos.append(d)
     # [FOLDER-ATTACHMENTS] v23 : pièces jointes de dossier nichées par projet (noms de fichiers
     # seuls, jamais le binaire — comme les mémos). Rattachées par NOM à l'import (comme le reste
@@ -11308,6 +11626,7 @@ def _purge_trash():
             conn.execute("DELETE FROM memo_comments WHERE memo_id = ?", (mid,))
             conn.execute("DELETE FROM memo_hearts WHERE memo_id = ?", (mid,))  # [FESTIVAL-VOTE]
             conn.execute("DELETE FROM memo_links WHERE src_memo_id = ? OR dst_memo_id = ?", (mid, mid))  # [MEMO-LINKS]
+            conn.execute("DELETE FROM memo_urls WHERE memo_id = ?", (mid,))  # [MEMO-URLS] v29
         conn.commit()
     finally:
         conn.close()
@@ -11983,6 +12302,7 @@ def import_links():
     }
     max_mpos = db.execute("SELECT COALESCE(MAX(position), -1) FROM memos").fetchone()[0]
     imported_memos = updated_memos = skipped_memos = 0
+    imported_memo_urls = 0  # [MEMO-URLS] v29
     for memo in memos:
         if isinstance(memo, dict):
             content = (memo.get("content") or "").strip()
@@ -12089,6 +12409,7 @@ def import_links():
             else:
                 skipped_memos += 1
             _import_memo_attachments(db, existing["id"], uid, memo.get("attachments"), now)  # [ATTACHMENTS] v22
+            imported_memo_urls += _import_memo_urls(db, existing["id"], uid, memo.get("urls"), now)  # [MEMO-URLS] v29
             continue
 
         # INSERT (mémo nouveau OU 'duplicate' explicite). Le dédup par contenu est court-circuité
@@ -12130,6 +12451,10 @@ def import_links():
         _import_memo_attachments(
             db, memos_by_uid[new_uid]["id"], new_uid,
             memo.get("attachments") if isinstance(memo, dict) else None, now,   # [ATTACHMENTS] v22
+        )
+        imported_memo_urls += _import_memo_urls(  # [MEMO-URLS] v29
+            db, memos_by_uid[new_uid]["id"], new_uid,
+            memo.get("urls") if isinstance(memo, dict) else None, now,
         )
         imported_memos += 1
 
@@ -12288,6 +12613,7 @@ def import_links():
             "imported_comments": imported_comments,
             "imported_memo_links": imported_memo_links,  # [MEMO-LINKS] v27
             "imported_link_refs": imported_link_refs,  # [LINK-REFS] v28
+            "imported_memo_urls": imported_memo_urls,  # [MEMO-URLS] v29
         }
     )
 

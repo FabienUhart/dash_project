@@ -105,6 +105,11 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | DELETE  | `/api/memos/<id>/link-refs/<link_id>` | **[LINK-REFS]** Retire la relation |
 | POST    | `/api/projects/<id>/link-refs` | **[LINK-REFS]** Miroir : relie un lien à ce dossier (`{link_id}`) |
 | DELETE  | `/api/projects/<id>/link-refs/<link_id>` | **[LINK-REFS]** Retire la relation |
+| GET     | `/api/memos/<id>/urls` | **[MEMO-URLS]** Liens attachés au mémo (ordre `position`) |
+| POST    | `/api/memos/<id>/urls` | **[MEMO-URLS]** Attache une URL http(s) (`{url, label}`) → 201 ; 400 invalide/plafond 20, 409 doublon |
+| PUT     | `/api/memos/<id>/urls/<url_id>` | **[MEMO-URLS]** `{label, position}` (l'URL ne se modifie pas) |
+| DELETE  | `/api/memos/<id>/urls/<url_id>` | **[MEMO-URLS]** Retire le lien |
+| POST / DELETE | `/share/<token>/memo/<id>/urls` | **[MEMO-URLS]** Invité approuvé : ajoute (`{url, label}`, capacité `create`) / retire **par URL** (`{url}`, capacité `own`) ; lecture = projection `{url, label, og_title, og_domain}` dans `/share/<token>/data` et le hub |
 | GET     | `/api/categories`          | Liste avec `link_count`                        |
 | POST    | `/api/categories`          | Crée une catégorie (`{name}`)                  |
 | PUT     | `/api/categories/<id>`     | Renomme                                        |

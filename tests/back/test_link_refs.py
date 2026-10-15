@@ -201,7 +201,7 @@ def test_export_v28_link_refs_by_uid_and_roundtrip(client, new_base):
         assert _ref(client, lien["id"], kind, tid).status_code == 201
 
     exp = client.get("/api/export").get_json()
-    assert int(exp["version"]) == 28, "le bump de format n'est pas dans l'export"
+    assert int(exp["version"]) >= 28, "le bump de format n'est pas dans l'export"
     refs = exp.get("link_refs")
     assert refs and len(refs) == 2, refs
     for r in refs:

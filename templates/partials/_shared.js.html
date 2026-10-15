@@ -4507,6 +4507,179 @@ function linkRefChip(ref, cfg) {
   return chip;
 }
 
+/* ===== [MEMO-URLS] v29 — des liens attachés au mémo, comme les fichiers (brief docs/briefs/MEMO-URLS.md) =====
+   Helpers PURS (règle du partial, ADR-001) : ni réseau ni `state`/`DATA` — chaque page fournit
+   `urls`/`content` et exécute les écritures dans les callbacks. Deux sources FUSIONNÉES à
+   l'affichage : (a) les URL ATTACHÉES (table `memo_urls`) ; (b) les URL DÉTECTÉES dans le
+   contenu (runtime, jamais stockées). Aucun style bespoke : chips `linkRefChip`, squelette
+   `renderAttachments` (invariant 9). */
+
+// 2.1 — URL détectées dans le texte. UNE SEULE regex d'URL dans l'app : `AUTOLINK_RE` +
+// `_autolinkTrim` ([EDITOR-AUTOLINK] / `linkifyTextNodes`). Déshabillage HTML par <template>
+// (un espace après chaque balise : « </p><p>https://… » ne colle pas deux blocs), les `href`
+// des <a> comptent aussi (un lien au texte personnalisé n'a pas son URL en clair), ponctuation
+// finale retirée, dédup par URL exacte, ordre d'apparition, max 50. Zéro état.
+function extractUrls(html) {
+  const s = String(html || '');
+  if (s.indexOf('http') < 0) return [];
+  let text = s;
+  if (s.indexOf('<') >= 0 && typeof document !== 'undefined') {
+    const t = document.createElement('template');
+    t.innerHTML = s.replace(/>/g, '> ');
+    const hrefs = Array.from(t.content.querySelectorAll('a[href]')).map(a => a.getAttribute('href') || '');
+    text = (t.content.textContent || '') + ' ' + hrefs.join(' ');
+  }
+  const out = [], seen = new Set();
+  AUTOLINK_RE.lastIndex = 0;
+  let m;
+  while ((m = AUTOLINK_RE.exec(text)) !== null) {
+    const u = _autolinkTrim(m[0]).replace(/[.,;:)\]]+$/, '');
+    if (!u || seen.has(u)) continue;
+    seen.add(u); out.push(u);
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+// Miroir CLIENT de `_clean_memo_url` : http(s) seulement, ≤ 2048, pas d'espace ni de chevron.
+function isHttpUrl(s) {
+  const u = String(s || '').trim();
+  return u.length > 0 && u.length <= 2048 && /^https?:\/\/[^\s<>"']+$/i.test(u);
+}
+function _memoUrlDomain(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return String(url || ''); }
+}
+// Libellé affiché : `label` || `og_title` || domaine — jamais l'URL brute en entier sur un chip.
+function memoUrlLabel(u) {
+  return String(u.label || '').trim() || String(u.og_title || '').trim() || String(u.og_domain || '').trim() || _memoUrlDomain(u.url);
+}
+// Les URL du texte NON déjà attachées (dédup par URL exacte) — ce qu'on affiche en grisé.
+function detectedUrlsNotAttached(content, urls) {
+  const have = new Set((urls || []).map(u => u && u.url));
+  return extractUrls(content).filter(u => !have.has(u));
+}
+// Chip d'une URL (attachée ou détectée) : le gabarit `linkRefChip` tel quel — corps = ouvrir le
+// site, ↗ = le site. Jamais de × DANS le chip : le retrait est un bouton icône de la ligne de
+// l'éditeur (gabarit `.iv-btn`, ≥ 24 px — le × interne de `linkRefChip` fait 10×15 px, des clics
+// réels le manquent). Favicon = le repli existant icons.duckduckgo.com (déjà autorisé, invariant
+// 6) ; s'il manque, l'icône trait prend le relais. `detected` = grisé + pointillé, title « Dans le texte ».
+function memoUrlChip(u, cfg) {
+  cfg = cfg || {};
+  const dom = u.og_domain || _memoUrlDomain(u.url);
+  const chip = linkRefChip({ name: memoUrlLabel(u), url_public: u.url, og_domain: dom,
+    favicon: dom && !cfg.detected ? 'https://icons.duckduckgo.com/ip3/' + dom + '.ico' : '' }, {
+    onOpen: () => window.open(u.url, '_blank', 'noopener'),
+  });
+  chip.classList.add('murl-chip');
+  chip.removeAttribute('data-link-id');
+  chip.dataset.url = u.url;
+  chip.title = (u.label ? u.label + ' — ' : '') + u.url;
+  if (cfg.detected) {
+    chip.classList.add('murl-detected');
+    chip.title = 'Dans le texte : ' + u.url;
+    chip.style.opacity = '0.6';
+    chip.style.borderStyle = 'dashed';
+  }
+  return chip;
+}
+// 2.3 — Rangée en pied de card / fiche 👁 (même style que `linkRefsRow`) : attachées d'abord
+// (ordre `position`), puis détectées (grisées). Clic = le site, pas de × sur la card. Null si rien.
+function urlsRow(urls, detected) {
+  const att = (urls || []).filter(u => u && u.url);
+  const have = new Set(att.map(u => u.url));
+  const det = (detected || []).filter(u => u && !have.has(u));
+  if (!att.length && !det.length) return null;
+  const row = el('div', { class: 'lrefs-row murls-row', attrs: {
+    style: 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;margin-top:0.35rem' } });
+  att.forEach(u => row.appendChild(memoUrlChip(u)));
+  det.forEach(u => row.appendChild(memoUrlChip({ url: u }, { detected: true })));
+  return row;
+}
+// 2.2 — Section « Liens (n) » de l'éditeur (3 pages), même squelette que `renderAttachments`.
+// cfg = { urls, content, canEdit, onAdd(url, label), onRemove(u), onMove(u, delta)? }
+// Les callbacks rendent une promesse ; une erreur (message serveur) s'affiche sous le formulaire.
+function renderMemoUrls(cfg) {
+  _attachStyle();
+  const urls = cfg.urls || [];
+  const detected = detectedUrlsNotAttached(cfg.content, urls);
+  if (!urls.length && !detected.length && !cfg.canEdit) return null;   // rien à voir ni à poser
+  const wrap = el('div', { class: 'attach-sec murls-sec' });
+  const head = el('div', { class: 'attach-head', attrs: { style: 'display:flex;align-items:center;gap:0.4rem' } });
+  head.appendChild(secHeadIcon('link'));
+  head.appendChild(el('span', { text: 'Liens' + (urls.length ? ' (' + urls.length + ')' : ''), attrs: { style: 'flex:1' } }));
+  wrap.appendChild(head);
+  const ARROW = 'background:none;border:1px solid var(--border);border-radius:9px;background:var(--panel-2);'
+    + 'color:var(--muted);cursor:pointer;font-size:0.8rem;line-height:1;padding:0.15rem 0.35rem';
+  urls.forEach((u, i) => {
+    const row = el('div', { class: 'attach-item murl-item', attrs: { 'data-url': u.url, style: 'gap:0.35rem' } });
+    const chip = memoUrlChip(u);
+    chip.style.maxWidth = '100%'; chip.style.flex = '1 1 auto'; chip.style.minWidth = '0';
+    row.appendChild(chip);
+    if (cfg.canEdit && (cfg.onRemove || (cfg.onMove && urls.length > 1))) {
+      const acts = el('div', { class: 'attach-acts' });
+      if (cfg.onMove && urls.length > 1) {   // ↑↓ = `position` (pas de D&D nouveau)
+        const up = el('button', { class: 'murl-up', text: '↑', attrs: { type: 'button', title: 'Monter', style: ARROW } });
+        const down = el('button', { class: 'murl-down', text: '↓', attrs: { type: 'button', title: 'Descendre', style: ARROW } });
+        if (i === 0) up.disabled = true;
+        if (i === urls.length - 1) down.disabled = true;
+        up.addEventListener('click', () => cfg.onMove(u, -1));
+        down.addEventListener('click', () => cfg.onMove(u, +1));
+        acts.appendChild(up); acts.appendChild(down);
+      }
+      // Retrait = même gabarit que le 🗑 des fichiers (`ivIconBtn` + danger DISCRET `.iv-danger`,
+      // monochrome au repos, rouge au survol) : zone de clic ≥ 24 px, jamais le × interne du chip.
+      if (cfg.onRemove) acts.appendChild(ivIconBtn('button', 'x', 'Retirer ce lien', 'iv-danger murl-x', { click: () => cfg.onRemove(u) }));
+      row.appendChild(acts);
+    }
+    wrap.appendChild(row);
+  });
+  if (cfg.canEdit && cfg.onAdd) {
+    const INPUT = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);'
+      + 'font:inherit;font-size:0.85rem;padding:0.35rem 0.5rem;min-width:0;';
+    const form = el('div', { class: 'murl-add', attrs: { style: 'display:flex;gap:0.35rem;flex-wrap:wrap;align-items:center;margin-top:0.4rem' } });
+    const inUrl = el('input', { class: 'murl-url', attrs: { type: 'url', placeholder: 'https://… (Entrée pour ajouter)', autocomplete: 'off', style: INPUT + 'flex:2 1 11rem' } });
+    const inLab = el('input', { class: 'murl-label', attrs: { type: 'text', placeholder: 'Libellé (optionnel)', maxlength: '120', autocomplete: 'off', style: INPUT + 'flex:1 1 7rem' } });
+    const btn = el('button', { class: 'murl-add-btn', text: 'Ajouter', attrs: { type: 'button' } });
+    const msg = el('div', { class: 'attach-hint murl-msg', attrs: { style: 'flex-basis:100%;min-height:0' } });
+    const go = async () => {
+      const url = inUrl.value.trim();
+      if (!isHttpUrl(url)) {
+        msg.textContent = 'Seules les adresses http(s) sont acceptées';
+        msg.style.color = 'var(--red)'; inUrl.focus(); return;
+      }
+      msg.textContent = ''; btn.disabled = true;
+      try { await cfg.onAdd(url, inLab.value.trim()); inUrl.value = ''; inLab.value = ''; }
+      catch (e) { msg.textContent = (e && e.message) || 'Impossible d’ajouter ce lien.'; msg.style.color = 'var(--red)'; }
+      btn.disabled = false;
+    };
+    const onEnter = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); go(); } };
+    inUrl.addEventListener('keydown', onEnter);
+    inLab.addEventListener('keydown', onEnter);
+    btn.addEventListener('click', go);
+    form.appendChild(inUrl); form.appendChild(inLab); form.appendChild(btn); form.appendChild(msg);
+    wrap.appendChild(form);
+    lucioleize(btn, 'luc-primary');
+  }
+  if (detected.length) {   // « Dans le texte » : chips grisées + « Épingler » (= POST, label vide)
+    const sub = el('div', { class: 'murl-detected-sec', attrs: { style: 'margin-top:0.45rem' } });
+    sub.appendChild(el('div', { class: 'attach-hint', text: 'Dans le texte', attrs: { style: 'margin-bottom:0.25rem' } }));
+    const row = el('div', { attrs: { style: 'display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center' } });
+    detected.forEach(u => {
+      const item = el('span', { attrs: { style: 'display:inline-flex;align-items:center;gap:0.25rem;max-width:100%' } });
+      item.appendChild(memoUrlChip({ url: u }, { detected: true }));
+      if (cfg.canEdit && cfg.onAdd) {
+        const pin = el('button', { class: 'prio-btn murl-pin', text: 'Épingler', attrs: {
+          type: 'button', title: 'Attacher ce lien au mémo', 'data-url': u, style: 'padding:0.05rem 0.45rem;font-size:0.72rem' } });
+        pin.addEventListener('click', async () => { pin.disabled = true; try { await cfg.onAdd(u, ''); } catch (e) { pin.disabled = false; } });
+        item.appendChild(pin);
+      }
+      row.appendChild(item);
+    });
+    sub.appendChild(row);
+    wrap.appendChild(sub);
+  }
+  return wrap;
+}
+
 // D2 — section « 🔗 Relié à » de l'éditeur (3 pages). cfg :
 //   { links, candidates:[{id,title,project_id,location,emoji}], current:{id,location,project_id},
 //     canEdit, onAdd(id), onRemove(id), onOpen(id) }
@@ -4743,6 +4916,16 @@ function openMemoView(cfg, memoId) {
       });
       sec.appendChild(row);
       scroll.appendChild(sec);
+    }
+    // — [MEMO-URLS] v29 : liens attachés + URL du texte, même rangée que sur la card —
+    {
+      const _m = d.memo || {};
+      const _urow = urlsRow(_m.urls || d.urls || [], detectedUrlsNotAttached(_m.content || '', _m.urls || d.urls || []));
+      if (_urow) {
+        const sec = section('🔗 LIENS (' + (_m.urls || d.urls || []).length + ')');
+        sec.appendChild(_urow);
+        scroll.appendChild(sec);
+      }
     }
     /* — ☑ sous-tâches — [MEMO-VIEW évolution] cochables DEPUIS la fiche, même mécanique que
        les cards : mise à jour OPTIMISTE locale puis le MÊME appel que le board

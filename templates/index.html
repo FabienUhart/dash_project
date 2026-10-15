@@ -2761,6 +2761,7 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
   </div>
   <div id="me-photos"></div>
   <div id="me-attachments"></div>
+  <div id="me-urls"></div><!-- [MEMO-URLS] v29 section « Liens » (rendue par renderMeUrls) -->
   <div id="me-links"></div><!-- [MEMO-LINKS] section « 🔗 Relié à » (rendue par renderMeLinks) -->
   <!-- [COMMENTS-POPIN] La section « 💬 Commentaires » a quitté le corps de la fiche : le fil vit
        maintenant dans sa propre pop-in (pleine hauteur), ouverte par le bouton du pied. Il n'y a
@@ -5566,7 +5567,8 @@ function visibleMemos() {
     return dans.filter(m => searchMatch(
       words, m.title, stripHTML(m.content),
       (m.assignees || []).join(' '),
-      (m.subtasks || []).map(st => st.content).join(' ')
+      (m.subtasks || []).map(st => st.content).join(' '),
+      (m.urls || []).map(u => (u.label || '') + ' ' + u.url).join(' ')   // [MEMO-URLS]
     ));
   }
   if (!q) return state.memos;
@@ -5586,7 +5588,8 @@ function visibleMemos() {
   const parTexte = state.memos.filter(m => searchMatch(
     words, m.title, stripHTML(m.content),
     (m.assignees || []).join(' '),
-    (m.subtasks || []).map(st => st.content).join(' ')
+    (m.subtasks || []).map(st => st.content).join(' '),
+    (m.urls || []).map(u => (u.label || '') + ' ' + u.url).join(' ')   // [MEMO-URLS] libellé + URL
   ));
   // `m#` = texte SEUL, c'est tout son sens : il sert justement à ne PAS ratisser les dossiers.
   if (scope === 'memos') return parTexte;
@@ -8350,6 +8353,41 @@ async function refreshMeAttachments(memo) {
   renderMeAttachments(memo);
 }
 
+// [MEMO-URLS] v29 — Section « Liens » de l'éditeur mémo (owner), même gabarit que les Fichiers.
+// Détection sur le contenu SAUVEGARDÉ (celui de la card) ; écriture via les routes owner.
+function renderMeUrls(memo) {
+  const box = document.getElementById('me-urls');
+  if (!box) return;
+  const hadFocus = box.contains(document.activeElement);   // rendre le focus au champ URL après un ajout
+  box.innerHTML = '';
+  const fresh = state.memos.find((x) => x.id === memo.id) || memo;
+  const sec = renderMemoUrls({
+    urls: fresh.urls || [],
+    content: fresh.content || '',
+    canEdit: true,
+    onAdd: async (url, label) => {
+      await api(`/api/memos/${memo.id}/urls`, { method: 'POST', body: JSON.stringify({ url, label }) });
+      await refreshMeUrls(memo);
+    },
+    onRemove: async (u) => {
+      await api(`/api/memos/${memo.id}/urls/${u.id}`, { method: 'DELETE' });
+      await refreshMeUrls(memo);
+    },
+    onMove: async (u, delta) => {
+      await api(`/api/memos/${memo.id}/urls/${u.id}`, { method: 'PUT', body: JSON.stringify({ position: Math.max(0, (u.position || 0) + delta) }) });
+      await refreshMeUrls(memo);
+    },
+  });
+  if (sec) box.appendChild(sec);
+  if (hadFocus) { const f = box.querySelector('.murl-url'); if (f) f.focus(); }
+}
+async function refreshMeUrls(memo) {
+  try { memo.urls = await api(`/api/memos/${memo.id}/urls`); } catch (e) {}
+  const m = state.memos.find((x) => x.id === memo.id); if (m) m.urls = memo.urls;
+  renderMeUrls(memo);
+  renderAll();   // la rangée de la card suit l'éditeur
+}
+
 // [MEMO-LINKS] D2 — section « 🔗 Relié à » de l'éditeur owner. Le picker propose TOUS les mémos
 // non supprimés (owner = mono-base, D4), classés proches-d'abord par le helper partagé. Écriture
 // via les routes owner POST/DELETE /api/memos/<id>/links ; rafraîchissement sans reload complet.
@@ -8400,6 +8438,7 @@ function openMemoEditor(memo) {
   renderMeMeta(memo);         // [LESS-BUTTONS] projet/échéance/priorité/emoji/couleur/récurrence/hors-vote
   renderMePhotos(memo);       // [MEMO-EDITOR-IMAGES]
   renderMeAttachments(memo);  // [ATTACHMENTS]
+  renderMeUrls(memo);         // [MEMO-URLS] v29 section « Liens »
   renderMeLinks(memo);        // [MEMO-LINKS] section « 🔗 Relié à »
   // [POPIN-COMMENTS-BTN] Le pied porte le compte : c'est lui qu'on voit sans défiler, donc c'est
   // lui qui doit dire s'il y a quelque chose à lire.
@@ -9150,6 +9189,9 @@ function taskEl(memo) {
     },
   });
   if (rrow) content.appendChild(rrow);
+  // [MEMO-URLS] v29 : liens attachés (ordre position) puis URL détectées dans le texte (grisées).
+  const urow = urlsRow(memo.urls, detectedUrlsNotAttached(memo.content, memo.urls));
+  if (urow) content.appendChild(urow);
   const vrow = voteRowEl(memo);
   if (vrow) content.appendChild(vrow);
   row.appendChild(content);
