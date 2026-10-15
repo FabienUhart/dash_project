@@ -7284,6 +7284,8 @@ def get_settings():
             "reaction_emojis": _reaction_palette(db),  # [REACTION-PALETTE] palette configurable
             # [HUB-EMAIL-INVITE] booléen seulement — JAMAIS le secret SMTP.
             "smtp_enabled": _smtp_config() is not None,
+            # [TOOLBAR-LAYOUT] horloge secondaire = réglage SERVEUR (tous les appareils), '' = aucune.
+            "extra_tz": _get_state(db, "extra_tz", ""),
         }
     )
 
@@ -7301,6 +7303,14 @@ def put_settings():
     if "map_marker_color" in data:
         color = _clean_hex_color(data.get("map_marker_color"), DEFAULT_MARKER_COLOR)
         _set_state(db, "map_marker_color", color)
+        db.commit()
+    if "extra_tz" in data:
+        # [TOOLBAR-LAYOUT] identifiant IANA (« Asia/Tokyo ») ou '' ; forme validée par regex,
+        # jamais de HTML ni d'espace — le front retombe sur l'identifiant brut s'il ne le connaît pas.
+        tz = (str(data.get("extra_tz") or "")).strip()
+        if tz and not re.match(r"^[A-Za-z_]+(?:/[A-Za-z0-9_+\-]+){0,2}$", tz) or len(tz) > 64:
+            return jsonify({"error": "fuseau invalide"}), 400
+        _set_state(db, "extra_tz", tz)
         db.commit()
     if "reaction_emojis" in data:
         # [REACTION-PALETTE] Config owner-only de la palette. Validation STRICTE de chaque emoji

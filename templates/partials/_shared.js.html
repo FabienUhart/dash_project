@@ -5043,7 +5043,10 @@ function _coverStyle() {
     + '.cover-seg button{height:30px;min-height:0;padding:0 0.7rem;background:transparent;border:none;border-radius:0;color:var(--muted);font:inherit;font-size:0.76rem;line-height:1;cursor:pointer;display:inline-flex;align-items:center;gap:0.3rem}'
     + '.cover-seg button + button{border-left:1px solid var(--border)}'
     + '.cover-seg button:hover{color:var(--text)}'
-    + '.cover-seg button.on{background:var(--panel-2);color:var(--accent)}'
+    // [TOOLBAR-LAYOUT] actif = fond accent + encre sombre (même encre que `.hdr-count`) : en thème
+    // clair, panel-2 ≈ panel rendait l'actif invisible. Vaut pour le tri ET Immersif/Compact.
+    + '.cover-seg button.on{background:var(--accent);color:var(--accent-ink,#10141a);font-weight:600}'
+    + '.cover-seg button.on:hover{color:var(--accent-ink,#10141a)}'
     + '.cover-seg .hdr-ic{width:14px;height:14px;flex-shrink:0}'
     /* — la card immersive : photo au fond, voile par-dessus, contenu au-dessus du voile.
        Pas d'`overflow:hidden` sur la card (il clipperait le menu ⋯) : l'arrondi est porté
@@ -7547,9 +7550,14 @@ function _hdrToolbarStyle() {
     + '.hdr-btn:hover .hdr-lbl,.hdr-btn:focus-visible .hdr-lbl{color:var(--accent)}'
     // pastille coin HAUT-droit = DONNÉE (compteur)
     + '.hdr-count{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:var(--accent);color:#10141a;font-size:0.62rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--panel);pointer-events:none}'
-    // vignette coin BAS-droit = MENU (variante B) : carré ~16px, chevron minuscule
-    + '.hdr-menu{position:absolute;bottom:-4px;right:-4px;width:16px;height:16px;border-radius:5px;background:var(--panel);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--muted);font-size:0.62rem;line-height:1;pointer-events:none;box-shadow:0 0 0 2px var(--panel)}'
-    + '.hdr-btn:hover .hdr-menu,.hdr-btn:focus-visible .hdr-menu{color:var(--accent);border-color:var(--accent)}'
+    // [TOOLBAR-LAYOUT] barre « large » (actions du dossier + dock dans le MÊME cadre) : toute la
+    // largeur du board, jamais de wrap (inline-flex nowrap + overflow-x:auto hérités) ; le 1er bouton
+    // du dock se cale à droite tant que tout tient. La bascule ‹ › reste COLLÉE au bord droit
+    // (sticky) avec un dégradé : c'est elle qui signale qu'il y a des boutons cachés sous elle.
+    + '.hdr-toolbar.wide{display:flex;width:100%}'
+    + '.hdr-toolbar.wide .hdr-dock-first{margin-left:auto}'
+    + '.hdr-toolbar.wide .hdr-toggle{position:sticky;right:0;background:linear-gradient(90deg,transparent,var(--panel) 35%);padding-left:10px;width:34px}'
+    + '.hdr-toolbar.wide .hdr-toggle:hover{background:linear-gradient(90deg,transparent,var(--panel-2) 35%)}'
     // séparateur vertical fin entre groupes d'actions
     + '.hdr-sep{width:1px;align-self:center;height:60%;background:var(--border);margin:0 0.2rem;flex:0 0 auto}'
     + '.hdr-toolbar.compact .hdr-btn{width:44px;height:44px}'
@@ -7565,8 +7573,8 @@ function _hdrToolbarStyle() {
     + '.hdr-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}'
     // [HDR-GLOW] lueur qui suit la souris sur le fond de survol (demande Fabien 30 juil., même
     // mécanique que la barre d'ajout owner) : clippée dans un calque interne .hdr-glowwrap —
-    // JAMAIS d'overflow:hidden sur .hdr-btn lui-même, les pastilles .hdr-count/.hdr-menu
-    // débordent du bouton (-4px) et seraient rognées (gotcha V26.2.136). Icône/libellé passés
+    // JAMAIS d'overflow:hidden sur .hdr-btn lui-même, la pastille .hdr-count
+    // déborde du bouton (-4px) et serait rognée (gotcha V26.2.136). Icône/libellé passés
     // au-dessus (z-index) pour rester nets sous la lueur. Clair = plus discret que le sombre.
     + '.hdr-glowwrap{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none}'
     + '.hdr-glow{position:absolute;left:-20px;top:-20px;width:38px;height:38px;border-radius:50%;background:var(--accent);filter:blur(16px);transform:translate(-50%,-50%);opacity:0;transition:opacity 0.3s ease}'
@@ -7937,11 +7945,13 @@ function hdrBtn(cfg) {
   gw.appendChild(glow); b.appendChild(gw);
   hdrAttachGlow(b, glow);
   b.appendChild(hdrIcon(cfg.icon));
-  b.appendChild(el('span', { class: 'hdr-lbl', text: cfg.label || '' }));
+  // [TOOLBAR-LAYOUT] bouton à MENU : « ▾ » fin en suffixe du libellé, rien hors du cadre du bouton
+  // (la vignette chevron `.hdr-menu` débordait du cadre — supprimée). En compact le libellé est
+  // masqué → aucun indicateur, le `title` suffit : c'est un bouton comme les autres.
+  b.appendChild(el('span', { class: 'hdr-lbl', text: (cfg.label || '') + (cfg.menu ? ' ▾' : '') }));
   const n = Number(cfg.count);
   if (cfg.count != null && cfg.count !== '' && !isNaN(n) && n > 0)
     b.appendChild(el('span', { class: 'hdr-count', text: n > 99 ? '99+' : String(n) }));
-  if (cfg.menu) b.appendChild(el('span', { class: 'hdr-menu', text: '⌄', attrs: { 'aria-hidden': 'true' } }));
   if (cfg.disabled) b.disabled = true;
   if (cfg.onClick) b.addEventListener('click', cfg.onClick);
   return b;

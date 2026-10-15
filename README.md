@@ -130,7 +130,7 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | POST    | `/api/memos/<id>/comments/seen` | Marque les commentaires du mémo « vus » (propriétaire) |
 | DELETE  | `/api/comments/<id>`       | Supprime un commentaire (propriétaire)         |
 | GET     | `/api/qr?data=<url>`       | QR code du texte/URL, en SVG                   |
-| GET     | `/api/settings`            | Réglages (`{owner_name}`)                      |
+| GET     | `/api/settings`            | Réglages (`{owner_name, map_marker_color, reaction_emojis, smtp_enabled, extra_tz}`) — `extra_tz` = horloge secondaire [TOOLBAR-LAYOUT], réglage serveur (tous les appareils) |
 | PUT     | `/api/settings`            | Change le nom du propriétaire (`{owner_name}`) |
 | GET     | `/api/projects`            | Liste avec `memo_count` (mémos en cours)       |
 | POST    | `/api/projects`            | Crée un projet (`{name, color}`)               |

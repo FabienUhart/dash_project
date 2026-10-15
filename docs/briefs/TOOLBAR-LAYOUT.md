@@ -1,7 +1,7 @@
 # Brief CC — [TOOLBAR-LAYOUT] : UNE barre d'actions, une ligne de tri qui tient, des tuiles sans « 0 »
 
 > **Front pur (`index.html` + `_shared.js`), `app.py` quasi intact (un seul réglage serveur de plus
-> en § 5, via `/api/settings` existant), export 28 inchangé.** Doctrine TDD. Cible **V28.12.279**.
+> en § 5, via `/api/settings` existant), export 28 inchangé.** Doctrine TDD. Cible **V29.1.280** (était V28.12.279 ; [MEMO-URLS] a pris le bump v29).
 > Lot de **polish desktop** issu de la comparaison de deux captures prod du 4 oct. 2026 (dark Chrome
 > ~2000 px, light Opera 1920 px) sur le dossier 🍎 Mac. Arbitrages Fabien du 4 oct. 12:27.
 
@@ -74,6 +74,6 @@ Non-régression : `test_tools_dock*`, `test_header_toolbar*`, `test_memo_sort_da
 ## 3. Livraison
 
 - `make test` vert (≥ 501 + nouveaux), mutations consignées dans le message de commit.
-- `REALISATION.md` : `[V28.12.279] feat(board) : **[TOOLBAR-LAYOUT] une seule barre d'actions…**` avec le détail des 6 points et le tableau du § 0 en une phrase.
+- `REALISATION.md` : `[V29.1.280] feat(board) : **[TOOLBAR-LAYOUT] une seule barre d'actions…**` avec le détail des 6 points et le tableau du § 0 en une phrase.
 - IDEAS.md : retirer de la file ; graine **[SORT-SELECT]** (option B) si A gêne sur mobile.
 - Rebuild local complet (BUILD_VERSION), **STOP** avant tout push : passe Cowork desktop (1280 / 900) **puis mobile** (Fabien bascule l'émulation), thème clair ET sombre, puis GO de Fabien.

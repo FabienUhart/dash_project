@@ -1053,6 +1053,7 @@ a.og:hover { border-color: var(--accent); }
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem;
+  min-height: 1.7rem; /* [TOOLBAR-LAYOUT] § 1.5 : sans compteur (0 masqué) la tuile garde sa hauteur — et icône trait (24 px) / emoji (26 px) s'alignent */
 }
 .mfilter .mf-count { font-weight: 600; font-size: 0.95rem; }
 .mfilter .mf-label { font-size: 0.78rem; font-weight: 600; display: block; margin-top: 0.1rem; }
@@ -1082,6 +1083,10 @@ a.og:hover { border-color: var(--accent); }
 .mfilter.active.f-scheduled { border-color: var(--guest); background: #221f2e; }
 .mfilter.active.f-overdue { border-color: var(--danger); background: #2e1a1a; }
 .mfilter.active.f-done { border-color: var(--orange); background: #2c2113; }
+/* [TOOLBAR-LAYOUT] retouche : les tuiles actives ont un fond SOMBRE fixe dans les deux thèmes → en clair, le
+   compteur héritait de --text (#1b2531) sur #15232e = invisible (capture Opera du 4 oct., § 0 du brief).
+   Encre claire fixe, comme le --text du thème sombre : lisible partout (contraste > 3:1, testé). */
+.mfilter.active .mf-count { color: #e8eef5; }
 /* [ADD-BAR-V2] barre d'ajout variante A : rangée 1 (titre + Détails + Ajouter) + rangée 2 repliable. */
 #memo-add-bar { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.5rem; }
 .mab-row1 { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
@@ -1958,9 +1963,14 @@ dialog .actions {
 #memo-sort-btn.on { border-color: var(--accent); color: var(--accent); background: var(--panel); }
 /* La ligne « Tri » et la ligne d'aide réutilisent `.cover-disp` (tokens, gabarit) : seule leur
    justification change — l'une porte deux groupes, l'autre une phrase qui se lit à gauche. */
-#memo-sort-bar { justify-content: flex-start; flex-wrap: wrap; }
-#memo-sort-bar #memo-sort-seg { margin-right: auto; }
-#memo-date-help { justify-content: flex-start; margin-top: -0.3rem; }
+/* [TOOLBAR-LAYOUT] § 1.3 option A : segment auto-porteur, JAMAIS de wrap (sous 480 px il défile) ;
+   bascule Immersif/Compact à droite via margin-right:auto sur le segment. */
+#memo-sort-bar { justify-content: flex-start; flex-wrap: nowrap; overflow-x: auto; gap: 0.6rem; scrollbar-width: thin; }
+#memo-sort-bar #memo-sort-seg { margin-right: auto; flex: 0 0 auto; }
+#memo-sort-bar .cover-seg { flex: 0 0 auto; }
+/* [TOOLBAR-LAYOUT] § 1.4 aide des dates : discrète, espacée, calculée (dateHelpLine) — plus le gabarit
+   de la ligne de tri. */
+#memo-date-help { font-size: 0.7rem; color: var(--muted); opacity: 0.75; margin: 0.35rem 0 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #memo-add-btn { display: inline-flex; }          /* [MEMO-QUICK-STICKY] révélé desktop aussi (ouvre/scroll/focus) */
 .block-head { align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
 .block-head-label { font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
@@ -3171,7 +3181,11 @@ function sortMemos(memos, mode) {
 // Le segment « Tri » du board. Gabarit `.cover-seg` de la bascule Immersif/Compact (partial) :
 // aucune classe nouvelle, l'actif se dit par la MATIÈRE (`.on`) — invariant 9.
 function memoSortSeg() {
-  const seg = el('div', { attrs: { id: 'memo-sort-seg', class: 'cover-seg' } });
+  // [TOOLBAR-LAYOUT] le gabarit `.cover-seg` vit dans `_coverStyle()` (partial), injecté jusqu'ici par la
+  // seule bascule Immersif/Compact — donc ABSENT sur un dossier sans photo (segment rendu avec le style
+  // `button` brut de la page, actif invisible). Le segment injecte lui-même son style.
+  if (typeof _coverStyle === 'function') _coverStyle();
+  const seg = el('div', { attrs: { id: 'memo-sort-seg', class: 'cover-seg', 'aria-label': 'Tri des mémos', role: 'group', title: 'Tri des mémos' } });
   MEMO_SORT_LABELS.forEach(([mode, label, titre]) => {
     const actif = state.memoSort === mode;
     seg.appendChild(el('button', {
@@ -3181,6 +3195,17 @@ function memoSortSeg() {
     }));
   });
   return seg;
+}
+
+// [TOOLBAR-LAYOUT] § 1.4 — ligne d'aide des préfixes de date, PURE et testable : mois courant,
+// semaine courante lundi..dimanche (`getDay()` avec dimanche = 7), dates LOCALES (jamais UTC).
+function dateHelpLine(now) {
+  const n = now || new Date();
+  const mois = n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0');
+  const j = n.getDay() || 7;
+  const lundi = new Date(n.getFullYear(), n.getMonth(), n.getDate() - (j - 1));
+  const dimanche = new Date(lundi.getFullYear(), lundi.getMonth(), lundi.getDate() + 6);
+  return 'Dates : d#' + mois + ' · d#' + dateStr(lundi) + '..' + dateStr(dimanche) + ' · d#semaine · c#' + mois + ' (créés)';
 }
 
 const MEMO_SORT_LABELS = [
@@ -3375,7 +3400,7 @@ async function loadAll() {
       && !state.projects.some(p => p.id === state.memoProject)) {
     state.memoProject = 'all';
   }
-  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; state.smtpEnabled = !!(s && s.smtp_enabled); if (s && Array.isArray(s.reaction_emojis)) REACTION_EMOJIS = s.reaction_emojis; } catch (e) {}
+  try { const s = await api('/api/settings'); if (s && s.owner_name) state.ownerName = s.owner_name; if (s && s.map_marker_color) state.mapMarkerColor = s.map_marker_color; state.smtpEnabled = !!(s && s.smtp_enabled); if (s && Array.isArray(s.reaction_emojis)) REACTION_EMOJIS = s.reaction_emojis; await syncExtraTZ(s); } catch (e) {}
   try { const f = await api('/api/favorites'); state.favorites = (f && Array.isArray(f.favorites)) ? f.favorites : []; } catch (e) { state.favorites = []; }  // [FAVORITES]
   try { const it = await api('/api/image-trash'); state.imageTrash = Array.isArray(it) ? it : []; } catch (e) { state.imageTrash = []; }  // [IMAGE-TRASH]
   try { localStorage.setItem('lastSyncAt', new Date().toISOString()); lastSyncAt = localStorage.getItem('lastSyncAt'); } catch (e) {}  // [OFFLINE] horodatage dernière synchro
@@ -9899,20 +9924,25 @@ function renderBoard() {
 
   // [HEADER-TOOLBAR v3] la barre d'actions vit ICI : sous le titre + description + rangée d'infos,
   // en pleine largeur dans son cadre (jamais à droite du titre).
-  // [TOOLS-DOCK] le dock (2e hdr-toolbar, même gabarit) s'aligne À DROITE sur la MÊME rangée
-  // que la barre d'actions (space-between) ; en ≤900 px le wrap le fait passer dessous.
+  // [TOOLBAR-LAYOUT] § 1.1 : le dock [TOOLS-DOCK] (Mémo / Fichier / Vocal / Dossier) n'est PLUS une
+  // 2e `hdrToolbar` — il rejoint la MÊME barre après un séparateur. Deux barres en `space-between;
+  // wrap` s'empilaient dès que le board était étroit et s'écartaient aux deux bords sinon (§ 0 du
+  // brief) : UNE bordure, UNE bascule ‹ ›, une seule hauteur ; si ça déborde, tout défile ensemble.
   const dockPid = (state.memoProject !== 'all' && state.memoProject !== 'inbox') ? state.memoProject : null;
   const dock = dockPid ? toolsDockState(dockPid) : null;
-  let toolsBar = null;
   if (dockPid) {
-    const td = hdrToolbar();
+    if (tbCount) tb.sep();
+    tb.bar.classList.add('wide');
+    let first = true;
     const mk = (key, icon, label, title) => {
-      const b = td.add({ icon, label, title, onClick: () => {
+      const b = tb.add({ icon, label, title, onClick: () => {
         const next = !dock[key];
         if (key === 'memo' && next) toolsDockFocusMemo = true;   // ouverture → focus titre
         setToolsDock(dockPid, key, next);
         renderBoard();
       } });
+      tbCount++;
+      if (first) { b.classList.add('hdr-dock-first'); first = false; }   // le dock se cale à droite
       if (dock[key]) b.classList.add('on');
       b.setAttribute('aria-pressed', dock[key] ? 'true' : 'false');
       return b;
@@ -9921,14 +9951,11 @@ function renderBoard() {
     mk('file', 'paperclip', 'Fichier', 'Afficher/masquer la zone de dépôt de fichiers du dossier');
     mk('voice', 'microphone', 'Vocal', 'Afficher/masquer le bouton d\'enregistrement vocal');
     mk('folder', 'folder-plus', 'Dossier', 'Afficher/masquer la création de sous-dossier');
-    toolsBar = td.end();
   }
-  if (tbCount || toolsBar) {
-    if (tbCount) tb.end();
-    const row = el('div', { attrs: { style: 'display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin:0 0 0.8rem' } });
-    if (tbCount) row.appendChild(tb.bar);
-    if (toolsBar) row.appendChild(toolsBar);
-    board.appendChild(row);
+  if (tbCount) {
+    tb.end();
+    tb.bar.style.margin = '0 0 0.8rem';   // une seule marge (la rangée intermédiaire a disparu)
+    board.appendChild(tb.bar);
   }
 
   // [VOTES-FRAME] encart « Votes » (consultation) sous la barre d'actions : chips de scrutins nommés
@@ -10018,6 +10045,9 @@ function renderBoard() {
     }
   }
 
+  // Les compteurs sont calculés sur `allMemos` = visibleMemos() DÉJÀ filtrés par la recherche : en
+  // recherche « clavier », « En cours 1 » = 1 mémo trouvé, pas 1 mémo du dossier. C'est voulu (les
+  // tuiles suivent la recherche) ; [TOOLBAR-LAYOUT] § 1.5 ne masque que le « 0 », qui n'était que du bruit.
   const counts = {  // [MEMO-DATE-RANGE] fin effective : séjour en cours = « aujourd'hui », pas en retard
     all: allMemos.filter(m => !m.done).length,
     overdue: allMemos.filter(m => !m.done && m.due_date && memoDueEndDay(m) < todayD).length,
@@ -10045,7 +10075,7 @@ function renderBoard() {
     const ic = el('span', { class: 'mf-icon' });
     if (typeof ico === 'string') ic.textContent = ico; else ic.appendChild(ico);
     top.appendChild(ic);
-    top.appendChild(el('span', { class: 'mf-count', text: String(counts[key]) }));
+    if (counts[key] > 0) top.appendChild(el('span', { class: 'mf-count', text: String(counts[key]) }));  // [TOOLBAR-LAYOUT] jamais de « 0 »
     tile.appendChild(top);
     tile.appendChild(el('span', { class: 'mf-label', text: label }));
     filters.appendChild(tile);
@@ -10222,18 +10252,17 @@ function renderBoard() {
        Immersif/Compact à droite. La bascule n'existe QUE si un mémo porte une photo — le tri,
        lui, doit toujours être là : c'est donc la rangée de tri qui porte la ligne, et la
        bascule vient s'y ranger quand elle a lieu d'être. */
+    // [TOOLBAR-LAYOUT] § 1.3 option A : plus de label « Tri » (le segment se porte seul,
+    // `aria-label` + `title`), nowrap (CSS) — le label se retrouvait seul sur sa ligne dès que ça serrait.
     const rang = el('div', { attrs: { id: 'memo-sort-bar', class: 'cover-disp' } });
-    rang.appendChild(el('span', { class: 'cover-disp-lbl', text: 'Tri' }));
     rang.appendChild(memoSortSeg());
     if (cov.bar) while (cov.bar.firstChild) rang.appendChild(cov.bar.firstChild);
     board.appendChild(rang);
     // Ligne d'aide des préfixes de date : informative, jamais cliquable (leçon [SEARCH-FOLD] —
     // une ligne qui pré-remplirait le champ le viderait au premier clic).
-    const aide = el('div', { attrs: { id: 'memo-date-help', class: 'cover-disp' } });
-    aide.appendChild(el('span', {
-      class: 'cover-disp-lbl',
-      text: 'Dates : d#2026-11 · d#2026-11-03..2026-11-09 · d#semaine · c#2026-09 (créés)',
-    }));
+    // [TOOLBAR-LAYOUT] § 1.4 : texte CALCULÉ sur le mois / la semaine courants (fini le `2026-11` figé).
+    const aide = el('div', { attrs: { id: 'memo-date-help', title: 'Préfixes de recherche par date' } });
+    aide.appendChild(el('span', { text: dateHelpLine(new Date()) }));
     board.appendChild(aide);
   }
 
@@ -11856,10 +11885,31 @@ document.getElementById('refresh-status').addEventListener('click', async () => 
 const tzSelect = document.getElementById('tz-select');
 TZ_CHOICES.forEach(([v, label]) => tzSelect.appendChild(el('option', { attrs: { value: v }, text: label })));
 tzSelect.value = localStorage.getItem('extraTZ') || '';
-tzSelect.addEventListener('change', () => {
+tzSelect.addEventListener('change', async () => {
+  // [TOOLBAR-LAYOUT] § 1.6 : le sélecteur écrit les DEUX — cache local (repli hors-ligne) + serveur.
   localStorage.setItem('extraTZ', tzSelect.value);
   updateClock();
+  try { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ extra_tz: tzSelect.value }) }); }
+  catch (e) { notify('Fuseau non enregistré sur le serveur (gardé sur cet appareil).', { error: true }); }
 });
+// [TOOLBAR-LAYOUT] § 1.6 — horloge secondaire sur TOUS les appareils : `extra_tz` est un réglage
+// serveur ; `localStorage.extraTZ` n'est plus qu'un CACHE (premier rendu, PWA hors-ligne).
+// Migration douce : serveur vide + cache présent → on pousse le cache UNE fois (le réglage posé
+// sur Opera n'est pas perdu). Serveur renseigné → il fait foi, le cache s'aligne.
+let extraTzSynced = false;
+async function syncExtraTZ(s) {
+  if (extraTzSynced || !s || !('extra_tz' in s)) return;
+  extraTzSynced = true;
+  const serveur = String(s.extra_tz || '');
+  const local = localStorage.getItem('extraTZ') || '';
+  if (serveur) {
+    if (local !== serveur) localStorage.setItem('extraTZ', serveur);
+  } else if (local) {
+    try { await api('/api/settings', { method: 'PUT', body: JSON.stringify({ extra_tz: local }) }); } catch (e) {}
+  }
+  tzSelect.value = localStorage.getItem('extraTZ') || '';
+  updateClock();
+}
 document.getElementById('purge-history').addEventListener('click', async () => {
   if (!state.history.length) { await notify("L'historique est déjà vide."); return; }
   if (!(await confirmPopin(`${state.history.length} entrée${state.history.length > 1 ? 's' : ''} seront effacées. Cette action est définitive.`, { title: 'Vider l\'historique ?', okLabel: 'Vider' }))) return;
