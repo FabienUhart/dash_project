@@ -3056,7 +3056,9 @@ function applyTableBetter(modules) {
     menus: ['column', 'row', 'merge', 'table', 'cell', 'wrap', 'delete'],
     toolbarTable: true,
   };
-  modules.keyboard = { bindings: QuillTableBetter.keyboardBindings };
+  // [EDITOR-AUTOLIST] Les bindings clavier se règlent ICI, une fois pour les 3 pages : ceux du
+  // module tableau + notre surcharge de « list autofill » (même nom → remplace celui de Quill).
+  modules.keyboard = { bindings: Object.assign({}, QuillTableBetter.keyboardBindings, { 'list autofill': autolistBinding() }) };
   if (Array.isArray(modules.toolbar)) {
     const tb = modules.toolbar;
     const last = tb[tb.length - 1];
@@ -3064,6 +3066,63 @@ function applyTableBetter(modules) {
     tb.splice(isClean ? tb.length - 1 : tb.length, 0, ['table-better']);
   }
   return modules;
+}
+
+/* ===== [EDITOR-SLASH] Un seul prédicat pour les raccourcis à une touche =====
+   « / » (focus recherche, index.html) testait le tagName du focus mais pas `isContentEditable` :
+   dans le `.ql-editor` de Quill (div contenteditable) chaque « / » était avalé — « 18/10/2026 »
+   devenait « 18102026 ». Ce prédicat dit si une frappe appartient à une ZONE DE SAISIE (ou à une
+   pop-in ouverte : un raccourci ne tire jamais sous un `<dialog>`, même focus sur un bouton).
+   Tout futur raccourci à une touche ([KEYS-1-9], « ? » de [SHORTCUT-HELP]) passe par lui.
+   Pur, sans état, identique owner/invité. */
+function inTextEntry(el = document.activeElement) {
+  if (document.querySelector('dialog[open]')) return true;
+  if (!el || el === document.body) return false;
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return true;
+  if (el.isContentEditable) return true;
+  return !!(el.closest && el.closest('.ql-editor'));
+}
+
+/* ===== [EDITOR-AUTOLIST] Autofill de liste : garder les puces, retirer les numéros =====
+   Quill 2 convertit en liste toute ligne commençant par « 1. », « - », « * », « [ ] » suivi d'un
+   espace, et Entrée continue la liste : un mémo en sections « 1. LE PRINCIPE », « 2. … » devenait
+   une seule <ol>. Copie du binding `list autofill` de Quill dont la regex EXCLUT le motif
+   numérique : « - », « * », « • » → puce, « [ ] » / « [x] » → case ; une section numérotée reste
+   un paragraphe, les listes ordonnées se créent par la barre d'outils. Corps du handler = celui de
+   Quill (sans le cas « ordered »), `format` conservé. Zéro lib (invariant 6). */
+const AUTOLIST_PREFIX = /^\s*?(\[\s?\]|\[x\]|-|\*|•)$/;
+function autolistBinding() {
+  const Delta = Quill.import('delta');
+  return {
+    key: ' ',
+    shiftKey: null,
+    collapsed: true,
+    format: { 'code-block': false, blockquote: false, table: false },
+    prefix: AUTOLIST_PREFIX,
+    handler(range, context) {
+      if (this.quill.scroll.query('list') == null) return true;
+      const { length } = context.prefix;
+      const [line, offset] = this.quill.getLine(range.index);
+      if (offset > length) return true;
+      let value;
+      switch (context.prefix.trim()) {
+        case '[]': case '[ ]': value = 'unchecked'; break;
+        case '[x]': value = 'checked'; break;
+        default: value = 'bullet';
+      }
+      this.quill.insertText(range.index, ' ', Quill.sources.USER);
+      this.quill.history.cutoff();
+      const delta = new Delta()
+        .retain(range.index - offset)
+        .delete(length + 1)
+        .retain(line.length() - 2 - offset)
+        .retain(1, { list: value });
+      this.quill.updateContents(delta, Quill.sources.USER);
+      this.quill.history.cutoff();
+      this.quill.setSelection(range.index - length, Quill.sources.SILENT);
+      return false;
+    },
+  };
 }
 
 function addMentionMatcher(q) {

@@ -5938,10 +5938,9 @@ let lastActivityKey = null;
 let pendingReload = false;
 
 function uiBusy() {
-  if (document.querySelector('dialog[open]')) return true;
-  const a = document.activeElement;
-  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return true;
-  return false;
+  // [EDITOR-SLASH] Même prédicat que les raccourcis à une touche (partial) : pop-in ouverte ou
+  // focus dans une zone de saisie = l'utilisateur est occupé, on ne rejoue pas de rechargement.
+  return inTextEntry();
 }
 
 async function refreshActivityBadge() {
@@ -11137,8 +11136,11 @@ searchInput.addEventListener('keydown', (e) => {
     searchInput.blur();
   }
 });
+// [EDITOR-SLASH] « / » = focus recherche, SAUF dans une zone de saisie ou sous une pop-in
+// (prédicat partagé `inTextEntry()` : il voit le `.ql-editor` contenteditable de Quill, que le
+// seul test du tagName manquait — chaque « / » tapé dans un mémo était avalé).
 document.addEventListener('keydown', (e) => {
-  if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+  if (e.key === '/' && !inTextEntry()) {
     e.preventDefault();
     searchInput.focus();
   }
