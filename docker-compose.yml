@@ -4,6 +4,7 @@ services:
     container_name: dashboard
     ports:
       - "8099:8099"
+      - "8100:8100"   # [DASH-MCP] serveur MCP (uvicorn), derrière Caddy /mcp* en prod
     volumes:
       - ./data:/app/data
     # [HUB-EMAIL-INVITE] Secrets SMTP via .env (gitignoré). required:false → `up` marche

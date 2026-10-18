@@ -6,3 +6,7 @@ ExifRead==3.0.0
 Pillow==11.3.0
 python-dotenv==1.0.1
 tzdata==2024.1
+# [DASH-MCP] serveur MCP distant (façade de /api/v1), SDK officiel + serveur ASGI + client HTTP
+mcp==1.30.0
+uvicorn==0.41.0
+httpx==0.28.1

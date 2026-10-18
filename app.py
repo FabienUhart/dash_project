@@ -1770,6 +1770,12 @@ def init_db():
         )
         """
     )
+    # [DASH-MCP] lot B : quel client parle avec ce jeton (`X-Dash-Client: mcp/1.0.0 (claude-chat)`).
+    # Colonnes additives, NON exportées (api_tokens n'est jamais exportée). Zéro bump.
+    tcols = {r[1] for r in conn.execute("PRAGMA table_info(api_tokens)").fetchall()}
+    for col in ("client_name", "client_version", "last_seen_version"):
+        if col not in tcols:
+            conn.execute(f"ALTER TABLE api_tokens ADD COLUMN {col} TEXT DEFAULT ''")
     conn.commit()
     conn.close()
 
@@ -12709,6 +12715,10 @@ API_AUDIT_DAYS = 90                 # purge de `api_audit` (comme _og_sweep : au
 API_FILTERS = ("open", "today", "scheduled", "overdue", "done", "history")
 API_SORTS = ("manual", "newest", "updated", "due")
 API_TOKEN_PREFIX = "dash_"
+# [DASH-MCP] versions des clients officiels, servies par GET /api/v1/client-versions (un client compare
+# et propose la mise à jour). None = client pas encore livré.
+CLIENT_VERSIONS = {"mcp": "1.0.0", "cli": None, "extension": None}
+X_DASH_CLIENT_RE = re.compile(r"^([a-z][a-z0-9-]{0,30})/([\w.+-]{1,40})(?:\s+\((.{0,80})\))?$")
 
 # Compteurs d'abus EN MÉMOIRE DE PROCESSUS, clé (sujet, nature, minute). Gunicorn tourne 2 workers :
 # le quota effectif est donc « par worker » (au pire ×2) — accepté, Caddy n'a pas de rate limit sans
@@ -12774,6 +12784,8 @@ def _api_token_dict(r):
         "id": r["id"], "name": r["name"], "scopes": r["scopes"], "source": r["source"],
         "created_at": r["created_at"] or "", "expires_at": r["expires_at"] or "",
         "last_used_at": r["last_used_at"] or "", "revoked_at": r["revoked_at"] or "",
+        "client_name": _row_get(r, "client_name", "") or "", "client_version": _row_get(r, "client_version", "") or "",
+        "last_seen_version": _row_get(r, "last_seen_version", "") or "",
     }
 
 
@@ -12900,6 +12912,15 @@ def require_token(scope):
             g.api_memo_id = None
             db.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
                        (datetime.now(timezone.utc).isoformat(), tok["id"]))
+            # [DASH-MCP] `X-Dash-Client: <nom>/<version> (<libellé>)` : nom + première version vue, et la
+            # dernière version vue (un vieux client se repère dans Appareils connectés). Jamais obligatoire.
+            xc = X_DASH_CLIENT_RE.match((request.headers.get("X-Dash-Client") or "").strip())
+            if xc:
+                cname, cver = xc.group(1), xc.group(2)
+                db.execute("UPDATE api_tokens SET last_seen_version = ?, "
+                           "client_name = CASE WHEN COALESCE(client_name, '') = '' THEN ? ELSE client_name END, "
+                           "client_version = CASE WHEN COALESCE(client_version, '') = '' THEN ? ELSE client_version END "
+                           "WHERE id = ?", (cver, cname, cver, tok["id"]))
             db.commit()
             resp = app.make_response(fn(*args, **kwargs))
             memo_id = kwargs.get("memo_id") or getattr(g, "api_memo_id", None)
@@ -13240,6 +13261,13 @@ def api_v1_openapi():
     spec = dict(OPENAPI)
     spec["info"] = dict(OPENAPI["info"], **{"x-build": BUILD_VERSION, "x-export": int(APP_VERSION)})
     return _api_json(spec)
+
+
+@api_v1.route("/client-versions", methods=["GET"])
+@require_token("read")
+def api_v1_client_versions():
+    """[DASH-MCP] versions courantes des clients officiels (constante) — un client se compare à elle."""
+    return _api_json(CLIENT_VERSIONS)
 
 
 @api_v1.route("/tree", methods=["GET"])

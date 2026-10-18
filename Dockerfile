@@ -10,5 +10,8 @@ COPY . .
 RUN mkdir -p /app/data
 
 EXPOSE 8099
+EXPOSE 8100
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8099", "--workers", "2", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "app:app"]
+# [DASH-MCP] deux workers (gunicorn 8099 + uvicorn 8100), voir bin/start.sh
+RUN chmod +x /app/bin/start.sh
+CMD ["/app/bin/start.sh"]

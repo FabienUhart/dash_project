@@ -181,6 +181,8 @@ OPENAPI = {
         "/export": {"get": _op("L'export JSON complet (même fonction que Paramètres › Sauvegardes), version 30.", tags=["lecture"],
                                responses={"200": _resp("ok", {"type": "object"})})},
         "/openapi.json": {"get": _op("Ce document.", tags=["auth"], responses={"200": _resp("ok", {"type": "object"})})},
+        "/client-versions": {"get": _op("Versions courantes des clients officiels (`mcp`, `cli`, `extension` ; null = pas encore livré) — un client se compare à elles. [DASH-MCP]", tags=["auth"],
+                                        responses={"200": _resp("ok", {"type": "object", "properties": {"mcp": {"type": ["string", "null"]}, "cli": {"type": ["string", "null"]}, "extension": {"type": ["string", "null"]}}})})},
         "/folders": {"post": _op("Crée un dossier (201) ; 409 si le nom est pris chez le même parent.", scope="write", tags=["dossiers"],
                                  body={"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}, "parent_id": {"type": ["integer", "null"]}, "emoji": {"type": "string"}, "color": {"type": "string"}}},
                                  responses={"201": _resp("créé", _ref("Folder")), "400": _resp("invalide"), "404": _resp("parent inconnu"), "409": _resp("nom pris")})},
