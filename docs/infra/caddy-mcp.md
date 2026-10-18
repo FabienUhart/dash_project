@@ -1,9 +1,18 @@
 # Infra — Caddy : router `/mcp*` vers le serveur MCP ([DASH-MCP] lot B, V30.1.283)
 
-> **Proposition, NON appliquée.** Le Caddyfile vit sur le Zimaboard, hors dépôt (conteneur `caddy`, monté
-> `/etc/caddy/Caddyfile`). À appliquer **uniquement sur GO explicite de Fabien**, au moment du déploiement de
-> V30.1.283, puis contrôle § 3. Authelia : `^/mcp/.*$` est **déjà en bypass** sur les deux domaines dash
-> (appliqué le 18 oct. avec V30.0.282, voir `authelia-api-v1.md`) — rien à y changer.
+> **APPLIQUÉE le 18 oct. 2026 à 15:05 (Paris), sur GO explicite de Fabien**, après le déploiement de V30.1.283
+> (Caddy v2.11.3). Le Caddyfile vit sur l'HÔTE : **`/home/casaos/Documents/projects/caddy/Caddyfile`**
+> (casaos, 600), monté **en lecture seule** dans le conteneur `caddy` (`/etc/caddy/Caddyfile`) — on l'édite donc
+> côté hôte, puis `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`.
+> Sauvegardes : `Caddyfile.bak-20261018-150553` (hôte, à côté) et `/data/Caddyfile.bak-20261018-150520` (volume
+> du conteneur). `caddy validate` : « Valid configuration », reload OK. Contrôle § 3 : voir `REALISATION.md`
+> [V30.1.283] et le journal du 18 oct. Authelia : `^/mcp/.*$` **déjà en bypass** depuis V30.0.282
+> (`authelia-api-v1.md`), rien n'y a changé.
+>
+> Ce qui a été inséré (les deux blocs dash : `handle @dash { … }` du bloc `*.homebayonne.duckdns.org`, et le
+> bloc `dash.fabnode.dev`) : après `import authelia`, un `handle /mcp*` → `192.168.1.39:8100` et un `handle`
+> de repli → `192.168.1.39:8099` (le `reverse_proxy` nu d'avant), schéma « switch » déjà utilisé plus bas dans
+> le fichier. Le `handle` est terminal : `/mcp*` ne tombe jamais dans le repli.
 
 ## 1. Ce qui tourne dans le conteneur `dashboard` depuis V30.1.283
 `bin/start.sh` lance **deux workers** : gunicorn (Flask, `:8099`, inchangé) et uvicorn (MCP, `:8100`,
@@ -34,18 +43,22 @@ dash.fabnode.dev {
 }
 ```
 
-Remplacer `192.168.1.39:8100` par ce que le bloc existant utilise pour 8099 (nom de conteneur `dashboard:8100`
-si Caddy et le dashboard partagent un réseau Docker ; IP de l'hôte sinon). Le `forward_auth` Authelia peut
-rester devant : la règle bypass `^/mcp/.*$` répond `200` sans session.
+Le bloc existant utilise `192.168.1.39:8099` (IP de l'hôte, ports publiés) : même forme pour 8100. Le
+`forward_auth` Authelia (`import authelia`) reste devant : la règle bypass `^/mcp/.*$` répond `200` sans session.
 
 ## 3. Appliquer (le jour du GO) et contrôler
 ```bash
 ssh -p 22 casaos@192.168.1.39
-docker exec caddy sh -c 'cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%Y%m%d-%H%M%S)'
-docker exec -it caddy vi /etc/caddy/Caddyfile            # insérer le handle ci-dessus dans les 2 blocs dash
-docker exec caddy caddy validate --config /etc/caddy/Caddyfile
-docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+F=/home/casaos/Documents/projects/caddy/Caddyfile          # SOURCE du bind mount (ro dans le conteneur)
+cp "$F" "$F.bak-$(date +%Y%m%d-%H%M%S)"
+vi "$F"                                                     # insérer le handle ci-dessus dans les 2 blocs dash
+docker exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker exec caddy caddy reload   --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
+
+⚠ Piège vécu : `docker exec caddy sh -c 'cat > /etc/caddy/Caddyfile'` échoue (« Read-only file system ») —
+le fichier est monté `:ro`. Écrire sur l'hôte, recharger depuis le conteneur. Un `caddy validate` sur une copie
+dans `/tmp` du conteneur permet de tester AVANT de toucher l'hôte.
 
 Contrôle **depuis le Zimaboard** (jamais depuis le Mac : chaque 401 compte pour fail2ban, voir
 `fail2ban-incident-20261018.md`) :
