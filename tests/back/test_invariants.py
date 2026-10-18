@@ -32,11 +32,11 @@ def _memos(c):
     return sorted(m.get("content", "") for m in r.get_json().get("memos", []))
 
 
-# --- Format d'export figé v29 ---------------------------------------------
+# --- Format d'export figé v30 ---------------------------------------------
 
-def test_export_version_is_29(client):
+def test_export_version_is_30(client):
     v = client.get("/api/version").get_json()
-    assert v["export"] == 29, "Format d'export modifié sans bump de version majeure."
+    assert v["export"] == 30, "Format d'export modifié sans bump de version majeure."
 
 
 def test_export_has_stable_top_level_keys(client):
@@ -107,3 +107,62 @@ def test_v1_export_still_importable(client):
                          "rouge-vert lors du prochain lot partages")
 def test_delete_share_leaves_no_orphan_guest(client):
     raise NotImplementedError
+
+
+# --- Invariant 10 : /api/v1/* n'accepte qu'un Bearer valide ([DASH-API]) -----------------------
+# L'API v1 est exposée HORS Authelia (règle bypass `/api/v1/*`) : le jeton est la SEULE porte.
+# Ces gardes encodent ce qui ne doit jamais cesser d'être vrai, quelle que soit la route ajoutée.
+
+def _mk_token(c, scopes="read,write"):
+    r = c.post("/api/tokens", json={"name": "inv", "scopes": scopes, "source": "cli"})
+    assert r.status_code == 201, r.data
+    return r.get_json()
+
+
+def test_inv10_toute_route_api_v1_exige_un_jeton(app_module):
+    """Introspection de `app.url_map` : AUCUNE route /api/v1/* sans `require_token` (le décorateur
+    marque la vue par `_requires_token`). Une route oubliée serait publique en prod."""
+    rules = [r for r in app_module.app.url_map.iter_rules() if r.rule.startswith("/api/v1")]
+    assert rules, "aucune route /api/v1 enregistrée"
+    for r in rules:
+        view = app_module.app.view_functions[r.endpoint]
+        assert getattr(view, "_requires_token", None) in ("read", "write"), \
+            "route /api/v1 sans require_token : %s" % r.rule
+    assert not [r for r in app_module.app.url_map.iter_rules() if r.rule.startswith("/mcp")], \
+        "/mcp est hors lot A (brief B)"
+
+
+def test_inv10_cookie_seul_401(client):
+    _mk_token(client)
+    r = client.get("/api/v1/me", headers={"Cookie": "authelia_session=cookie-valide-cote-proxy"})
+    assert r.status_code == 401 and r.get_json() == {}
+
+
+def test_inv10_jeton_revoque_401(client):
+    t = _mk_token(client)
+    assert client.delete("/api/tokens/%d" % t["id"]).status_code == 204
+    r = client.get("/api/v1/me", headers={"Authorization": "Bearer " + t["token"]})
+    assert r.status_code == 401 and r.get_json() == {}
+
+
+def test_inv10_scope_read_sur_une_ecriture_403(client):
+    t = _mk_token(client, scopes="read")
+    r = client.post("/api/v1/memos", json={"title": "x"}, headers={"Authorization": "Bearer " + t["token"]})
+    assert r.status_code == 403
+
+
+def test_inv10_le_jeton_en_clair_n_est_ni_dans_l_export_ni_dans_l_audit(client, app_module):
+    import hashlib
+    import sqlite3
+    t = _mk_token(client)
+    client.get("/api/v1/me", headers={"Authorization": "Bearer " + t["token"]})
+    brut = client.get("/api/export").get_data(as_text=True)
+    assert t["token"] not in brut and hashlib.sha256(t["token"].encode()).hexdigest() not in brut
+    assert "api_tokens" not in client.get("/api/export").get_json()
+    con = sqlite3.connect(app_module.DB_PATH)
+    try:
+        rows = con.execute("SELECT * FROM api_audit").fetchall()
+    finally:
+        con.close()
+    assert rows
+    assert t["token"] not in " ".join(" ".join(str(v) for v in r) for r in rows)

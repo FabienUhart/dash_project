@@ -68,7 +68,7 @@ from flask import (
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-APP_VERSION = "29"  # X = version du format d'export (invariant 1) — v29 = [MEMO-URLS] liens attachés au mémo (table memo_urls) ; v28 = [LINK-REFS] un lien relié à un mémo ou un dossier ; v27 = [MEMO-LINKS] liens entre mémos ; v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
+APP_VERSION = "30"  # X = version du format d'export (invariant 1) — v30 = [DASH-API] memos.source (provenance : '' = UI, sinon la source du jeton API) ; v29 = [MEMO-URLS] liens attachés au mémo (table memo_urls) ; v28 = [LINK-REFS] un lien relié à un mémo ou un dossier ; v27 = [MEMO-LINKS] liens entre mémos ; v26 = [GUEST-HOME] created_by sur les projets ; v25 = [PROJECT-NAME-PER-FOLDER] uid/parent_uid/project_uid + unicité par dossier ; v24 = [MEMO-DATE-RANGE] date de fin (plage) ; v23 = [FOLDER-ATTACHMENTS] ; v22 = [ATTACHMENTS] ; v21 = [COMMENT-REACTIONS]
 
 
 def _build_version():
@@ -1732,6 +1732,44 @@ def init_db():
     # [PROJECT-NAME-PER-FOLDER] v25 : backfill uid des projets (jamais régénéré ensuite — invariant 3).
     for row in conn.execute("SELECT id FROM projects WHERE uid = '' OR uid IS NULL").fetchall():
         conn.execute("UPDATE projects SET uid = ? WHERE id = ?", (str(uuid.uuid4()), row[0]))
+    # [DASH-API] v30 : provenance d'un mémo. '' = UI (défaut), sinon la `source` du jeton API qui l'a
+    # écrit en dernier (création ou modification). Additive, backfill implicite par le DEFAULT.
+    mcols = {r[1] for r in conn.execute("PRAGMA table_info(memos)").fetchall()}
+    if "source" not in mcols:
+        conn.execute("ALTER TABLE memos ADD COLUMN source TEXT DEFAULT ''")
+    # [DASH-API] jetons de l'API v1 : seule l'EMPREINTE sha256 est stockée (le clair n'est montré
+    # qu'à la création). Non exportés (comme session_token). `CREATE TABLE IF NOT EXISTS`.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS api_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            scopes TEXT NOT NULL DEFAULT 'read',
+            source TEXT NOT NULL DEFAULT 'other',
+            created_at TEXT NOT NULL,
+            expires_at TEXT DEFAULT '',
+            last_used_at TEXT DEFAULT '',
+            revoked_at TEXT DEFAULT ''
+        )
+        """
+    )
+    # [DASH-API] traçabilité : un appel = une ligne (jamais le contenu). Non exportée, purge > 90 j.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS api_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_id INTEGER,
+            at TEXT NOT NULL,
+            method TEXT NOT NULL,
+            route TEXT NOT NULL,
+            memo_id INTEGER,
+            args_summary TEXT DEFAULT '',
+            ip TEXT DEFAULT '',
+            status INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -4541,23 +4579,28 @@ def list_memos():
 
 @app.route("/api/memos", methods=["POST"])
 def create_memo():
-    data = request.get_json(silent=True) or {}
+    payload, status = _create_memo_core(get_db(), request.get_json(silent=True) or {})
+    return jsonify(payload), status
+
+
+def _create_memo_core(db, data, source=""):
+    """Création d'un mémo — UN seul code d'insertion pour l'UI (`source=''`) et l'API v1
+    ([DASH-API], `source` = celle du jeton). Rend (payload, status)."""
     content = (data.get("content") or "").strip()
     title = _clean_title(data.get("title"))
     if not content and not title:
-        return jsonify({"error": "content required"}), 400
-    db = get_db()
+        return {"error": "content required"}, 400
     _dd = (data.get("due_date") or "").strip()
     _rec = _valid_recurrence(data.get("recurrence"))
     # [MEMO-DATE-RANGE] date de fin (mêmes garde-fous que _perform_memo_update).
     _de = _clean_due_end(data.get("due_end")) if _dd else ""
     if _de:
         if _de < _dd:
-            return jsonify({"error": "la date de fin doit être ≥ la date de début"}), 400
+            return {"error": "la date de fin doit être ≥ la date de début"}, 400
         if _rec:
-            return jsonify({"error": "récurrence et plage de dates sont exclusives"}), 400
+            return {"error": "récurrence et plage de dates sont exclusives"}, 400
     elif data.get("due_end") and not _dd:
-        return jsonify({"error": "une date de fin exige une date de début"}), 400
+        return {"error": "une date de fin exige une date de début"}, 400
     # [OFFLINE] Idempotence du rejeu de la file hors ligne : le client peut fournir un `uid` (UUID
     # généré à la note). Si un mémo NON supprimé porte déjà cet uid → on le renvoie tel quel (aucun
     # doublon, rejeu sûr même après coupure en plein milieu). uid invalide/absent → généré serveur.
@@ -4567,7 +4610,7 @@ def create_memo():
             "SELECT * FROM memos WHERE uid = ? AND COALESCE(deleted_at,'') = ''", (client_uid,)
         ).fetchone()
         if dup:
-            return jsonify(_memo_dict(dup, _owner_name(get_db()))), 200
+            return _memo_dict(dup, _owner_name(db)), 200
         uid = client_uid
     else:
         uid = str(uuid.uuid4())
@@ -4576,8 +4619,8 @@ def create_memo():
     cur = db.execute(
         "INSERT INTO memos (content, position, created_at, uid, updated_at, "
         "done, due_date, due_time, end_time, due_end, priority, subtasks, project_id, recurrence, emoji, location, "
-        "title, assignees, marker_color, map_groups) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "title, assignees, marker_color, map_groups, source) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             content,
             max_pos + 1,
@@ -4602,11 +4645,12 @@ def create_memo():
             _assignees_json(data.get("assignees")),
             _clean_hex_color(data.get("marker_color"), ""),
             _map_groups_json(data.get("map_groups")),
+            source or "",  # [DASH-API] v30
         ),
     )
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (cur.lastrowid,)).fetchone()
-    return jsonify(_memo_dict(row, _owner_name(db))), 201
+    return _memo_dict(row, _owner_name(db)), 201
 
 
 def _memo_snapshot(content, done, due_date, priority, subtasks_json, recurrence,
@@ -4666,7 +4710,8 @@ def _log_revision(db, memo_row, after, editor, share_id=None):
     )
 
 
-def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
+def _perform_memo_update(db, existing, data, editor="moi", share_id=None, source=None):
+    # [DASH-API] `source` : None = inchangée (UI, invité) ; chaîne = dernière écriture par l'API.
     memo_id = existing["id"]
     content = (data.get("content", existing["content"]) or "").strip()
     title = (
@@ -4794,6 +4839,8 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None):
             memo_id,
         ),
     )
+    if source is not None:
+        db.execute("UPDATE memos SET source = ? WHERE id = ?", (source, memo_id))  # [DASH-API] v30
     db.commit()
     # [VOTE-GROUPS §7] Mémo déplacé → retiré des votes nommés dont il sort du périmètre.
     if project_id != existing["project_id"]:
@@ -11774,6 +11821,10 @@ def _backup_loop():
             _purge_image_trash()  # [IMAGE-TRASH] rétention propre (30 j), indépendante des mémos
         except Exception:
             pass
+        try:
+            _purge_api_audit()  # [DASH-API] audit > 90 j
+        except Exception:
+            pass
         time.sleep(3600)
 
 
@@ -12342,6 +12393,10 @@ def import_links():
             if memo_due_end and (memo_due_end < due_date or recurrence):
                 memo_due_end = ""
             memo_created_by = str(memo.get("created_by") or "").strip()[:200]
+            # [DASH-API] v30 : provenance. Absente (v1→v29) ou inconnue → '' (= UI). Jamais de 400.
+            memo_source = str(memo.get("source") or "").strip()
+            if memo_source not in API_SOURCES:
+                memo_source = ""
         else:
             content = str(memo).strip()
             uid = ""
@@ -12364,6 +12419,7 @@ def import_links():
             memo_end = ""  # [FESTIVAL-VOTE]
             memo_due_end = ""  # [MEMO-DATE-RANGE]
             memo_created_by = ""
+            memo_source = ""
         if not content and not title:
             continue
 
@@ -12398,22 +12454,23 @@ def import_links():
             if not due_date or (merged_due_end and merged_due_end < due_date) or recurrence:
                 merged_due_end = ""
             merged_created_by = memo_created_by or _row_get(existing, "created_by")
+            merged_source = memo_source or _row_get(existing, "source")  # [DASH-API] v30 : jamais effacée par du vide
             if res == "overwrite":
                 # [IMPORT-PREVIEW] Écraser/Restaurer : force la mise à jour, restaure si en corbeille
                 # (deleted_at=''), rattache au projet visé par l'import (project_id résolu du fichier).
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, due_end=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
-                    "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, deleted_at='', updated_at=? WHERE id=?",
-                    (content, done, due_date, merged_time, merged_end, merged_due_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, (updated or now), existing["id"]),
+                    "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, source=?, deleted_at='', updated_at=? WHERE id=?",
+                    (content, done, due_date, merged_time, merged_end, merged_due_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, merged_source, (updated or now), existing["id"]),
                 )
                 updated_memos += 1
             elif updated and updated > (existing["updated_at"] or ""):
                 db.execute(
                     "UPDATE memos SET content=?, done=?, due_date=?, due_time=?, end_time=?, due_end=?, priority=?, "
                     "subtasks=?, project_id=?, images=?, recurrence=?, emoji=?, location=?, "
-                    "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, updated_at=? WHERE id=?",
-                    (content, done, due_date, merged_time, merged_end, merged_due_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, updated, existing["id"]),
+                    "title=?, assignees=?, marker_color=?, map_groups=?, created_by=?, source=?, updated_at=? WHERE id=?",
+                    (content, done, due_date, merged_time, merged_end, merged_due_end, priority, subtasks, project_id, merged_images, recurrence, memo_emoji, memo_location, title, assignees, merged_marker, memo_groups, merged_created_by, merged_source, updated, existing["id"]),
                 )
                 updated_memos += 1
             else:
@@ -12446,9 +12503,9 @@ def import_links():
         db.execute(
             "INSERT INTO memos (content, position, created_at, uid, updated_at, "
             "done, due_date, due_time, end_time, due_end, priority, subtasks, project_id, images, recurrence, emoji, location, "
-            "title, assignees, marker_color, map_groups, created_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, memo_end, memo_due_end, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups, memo_created_by),
+            "title, assignees, marker_color, map_groups, created_by, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, max_mpos, created, new_uid, updated or created, done, due_date, memo_time, memo_end, memo_due_end, priority, subtasks, project_id, images, recurrence, memo_emoji, memo_location, title, assignees, memo_marker, memo_groups, memo_created_by, memo_source),
         )
         memos_by_uid[new_uid] = db.execute(
             "SELECT * FROM memos WHERE uid = ?", (new_uid,)
@@ -12626,6 +12683,1131 @@ def import_links():
             "imported_memo_urls": imported_memo_urls,  # [MEMO-URLS] v29
         }
     )
+
+
+# ═══════════════════════════ [DASH-API] API v1 — jeton Bearer, hors Authelia ═══════════════════════════
+# Pourquoi : Claude (chat et Claude Code), un CLI et plus tard l'appli mobile lisent et écrivent dans le
+# dashboard SANS passer par Chrome. Les humains continuent d'entrer par Authelia ; l'API est exposée par
+# une règle bypass `/api/v1/*` (docs/infra/authelia-api-v1.md), donc le JETON EST LA SEULE PORTE
+# (invariant 10) : jamais le cookie de session, 401 `{}` sans indice, 403 sur scope insuffisant, quotas,
+# audit de chaque appel, provenance `memos.source` (export v30). La GESTION des jetons reste un acte du
+# propriétaire derrière Authelia (`/api/tokens`, onglet Paramètres › Appareils connectés) — un jeton volé
+# ne fabrique pas d'autres jetons (§ 1.6 du brief).
+import unicodedata
+from functools import wraps
+from html.parser import HTMLParser
+
+from flask import Blueprint
+
+from api.v1.openapi import OPENAPI
+
+API_SOURCES = ("claude-chat", "claude-code", "cli", "flutter", "other")
+API_SCOPES = ("read", "read,write")
+API_BODY_MAX = 256 * 1024           # corps JSON ≤ 256 Ko → 413
+API_RATE = {"read": 120, "write": 30, "anon": 20}   # par minute ; anon = par IP sans jeton
+API_AUDIT_DAYS = 90                 # purge de `api_audit` (comme _og_sweep : au démarrage + boucle horaire)
+API_FILTERS = ("open", "today", "scheduled", "overdue", "done", "history")
+API_SORTS = ("manual", "newest", "updated", "due")
+API_TOKEN_PREFIX = "dash_"
+
+# Compteurs d'abus EN MÉMOIRE DE PROCESSUS, clé (sujet, nature, minute). Gunicorn tourne 2 workers :
+# le quota effectif est donc « par worker » (au pire ×2) — accepté, Caddy n'a pas de rate limit sans
+# plugin et l'intention est de freiner un script fou, pas de facturer au tick.
+_api_rate = {}
+_api_rate_lock = threading.Lock()
+
+
+def _api_rate_reset():
+    """Remise à zéro (tests ; équivaut à un redémarrage du serveur)."""
+    with _api_rate_lock:
+        _api_rate.clear()
+
+
+def _api_rate_hit(subject, kind):
+    """Compte un appel. Rend (autorisé, secondes avant la prochaine minute)."""
+    now = time.time()
+    minute = int(now // 60)
+    with _api_rate_lock:
+        for k in [k for k in _api_rate if k[2] != minute]:
+            del _api_rate[k]
+        n = _api_rate.get((subject, kind, minute), 0) + 1
+        _api_rate[(subject, kind, minute)] = n
+    return n <= API_RATE[kind], max(1, 60 - int(now % 60))
+
+
+def _api_token_hash(plain):
+    return hashlib.sha256(str(plain or "").encode("utf-8")).hexdigest()
+
+
+def _clean_api_expires(value):
+    """'' (jamais) ou un instant ISO normalisé en UTC. Date seule acceptée (= minuit UTC). Invalide → None."""
+    v = str(value or "").strip()
+    if not v:
+        return ""
+    try:
+        if DUE_DATE_RE.match(v):
+            dt = datetime.strptime(v, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        else:
+            dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _api_token_new(db, name, scopes, source, expires_at):
+    """Crée un jeton. Rend (row, jeton en clair) — le clair n'existe qu'ici, jamais stocké ni loggé."""
+    plain = API_TOKEN_PREFIX + secrets.token_urlsafe(30)[:40]
+    now = datetime.now(timezone.utc).isoformat()
+    cur = db.execute(
+        "INSERT INTO api_tokens (name, token_hash, scopes, source, created_at, expires_at, last_used_at, revoked_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, '', '')",
+        (name, _api_token_hash(plain), scopes, source, now, expires_at or ""),
+    )
+    return db.execute("SELECT * FROM api_tokens WHERE id = ?", (cur.lastrowid,)).fetchone(), plain
+
+
+def _api_token_dict(r):
+    """Projection owner : JAMAIS `token_hash`."""
+    return {
+        "id": r["id"], "name": r["name"], "scopes": r["scopes"], "source": r["source"],
+        "created_at": r["created_at"] or "", "expires_at": r["expires_at"] or "",
+        "last_used_at": r["last_used_at"] or "", "revoked_at": r["revoked_at"] or "",
+    }
+
+
+def _api_token_from_request(db):
+    """Le jeton porté par `Authorization: Bearer …`, s'il est valide (non révoqué, non expiré).
+    Comparaison d'empreintes en temps constant sur TOUTES les lignes (quelques jetons : négligeable),
+    jamais un `WHERE token_hash = ?` dont le temps dépendrait de l'égalité. Rend None sans distinguer
+    les cas (le 401 ne donne aucun indice)."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    plain = auth[7:].strip()
+    if not plain.startswith(API_TOKEN_PREFIX) or len(plain) > 200:
+        return None
+    h = _api_token_hash(plain)
+    found = None
+    for r in db.execute("SELECT * FROM api_tokens").fetchall():
+        if hmac.compare_digest(r["token_hash"], h):
+            found = r
+    if found is None:
+        return None
+    if (found["revoked_at"] or ""):
+        return None
+    exp = found["expires_at"] or ""
+    if exp and exp <= datetime.now(timezone.utc).isoformat():
+        return None
+    return found
+
+
+def _api_client_ip():
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()[:64]
+    return (request.remote_addr or "")[:64]
+
+
+def _api_args_summary():
+    """≤ 200 car., JAMAIS le contenu : noms des clés du corps, paires de la query (valeurs tronquées)."""
+    parts = []
+    for k, v in request.args.items():
+        parts.append("%s=%s" % (k[:20], str(v)[:30]))
+    if request.method in ("POST", "PATCH", "PUT", "DELETE"):
+        body = request.get_json(silent=True)
+        if isinstance(body, dict):
+            parts.append("body:" + ",".join(sorted(str(k)[:20] for k in body.keys())[:20]))
+    return " ".join(parts)[:200]
+
+
+def _api_audit(db, token_id, status, memo_id=None):
+    try:
+        route = (request.url_rule.rule if request.url_rule else request.path)
+        route = re.sub(r"<(?:[a-z]+:)?([a-z_]+)>", r"<\1>", route)
+        db.execute(
+            "INSERT INTO api_audit (token_id, at, method, route, memo_id, args_summary, ip, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (token_id, datetime.now(timezone.utc).isoformat(), request.method, route[:200], memo_id,
+             _api_args_summary(), _api_client_ip(), int(status)),
+        )
+        db.commit()
+    except Exception:
+        pass
+
+
+def _purge_api_audit():
+    """Purge > API_AUDIT_DAYS (90 j). Appelée au démarrage et dans la boucle horaire."""
+    limite = (datetime.now(timezone.utc) - timedelta(days=API_AUDIT_DAYS)).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("DELETE FROM api_audit WHERE at < ?", (limite,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _api_json(payload, status=200):
+    resp = jsonify(payload)
+    resp.status_code = status
+    return resp
+
+
+api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+
+
+@api_v1.after_request
+def _api_v1_headers(resp):
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+def require_token(scope):
+    """Porte unique de l'API v1 (invariant 10). `scope` ∈ {'read','write'} : ce que la route EXIGE.
+    La vue décorée porte `_requires_token` — la batterie d'invariants parcourt `app.url_map` et refuse
+    toute route /api/v1 sans cette marque."""
+    assert scope in ("read", "write")
+
+    def deco(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            db = get_db()
+            tok = _api_token_from_request(db)
+            if tok is None:
+                ok, retry = _api_rate_hit("ip:" + _api_client_ip(), "anon")
+                status = 401 if ok else 429
+                _api_audit(db, None, status)
+                resp = _api_json({}, status)
+                if status == 429:
+                    resp.headers["Retry-After"] = str(retry)
+                return resp
+            if scope == "write" and "write" not in (tok["scopes"] or "").split(","):
+                _api_audit(db, tok["id"], 403)
+                return _api_json({"error": "scope insuffisant"}, 403)
+            kind = "write" if request.method in ("POST", "PATCH", "PUT", "DELETE") else "read"
+            ok, retry = _api_rate_hit("tok:%d" % tok["id"], kind)
+            if not ok:
+                _api_audit(db, tok["id"], 429)
+                resp = _api_json({"error": "quota dépassé"}, 429)
+                resp.headers["Retry-After"] = str(retry)
+                return resp
+            if kind == "write" and (request.content_length or 0) > API_BODY_MAX:
+                _api_audit(db, tok["id"], 413)
+                return _api_json({"error": "corps trop volumineux (256 Ko max)"}, 413)
+            g.api_token = tok
+            g.api_memo_id = None
+            db.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+                       (datetime.now(timezone.utc).isoformat(), tok["id"]))
+            db.commit()
+            resp = app.make_response(fn(*args, **kwargs))
+            memo_id = kwargs.get("memo_id") or getattr(g, "api_memo_id", None)
+            _api_audit(db, tok["id"], resp.status_code, memo_id)
+            return resp
+
+        wrapper._requires_token = scope
+        return wrapper
+
+    return deco
+
+
+# ───────────────────────── règles des six tuiles, portées depuis le board ─────────────────────────
+# Portage à l'IDENTIQUE de `memoDueEndDay` / `memoCoversDay` (partial) et des compteurs de `renderBoard`
+# (index.html). La fixture jumelle `tests/fixtures/tiles_cases.json` est jouée des deux côtés.
+
+def _memo_due_end_day(m):
+    """Fin effective : `due_end` si plage valide (≥ due_date), sinon `due_date`."""
+    de = m.get("due_end") or ""
+    dd = m.get("due_date") or ""
+    return de if (de and dd and de >= dd) else dd
+
+
+def _memo_covers_day(m, day):
+    s = m.get("due_date") or ""
+    if not s or not day:
+        return False
+    return s <= day <= _memo_due_end_day(m)
+
+
+def _memo_in_tile(m, filt, today):
+    done = bool(m.get("done"))
+    dd = m.get("due_date") or ""
+    if filt == "done":
+        return done
+    if done:
+        return False
+    if filt == "open":
+        return True
+    if filt == "overdue":
+        return bool(dd) and _memo_due_end_day(m) < today
+    if filt == "today":
+        return _memo_covers_day(m, today)
+    if filt == "scheduled":
+        return bool(dd) and dd > today
+    return False
+
+
+def _tile_counts(memos, today):
+    """Les cinq compteurs de mémos (`history` se compte à part : lignes de memo_history)."""
+    c = {"all": 0, "overdue": 0, "today": 0, "scheduled": 0, "done": 0}
+    for m in memos:
+        if bool(m.get("done")):
+            c["done"] += 1
+            continue
+        c["all"] += 1
+        if _memo_in_tile(m, "overdue", today):
+            c["overdue"] += 1
+        if _memo_in_tile(m, "today", today):
+            c["today"] += 1
+        if _memo_in_tile(m, "scheduled", today):
+            c["scheduled"] += 1
+    return c
+
+
+def _api_sort_memos(items, mode):
+    """Portage de `sortMemos` (index.html) : manuel = position ; `due` = datés d'abord (date, sans
+    heure avant avec heure, heure, id), puis les sans-date dans l'ordre manuel."""
+    if mode == "newest":
+        return sorted(items, key=lambda m: (m.get("created_at") or "", m.get("id") or 0), reverse=True)
+    if mode == "updated":
+        return sorted(items, key=lambda m: (m.get("updated_at") or "", m.get("id") or 0), reverse=True)
+    if mode == "due":
+        avec = [m for m in items if m.get("due_date")]
+        sans = [m for m in items if not m.get("due_date")]
+        avec.sort(key=lambda m: (m["due_date"], 1 if m.get("due_time") else 0, m.get("due_time") or "", m.get("id") or 0))
+        return avec + sans
+    return list(items)
+
+
+# ───────────────────────── texte : HTML ⇄ texte, nettoyage, pliage de recherche ─────────────────────────
+
+_HTML_BLOCK_END_RE = re.compile(r"</(?:p|div|li|h[1-6]|tr|blockquote|pre|td|th)>|<br\s*/?>", re.I)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _html_to_text(h):
+    """HTML déshabillé : fins de blocs → espace, balises retirées, entités décodées, blancs réduits."""
+    if not h:
+        return ""
+    t = _HTML_BLOCK_END_RE.sub(" ", str(h))
+    t = _HTML_TAG_RE.sub("", t)
+    t = html.unescape(t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _text_to_html(t):
+    """Texte brut → paragraphes ÉCHAPPÉS (`\\n\\n` = nouveau paragraphe, `\\n` = <br>). Jamais de HTML brut."""
+    t = str(t or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not t:
+        return ""
+    out = []
+    for para in re.split(r"\n\s*\n", t):
+        lines = [html.escape(l.strip(), quote=False) for l in para.split("\n") if l.strip()]
+        if lines:
+            out.append("<p>" + "<br>".join(lines) + "</p>")
+    return "".join(out)
+
+
+_HTML_DROP = {"script", "style", "iframe", "object", "embed", "link", "meta", "form", "input", "button",
+              "textarea", "select", "svg", "math", "template", "noscript"}
+_HTML_ALLOW = {"p", "br", "strong", "b", "em", "i", "u", "s", "strike", "a", "ul", "ol", "li", "h1", "h2", "h3",
+               "h4", "h5", "h6", "blockquote", "pre", "code", "span", "div", "sub", "sup", "table", "thead",
+               "tbody", "tfoot", "tr", "td", "th", "col", "colgroup", "hr"}
+_HTML_VOID = {"br", "hr", "col"}
+_HTML_ATTR_ALLOW = {"href", "class", "style", "data-list", "data-mention", "colspan", "rowspan", "target", "rel",
+                    "data-row", "data-cell", "width", "height", "spellcheck", "contenteditable"}
+_HTML_STYLE_OK_RE = re.compile(r"^\s*(color|background-color|background|text-align|width|height)\s*:\s*[#\w\s(),.%-]+$", re.I)
+_HTML_HREF_OK_RE = re.compile(r"^\s*(https?:|mailto:|/|#|\.)", re.I)
+
+
+class _MemoHtmlCleaner(HTMLParser):
+    """Même doctrine que `sanitizeHTML` du front (script/style/iframe/… retirés AVEC leur contenu,
+    attributs `on*` et `javascript:` retirés) + une liste blanche de balises/attributs : une balise
+    inconnue disparaît, son TEXTE reste. Le texte est ré-échappé en sortie."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out = []
+        self._drop = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in _HTML_DROP:
+            if tag not in _HTML_VOID:
+                self._drop += 1
+            return
+        if self._drop or tag not in _HTML_ALLOW:
+            return
+        clean = []
+        for k, v in attrs:
+            k = (k or "").lower()
+            v = v if v is not None else ""
+            if k.startswith("on") or k not in _HTML_ATTR_ALLOW:
+                continue
+            if k == "href" and not _HTML_HREF_OK_RE.match(v):
+                continue
+            if k == "style" and not all(_HTML_STYLE_OK_RE.match(d) for d in v.split(";") if d.strip()):
+                continue
+            clean.append(' %s="%s"' % (k, html.escape(v, quote=True)))
+        self.out.append("<%s%s>" % (tag, "".join(clean)))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in _HTML_DROP:
+            if tag not in _HTML_VOID and self._drop:
+                self._drop -= 1
+            return
+        if self._drop or tag not in _HTML_ALLOW or tag in _HTML_VOID:
+            return
+        self.out.append("</%s>" % tag)
+
+    def handle_data(self, data):
+        if not self._drop:
+            self.out.append(html.escape(data, quote=False))
+
+
+def _clean_memo_html(h):
+    h = str(h or "").strip()
+    if not h:
+        return ""
+    p = _MemoHtmlCleaner()
+    p.feed(h)
+    p.close()
+    return "".join(p.out).strip()
+
+
+def _search_fold(s):
+    """Portage de `searchFold` (partial) : NFD + accents retirés, minuscules, apostrophes/guillemets
+    typographiques normalisés, blancs réduits."""
+    s = unicodedata.normalize("NFD", str(s if s is not None else ""))
+    s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
+    s = s.replace("‘", "'").replace("’", "'").replace("‛", "'").replace("“", '"').replace("”", '"')
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _search_match(words, *fields):
+    """« Tous les mots, n'importe quel ordre », champs pris ENSEMBLE (`searchMatch` du partial)."""
+    if not words:
+        return True
+    hay = _search_fold(" ".join(str(f) for f in fields if f))
+    return all(w in hay for w in words)
+
+
+def _memo_has_hashtag(m, tag):
+    """`#tag` écrit dans le corps ou le titre, plié, borne de fin stricte (`#note` ≠ `#notes`)."""
+    t = _search_fold(tag).lstrip("#")
+    if not t:
+        return False
+    hay = _search_fold((m.get("title") or "") + " " + _html_to_text(m.get("content") or ""))
+    return re.search(r"#" + re.escape(t) + r"(?![\w-])", hay) is not None
+
+
+# ───────────────────────── helpers de scope / de payload ─────────────────────────
+
+def _api_scope_ids(db, folder, subtree):
+    """`folder` absent → None (tout) ; 'inbox' → {None} ; id → {id} (+ descendants si subtree).
+    Dossier inconnu → lève ValueError (la route répond 404)."""
+    if folder is None or folder == "":
+        return None
+    if str(folder).lower() == "inbox":
+        return {None}
+    try:
+        fid = int(folder)
+    except (TypeError, ValueError):
+        raise ValueError("folder")
+    if not db.execute("SELECT 1 FROM projects WHERE id = ?", (fid,)).fetchone():
+        raise ValueError("folder")
+    ids = {fid}
+    if str(subtree or "") in ("1", "true"):
+        ids |= set(_project_descendants(db, fid))
+    return ids
+
+
+def _api_live_rows(db, scope_ids=None):
+    rows = db.execute(
+        "SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' ORDER BY position, id"
+    ).fetchall()
+    if scope_ids is None:
+        return rows
+    return [r for r in rows if r["project_id"] in scope_ids]
+
+
+def _api_memo_items(db, rows):
+    """`_memo_dict` + `urls` + `attachments` + `content_text`, même forme pour toutes les listes."""
+    owner_name = _owner_name(db)
+    ids = [r["id"] for r in rows]
+    umap = _memo_urls_map(db, ids, owner_name) if ids else {}
+    amap = _attachments_map(db, ids, lambda r: "/api/attachments/" + str(r["id"])) if ids else {}
+    out = []
+    for r in rows:
+        d = _memo_dict(r, owner_name)
+        d["urls"] = umap.get(r["id"], [])
+        d["attachments"] = amap.get(r["id"], [])
+        d["content_text"] = _html_to_text(d.get("content") or "")
+        d["source"] = d.get("source") or ""
+        out.append(d)
+    return out
+
+
+def _api_memo_lite(r):
+    return {"id": r["id"], "uid": r["uid"] or "", "title": _row_get(r, "title"), "done": bool(r["done"]),
+            "due_date": r["due_date"] or "", "due_end": _row_get(r, "due_end") or "", "due_time": _row_get(r, "due_time"),
+            "priority": r["priority"] or 0, "project_id": r["project_id"]}
+
+
+def _api_today():
+    t = (request.args.get("today") or "").strip()
+    if t:
+        if not DUE_DATE_RE.match(t):
+            return None
+        return t
+    return date.today().isoformat()
+
+
+def _api_memo_or_404(db, memo_id):
+    """Ligne COMPLÈTE du mémo s'il est vivant (hors corbeille), sinon None → la route répond 404."""
+    return db.execute(
+        "SELECT * FROM memos WHERE id = ? AND COALESCE(deleted_at, '') = ''", (memo_id,)
+    ).fetchone()
+
+
+def _api_source():
+    tok = getattr(g, "api_token", None)
+    return (tok["source"] if tok else "") or "other"
+
+
+def _api_translate_write(db, data):
+    """Vocabulaire API → vocabulaire interne, avec les garde-fous propres à l'API. Rend (data, err, code)."""
+    d = dict(data or {})
+    if "folder_id" in d:
+        fid = d.pop("folder_id")
+        if fid in (None, "", 0):
+            d["project_id"] = None
+        else:
+            try:
+                fid = int(fid)
+            except (TypeError, ValueError):
+                return None, {"error": "folder_id invalide"}, 400
+            if not db.execute("SELECT 1 FROM projects WHERE id = ?", (fid,)).fetchone():
+                return None, {"error": "dossier introuvable"}, 404
+            d["project_id"] = fid
+    if "due_date" in d and d.get("due_date") not in (None, "") and not DUE_DATE_RE.match(str(d["due_date"])):
+        return None, {"error": "due_date : format YYYY-MM-DD attendu"}, 400
+    if "due_date" in d and d.get("due_date") is None:
+        d["due_date"] = ""
+    if "due_end" in d and d.get("due_end") is None:
+        d["due_end"] = ""
+    if "content_text" in d:
+        d["content"] = _text_to_html(d.pop("content_text"))
+    elif "content" in d:
+        d["content"] = _clean_memo_html(d.get("content"))
+    tags = d.pop("tags", None)
+    if isinstance(tags, list) and tags:
+        base = d.get("content") or ""
+        hay = _search_fold(_html_to_text(base))
+        neufs = []
+        for t in tags:
+            t = re.sub(r"[^\w-]", "", str(t or "").strip().lstrip("#"))[:40]
+            if t and not re.search(r"#" + re.escape(_search_fold(t)) + r"(?![\w-])", hay) and t not in neufs:
+                neufs.append(t)
+        if neufs:
+            d["content"] = base + "<p>" + " ".join("#" + t for t in neufs) + "</p>"
+    return d, None, None
+
+
+def _api_memo_response(db, memo_id, status=200):
+    row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    return _api_json(_api_memo_items(db, [row])[0], status)
+
+
+# ───────────────────────── lecture (scope read) ─────────────────────────
+
+@api_v1.route("/me", methods=["GET"])
+@require_token("read")
+def api_v1_me():
+    t = g.api_token
+    return _api_json({"name": t["name"], "scopes": (t["scopes"] or "").split(","), "source": t["source"],
+                      "expires_at": t["expires_at"] or ""})
+
+
+@api_v1.route("/openapi.json", methods=["GET"])
+@require_token("read")
+def api_v1_openapi():
+    spec = dict(OPENAPI)
+    spec["info"] = dict(OPENAPI["info"], **{"x-build": BUILD_VERSION, "x-export": int(APP_VERSION)})
+    return _api_json(spec)
+
+
+@api_v1.route("/tree", methods=["GET"])
+@require_token("read")
+def api_v1_tree():
+    db = get_db()
+    counts = {}
+    for r in db.execute(
+        "SELECT project_id, done, COUNT(*) AS n FROM memos WHERE COALESCE(deleted_at, '') = '' "
+        "GROUP BY project_id, done"
+    ).fetchall():
+        c = counts.setdefault(r["project_id"], {"open": 0, "done": 0})
+        c["done" if r["done"] else "open"] += r["n"]
+    folders = []
+    for p in db.execute("SELECT id, uid, name, emoji, color, parent_id, position FROM projects ORDER BY position, id").fetchall():
+        folders.append({"id": p["id"], "uid": p["uid"] or "", "name": p["name"], "emoji": p["emoji"] or "",
+                        "color": p["color"] or "", "parent_id": p["parent_id"], "position": p["position"],
+                        "counts": counts.get(p["id"], {"open": 0, "done": 0})})
+    memos = [_api_memo_lite(r) for r in _api_live_rows(db)]
+    return _api_json({"folders": folders, "memos": memos})
+
+
+def _api_history_items(db):
+    return [dict(r) for r in db.execute(
+        "SELECT id, memo_uid, content, project, done_at FROM memo_history ORDER BY done_at DESC, id DESC"
+    ).fetchall()]
+
+
+def _api_paginate(items):
+    """`limit` (défaut 50, plafonné 200) + `cursor` (offset opaque). Rend (page, err, code)."""
+    try:
+        limit = int(request.args.get("limit") or 50)
+    except (TypeError, ValueError):
+        return None, {"error": "limit invalide"}, 400
+    limit = max(1, min(200, limit))
+    cur = request.args.get("cursor") or "0"
+    if not re.match(r"^\d+$", cur):
+        return None, {"error": "cursor invalide"}, 400
+    start = int(cur)
+    page = items[start:start + limit]
+    nxt = str(start + limit) if start + limit < len(items) else None
+    return {"items": page, "next_cursor": nxt}, None, None
+
+
+@api_v1.route("/memos", methods=["GET"])
+@require_token("read")
+def api_v1_memos():
+    db = get_db()
+    filt = request.args.get("filter") or ""
+    if filt and filt not in API_FILTERS:
+        return _api_json({"error": "filter invalide"}, 400)
+    sort = request.args.get("sort") or "manual"
+    if sort not in API_SORTS:
+        return _api_json({"error": "sort invalide"}, 400)
+    # Un « + » de fuseau non encodé arrive en espace : on le rend (tolérance, pas une grammaire).
+    since = (request.args.get("since") or "").strip().replace(" ", "+")
+    if since and not re.match(r"^\d{4}-\d{2}-\d{2}", since):
+        return _api_json({"error": "since : instant ISO attendu"}, 400)
+    today = _api_today()
+    if today is None:
+        return _api_json({"error": "today : format YYYY-MM-DD attendu"}, 400)
+    try:
+        scope = _api_scope_ids(db, request.args.get("folder"), request.args.get("subtree"))
+    except ValueError:
+        return _api_json({"error": "dossier introuvable"}, 404)
+    if filt == "history":
+        page, err, code = _api_paginate(_api_history_items(db))
+        return _api_json(err, code) if err else _api_json(page)
+    items = _api_memo_items(db, _api_live_rows(db, scope))
+    if filt:
+        items = [m for m in items if _memo_in_tile(m, filt, today)]
+    if since:
+        items = [m for m in items if (m.get("updated_at") or "") > since]
+    items = _api_sort_memos(items, sort)
+    page, err, code = _api_paginate(items)
+    return _api_json(err, code) if err else _api_json(page)
+
+
+@api_v1.route("/memos/<int:memo_id>", methods=["GET"])
+@require_token("read")
+def api_v1_memo(memo_id):
+    db = get_db()
+    row = _api_memo_or_404(db, memo_id)
+    if not row:
+        return _api_json({"error": "not found"}, 404)
+    d = _api_memo_items(db, [row])[0]
+    crows = db.execute("SELECT * FROM memo_comments WHERE memo_id = ? ORDER BY created_at, id", (memo_id,)).fetchall()
+    ids = [r["id"] for r in crows]
+    seen = _comment_seen_map(db, ids)
+    reacts = _comment_reactions_map(db, ids)
+    owner_name = _owner_name(db)
+    palette = _reaction_palette(db)
+    polls = _polls_map(db, crows, me="", owner_name=owner_name, is_owner=True)
+    d["comments"] = [_comment_dict(r, seen, reacts, me="", owner_name=owner_name, palette=palette,
+                                   can_delete=True, poll=polls.get(r["id"])) for r in crows]
+    return _api_json(d)
+
+
+@api_v1.route("/counts", methods=["GET"])
+@require_token("read")
+def api_v1_counts():
+    db = get_db()
+    today = _api_today()
+    if today is None:
+        return _api_json({"error": "today : format YYYY-MM-DD attendu"}, 400)
+    try:
+        scope = _api_scope_ids(db, request.args.get("folder"), request.args.get("subtree"))
+    except ValueError:
+        return _api_json({"error": "dossier introuvable"}, 404)
+    rows = _api_live_rows(db, scope)
+    c = _tile_counts([{"done": r["done"], "due_date": r["due_date"], "due_end": _row_get(r, "due_end")} for r in rows], today)
+    c["history"] = db.execute("SELECT COUNT(*) FROM memo_history").fetchone()[0]
+    return _api_json(c)
+
+
+@api_v1.route("/search", methods=["GET"])
+@require_token("read")
+def api_v1_search():
+    db = get_db()
+    q = (request.args.get("q") or "").strip()
+    tag = (request.args.get("tag") or "").strip()
+    if not q and not tag:
+        return _api_json({"error": "q ou tag requis"}, 400)
+    bornes = {}
+    for k in ("due_from", "due_to", "created_from", "created_to"):
+        v = (request.args.get(k) or "").strip()
+        if v and not DUE_DATE_RE.match(v):
+            return _api_json({"error": k + " : format YYYY-MM-DD attendu"}, 400)
+        bornes[k] = v
+    try:
+        scope = _api_scope_ids(db, request.args.get("folder"), "1")
+    except ValueError:
+        return _api_json({"error": "dossier introuvable"}, 404)
+    words = _search_fold(q).split() if q else []
+    out = []
+    for m in _api_memo_items(db, _api_live_rows(db, scope)):
+        if tag and not _memo_has_hashtag(m, tag):
+            continue
+        if words and not _search_match(
+            words, m.get("title"), m.get("content_text"),
+            " ".join(m.get("assignees") or []),
+            " ".join(st.get("content", "") for st in (m.get("subtasks") or [])),
+            " ".join((u.get("label") or "") + " " + (u.get("url") or "") for u in (m.get("urls") or [])),
+        ):
+            continue
+        dd = m.get("due_date") or ""
+        if (bornes["due_from"] or bornes["due_to"]) and not dd:
+            continue
+        if bornes["due_from"] and dd < bornes["due_from"]:
+            continue
+        if bornes["due_to"] and dd > bornes["due_to"]:
+            continue
+        cd = (m.get("created_at") or "")[:10]
+        if bornes["created_from"] and cd < bornes["created_from"]:
+            continue
+        if bornes["created_to"] and cd > bornes["created_to"]:
+            continue
+        out.append(m)
+    page, err, code = _api_paginate(out)
+    return _api_json(err, code) if err else _api_json(page)
+
+
+@api_v1.route("/plan", methods=["GET"])
+@require_token("read")
+def api_v1_plan():
+    """La vue Plan (`renderTreeView`) : dossiers racines → mémos actifs (terminés compris, corbeille
+    exclue) puis sous-dossiers ; `count` = mémos NON terminés du sous-arbre ; Inbox = mémos sans dossier."""
+    db = get_db()
+    projects = db.execute("SELECT id, uid, name, emoji, color, parent_id, position FROM projects ORDER BY position, id").fetchall()
+    rows = _api_live_rows(db)
+    by_proj = {}
+    for r in rows:
+        by_proj.setdefault(r["project_id"], []).append(r)
+    kids = {}
+    for p in projects:
+        kids.setdefault(p["parent_id"], []).append(p)
+
+    def memo_row(r):
+        d = _api_memo_lite(r)
+        try:
+            d["assignees"] = json.loads(_row_get(r, "assignees", "[]") or "[]")
+        except Exception:
+            d["assignees"] = []
+        d["location"] = _parse_location(_row_get(r, "location"))
+        return d
+
+    def count_active(pid):
+        n = sum(1 for r in by_proj.get(pid, []) if not r["done"])
+        for c in kids.get(pid, []):
+            n += count_active(c["id"])
+        return n
+
+    def node(p):
+        return {"id": p["id"], "uid": p["uid"] or "", "name": p["name"], "emoji": p["emoji"] or "",
+                "color": p["color"] or "", "count": count_active(p["id"]),
+                "memos": [memo_row(r) for r in by_proj.get(p["id"], [])],
+                "children": [node(c) for c in kids.get(p["id"], [])]}
+
+    return _api_json({"roots": [node(p) for p in kids.get(None, [])],
+                      "inbox": {"memos": [memo_row(r) for r in by_proj.get(None, [])]}})
+
+
+@api_v1.route("/export", methods=["GET"])
+@require_token("read")
+def api_v1_export():
+    return _api_json(_build_export(get_db()))
+
+
+# ───────────────────────── écriture (scope write) ─────────────────────────
+
+@api_v1.route("/memos", methods=["POST"])
+@require_token("write")
+def api_v1_create_memo():
+    db = get_db()
+    data, err, code = _api_translate_write(db, request.get_json(silent=True) or {})
+    if err:
+        return _api_json(err, code)
+    urls = data.pop("urls", None)
+    payload, status = _create_memo_core(db, data, source=_api_source())
+    if status != 201:
+        return _api_json(payload, status)
+    g.api_memo_id = payload["id"]
+    if isinstance(urls, list):
+        memo = db.execute("SELECT * FROM memos WHERE id = ?", (payload["id"],)).fetchone()
+        now = datetime.now(timezone.utc).isoformat()
+        for u in urls[:MEMO_URLS_MAX]:
+            if not isinstance(u, dict):
+                continue
+            url = _clean_memo_url(u.get("url"))
+            if url:
+                _insert_memo_url(db, memo, url, _clean_url_label(u.get("label")), "", now)
+        db.commit()
+    return _api_memo_response(db, payload["id"], 201)
+
+
+def _api_update(db, existing, data):
+    payload, status = _perform_memo_update(db, existing, data, editor="api:" + _api_source(), source=_api_source())
+    if status != 200:
+        return _api_json(payload, status)
+    return _api_memo_response(db, existing["id"])
+
+
+@api_v1.route("/memos/<int:memo_id>", methods=["PATCH"])
+@require_token("write")
+def api_v1_patch_memo(memo_id):
+    db = get_db()
+    existing = _api_memo_or_404(db, memo_id)
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    data, err, code = _api_translate_write(db, request.get_json(silent=True) or {})
+    if err:
+        return _api_json(err, code)
+    data.pop("urls", None)
+    return _api_update(db, existing, data)
+
+
+@api_v1.route("/memos/<int:memo_id>/append", methods=["POST"])
+@require_token("write")
+def api_v1_append_memo(memo_id):
+    db = get_db()
+    existing = _api_memo_or_404(db, memo_id)
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    data, err, code = _api_translate_write(db, request.get_json(silent=True) or {})
+    if err:
+        return _api_json(err, code)
+    ajout = (data.get("content") or "").strip()
+    if not ajout:
+        return _api_json({"error": "content ou content_text requis"}, 400)
+    return _api_update(db, existing, {"content": (existing["content"] or "") + ajout})
+
+
+@api_v1.route("/memos/<int:memo_id>/move", methods=["POST"])
+@require_token("write")
+def api_v1_move_memo(memo_id):
+    db = get_db()
+    existing = _api_memo_or_404(db, memo_id)
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    body = request.get_json(silent=True) or {}
+    data, err, code = _api_translate_write(db, {"folder_id": body.get("folder_id")})
+    if err:
+        return _api_json(err, code)
+    return _api_update(db, existing, {"project_id": data.get("project_id")})
+
+
+@api_v1.route("/memos/<int:memo_id>/done", methods=["POST"])
+@require_token("write")
+def api_v1_done_memo(memo_id):
+    db = get_db()
+    existing = _api_memo_or_404(db, memo_id)
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    return _api_update(db, existing, {"done": True})
+
+
+@api_v1.route("/memos/<int:memo_id>/undone", methods=["POST"])
+@require_token("write")
+def api_v1_undone_memo(memo_id):
+    db = get_db()
+    existing = _api_memo_or_404(db, memo_id)
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    return _api_update(db, existing, {"done": False})
+
+
+@api_v1.route("/memos/<int:memo_id>/subtasks", methods=["POST"])
+@require_token("write")
+def api_v1_add_subtask(memo_id):
+    db = get_db()
+    existing = _api_memo_or_404(db, memo_id)
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    body = request.get_json(silent=True) or {}
+    content = str(body.get("content") or "").strip()
+    if not content:
+        return _api_json({"error": "content requis"}, 400)
+    try:
+        subs = json.loads(existing["subtasks"] or "[]")
+    except Exception:
+        subs = []
+    subs.append({"content": content, "done": bool(body.get("done"))})
+    payload, status = _perform_memo_update(db, existing, {"subtasks": subs}, editor="api:" + _api_source(), source=_api_source())
+    if status != 200:
+        return _api_json(payload, status)
+    return _api_memo_response(db, memo_id, 201)
+
+
+@api_v1.route("/memos/<int:memo_id>/subtasks/<int:n>", methods=["PATCH"])
+@require_token("write")
+def api_v1_patch_subtask(memo_id, n):
+    db = get_db()
+    existing = _api_memo_or_404(db, memo_id)
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    try:
+        subs = json.loads(existing["subtasks"] or "[]")
+    except Exception:
+        subs = []
+    if n < 0 or n >= len(subs):
+        return _api_json({"error": "sous-tâche introuvable"}, 404)
+    body = request.get_json(silent=True) or {}
+    if "done" in body:
+        subs[n]["done"] = bool(body.get("done"))
+    if "content" in body:
+        c = str(body.get("content") or "").strip()
+        if not c:
+            return _api_json({"error": "content vide"}, 400)
+        subs[n]["content"] = c
+    return _api_update(db, existing, {"subtasks": subs})
+
+
+@api_v1.route("/memos/<int:memo_id>/urls", methods=["POST"])
+@require_token("write")
+def api_v1_add_url(memo_id):
+    db = get_db()
+    memo = _api_memo_or_404(db, memo_id)
+    if not memo:
+        return _api_json({"error": "not found"}, 404)
+    data = request.get_json(silent=True) or {}
+    url = _clean_memo_url(data.get("url"))
+    if not url:
+        return _api_json({"error": "Seules les adresses http(s) sont acceptées (2048 caractères max)."}, 400)
+    row, err, code = _insert_memo_url(db, memo, url, _clean_url_label(data.get("label")), "",
+                                      datetime.now(timezone.utc).isoformat())
+    if err:
+        return _api_json(err, code)
+    db.execute("UPDATE memos SET source = ? WHERE id = ?", (_api_source(), memo_id))
+    db.commit()
+    return _api_json(_memo_url_dict(row, _owner_name(db)), 201)
+
+
+@api_v1.route("/memos/<int:memo_id>/urls/<int:url_id>", methods=["DELETE"])
+@require_token("write")
+def api_v1_delete_url(memo_id, url_id):
+    db = get_db()
+    if not _api_memo_or_404(db, memo_id):
+        return _api_json({"error": "not found"}, 404)
+    r = db.execute("SELECT id FROM memo_urls WHERE id = ? AND memo_id = ?", (url_id, memo_id)).fetchone()
+    if not r:
+        return _api_json({"error": "not found"}, 404)
+    db.execute("DELETE FROM memo_urls WHERE id = ?", (url_id,))
+    db.execute("UPDATE memos SET updated_at = ?, source = ? WHERE id = ?",
+               (datetime.now(timezone.utc).isoformat(), _api_source(), memo_id))
+    db.commit()
+    return "", 204
+
+
+@api_v1.route("/memos/<int:memo_id>/comments", methods=["POST"])
+@require_token("write")
+def api_v1_add_comment(memo_id):
+    db = get_db()
+    memo = _api_memo_or_404(db, memo_id)
+    if not memo:
+        return _api_json({"error": "not found"}, 404)
+    data = request.get_json(silent=True) or {}
+    body = _clean_comment_body(data.get("content") if "content" in data else data.get("body"))
+    if not body:
+        return _api_json({"error": "content requis"}, 400)
+    row = _insert_comment(db, memo, body, "moi")
+    db.commit()
+    return _api_json(_comment_dict(row, can_delete=True), 201)
+
+
+@api_v1.route("/memos/<int:memo_id>", methods=["DELETE"])
+@require_token("write")
+def api_v1_trash_memo(memo_id):
+    """Suppression DOUCE (invariant 7) : `deleted_at` posé, jamais de DELETE SQL."""
+    db = get_db()
+    if not _api_memo_or_404(db, memo_id):
+        return _api_json({"error": "not found"}, 404)
+    db.execute("UPDATE memos SET deleted_at = ?, source = ? WHERE id = ?",
+               (datetime.now(timezone.utc).isoformat(), _api_source(), memo_id))
+    db.commit()
+    return "", 204
+
+
+@api_v1.route("/memos/<int:memo_id>/restore", methods=["POST"])
+@require_token("write")
+def api_v1_restore_memo(memo_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM memos WHERE id = ? AND COALESCE(deleted_at, '') != ''", (memo_id,)
+    ).fetchone()
+    if not row:
+        return _api_json({"error": "pas en corbeille"}, 404)
+    db.execute("UPDATE memos SET deleted_at = '', source = ? WHERE id = ?", (_api_source(), memo_id))
+    db.commit()
+    return _api_memo_response(db, memo_id)
+
+
+def _api_folder_dict(db, pid):
+    p = db.execute("SELECT id, uid, name, emoji, color, parent_id, position FROM projects WHERE id = ?", (pid,)).fetchone()
+    c = {"open": 0, "done": 0}
+    for r in db.execute(
+        "SELECT done, COUNT(*) AS n FROM memos WHERE project_id = ? AND COALESCE(deleted_at, '') = '' GROUP BY done", (pid,)
+    ).fetchall():
+        c["done" if r["done"] else "open"] = r["n"]
+    return {"id": p["id"], "uid": p["uid"] or "", "name": p["name"], "emoji": p["emoji"] or "",
+            "color": p["color"] or "", "parent_id": p["parent_id"], "position": p["position"], "counts": c}
+
+
+def _api_parent(db, project_id, value):
+    pid, err = _resolve_parent(db, project_id, value)
+    if err:
+        return None, _api_json({"error": err}, 404 if "introuvable" in err else 400)
+    return pid, None
+
+
+@api_v1.route("/folders", methods=["POST"])
+@require_token("write")
+def api_v1_create_folder():
+    db = get_db()
+    data = request.get_json(silent=True) or {}
+    name = re.sub(r"[<>]", "", str(data.get("name") or "")).strip()[:120]
+    if not name:
+        return _api_json({"error": "name required"}, 400)
+    parent_id, err = _api_parent(db, None, data.get("parent_id"))
+    if err:
+        return err
+    if _sibling_name_taken(db, name, parent_id):
+        return _api_json({"error": PROJECT_NAME_TAKEN_MSG}, 409)
+    max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM projects").fetchone()[0]
+    cur = db.execute(
+        "INSERT INTO projects (name, color, position, tags, emoji, description, marker_color, parent_id, uid) "
+        "VALUES (?, ?, ?, '', ?, '', '', ?, ?)",
+        (name, _clean_hex_color(data.get("color"), "") or (str(data.get("color") or "").strip()[:20]),
+         max_pos + 1, _clean_emoji(data.get("emoji")), parent_id, str(uuid.uuid4())),
+    )
+    db.commit()
+    return _api_json(_api_folder_dict(db, cur.lastrowid), 201)
+
+
+@api_v1.route("/folders/<int:folder_id>", methods=["PATCH"])
+@require_token("write")
+def api_v1_patch_folder(folder_id):
+    db = get_db()
+    existing = db.execute("SELECT * FROM projects WHERE id = ?", (folder_id,)).fetchone()
+    if not existing:
+        return _api_json({"error": "not found"}, 404)
+    data = request.get_json(silent=True) or {}
+    name = re.sub(r"[<>]", "", str(data.get("name", existing["name"]) or "")).strip()[:120]
+    if not name:
+        return _api_json({"error": "name required"}, 400)
+    if "parent_id" in data:
+        parent_id, err = _api_parent(db, folder_id, data.get("parent_id"))
+        if err:
+            return err
+    else:
+        parent_id = existing["parent_id"]
+    if _sibling_name_taken(db, name, parent_id, exclude_id=folder_id):
+        return _api_json({"error": PROJECT_NAME_TAKEN_MSG}, 409)
+    emoji = _clean_emoji(data.get("emoji", existing["emoji"]))
+    color = (_clean_hex_color(data.get("color"), "") or str(data.get("color") or "").strip()[:20]) if "color" in data else (existing["color"] or "")
+    db.execute("UPDATE projects SET name = ?, parent_id = ?, emoji = ?, color = ? WHERE id = ?",
+               (name, parent_id, emoji, color, folder_id))
+    db.commit()
+    return _api_json(_api_folder_dict(db, folder_id))
+
+
+app.register_blueprint(api_v1)
+
+
+# ───────────────────────── gestion des jetons — OWNER, derrière Authelia (pas sous /api/v1) ─────────────────────────
+
+@app.route("/api/tokens", methods=["GET"])
+def list_api_tokens():
+    db = get_db()
+    return jsonify([_api_token_dict(r) for r in db.execute("SELECT * FROM api_tokens ORDER BY id").fetchall()])
+
+
+@app.route("/api/tokens", methods=["POST"])
+def create_api_token():
+    data = request.get_json(silent=True) or {}
+    name = re.sub(r"[<>]", "", str(data.get("name") or "")).strip()[:80]
+    scopes = str(data.get("scopes") or "read").strip().replace(" ", "")
+    source = str(data.get("source") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    if scopes not in API_SCOPES:
+        return jsonify({"error": "scopes : 'read' ou 'read,write'"}), 400
+    if source not in API_SOURCES:
+        return jsonify({"error": "source invalide"}), 400
+    expires = _clean_api_expires(data.get("expires_at"))
+    if expires is None:
+        return jsonify({"error": "expires_at : date ou instant ISO attendu"}), 400
+    db = get_db()
+    row, plain = _api_token_new(db, name, scopes, source, expires)
+    db.commit()
+    out = _api_token_dict(row)
+    out["token"] = plain   # affiché UNE fois ; jamais relisible ensuite
+    return jsonify(out), 201
+
+
+@app.route("/api/tokens/<int:token_id>", methods=["DELETE"])
+def revoke_api_token(token_id):
+    db = get_db()
+    row = db.execute("SELECT id FROM api_tokens WHERE id = ?", (token_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    db.execute("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND COALESCE(revoked_at, '') = ''",
+               (datetime.now(timezone.utc).isoformat(), token_id))
+    db.commit()
+    return "", 204
+
+
+@app.route("/api/tokens/audit", methods=["GET"])
+def list_api_audit():
+    db = get_db()
+    try:
+        limit = max(1, min(500, int(request.args.get("limit") or 50)))
+    except (TypeError, ValueError):
+        limit = 50
+    tid = request.args.get("token_id")
+    if tid:
+        try:
+            rows = db.execute("SELECT * FROM api_audit WHERE token_id = ? ORDER BY id DESC LIMIT ?", (int(tid), limit)).fetchall()
+        except ValueError:
+            return jsonify({"error": "token_id invalide"}), 400
+    else:
+        rows = db.execute("SELECT * FROM api_audit ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+try:
+    _purge_api_audit()
+except Exception:
+    pass
 
 
 init_db()

@@ -148,12 +148,42 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | GET     | `/uploads/<nom>`           | Sert une image uploadée                        |
 | GET     | `/api/favicon/<id>`        | Favicon du service, récupéré côté serveur (cache mémoire) |
 | GET     | `/api/og-image/<nom>`      | **[LINK-OG]** Vignette d'aperçu cachée (`<uid>.jpg` uniquement, revalidation ETag) |
-| GET     | `/api/export`              | Sauvegarde JSON v15 (liens + catégories + projets hiérarchisés + priorités + mémos hors corbeille + historique + géoloc + commentaires avec priorité/réponses) |
+| GET     | `/api/export`              | Sauvegarde JSON v30 (liens + catégories + projets hiérarchisés + priorités + mémos hors corbeille + historique + géoloc + commentaires avec priorité/réponses) |
 | POST    | `/api/import`              | Réimporte une sauvegarde (voir Backup / restore) |
 
 Le check de statut est fait côté Flask pour éviter le CORS. Renvoie `online` / `offline` / `unknown` (URL vide) par URL renseignée.
 
 La météo est récupérée côté client depuis open-meteo.com (Bayonne, gratuit, sans clé). Les favicons sont récupérés par Flask via l'URL locale du service (ce qui contourne Authelia), avec fallback `icons.duckduckgo.com` puis initiale du nom.
+
+### API v1 — jeton Bearer, pour Claude, le terminal et le mobile ([DASH-API], V30.0.282)
+
+Hors Authelia (règle bypass `^/api/v1/.*`, cf. `docs/infra/authelia-api-v1.md`) : **le jeton est la seule porte** (invariant 10). Les jetons se créent dans **Paramètres › Appareils connectés** (routes owner `GET/POST /api/tokens`, `DELETE /api/tokens/<id>` = révocation, `GET /api/tokens/audit`) ; le clair n'est montré qu'**une fois**. Appel :
+
+```
+curl -H "Authorization: Bearer dash_…" https://dash…/api/v1/me
+```
+
+| Méthode | Endpoint | Scope | Description |
+|---------|----------|-------|-------------|
+| GET | `/api/v1/me` | read | Le jeton qui parle (`name`, `scopes`, `source`, `expires_at`) |
+| GET | `/api/v1/openapi.json` | read | OpenAPI 3.1 écrite à la main (`api/v1/openapi.py`), chaque route y figure (test) |
+| GET | `/api/v1/tree` | read | Dossiers (compteurs `open`/`done`) + mémos **sans contenu** |
+| GET | `/api/v1/memos?folder&subtree=1&filter&sort&limit≤200&cursor&since&today` | read | `{items, next_cursor}` ; `filter ∈ open|today|scheduled|overdue|done|history` = **exactement** les tuiles ; `sort ∈ manual|newest|updated|due` ; chaque item = mémo + `content_text` |
+| GET | `/api/v1/memos/<id>` | read | Mémo complet + `comments` + `urls` + noms des `attachments`/`images` ; corbeille → 404 |
+| GET | `/api/v1/counts?folder&subtree=1&today` | read | Les six chiffres des tuiles |
+| GET | `/api/v1/search?q&tag&folder&due_from&due_to&created_from&created_to&limit` | read | Texte plié (accents, casse, ordre des mots) sur titre + contenu + sous-tâches + assignés + libellés/URL |
+| GET | `/api/v1/plan` | read | La vue Plan (racines → sous-dossiers + mémos actifs, Inbox à part) |
+| GET | `/api/v1/export` | read | L'export JSON complet (v30) |
+| POST | `/api/v1/memos` | write | `{title, content|content_text, folder_id, due_date, due_end, due_time, priority, subtasks[], assignees[], tags[], urls[]}` → 201 ; `source` posée |
+| PATCH | `/api/v1/memos/<id>` | write | Modification partielle (mêmes règles que l'UI) |
+| POST | `/api/v1/memos/<id>/append` · `/move` · `/done` · `/undone` · `/restore` | write | Ajouter à la fin · déplacer (`folder_id`, null = Inbox) · terminer · rouvrir · sortir de la corbeille |
+| POST / PATCH | `/api/v1/memos/<id>/subtasks` · `/subtasks/<n>` | write | Ajouter · modifier (`done`, `content`) |
+| POST / DELETE | `/api/v1/memos/<id>/urls` · `/urls/<url_id>` | write | Réutilise [MEMO-URLS] (400 / 409) |
+| POST | `/api/v1/memos/<id>/comments` | write | Commentaire au nom du propriétaire |
+| DELETE | `/api/v1/memos/<id>` | write | **Corbeille** (jamais de purge) |
+| POST / PATCH | `/api/v1/folders` · `/folders/<id>` | write | Créer · renommer/déplacer (409 si le nom est pris chez le parent) |
+
+Réponses : 401 `{}` (jeton absent/inconnu/révoqué/expiré, cookie ignoré), 403 (scope), 429 + `Retry-After` (120 lectures / 30 écritures par minute et par jeton ; 20 tentatives/min par IP sans jeton), 413 (> 256 Ko). Chaque appel laisse une ligne dans `api_audit` (jamais le contenu). Hors périmètre : partages, invités, jetons, réglages, import, purge, fichiers (lot A2), MCP (lot B).
 
 ## Partage par lien
 

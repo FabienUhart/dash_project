@@ -1,0 +1,75 @@
+{
+  "_doc": "[DASH-API] Fixture JUMELLE des six tuiles du board. Jouée par tests/back/test_tiles_twin.py (Python : _tile_counts) ET tests/front/test_tiles_twin.py (le board, dans Chrome). Chaque mémo porte des OFFSETS en jours par rapport à « aujourd'hui » (null = sans date) ; les deux côtés résolvent les dates contre leur propre aujourd'hui, donc les comptes attendus ne dépendent pas de la date du test. Règles (index.html renderBoard + _shared.js memoDueEndDay/memoCoversDay) : all = non terminés ; overdue = non terminé, daté, fin effective < auj ; today = non terminé, plage [due..fin] couvre auj ; scheduled = non terminé, due_date > auj ; done = terminés. La fin effective = due_end si due_end >= due_date, sinon due_date.",
+  "cases": [
+    {
+      "name": "vide",
+      "memos": [],
+      "expected": {"all": 0, "overdue": 0, "today": 0, "scheduled": 0, "done": 0}
+    },
+    {
+      "name": "sans date",
+      "memos": [{"due_offset": null, "done": false}, {"due_offset": null, "done": true}],
+      "expected": {"all": 1, "overdue": 0, "today": 0, "scheduled": 0, "done": 1}
+    },
+    {
+      "name": "hier = en retard",
+      "memos": [{"due_offset": -1, "done": false}],
+      "expected": {"all": 1, "overdue": 1, "today": 0, "scheduled": 0, "done": 0}
+    },
+    {
+      "name": "aujourd'hui",
+      "memos": [{"due_offset": 0, "done": false}],
+      "expected": {"all": 1, "overdue": 0, "today": 1, "scheduled": 0, "done": 0}
+    },
+    {
+      "name": "demain = planifié",
+      "memos": [{"due_offset": 1, "done": false}],
+      "expected": {"all": 1, "overdue": 0, "today": 0, "scheduled": 1, "done": 0}
+    },
+    {
+      "name": "terminé hier ne compte ni en retard ni en cours",
+      "memos": [{"due_offset": -1, "done": true}, {"due_offset": 0, "done": true}, {"due_offset": 3, "done": true}],
+      "expected": {"all": 0, "overdue": 0, "today": 0, "scheduled": 0, "done": 3}
+    },
+    {
+      "name": "séjour en cours (début hier, fin demain) = aujourd'hui, pas en retard",
+      "memos": [{"due_offset": -1, "due_end_offset": 1, "done": false}],
+      "expected": {"all": 1, "overdue": 0, "today": 1, "scheduled": 0, "done": 0}
+    },
+    {
+      "name": "plage finie hier = en retard",
+      "memos": [{"due_offset": -5, "due_end_offset": -1, "done": false}],
+      "expected": {"all": 1, "overdue": 1, "today": 0, "scheduled": 0, "done": 0}
+    },
+    {
+      "name": "plage qui commence demain = planifié",
+      "memos": [{"due_offset": 1, "due_end_offset": 4, "done": false}],
+      "expected": {"all": 1, "overdue": 0, "today": 0, "scheduled": 1, "done": 0}
+    },
+    {
+      "name": "plage qui finit aujourd'hui = aujourd'hui",
+      "memos": [{"due_offset": -3, "due_end_offset": 0, "done": false}],
+      "expected": {"all": 1, "overdue": 0, "today": 1, "scheduled": 0, "done": 0}
+    },
+    {
+      "name": "fin de plage invalide (< début) ignorée : hier = en retard",
+      "memos": [{"due_offset": -1, "due_end_offset": -4, "done": false}],
+      "expected": {"all": 1, "overdue": 1, "today": 0, "scheduled": 0, "done": 0}
+    },
+    {
+      "name": "mélange",
+      "memos": [
+        {"due_offset": null, "done": false},
+        {"due_offset": -2, "done": false},
+        {"due_offset": -1, "done": false},
+        {"due_offset": 0, "done": false},
+        {"due_offset": 0, "done": true},
+        {"due_offset": 2, "done": false},
+        {"due_offset": 9, "done": false},
+        {"due_offset": -1, "due_end_offset": 2, "done": false},
+        {"due_offset": null, "done": true}
+      ],
+      "expected": {"all": 7, "overdue": 2, "today": 2, "scheduled": 2, "done": 2}
+    }
+  ]
+}

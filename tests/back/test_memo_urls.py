@@ -243,8 +243,8 @@ def test_export_v29_urls_without_og_and_roundtrip(client, new_base, monkeypatch)
     assert _add(client, memo["id"], "https://apple.com/fr").status_code == 201
 
     exp = client.get("/api/export").get_json()
-    assert int(exp["version"]) == 29, "le bump de format n'est pas dans l'export"
-    assert client.get("/api/version").get_json()["export"] == 29
+    assert int(exp["version"]) >= 29, "le bump de format n'est pas dans l'export"
+    assert client.get("/api/version").get_json()["export"] >= 29
     m = next(x for x in exp["memos"] if x["uid"] == memo["uid"])
     assert len(m["urls"]) == 2
     for u in m["urls"]:

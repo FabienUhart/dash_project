@@ -1808,6 +1808,30 @@ dialog {
 .dlg-compact { width: min(420px, 92vw); }
 #create-dialog, #import-preview-dialog, #vote-manage-dialog, #agenda-day-dialog, #memo-edit-dialog { width: min(clamp(680px, 52vw, 980px), 94vw); }
 #confirm-dialog, #notify-dialog { width: min(420px, 92vw); }
+/* [DASH-API] Appareils connectés — tokens du système, aucun style bespoke (invariant 9). */
+.tok-form { display: grid; grid-template-columns: 1.6fr 1fr 1fr 0.9fr auto; gap: 0.4rem; align-items: center; }
+.tok-form input, .tok-form select { min-width: 0; }
+.tok-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.tok-row { display: grid; grid-template-columns: 1.4fr 0.9fr 0.9fr 1.3fr auto; gap: 0.5rem; align-items: center;
+  padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); font-size: 0.82rem; }
+.tok-row .tok-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tok-row .tok-dates { color: var(--muted); font-size: 0.74rem; line-height: 1.3; }
+.tok-row.tok-off { opacity: 0.55; }
+.tok-row .tok-revoke { color: var(--red); }
+.tok-row .tok-revoke.tok-arm { border-color: var(--red); }
+.tok-plain { display: block; padding: 0.6rem 0.7rem; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2);
+  font-size: 0.92rem; word-break: break-all; user-select: all; margin: 0.4rem 0 0.8rem; }
+.tok-audit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; color: var(--muted);
+  max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 9px; padding: 0.4rem 0.6rem; background: var(--panel-2); }
+.tok-audit-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.5; }
+.tok-audit-row .st-ok { color: var(--green); } .tok-audit-row .st-ko { color: var(--red); }
+.badge.memo-source { cursor: default; }
+@media (max-width: 760px) {
+  .tok-form { grid-template-columns: 1fr 1fr; }
+  .tok-form #tok-name { grid-column: 1 / -1; }
+  .tok-row { grid-template-columns: 1fr auto; }
+  .tok-row .tok-dates { grid-column: 1 / -1; }
+}
 dialog::backdrop { background: rgba(6,9,12,0.62); backdrop-filter: blur(3px); }
 /* [MAP-CLOSE-UX] En-tête carte : titre + ✕ collés en haut du dialog (sticky), fond
    opaque pour masquer le contenu qui défile dessous. Desktop : ✕ visible aussi. */
@@ -2819,6 +2843,7 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
     <button type="button" class="prio-btn" data-tab="prios" role="tab">🚩 Priorités</button>
     <button type="button" class="prio-btn" data-tab="reactions" role="tab">😊 Réactions</button>
     <button type="button" class="prio-btn" data-tab="capture" role="tab">🔖 Capture</button>
+    <button type="button" class="prio-btn" data-tab="devices" role="tab">🔌 Appareils connectés</button>
   </div>
 
   <div class="settings-panel" data-panel="identity">
@@ -2992,8 +3017,61 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
     </div>
   </div>
 
+
+  <!-- [DASH-API] § 1.8 — Appareils connectés : les jetons de l'API v1 (Claude, CLI, mobile). Le jeton
+       en clair n'est montré qu'UNE fois, dans #token-dialog ; la liste n'en porte jamais que le nom,
+       la source, les droits et les dates. Révocation = confirmation DOUCE (deux clics, pas de confirm()). -->
+  <div class="settings-panel" data-panel="devices">
+    <div class="settings-section">
+      <h4>🔌 APPAREILS CONNECTÉS</h4>
+      <p style="font-size:0.82rem;color:var(--muted);margin:0 0 0.8rem">
+        Un jeton par appareil ou par assistant (Claude, Claude Code, terminal, mobile). Il entre par
+        <code>/api/v1</code> avec <code>Authorization: Bearer …</code>, jamais avec ta session.
+        Révoque-le ici en cas de doute : effet immédiat.
+      </p>
+      <div class="tok-form">
+        <input id="tok-name" type="text" placeholder="Nom (ex. MacBook · Claude Code)" maxlength="80" aria-label="Nom du jeton">
+        <select id="tok-source" aria-label="Source">
+          <option value="claude-code">Claude Code</option>
+          <option value="claude-chat">Claude (chat)</option>
+          <option value="cli">Terminal (CLI)</option>
+          <option value="flutter">Appli mobile</option>
+          <option value="other">Autre</option>
+        </select>
+        <select id="tok-scopes" aria-label="Droits">
+          <option value="read">Lecture seule</option>
+          <option value="read,write">Lecture + écriture</option>
+        </select>
+        <input id="tok-expires" type="date" aria-label="Expiration (optionnelle)" title="Expiration (optionnelle)">
+        <button type="button" id="tok-create" class="prio-btn">➕ Créer</button>
+      </div>
+      <p id="tok-msg" style="font-size:0.78rem;color:var(--red);min-height:1em;margin:0.3rem 0 0.6rem"></p>
+      <div id="tok-list" class="tok-list"></div>
+    </div>
+    <div class="settings-section">
+      <h4>📜 JOURNAL D'AUDIT <span style="font-weight:400;text-transform:none;letter-spacing:0">(50 derniers appels)</span></h4>
+      <div class="settings-row" style="margin-bottom:0.5rem">
+        <select id="tok-audit-filter" aria-label="Filtrer par jeton"><option value="">Tous les jetons</option></select>
+        <button type="button" id="tok-audit-refresh" class="prio-btn" title="Rafraîchir">↻</button>
+      </div>
+      <div id="tok-audit" class="tok-audit"></div>
+    </div>
+  </div>
+
   <div class="actions">
     <button id="settings-close">Fermer</button>
+  </div>
+</dialog>
+
+<!-- [DASH-API] Le jeton, UNE fois. Fermer vide le champ : le clair ne survit pas dans le DOM. -->
+<dialog id="token-dialog" class="dlg-compact">
+  <h3>🔑 Jeton créé</h3>
+  <p style="font-size:0.85rem;color:var(--muted)">Copie-le maintenant : il est affiché <strong>une seule fois</strong>.
+    Ensuite seule son empreinte est conservée — perdu = à révoquer et recréer.</p>
+  <code id="tok-plain" class="tok-plain" aria-live="polite"></code>
+  <div class="actions">
+    <button type="button" id="tok-copy">📋 Copier</button>
+    <button type="button" id="tok-close">Fermer</button>
   </div>
 </dialog>
 
@@ -9267,6 +9345,13 @@ function taskEl(memo) {
       },
     }));
   }
+  // [DASH-API] provenance : écrit (créé ou modifié en dernier) par l'API — discret, title explicite.
+  if (memo.source) {
+    badges.appendChild(el('span', {
+      class: 'badge memo-source', text: API_SOURCE_ICON[memo.source] || '🔌',
+      attrs: { title: 'via ' + (API_SOURCE_LABEL[memo.source] || memo.source) + ' (API)' },
+    }));
+  }
   row.appendChild(badges);
 
   const actions = el('div', { class: 'task-actions' });
@@ -11613,7 +11698,7 @@ watchHeaderHeight();
 const settingsDialog = document.getElementById('settings-dialog');
 
 // [SETTINGS-TABS] un seul panneau visible ; onglet actif persisté (localStorage `settingsTab`).
-const SETTINGS_TABS = ['identity', 'map', 'backups', 'cats', 'prios', 'reactions', 'capture'];
+const SETTINGS_TABS = ['identity', 'map', 'backups', 'cats', 'prios', 'reactions', 'capture', 'devices'];
 function setSettingsTab(tab) {
   if (!SETTINGS_TABS.includes(tab)) tab = 'identity';
   localStorage.setItem('settingsTab', tab);
@@ -11628,6 +11713,104 @@ function setSettingsTab(tab) {
 document.querySelectorAll('#settings-tabs .prio-btn').forEach(b => {
   b.addEventListener('click', () => setSettingsTab(b.dataset.tab));
 });
+
+// [DASH-API] § 1.8 — Paramètres › Appareils connectés. Gestion OWNER des jetons de l'API v1 (routes
+// /api/tokens derrière Authelia — jamais sous /api/v1). Le jeton en clair n'existe que dans la réponse
+// de création, montré UNE fois dans #token-dialog puis effacé du DOM.
+const API_SOURCE_LABEL = { 'claude-chat': 'Claude', 'claude-code': 'Claude Code', cli: 'le terminal (CLI)', flutter: "l'appli mobile", other: "l'API" };
+const API_SOURCE_ICON = { 'claude-chat': '✦', 'claude-code': '✦', cli: '⌘', flutter: '📱', other: '🔌' };
+const API_SCOPE_LABEL = { read: 'lecture', 'read,write': 'lecture + écriture' };
+let tokList = [];
+function fmtTokDate(iso) { if (!iso) return '—'; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+function tokState(t) {
+  if (t.revoked_at) return 'révoqué';
+  if (t.expires_at && new Date(t.expires_at) <= new Date()) return 'expiré';
+  return 'actif';
+}
+async function renderDevicesTab() {
+  const list = document.getElementById('tok-list');
+  if (!list) return;
+  try { tokList = await api('/api/tokens'); } catch (_) { tokList = []; }
+  list.innerHTML = '';
+  if (!tokList.length) list.appendChild(el('div', { class: 'empty', text: 'Aucun appareil connecté. Crée un jeton ci-dessus pour Claude, le terminal ou le mobile.' }));
+  tokList.forEach(t => {
+    const st = tokState(t);
+    const row = el('div', { class: 'tok-row' + (st === 'actif' ? '' : ' tok-off'), attrs: { 'data-token-id': t.id } });
+    row.appendChild(el('span', { class: 'tok-name', text: (API_SOURCE_ICON[t.source] || '🔌') + ' ' + t.name, attrs: { title: t.name } }));
+    row.appendChild(el('span', { class: 'badge', text: API_SOURCE_LABEL[t.source] || t.source }));
+    row.appendChild(el('span', { class: 'badge', text: API_SCOPE_LABEL[t.scopes] || t.scopes, attrs: { title: t.scopes } }));
+    row.appendChild(el('span', { class: 'tok-dates', text: 'créé ' + fmtTokDate(t.created_at) + ' · dernier usage ' + fmtTokDate(t.last_used_at) + (t.expires_at ? ' · expire ' + fmtTokDate(t.expires_at) : '') + ' · ' + st }));
+    if (st === 'actif') {
+      const rv = el('button', { class: 'prio-btn tok-revoke', text: 'Révoquer', attrs: { type: 'button', title: 'Révoquer ce jeton (effet immédiat)' } });
+      let armed = null;
+      rv.addEventListener('click', async () => {
+        if (!armed) {   // confirmation douce : le même bouton demande « Confirmer ? » pendant 4 s
+          armed = setTimeout(() => { armed = null; rv.textContent = 'Révoquer'; rv.classList.remove('tok-arm'); }, 4000);
+          rv.textContent = 'Confirmer ?'; rv.classList.add('tok-arm'); return;
+        }
+        clearTimeout(armed); armed = null;
+        try { await api('/api/tokens/' + t.id, { method: 'DELETE' }); } catch (e) { notify(e.message, { error: true }); }
+        renderDevicesTab();
+      });
+      row.appendChild(rv);
+    } else {
+      row.appendChild(el('span', { class: 'badge', text: st }));
+    }
+    list.appendChild(row);
+  });
+  const sel = document.getElementById('tok-audit-filter');
+  const keep = sel.value;
+  sel.innerHTML = '';
+  sel.appendChild(el('option', { attrs: { value: '' }, text: 'Tous les jetons' }));
+  tokList.forEach(t => sel.appendChild(el('option', { attrs: { value: String(t.id) }, text: t.name })));
+  sel.value = tokList.some(t => String(t.id) === keep) ? keep : '';
+  renderTokAudit();
+}
+async function renderTokAudit() {
+  const box = document.getElementById('tok-audit');
+  if (!box) return;
+  const tid = document.getElementById('tok-audit-filter').value;
+  let rows = [];
+  try { rows = await api('/api/tokens/audit?limit=50' + (tid ? '&token_id=' + tid : '')); } catch (_) { rows = []; }
+  box.innerHTML = '';
+  if (!rows.length) { box.appendChild(el('div', { class: 'tok-audit-row', text: 'Aucun appel pour le moment.' })); return; }
+  const names = {}; tokList.forEach(t => { names[t.id] = t.name; });
+  rows.forEach(r => {
+    const line = el('div', { class: 'tok-audit-row' });
+    line.appendChild(el('span', { text: fmtTokDate(r.at) + ' ' }));
+    line.appendChild(el('span', { class: r.status < 400 ? 'st-ok' : 'st-ko', text: String(r.status) }));
+    line.appendChild(el('span', { text: ' ' + r.method + ' ' + r.route + (r.memo_id ? ' #' + r.memo_id : '') + ' · ' + (r.token_id ? (names[r.token_id] || 'jeton ' + r.token_id) : 'sans jeton') + (r.args_summary ? ' · ' + r.args_summary : '') }));
+    box.appendChild(line);
+  });
+}
+document.getElementById('tok-audit-filter').addEventListener('change', renderTokAudit);
+document.getElementById('tok-audit-refresh').addEventListener('click', renderDevicesTab);
+document.getElementById('tok-create').addEventListener('click', async () => {
+  const msg = document.getElementById('tok-msg'); msg.textContent = '';
+  const name = document.getElementById('tok-name').value.trim();
+  if (!name) { msg.textContent = 'Donne un nom à cet appareil.'; document.getElementById('tok-name').focus(); return; }
+  const body = { name, source: document.getElementById('tok-source').value, scopes: document.getElementById('tok-scopes').value,
+                 expires_at: document.getElementById('tok-expires').value || '' };
+  try {
+    const t = await api('/api/tokens', { method: 'POST', body: JSON.stringify(body) });
+    document.getElementById('tok-name').value = ''; document.getElementById('tok-expires').value = '';
+    const dlg = document.getElementById('token-dialog');
+    document.getElementById('tok-plain').textContent = t.token;
+    dlg.showModal();
+    renderDevicesTab();
+  } catch (e) { msg.textContent = e.message; }
+});
+document.getElementById('tok-copy').addEventListener('click', async (e) => {
+  const code = document.getElementById('tok-plain').textContent;
+  try { await navigator.clipboard.writeText(code); e.target.textContent = '✓ Copié'; setTimeout(() => { e.target.textContent = '📋 Copier'; }, 1500); } catch (_) {}
+});
+(() => {
+  const dlg = document.getElementById('token-dialog');
+  const wipe = () => { document.getElementById('tok-plain').textContent = ''; };   // le clair ne reste pas dans le DOM
+  document.getElementById('tok-close').addEventListener('click', () => { wipe(); dlg.close(); });   // effacé AVANT la fermeture (synchrone)
+  dlg.addEventListener('close', wipe);
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); wipe(); dlg.close(); });
+})();
 
 // [WEB-CAPTURE] Génère les 2 bookmarklets (favoris « magiques ») avec l'origin courant. Le href
 // `javascript:` est draggable vers la barre de favoris ; le bouton 📋 copie le code (favori manuel).
@@ -11691,6 +11874,7 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   renderReactionManage();
   renderBackups();
   renderCaptureTab();  // [WEB-CAPTURE] génère les 2 bookmarklets avec l'origin courant
+  renderDevicesTab();  // [DASH-API] jetons de l'API v1 + audit
   // [POMODORO V1.1] reflète l'état d'affichage du widget minuteur (piloté dans le partial).
   const pvcb = document.getElementById('pomo-visible-cb');
   if (pvcb) pvcb.checked = !(window.pomoIsHidden && window.pomoIsHidden());
