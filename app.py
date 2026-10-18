@@ -1776,6 +1776,32 @@ def init_db():
     for col in ("client_name", "client_version", "last_seen_version"):
         if col not in tcols:
             conn.execute(f"ALTER TABLE api_tokens ADD COLUMN {col} TEXT DEFAULT ''")
+    # [NOTIF-CENTER] une ligne par (événement, destinataire). '' = owner, 'g:<share_guests.id>' = invité.
+    # Volatile, JAMAIS exportée (comme activity_seen_at). `CREATE TABLE IF NOT EXISTS`, jamais destructive.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uid TEXT DEFAULT '',
+            recipient TEXT NOT NULL,
+            level TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT '',
+            actor_kind TEXT NOT NULL DEFAULT '',
+            share_id INTEGER,
+            project_id INTEGER,
+            memo_id INTEGER,
+            memo_uid TEXT DEFAULT '',
+            comment_id INTEGER,
+            title TEXT DEFAULT '',
+            excerpt TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            read_at TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_recipient ON notifications (recipient, level, read_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_notif_memo ON notifications (memo_id)")
     conn.commit()
     conn.close()
 
@@ -4406,6 +4432,11 @@ def _image_trash_put(db, memo_row, names, deleted_by="", share_id=None):
             "deleted_at, share_id) VALUES (?, ?, ?, ?, ?, ?)",
             (memo_id, memo_uid, n, deleted_by or "", now, share_id),
         )
+    if share_id is not None and memo_row is not None:   # [NOTIF-CENTER]
+        share = db.execute("SELECT * FROM shares WHERE id = ?", (share_id,)).fetchone()
+        guest = db.execute("SELECT * FROM share_guests WHERE share_id = ? AND lower(email) = ?",
+                           (share_id, (_voter_email(deleted_by) or "").lower())).fetchone()
+        _notify_share_activity(db, memo_row, "image_delete", guest, share, excerpt="%d photo(s)" % len([x for x in (names or []) if x]))
 
 
 def _image_trash_forget(db, names):
@@ -4656,6 +4687,11 @@ def _create_memo_core(db, data, source=""):
     )
     db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (cur.lastrowid,)).fetchone()
+    try:
+        _notify_body_mentions(db, row["id"], content, ("api:" + source) if source else "moi")  # [NOTIF-CENTER]
+        db.commit()
+    except Exception:
+        pass
     return _memo_dict(row, _owner_name(db)), 201
 
 
@@ -4714,6 +4750,45 @@ def _log_revision(db, memo_row, after, editor, share_id=None):
             datetime.now(timezone.utc).isoformat(),
         ),
     )
+    if share_id is not None:   # [NOTIF-CENTER] une révision d'invité = activité pour l'owner et les autres invités
+        share = db.execute("SELECT * FROM shares WHERE id = ?", (share_id,)).fetchone()
+        guest = db.execute("SELECT * FROM share_guests WHERE share_id = ? AND lower(email) = ?",
+                           (share_id, (_voter_email(editor) or "").lower())).fetchone()
+        fresh = dict(memo_row)
+        fresh["title"] = after.get("title") or fresh.get("title") or ""
+        _notify_share_activity(db, fresh, "edit", guest, share, excerpt=_revision_nature(before, after))
+
+
+def _revision_nature(before, after):
+    """La NATURE d'une révision, lisible : « sous-tâche cochée », « texte modifié », « dates modifiées »…
+    joints par « · » ; '' si rien d'identifiable. Sert d'`excerpt` à l'entrée `activity/edit`."""
+    parts = []
+    if (before.get("title") or "") != (after.get("title") or ""):
+        parts.append("titre modifié")
+    if (before.get("content") or "") != (after.get("content") or ""):
+        parts.append("texte modifié")
+    if any((before.get(k) or "") != (after.get(k) or "") for k in ("due_date", "due_time", "end_time", "due_end", "recurrence")):
+        parts.append("dates modifiées")
+    sb, sa = before.get("subtasks") or [], after.get("subtasks") or []
+    if sb != sa:
+        if len(sb) == len(sa) and all((x.get("content") or "") == (y.get("content") or "") for x, y in zip(sb, sa)):
+            cochees = sum(1 for x, y in zip(sb, sa) if not x.get("done") and y.get("done"))
+            decochees = sum(1 for x, y in zip(sb, sa) if x.get("done") and not y.get("done"))
+            if cochees and not decochees:
+                parts.append("sous-tâche cochée" if cochees == 1 else "%d sous-tâches cochées" % cochees)
+            elif decochees and not cochees:
+                parts.append("sous-tâche décochée" if decochees == 1 else "%d sous-tâches décochées" % decochees)
+            else:
+                parts.append("sous-tâches modifiées")
+        else:
+            parts.append("sous-tâches modifiées")
+    if bool(before.get("done")) != bool(after.get("done")):
+        parts.append("terminé" if after.get("done") else "rouvert")
+    if (before.get("priority") or 0) != (after.get("priority") or 0):
+        parts.append("priorité modifiée")
+    if (before.get("assignees") or []) != (after.get("assignees") or []):
+        parts.append("assignés modifiés")
+    return " · ".join(parts)
 
 
 def _perform_memo_update(db, existing, data, editor="moi", share_id=None, source=None):
@@ -4847,6 +4922,11 @@ def _perform_memo_update(db, existing, data, editor="moi", share_id=None, source
     )
     if source is not None:
         db.execute("UPDATE memos SET source = ? WHERE id = ?", (source, memo_id))  # [DASH-API] v30
+    if content != (existing["content"] or ""):   # [NOTIF-CENTER] @mentions du corps
+        try:
+            _notify_body_mentions(db, memo_id, content, ("api:" + source) if source else editor, share_id)
+        except Exception:
+            pass
     db.commit()
     # [VOTE-GROUPS §7] Mémo déplacé → retiré des votes nommés dont il sort du périmètre.
     if project_id != existing["project_id"]:
@@ -4911,6 +4991,7 @@ def _purge_memo_row(db, memo_id):
         _delete_attachment_file(a["filename"])
     db.execute("DELETE FROM attachments WHERE memo_id = ?", (memo_id,))
     db.execute("DELETE FROM memo_urls WHERE memo_id = ?", (memo_id,))  # [MEMO-URLS] v29 : cascade
+    db.execute("DELETE FROM notifications WHERE memo_id = ?", (memo_id,))  # [NOTIF-CENTER] cascade
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     _purge_shares_for(db, "memo", memo_id)   # [CASCADE-SHARES] partages ET leurs invités
     # [COMMENT-REACTIONS] purge des réactions AVANT les commentaires (comment_id → orphelin sinon).
@@ -7617,6 +7698,16 @@ def _apply_guest_role(db, guest_id, project_id, role, add, rem, actor, actor_gue
              (_row_get(prev, "caps_remove", "[]") if prev else "[]"),
              1 if prev else 0, now),
         )
+    # [NOTIF-CENTER] la personne visée l'apprend ; l'owner aussi quand c'est un DÉLÉGUÉ qui agit.
+    target = db.execute("SELECT * FROM share_guests WHERE id = ?", (guest_id,)).fetchone()
+    a_label, a_kind, _ = _notif_actor(db, actor)
+    if actor_guest_id is not None:
+        a_kind = "guest"
+    rs = ["g:%d" % guest_id] + ([""] if actor_guest_id is not None else [])
+    _notify(db, rs, "me", "role_granted", a_label, a_kind,
+            share_id=target["share_id"] if target else None, project_id=project_id,
+            title=_project_name(db, project_id),
+            excerpt=({"admin": "Admin", "editor": "Éditeur", "commenter": "Commentateur", "viewer": "Lecteur"}.get(role, role) if role else "rôle retiré"))
 
 
 def _admin_scope_ok(db, share, guest, project_id):
@@ -8329,10 +8420,12 @@ def activity():
     # dernier « vu » compte dans le 🔔 — l'owner apprend qu'on a nommé quelqu'un chez lui.
     admin_acts = _admin_actions_payload(db)
     unseen += sum(1 for a in admin_acts if not a["revoked"] and (a["created_at"] or "") > seen_at)
+    unread_me = _notif_unread(db, "")   # [NOTIF-CENTER] le badge = « pour moi » non lues, rien d'autre
     return jsonify(
         {
             "pending_guests": pending,
-            "unseen": unseen,
+            "unseen": unread_me,          # compat : même valeur que unread_me pendant ce lot, retiré en V2
+            "unread_me": unread_me,
             "role_requests": role_reqs,
             "admin_actions": admin_acts,
             "revisions": out_rev,
@@ -8760,9 +8853,13 @@ def _insert_comment(db, memo_row, body, author, share_id=None, parent_id=None, p
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (memo_row["id"], memo_row["uid"] or "", author, share_id, body, now, parent_id, priority, kind or ""),
     )
-    return db.execute(
-        "SELECT * FROM memo_comments WHERE id = ?", (cur.lastrowid,)
-    ).fetchone()
+    row = db.execute("SELECT * FROM memo_comments WHERE id = ?", (cur.lastrowid,)).fetchone()
+    if (kind or "") in ("", "poll"):   # [NOTIF-CENTER] un message d'humain notifie ; une ligne système, non
+        try:
+            _notify_comment(db, memo_row, row)
+        except Exception:
+            pass
+    return row
 
 
 # [COMMENTS-V2 addendum] Marqueur de message vocal posé dans le corps du commentaire par le front
@@ -9580,10 +9677,18 @@ def hub_data(hub_token):
             if label and label not in members:
                 members.append(label)
 
+    # [NOTIF-CENTER] agrégé sur tous les partages du hub (recipients = ses lignes share_guests)
+    _nr, _nsh, _nn = _hub_notif_scope(db, hub)
+    _mu = {}
+    for _r in _nr:
+        for k, v in _notif_memo_unread(db, _r, _nsh).items():
+            _mu[str(k)] = _mu.get(str(k), 0) + v
     resp = jsonify({
         "kind": "hub",
         "name": hub["name"] or "",
         "roots": roots,
+        "unread_me": sum(_notif_unread(db, _r, _nsh) for _r in _nr),
+        "memo_unread": _mu,
         "projects": projects,
         "memos": memos,
         "trash": trash,
@@ -9906,6 +10011,14 @@ def share_data(token):
         td.update(_memo_guest_caps(db, share, r, my_email))
         trash.append(td)
     payload["trash"] = trash
+    # [NOTIF-CENTER] compteur de la cloche + chip « n pour toi » par mémo, pour CET invité, CE partage.
+    if my_guest is not None:
+        rec = "g:%d" % my_guest["id"]
+        payload["unread_me"] = _notif_unread(db, rec, [share["id"]])
+        payload["memo_unread"] = {str(k): v for k, v in _notif_memo_unread(db, rec, [share["id"]]).items()}
+    else:
+        payload["unread_me"] = 0
+        payload["memo_unread"] = {}
     return jsonify(payload)
 
 
@@ -9978,6 +10091,10 @@ def share_register(token):
         "VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)",
         (share["id"], email, name, gtoken, now, now, _welcome_role(share)),
     )
+    # [NOTIF-CENTER] « un nouvel utilisateur est sur l'application » — la 1re visite seulement (INSERT).
+    _notify(db, [""], "me", "guest_new", name or email, "guest", share_id=share["id"],
+            project_id=share["target_id"] if share["kind"] == "project" else None,
+            title=_share_label(db, share), excerpt=email)
     db.commit()
     _ensure_hub(db, email, name)  # [ONE-LINK-MULTI]
     _ensure_guest_home(db, email, name)  # [GUEST-HOME] espace perso du nouvel invité approuvé
@@ -10033,6 +10150,8 @@ def share_role_request(token):
         db.execute(
             "INSERT INTO role_requests (guest_id, project_id, role_requested, status, created_at) "
             "VALUES (?, ?, ?, 'pending', ?)", (guest["id"], pid, role, now))
+        _notify(db, [""], "me", "role_request", _notif_guest_label(guest), "guest", share_id=share["id"],  # [NOTIF-CENTER]
+                project_id=pid, title=_project_name(db, pid), excerpt="Éditeur" if role == "editor" else "Commentateur")
     # 🔔 owner par le circuit d'activité EXISTANT (une ligne `memo_revisions` de partage, comme
     # « 📁 Projet créé » ou « 🗑 Photo supprimée ») : aucun circuit de notification nouveau.
     proj = db.execute("SELECT name FROM projects WHERE id = ?", (pid,)).fetchone()
@@ -10105,6 +10224,10 @@ def share_update_memo(token, memo_id):
         db, existing, data, editor=f"{editor} <{guest['email']}>", share_id=share["id"]
     )
     if status == 200:
+        if "project_id" in data and data["project_id"] != _row_get(existing, "project_id", None):   # [NOTIF-CENTER]
+            moved = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+            _notify_share_activity(db, moved, "memo_move", guest, share, excerpt=_project_name(db, data["project_id"]))
+            db.commit()
         payload = _share_memo_dict_from_payload(payload)
     return jsonify(payload), status
 
@@ -10130,6 +10253,7 @@ def share_delete_memo(token, memo_id):
     if err:
         return err
     now = datetime.now(timezone.utc).isoformat()
+    _notify_share_activity(db, row, "memo_delete", guest, share)   # [NOTIF-CENTER] (avant la corbeille : la ligne reste visible)
     db.execute("UPDATE memos SET deleted_at = ? WHERE id = ?", (now, memo_id))
     db.commit()
     return "", 204
@@ -10591,8 +10715,10 @@ def share_add_memo(token):
             now,
         ),
     )
-    db.commit()
     row = db.execute("SELECT * FROM memos WHERE id = ?", (cur.lastrowid,)).fetchone()
+    _notify_share_activity(db, row, "memo_create", guest, share, excerpt=title)   # [NOTIF-CENTER]
+    _notify_body_mentions(db, row["id"], content, f"{editor} <{guest['email']}>", share["id"])
+    db.commit()
     return jsonify(_share_memo_dict(row)), 201
 
 
@@ -11058,6 +11184,7 @@ def share_vote_memo(token, memo_id):
     if _vote_is_closed(proj):
         return jsonify({"error": "vote clos"}), 409
     _cast_vote(db, proj["id"], memo_id, voter, _clean_vote_mode(proj["vote_mode"]))  # [VOTE-MULTI]
+    _notify(db, [""], "me", "vote", _notif_guest_label(guest), "guest", share_id=share["id"], memo_row=memo, excerpt="a voté")  # [NOTIF-CENTER]
     db.commit()
     pv = _vote_project_payload(db, proj, owner=False)
     return jsonify({"project_id": proj["id"], "vote": pv,
@@ -11089,6 +11216,8 @@ def share_heart_memo(token, memo_id):
     kind, payload = _toggle_heart(db, memo, voter, bool(data.get("replace")))
     if kind == "conflict":
         return jsonify({"error": "créneau en conflit", "conflict": payload}), 409
+    if kind != "removed":   # [NOTIF-CENTER] poser un ❤️ notifie ; le retirer, non
+        _notify(db, [""], "me", "vote", _notif_guest_label(guest), "guest", share_id=share["id"], memo_row=memo, excerpt="❤️ coup de cœur")
     db.commit()
     return jsonify(_heart_result(db, memo_id, voter, _owner_name(db)))
 
@@ -11829,6 +11958,10 @@ def _backup_loop():
             pass
         try:
             _purge_api_audit()  # [DASH-API] audit > 90 j
+        except Exception:
+            pass
+        try:
+            _purge_notifications()  # [NOTIF-CENTER] lues > 90 j, non lues > 365 j
         except Exception:
             pass
         time.sleep(3600)
@@ -12691,6 +12824,476 @@ def import_links():
     )
 
 
+# ═══════════════════════════ [NOTIF-CENTER] centre de notifications, owner ET invités ═══════════════════════════
+# Doctrine : une ligne est ÉCRITE au moment de l'événement (fan-out par destinataire) — jamais un flux
+# recalculé à la volée — c'est la seule façon d'avoir un « non lu » PAR PERSONNE et des compteurs justes.
+# Table volatile, HORS export (comme `activity_seen_at`). Deux niveaux : `me` (« pour moi », compte dans le
+# badge) et `activity` (onglet discret, ne compte pas). Invariant 5 : un invité ne reçoit que ce qui vient
+# de SON partage, et les routes invité filtrent `recipient` ET `share_id` (double ceinture).
+NOTIF_KEEP_DAYS = (90, 365)        # (lues, non lues) — purge quotidienne
+NOTIF_EXCERPT_MAX = 240
+NOTIF_LEVELS = ("me", "activity")
+NOTIF_MENTION_RE = re.compile(r"@([^\s@<>\"',;:!?()\[\]]{1,60})")
+NOTIF_DATA_MENTION_RE = re.compile(r'data-mention="([^"]{1,80})"')
+
+
+def _notif_excerpt(text):
+    t = _html_to_text(text or "") if ("<" in str(text or "")) else re.sub(r"\s+", " ", str(text or "")).strip()
+    return t[:NOTIF_EXCERPT_MAX]
+
+
+def _notify(db, recipients, level, kind, actor, actor_kind, share_id=None, project_id=None,
+            memo_row=None, comment_id=None, title="", excerpt=""):
+    """Écrit UNE ligne par destinataire distinct. `recipients` = itérable de '' (owner) / 'g:<id>'.
+    Jamais d'exception vers l'appelant : une notification qui échoue ne doit pas faire échouer l'acte."""
+    if level not in NOTIF_LEVELS:
+        return 0
+    now = datetime.now(timezone.utc).isoformat()
+    memo_id = memo_row["id"] if memo_row is not None else None
+    memo_uid = (_row_get(memo_row, "uid", "") or "") if memo_row is not None else ""
+    if memo_row is not None and not title:
+        title = _row_get(memo_row, "title", "") or _notif_excerpt(_row_get(memo_row, "content", ""))[:80]
+    if memo_row is not None and project_id is None:
+        project_id = _row_get(memo_row, "project_id", None)
+    n = 0
+    for r in dict.fromkeys(recipients or []):
+        if r is None:
+            continue
+        try:
+            db.execute(
+                "INSERT INTO notifications (uid, recipient, level, kind, actor, actor_kind, share_id, project_id, "
+                "memo_id, memo_uid, comment_id, title, excerpt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), r, level, kind, (actor or "")[:80], actor_kind, share_id, project_id, memo_id,
+                 memo_uid, comment_id, (title or "")[:200], _notif_excerpt(excerpt), now),
+            )
+            n += 1
+        except Exception:
+            pass
+    return n
+
+
+def _project_name(db, pid):
+    if not pid:
+        return ""
+    r = db.execute("SELECT name FROM projects WHERE id = ?", (pid,)).fetchone()
+    return r["name"] if r else ""
+
+
+def _share_label(db, share):
+    """Nom lisible d'un partage : le dossier ciblé, ou le titre du mémo partagé."""
+    if share["kind"] == "project":
+        return _project_name(db, share["target_id"])
+    m = db.execute("SELECT title FROM memos WHERE id = ?", (share["target_id"],)).fetchone()
+    return (m["title"] if m else "") or "mémo partagé"
+
+
+def _notif_guest_label(guest):
+    return (guest["name"] or guest["email"] or "invité")[:80]
+
+
+def _shares_for_memo(db, memo_row):
+    """Les partages dont le périmètre couvre ce mémo (dossier englobant, ou partage du mémo lui-même)."""
+    if memo_row is None:
+        return []
+    out = []
+    pid = _row_get(memo_row, "project_id", None)
+    for sh in db.execute("SELECT * FROM shares ORDER BY id").fetchall():
+        if sh["kind"] == "memo" and sh["target_id"] == memo_row["id"]:
+            out.append(sh)
+        elif sh["kind"] == "project" and pid is not None and pid in set(_project_descendants(db, sh["target_id"])):
+            out.append(sh)
+    return out
+
+
+def _guests_of_shares(db, shares):
+    """[(share, guest)] pour tous les invités APPROUVÉS des partages donnés."""
+    out = []
+    for sh in shares:
+        for g in db.execute(
+            "SELECT * FROM share_guests WHERE share_id = ? AND status = 'approved' ORDER BY id", (sh["id"],)
+        ).fetchall():
+            out.append((sh, g))
+    return out
+
+
+def _notif_actor(db, author, share_id=None):
+    """(label, actor_kind, email) à partir d'un auteur « moi » / « Nom <email> » / « api:<source> »."""
+    a = str(author or "").strip()
+    if a.startswith("api:"):
+        return a[4:] or "api", "api", ""
+    email = _voter_email(a) if a else ""
+    if not a or a == "moi" or (not email and a == _owner_name(db)):
+        return _owner_name(db), "owner", ""
+    return re.sub(r"\s*<[^>]*>", "", a).strip()[:80] or email, "guest", (email or "").lower()
+
+
+def _mention_targets(text, owner_name, pairs):
+    """Qui est mentionné dans `text` ? Rend {recipient: share_id}. `@Nom` (texte) et `data-mention="Nom"`
+    (HTML du corps). Comparaison pliée (accents, casse) sur le nom affiché ou la partie locale de l'e-mail."""
+    raw = str(text or "")
+    names = set(m.group(1) for m in NOTIF_DATA_MENTION_RE.finditer(raw))
+    plain = _html_to_text(raw) if "<" in raw else raw
+    names |= set(m.group(1) for m in NOTIF_MENTION_RE.finditer(plain))
+    folded = {_search_fold(n).rstrip(".") for n in names if n}
+    if not folded:
+        return {}
+    out = {}
+    if owner_name and _search_fold(owner_name) in folded:
+        out[""] = None
+    for sh, g in pairs:
+        cands = {_search_fold(g["name"] or ""), _search_fold((g["email"] or "").split("@")[0])}
+        # un nom composé « Jean Dupont » mentionné « @Jean » : on accepte aussi le premier mot
+        first = _search_fold((g["name"] or "").split(" ")[0]) if g["name"] else ""
+        if first:
+            cands.add(first)
+        if folded & {c for c in cands if c}:
+            out["g:%d" % g["id"]] = sh["id"]
+    return out
+
+
+def _notify_comment(db, memo_row, comment_row):
+    """Fan-out d'un commentaire : `mention` > `reply` > `comment`, une seule ligne par destinataire,
+    jamais l'auteur. Réponse = `parent_id` (la règle « 24 h sur le même mémo » du brief est écartée :
+    `memo_comments.parent_id` existe, c'est lui qui fait foi)."""
+    if memo_row is None or comment_row is None:
+        return
+    author = comment_row["author"]
+    share_id = _row_get(comment_row, "share_id", None)
+    actor, actor_kind, actor_email = _notif_actor(db, author, share_id)
+    owner_name = _owner_name(db)
+    body = comment_row["body"] or ""
+    shares = _shares_for_memo(db, memo_row)
+    pairs = _guests_of_shares(db, shares)
+    mine = {""} if actor_kind == "owner" else {"g:%d" % g["id"] for sh, g in pairs if (g["email"] or "").lower() == actor_email}
+    targets = {}   # recipient -> (kind, share_id)
+    for r, sid in _mention_targets(body, owner_name, pairs).items():
+        targets[r] = ("mention", sid if sid is not None else share_id)
+    pid = _row_get(comment_row, "parent_id", None)
+    if pid:
+        parent = db.execute("SELECT author, share_id FROM memo_comments WHERE id = ?", (pid,)).fetchone()
+        if parent:
+            p_label, p_kind, p_email = _notif_actor(db, parent["author"], parent["share_id"])
+            if p_kind == "owner":
+                targets.setdefault("", ("reply", share_id))
+            elif p_kind == "guest":
+                for sh, g in pairs:
+                    if (g["email"] or "").lower() == p_email:
+                        targets.setdefault("g:%d" % g["id"], ("reply", sh["id"]))
+    if actor_kind != "owner":
+        targets.setdefault("", ("comment", share_id))
+    created_email = (_voter_email(_row_get(memo_row, "created_by", "") or "") or "").lower()
+    try:
+        assignees = {_search_fold(a) for a in json.loads(_row_get(memo_row, "assignees", "[]") or "[]")}
+    except Exception:
+        assignees = set()
+    commenters = {(_voter_email(r["author"]) or "").lower() for r in db.execute(
+        "SELECT author FROM memo_comments WHERE memo_id = ? AND id != ? AND COALESCE(deleted_at,'') = ''",
+        (memo_row["id"], comment_row["id"])).fetchall()}
+    for sh, g in pairs:
+        r = "g:%d" % g["id"]
+        if r in targets:
+            continue
+        ge = (g["email"] or "").lower()
+        if ge == created_email or _search_fold(g["name"] or "") in assignees or ge in commenters:
+            targets[r] = ("comment", sh["id"])
+    for r in mine:
+        targets.pop(r, None)
+    by_kind = {}
+    for r, (kind, sid) in targets.items():
+        by_kind.setdefault((kind, sid), []).append(r)
+    for (kind, sid), rs in by_kind.items():
+        _notify(db, rs, "me", kind, actor, actor_kind, share_id=sid, memo_row=memo_row,
+                comment_id=comment_row["id"], excerpt=body)
+
+
+def _notify_body_mentions(db, memo_id, content, editor, share_id=None):
+    """`@Nom` / `data-mention` dans le CORPS d'un mémo à l'enregistrement → `me/mention`."""
+    if not content or ("@" not in content and "data-mention" not in content):
+        return
+    memo_row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    if memo_row is None:
+        return
+    actor, actor_kind, actor_email = _notif_actor(db, editor, share_id)
+    pairs = _guests_of_shares(db, _shares_for_memo(db, memo_row))
+    targets = _mention_targets(content, _owner_name(db), pairs)
+    mine = {""} if actor_kind == "owner" else {"g:%d" % g["id"] for sh, g in pairs if (g["email"] or "").lower() == actor_email}
+    for r in mine:
+        targets.pop(r, None)
+    by_share = {}
+    for r, sid in targets.items():
+        by_share.setdefault(sid if sid is not None else share_id, []).append(r)
+    for sid, rs in by_share.items():
+        _notify(db, rs, "me", "mention", actor, actor_kind, share_id=sid, memo_row=memo_row,
+                excerpt=_html_to_text(content)[:NOTIF_EXCERPT_MAX])
+
+
+def _notify_share_activity(db, memo_row, kind, guest, share, excerpt=""):
+    """Activité d'un invité (edit / memo_create / memo_move / memo_delete / image_delete) → owner + les
+    AUTRES invités du partage, jamais l'auteur."""
+    if memo_row is None or share is None:
+        return
+    actor = _notif_guest_label(guest) if guest is not None else "invité"
+    gemail = ((guest["email"] if guest is not None else "") or "").lower()
+    rs = [""] + ["g:%d" % g["id"] for g in db.execute(
+        "SELECT id, email FROM share_guests WHERE share_id = ? AND status = 'approved'", (share["id"],)
+    ).fetchall() if (g["email"] or "").lower() != gemail]
+    _notify(db, rs, "activity", kind, actor, "guest", share_id=share["id"], memo_row=memo_row, excerpt=excerpt)
+
+
+def _notify_api_write(db, memo_id, label):
+    """Écriture via /api/v1 (ou le MCP) → `activity/api_write` pour l'OWNER seulement, `actor` =
+    `client_name` du jeton (sinon sa `source`). Jamais côté invité."""
+    tok = getattr(g, "api_token", None)
+    if tok is None:
+        return
+    memo_row = db.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+    xc = X_DASH_CLIENT_RE.match((request.headers.get("X-Dash-Client") or "").strip())
+    actor = (xc.group(1) if xc else (_row_get(tok, "client_name", "") or tok["source"] or "api"))
+    _notify(db, [""], "activity", "api_write", actor, "api", memo_row=memo_row, excerpt=label)
+
+
+def _notif_filter_sql(recipient, level, share_ids=None, since=""):
+    where = ["n.recipient = ?", "(n.memo_id IS NULL OR COALESCE(m.deleted_at, '') = '')"]
+    args = [recipient]
+    if level:
+        where.append("n.level = ?")
+        args.append(level)
+    if share_ids is not None:
+        ids = [int(s) for s in share_ids]
+        if not ids:
+            where.append("0")
+        else:
+            where.append("n.share_id IN (%s)" % ",".join("?" * len(ids)))
+            args.extend(ids)
+    if since:
+        where.append("n.created_at > ?")
+        args.append(since)
+    return " AND ".join(where), args
+
+
+def _notif_unread(db, recipient, share_ids=None):
+    where, args = _notif_filter_sql(recipient, "me", share_ids)
+    return db.execute(
+        "SELECT COUNT(*) FROM notifications n LEFT JOIN memos m ON m.id = n.memo_id WHERE " + where + " AND n.read_at IS NULL",
+        args).fetchone()[0]
+
+
+def _notif_memo_unread(db, recipient, share_ids=None):
+    where, args = _notif_filter_sql(recipient, "me", share_ids)
+    return {r["memo_id"]: r["n"] for r in db.execute(
+        "SELECT n.memo_id, COUNT(*) AS n FROM notifications n LEFT JOIN memos m ON m.id = n.memo_id WHERE " + where +
+        " AND n.read_at IS NULL AND n.memo_id IS NOT NULL GROUP BY n.memo_id", args).fetchall()}
+
+
+def _notif_items(db, recipient, level, share_ids=None, since="", share_names=None):
+    """Page d'items + next_cursor (offset opaque). `limit` ≤ 100, défaut 30."""
+    try:
+        limit = max(1, min(100, int(request.args.get("limit") or 30)))
+    except (TypeError, ValueError):
+        limit = 30
+    cur = request.args.get("cursor") or "0"
+    start = int(cur) if re.match(r"^\d+$", cur) else 0
+    where, args = _notif_filter_sql(recipient, level if level in NOTIF_LEVELS else None, share_ids, since)
+    rows = db.execute(
+        "SELECT n.*, m.title AS memo_title_now, m.deleted_at AS memo_deleted_at, p.name AS project_name "
+        "FROM notifications n LEFT JOIN memos m ON m.id = n.memo_id LEFT JOIN projects p ON p.id = n.project_id "
+        "WHERE " + where + " ORDER BY n.created_at DESC, n.id DESC LIMIT ? OFFSET ?", args + [limit + 1, start]
+    ).fetchall()
+    items = []
+    for r in rows[:limit]:
+        d = dict(r)
+        d["memo_title"] = (d.pop("memo_title_now", None) or d.get("title") or "")
+        d["memo_deleted"] = bool(d.pop("memo_deleted_at", "") or "")
+        d["project_name"] = d.get("project_name") or ""
+        d["read"] = bool(d.get("read_at"))
+        if share_names is not None:
+            d["share_name"] = share_names.get(d.get("share_id"), "")
+        items.append(d)
+    return {"items": items, "next_cursor": str(start + limit) if len(rows) > limit else None}
+
+
+def _notif_mark_read(db, recipient, data, share_ids=None):
+    """`{ids:[…]}` ou `{level, all:true}`. Rend (ok, 404?) : un id hors périmètre → 404, RIEN modifié."""
+    now = datetime.now(timezone.utc).isoformat()
+    data = data or {}
+    if data.get("all"):
+        level = data.get("level") if data.get("level") in NOTIF_LEVELS else "me"
+        where, args = _notif_filter_sql(recipient, level, share_ids)
+        ids = [r["id"] for r in db.execute(
+            "SELECT n.id FROM notifications n LEFT JOIN memos m ON m.id = n.memo_id WHERE " + where + " AND n.read_at IS NULL", args).fetchall()]
+    elif data.get("memo_id") is not None:
+        # ouvrir la card d'un mémo lit ce qu'on m'y adressait (chip « n pour toi »), rien d'autre
+        try:
+            mid = int(data.get("memo_id"))
+        except (TypeError, ValueError):
+            return False
+        where, args = _notif_filter_sql(recipient, "me", share_ids)
+        ids = [r["id"] for r in db.execute(
+            "SELECT n.id FROM notifications n LEFT JOIN memos m ON m.id = n.memo_id WHERE " + where +
+            " AND n.read_at IS NULL AND n.memo_id = ?", args + [mid]).fetchall()]
+    else:
+        try:
+            ids = [int(i) for i in (data.get("ids") or [])]
+        except (TypeError, ValueError):
+            return False
+        if not ids:
+            return True
+        where, args = _notif_filter_sql(recipient, None, share_ids)
+        ok = {r["id"] for r in db.execute(
+            "SELECT n.id FROM notifications n LEFT JOIN memos m ON m.id = n.memo_id WHERE " + where +
+            " AND n.id IN (%s)" % ",".join("?" * len(ids)), args + ids).fetchall()}
+        if set(ids) - ok:
+            return False
+    for i in ids:
+        db.execute("UPDATE notifications SET read_at = COALESCE(read_at, ?) WHERE id = ?", (now, i))
+    db.commit()
+    return True
+
+
+def _purge_notifications():
+    """Lues > 90 j et non lues > 365 j (NOTIF_KEEP_DAYS). Démarrage + boucle horaire."""
+    read_days, unread_days = NOTIF_KEEP_DAYS
+    now = datetime.now(timezone.utc)
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("DELETE FROM notifications WHERE read_at IS NOT NULL AND read_at < ?",
+                     ((now - timedelta(days=read_days)).isoformat(),))
+        conn.execute("DELETE FROM notifications WHERE read_at IS NULL AND created_at < ?",
+                     ((now - timedelta(days=unread_days)).isoformat(),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ───────────────────────── routes OWNER (derrière Authelia) ─────────────────────────
+
+@app.route("/api/notifications", methods=["GET"])
+def list_notifications():
+    db = get_db()
+    level = request.args.get("level") or "me"
+    if level not in NOTIF_LEVELS:
+        return jsonify({"error": "level invalide"}), 400
+    out = _notif_items(db, "", level)
+    out["unread_me"] = _notif_unread(db, "")
+    return jsonify(out)
+
+
+@app.route("/api/notifications/read", methods=["POST"])
+def read_notifications():
+    db = get_db()
+    if not _notif_mark_read(db, "", request.get_json(silent=True) or {}):
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"unread_me": _notif_unread(db, "")})
+
+
+# ───────────────────────── routes INVITÉ (sous /share/*, invariant 5) ─────────────────────────
+# Le destinataire est DÉDUIT du jeton invité (jamais un paramètre) ; les items sont filtrés
+# `recipient` ET `share_id = partage du token` (double ceinture, testée).
+
+@app.route("/share/<token>/notifications", methods=["GET"])
+def share_notifications(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    level = request.args.get("level") or "me"
+    if level not in NOTIF_LEVELS:
+        return jsonify({"error": "level invalide"}), 400
+    rec = "g:%d" % guest["id"]
+    out = _notif_items(db, rec, level, share_ids=[share["id"]])
+    out["unread_me"] = _notif_unread(db, rec, [share["id"]])
+    return jsonify(out)
+
+
+@app.route("/share/<token>/notifications/read", methods=["POST"])
+def share_read_notifications(token):
+    db = get_db()
+    share = _share_by_token(db, token)
+    if not share:
+        return jsonify({"error": "invalid"}), 404
+    guest, err = _approved_or_403(db, share)
+    if err:
+        return err
+    rec = "g:%d" % guest["id"]
+    if not _notif_mark_read(db, rec, request.get_json(silent=True) or {}, share_ids=[share["id"]]):
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"unread_me": _notif_unread(db, rec, [share["id"]])})
+
+
+def _hub_notif_scope(db, hub):
+    """(recipients, share_ids, share_names) du hub : les lignes `share_guests` approuvées de cet e-mail."""
+    shares = _hub_approved_shares(db, hub["email"])
+    share_ids = [s["id"] for s in shares]
+    recips, names = [], {}
+    for s in shares:
+        g = _guest_for_email(db, s, hub["email"])
+        if g is not None:
+            recips.append("g:%d" % g["id"])
+        if s["kind"] == "project":
+            p = db.execute("SELECT name FROM projects WHERE id = ?", (s["target_id"],)).fetchone()
+            names[s["id"]] = p["name"] if p else ""
+        else:
+            m = db.execute("SELECT title FROM memos WHERE id = ?", (s["target_id"],)).fetchone()
+            names[s["id"]] = (m["title"] if m else "") or "mémo partagé"
+    return recips, share_ids, names
+
+
+def _hub_notif_union(db, recips, share_ids, names, level):
+    pages = [_notif_items(db, r, level, share_ids=share_ids, share_names=names) for r in recips]
+    items = sorted((i for p in pages for i in p["items"]), key=lambda i: (i["created_at"], i["id"]), reverse=True)
+    return {"items": items, "next_cursor": next((p["next_cursor"] for p in pages if p["next_cursor"]), None)}
+
+
+@app.route("/share/hub/<hub_token>/notifications", methods=["GET"])
+def hub_notifications(hub_token):
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    if not hub:
+        return jsonify({"error": "invalid"}), 404
+    if not _hub_proof(db, hub):
+        return jsonify({"error": "code requis"}), 403
+    level = request.args.get("level") or "me"
+    if level not in NOTIF_LEVELS:
+        return jsonify({"error": "level invalide"}), 400
+    recips, share_ids, names = _hub_notif_scope(db, hub)
+    out = _hub_notif_union(db, recips, share_ids, names, level)
+    out["unread_me"] = sum(_notif_unread(db, r, share_ids) for r in recips)
+    return jsonify(out)
+
+
+@app.route("/share/hub/<hub_token>/notifications/read", methods=["POST"])
+def hub_read_notifications(hub_token):
+    db = get_db()
+    hub = _hub_by_token(db, hub_token)
+    if not hub:
+        return jsonify({"error": "invalid"}), 404
+    if not _hub_proof(db, hub):
+        return jsonify({"error": "code requis"}), 403
+    recips, share_ids, names = _hub_notif_scope(db, hub)
+    data = request.get_json(silent=True) or {}
+    ok = False
+    if data.get("all"):
+        for r in recips:
+            ok = _notif_mark_read(db, r, data, share_ids=share_ids) or ok
+        ok = True
+    else:
+        ids = data.get("ids") or []
+        rows = db.execute("SELECT id, recipient FROM notifications WHERE id IN (%s)" % ",".join("?" * len(ids)) if ids else "SELECT id, recipient FROM notifications WHERE 0", ids).fetchall()
+        by = {}
+        for r in rows:
+            by.setdefault(r["recipient"], []).append(r["id"])
+        if len(rows) != len(set(int(i) for i in ids)) or any(r not in recips for r in by):
+            return jsonify({"error": "not found"}), 404
+        ok = all(_notif_mark_read(db, r, {"ids": v}, share_ids=share_ids) for r, v in by.items())
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    return jsonify({"unread_me": sum(_notif_unread(db, r, share_ids) for r in recips)})
+
+
+
 # ═══════════════════════════ [DASH-API] API v1 — jeton Bearer, hors Authelia ═══════════════════════════
 # Pourquoi : Claude (chat et Claude Code), un CLI et plus tard l'appli mobile lisent et écrivent dans le
 # dashboard SANS passer par Chrome. Les humains continuent d'entrer par Authelia ; l'API est exposée par
@@ -13270,6 +13873,31 @@ def api_v1_client_versions():
     return _api_json(CLIENT_VERSIONS)
 
 
+@api_v1.route("/notifications", methods=["GET"])
+@require_token("read")
+def api_v1_notifications():
+    """[NOTIF-CENTER] les notifications de l'OWNER (le jeton est le sien), même payload que /api/notifications."""
+    db = get_db()
+    level = request.args.get("level") or "me"
+    if level not in NOTIF_LEVELS:
+        return _api_json({"error": "level invalide"}, 400)
+    since = (request.args.get("since") or "").strip().replace(" ", "+")
+    if since and not re.match(r"^\d{4}-\d{2}-\d{2}", since):
+        return _api_json({"error": "since : instant ISO attendu"}, 400)
+    out = _notif_items(db, "", level, since=since)
+    out["unread_me"] = _notif_unread(db, "")
+    return _api_json(out)
+
+
+@api_v1.route("/notifications/read", methods=["POST"])
+@require_token("write")
+def api_v1_notifications_read():
+    db = get_db()
+    if not _notif_mark_read(db, "", request.get_json(silent=True) or {}):
+        return _api_json({"error": "not found"}, 404)
+    return _api_json({"unread_me": _notif_unread(db, "")})
+
+
 @api_v1.route("/tree", methods=["GET"])
 @require_token("read")
 def api_v1_tree():
@@ -13490,6 +14118,8 @@ def api_v1_create_memo():
     if status != 201:
         return _api_json(payload, status)
     g.api_memo_id = payload["id"]
+    _notify_api_write(db, payload["id"], "création")   # [NOTIF-CENTER]
+    db.commit()
     if isinstance(urls, list):
         memo = db.execute("SELECT * FROM memos WHERE id = ?", (payload["id"],)).fetchone()
         now = datetime.now(timezone.utc).isoformat()
@@ -13503,10 +14133,12 @@ def api_v1_create_memo():
     return _api_memo_response(db, payload["id"], 201)
 
 
-def _api_update(db, existing, data):
+def _api_update(db, existing, data, label="modification"):
     payload, status = _perform_memo_update(db, existing, data, editor="api:" + _api_source(), source=_api_source())
     if status != 200:
         return _api_json(payload, status)
+    _notify_api_write(db, existing["id"], label)   # [NOTIF-CENTER]
+    db.commit()
     return _api_memo_response(db, existing["id"])
 
 
@@ -13537,7 +14169,7 @@ def api_v1_append_memo(memo_id):
     ajout = (data.get("content") or "").strip()
     if not ajout:
         return _api_json({"error": "content ou content_text requis"}, 400)
-    return _api_update(db, existing, {"content": (existing["content"] or "") + ajout})
+    return _api_update(db, existing, {"content": (existing["content"] or "") + ajout}, label="ajout de texte")
 
 
 @api_v1.route("/memos/<int:memo_id>/move", methods=["POST"])
@@ -13551,7 +14183,7 @@ def api_v1_move_memo(memo_id):
     data, err, code = _api_translate_write(db, {"folder_id": body.get("folder_id")})
     if err:
         return _api_json(err, code)
-    return _api_update(db, existing, {"project_id": data.get("project_id")})
+    return _api_update(db, existing, {"project_id": data.get("project_id")}, label="déplacement")
 
 
 @api_v1.route("/memos/<int:memo_id>/done", methods=["POST"])
@@ -13561,7 +14193,7 @@ def api_v1_done_memo(memo_id):
     existing = _api_memo_or_404(db, memo_id)
     if not existing:
         return _api_json({"error": "not found"}, 404)
-    return _api_update(db, existing, {"done": True})
+    return _api_update(db, existing, {"done": True}, label="terminé")
 
 
 @api_v1.route("/memos/<int:memo_id>/undone", methods=["POST"])
@@ -13571,7 +14203,7 @@ def api_v1_undone_memo(memo_id):
     existing = _api_memo_or_404(db, memo_id)
     if not existing:
         return _api_json({"error": "not found"}, 404)
-    return _api_update(db, existing, {"done": False})
+    return _api_update(db, existing, {"done": False}, label="rouvert")
 
 
 @api_v1.route("/memos/<int:memo_id>/subtasks", methods=["POST"])
@@ -13593,6 +14225,8 @@ def api_v1_add_subtask(memo_id):
     payload, status = _perform_memo_update(db, existing, {"subtasks": subs}, editor="api:" + _api_source(), source=_api_source())
     if status != 200:
         return _api_json(payload, status)
+    _notify_api_write(db, memo_id, "sous-tâche ajoutée")   # [NOTIF-CENTER]
+    db.commit()
     return _api_memo_response(db, memo_id, 201)
 
 
@@ -13617,7 +14251,7 @@ def api_v1_patch_subtask(memo_id, n):
         if not c:
             return _api_json({"error": "content vide"}, 400)
         subs[n]["content"] = c
-    return _api_update(db, existing, {"subtasks": subs})
+    return _api_update(db, existing, {"subtasks": subs}, label="sous-tâche")
 
 
 @api_v1.route("/memos/<int:memo_id>/urls", methods=["POST"])
@@ -13679,6 +14313,7 @@ def api_v1_trash_memo(memo_id):
     db = get_db()
     if not _api_memo_or_404(db, memo_id):
         return _api_json({"error": "not found"}, 404)
+    _notify_api_write(db, memo_id, "envoyé à la corbeille")   # [NOTIF-CENTER] avant : la ligne reste visible
     db.execute("UPDATE memos SET deleted_at = ?, source = ? WHERE id = ?",
                (datetime.now(timezone.utc).isoformat(), _api_source(), memo_id))
     db.commit()
@@ -13695,6 +14330,7 @@ def api_v1_restore_memo(memo_id):
     if not row:
         return _api_json({"error": "pas en corbeille"}, 404)
     db.execute("UPDATE memos SET deleted_at = '', source = ? WHERE id = ?", (_api_source(), memo_id))
+    _notify_api_write(db, memo_id, "restauré")   # [NOTIF-CENTER]
     db.commit()
     return _api_memo_response(db, memo_id)
 
@@ -13834,6 +14470,7 @@ def list_api_audit():
 
 try:
     _purge_api_audit()
+    _purge_notifications()
 except Exception:
     pass
 

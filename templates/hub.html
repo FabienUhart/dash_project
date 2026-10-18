@@ -722,6 +722,42 @@ const todayStr = () => { const d = new Date(); return d.getFullYear()+'-'+String
 initThemePref();
 { const _hdr = document.querySelector('#dash header');
   if (_hdr) _hdr.appendChild(guestGearButton('btn', () => openGuestSettings(hubSettingsCfg()))); }
+// [NOTIF-CENTER] cloche du hub : agrège tous ses partages (le serveur déduit les destinataires de l'e-mail prouvé).
+const notifCenter = notifPanel({
+  anchor: () => document.getElementById('notif-btn'),
+  fetch: async (level, cursor) => {
+    const r = await fetch(HUB_BASE + '/notifications?level=' + level + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''), { headers: { 'X-Guest-Token': hubProof() } });
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  },
+  markRead: async (payload) => {
+    const r = await fetch(HUB_BASE + '/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': hubProof() }, body: JSON.stringify(payload) });
+    return r.ok ? r.json() : {};
+  },
+  onBadge: (n) => notifSetBadge(n),
+  footer: 'Seulement ce qu\'on t\'adresse dans tes dossiers partagés.',
+  onOpen: (item) => {
+    if (!item.memo_id) return;
+    const m = (DATA.memos || []).find(x => x.id === item.memo_id);
+    if (!m) return;
+    if (DATA.memo_unread) delete DATA.memo_unread[String(m.id)];
+    document.querySelectorAll('.task[data-memo-id="' + m.id + '"] .notif-chip').forEach(c => c.remove());
+    // Un commentaire, une mention, une réponse → le FIL (pop-in 💬) ; le reste → l'éditeur (retouche Cowork).
+    if (['comment', 'mention', 'reply'].includes(item.kind)) openHubCommentsPopin(m);
+    else openEditor(m);
+  },
+});
+{ const _hdr = document.querySelector('#dash header');
+  if (_hdr) _hdr.appendChild(notifBellButton('btn', () => notifCenter.toggle())); }
+async function notifReadMemo(memoId) {
+  if (!DATA.memo_unread || !DATA.memo_unread[String(memoId)]) return;
+  delete DATA.memo_unread[String(memoId)];
+  try {
+    const r = await fetch(HUB_BASE + '/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': hubProof() }, body: JSON.stringify({ memo_id: memoId }) });
+    if (r.ok) { const j = await r.json(); DATA.unread_me = j.unread_me; notifSetBadge(j.unread_me); }
+  } catch (_) {}
+  document.querySelectorAll('.task[data-memo-id="' + memoId + '"] .notif-chip').forEach(c => c.remove());
+}
 // cfg de la pop-in : e-mail (route EXISTANTE, destinataire forcé serveur) + favoris locaux.
 function hubSettingsCfg() {
   const getFavItems = () => hubFavEntries();
@@ -818,7 +854,7 @@ async function loadDash(knownFolders) {
 }
 async function reload() {
   const r = await fetch(HUB_BASE + '/data', { headers: { 'X-Guest-Token': hubProof() } });
-  if (r.ok) { DATA = await r.json(); if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis; persistFolderTokens(DATA.folders); render(); }
+  if (r.ok) { DATA = await r.json(); notifSetBadge(DATA.unread_me || 0); if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis; persistFolderTokens(DATA.folders); render(); }  // [NOTIF-CENTER] badge
 }
 function showCode() { document.getElementById('dash').hidden = true; document.getElementById('code-screen').hidden = false;
   document.getElementById('pin').focus(); }
@@ -1368,6 +1404,9 @@ function memoCard(m) {
     commentsShowWhenEmpty: !!m.can_comment,   // [HUB-COMMENTS-POPIN-ADDENDUM] opt-in explicite
   });
   if (_pic) content.appendChild(_pic);
+  // [NOTIF-CENTER] chip « n pour toi » (notifications non lues pour MOI sur ce mémo)
+  { const _nu = DATA.memo_unread && DATA.memo_unread[String(m.id)];
+    if (_nu) content.appendChild(notifMemoChip(_nu, () => notifReadMemo(m.id))); }
   // [MEMO-LINKS] D3 : chips des deux côtés ; clic = éditeur du relié (stopPropagation dans le helper).
   const _lk = memoLinkChips(m.links, (otherId) => {
     const target = (DATA.memos || []).find((x) => x.id === otherId);

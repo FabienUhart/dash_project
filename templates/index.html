@@ -6027,8 +6027,10 @@ async function refreshActivityBadge() {
     const a = await api('/api/activity');
     state.activity = a;
     promptReloadIfStale(EMBEDDED_BUILD, a.build_version);  // [UPDATE-PROMPT]
+    // [NOTIF-CENTER] le badge = « pour moi » NON LUES, rien d'autre (l'activité ne compte jamais).
     const badge = document.getElementById('activity-badge');
-    const n = (a.pending_guests || 0) + (a.unseen || 0);
+    const n = Number(a.unread_me != null ? a.unread_me : a.unseen) || 0;
+    state.notifUnread = n;
     badge.textContent = String(n);
     badge.style.display = n > 0 ? 'block' : 'none';
     // [SHARES-BADGE] rafraîchir le compteur « N · M » de la sidebar (ajout/retrait
@@ -6069,12 +6071,43 @@ document.addEventListener('close', () => {
   }, 100);
 }, true);
 
-document.getElementById('activity-btn').addEventListener('click', () => openSharesView());
+// [NOTIF-CENTER] La cloche ouvre le PANNEAU de notifications (plus la vue Partages, qui reste
+// accessible par la sidebar « 🔗 Partages » et par le lien en tête du panneau). Ouvrir la vue Partages
+// ne marque plus rien « vu » : seul le clic sur une entrée (ou « Tout marquer lu ») lit.
+const notifCenter = notifPanel({
+  anchor: () => document.getElementById('activity-btn'),
+  fetch: (level, cursor) => api('/api/notifications?level=' + level + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')),
+  markRead: (payload) => api('/api/notifications/read', { method: 'POST', body: JSON.stringify(payload) }),
+  onBadge: (n) => { state.notifUnread = n; const b = document.getElementById('activity-badge'); b.textContent = String(n); b.style.display = n > 0 ? 'block' : 'none'; },
+  sharesLink: { label: 'Partages et invités', onClick: () => openSharesView() },
+  footer: 'Pour moi : ce qu\'on t\'adresse. Activité : ce que les invités et les clients API ont fait.',
+  onOpen: (item) => openNotifTarget(item),
+});
+document.getElementById('activity-btn').addEventListener('click', () => notifCenter.toggle());
+
+// Clic sur une entrée : la card du mémo, fil déplié pour un commentaire ; la vue Partages pour un
+// invité ou un rôle ; la Corbeille si le mémo y est.
+function openNotifTarget(item) {
+  if (['guest_new', 'role_request', 'role_granted'].includes(item.kind)) { openSharesView(); return; }
+  if (!item.memo_id) return;
+  if (item.memo_deleted) { notify('Ce mémo est dans la Corbeille.', { title: '🗑 Corbeille' }).then(() => openTrashView()); return; }
+  const memo = state.memos.find(m => m.id === item.memo_id);
+  if (!memo) { notify('Ce mémo n\'est plus accessible.', { error: true }); return; }
+  state.view = 'memos';
+  state.memoProject = memo.project_id || 'all';
+  state.memoFilter = 'all';
+  state.search = ''; if (typeof searchInput !== 'undefined') searchInput.value = '';
+  expandedMemos.add(memo.id);
+  renderAll();
+  setTimeout(() => {
+    if (!scrollToMemo(memo.id)) { state.memoProject = 'all'; renderAll(); setTimeout(() => scrollToMemo(memo.id), 80); }
+    if (['comment', 'mention', 'reply'].includes(item.kind)) openCommentsPopin(memo, () => renderAll());
+  }, 80);
+}
 
 async function openSharesView() {
   state.view = 'shares';
   renderAll();
-  await api('/api/activity/seen', { method: 'POST' });
   await refreshActivityBadge();
   renderSidebar();
 }

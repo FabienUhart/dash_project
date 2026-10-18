@@ -130,6 +130,10 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | POST    | `/api/memos/<id>/comments/seen` | Marque les commentaires du mémo « vus » (propriétaire) |
 | DELETE  | `/api/comments/<id>`       | Supprime un commentaire (propriétaire)         |
 | GET     | `/api/qr?data=<url>`       | QR code du texte/URL, en SVG                   |
+| GET     | `/api/notifications?level=me\|activity&cursor&limit` | **[NOTIF-CENTER]** Centre de notifications du propriétaire : `{items, next_cursor, unread_me}` ; `me` = ce qu'on m'adresse (compte dans la cloche), `activity` = ce que les invités et l'API ont fait |
+| POST    | `/api/notifications/read`  | **[NOTIF-CENTER]** `{ids:[…]}`, `{level, all:true}` ou `{memo_id}` → `{unread_me}` |
+| GET / POST | `/share/<token>/notifications` · `…/read` | **[NOTIF-CENTER]** Même chose pour un invité approuvé, scopé à SON partage (destinataire déduit du jeton, double filtre `share_id`) ; hub : `/share/hub/<token>/notifications` agrège ses partages |
+| GET / POST | `/api/v1/notifications` · `…/read` | **[NOTIF-CENTER]** Idem pour l'API v1 (jeton `read` / `write`) ; outil MCP `get_notifications` |
 | GET     | `/api/settings`            | Réglages (`{owner_name, map_marker_color, reaction_emojis, smtp_enabled, extra_tz}`) — `extra_tz` = horloge secondaire [TOOLBAR-LAYOUT], réglage serveur (tous les appareils) |
 | PUT     | `/api/settings`            | Change le nom du propriétaire (`{owner_name}`) |
 | GET     | `/api/projects`            | Liste avec `memo_count` (mémos en cours)       |

@@ -7526,6 +7526,7 @@ const HDR_ICONS = {
   'zoom-in': ['M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0', 'M7 10l6 0', 'M10 7l0 6', 'M21 21l-6 -6'],
   'zoom-out': ['M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0', 'M7 10l6 0', 'M21 21l-6 -6'],
   x: ['M18 6l-12 12', 'M6 6l12 12'],
+  bell: ['M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6', 'M9 17v1a3 3 0 0 0 6 0v-1'],  // [NOTIF-CENTER]
   'chevron-left': ['M15 6l-6 6l6 6'],
   'chevron-right': ['M9 6l6 6l-6 6'],
   'player-stop': ['M5 5m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z'],
@@ -8695,4 +8696,290 @@ function attachSearchUI(cfg) {
 
   return { refreshHelp, positionHelp, openSheet, closeSheet, sheetOpen: () => !!(sheet && sheet.open) };
 }
+
+/* ═══ [NOTIF-CENTER] Centre de notifications — composant PARTAGÉ owner / share / hub (ADR-001) ═══
+   La cloche ouvre un panneau : desktop (> 900 px) = popover 760 px ancré sous la cloche (non modal,
+   fermeture clic dehors + Échap) ; mobile = feuille qui monte du bas (gabarit `#folders-sheet`).
+   UN SEUL <dialog>, deux géométries en CSS ; entrée CSS seulement (invariant 8, jamais de GSAP) ;
+   `display` SEULEMENT dans `[open]` (sinon fantôme non modal infermable). Onglets en `.cover-seg`,
+   boutons `.prio-btn`, pastilles `.badge` (invariant 9). Les données viennent de `cfg` : la page
+   fournit `fetch(level, cursor)`, `markRead(payload)`, `onOpen(item)`, `onBadge(n)`, `footer`,
+   `sharesLink` — le composant ne connaît ni `state` ni `DATA`. */
+function _notifStyle() {
+  if (document.getElementById('notif-style')) return;
+  if (typeof _coverStyle === 'function') _coverStyle();
+  const st = document.createElement('style'); st.id = 'notif-style';
+  st.textContent =
+      '#notif-dlg:not([open]){display:none}'
+    + '#notif-dlg{border:1px solid var(--border);background:var(--panel);color:var(--text);padding:0;margin:0;'
+    + 'border-radius:14px;box-shadow:var(--shadow-lg,0 12px 40px rgba(0,0,0,.45));width:min(760px,calc(100vw - 32px));'
+    + 'max-height:min(80vh,720px);display:flex;flex-direction:column;position:fixed;inset:auto;z-index:60}'
+    + '#notif-dlg[open]{animation:notif-in .16s ease-out}'
+    + '@keyframes notif-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}'
+    + '@media (prefers-reduced-motion: reduce){ #notif-dlg[open]{animation-duration:.01s}}'   /* espace volontaire : accolade + dièse collés = début de commentaire Jinja */
+    + '#notif-dlg::backdrop{background:transparent}'
+    + '.notif-head{display:flex;align-items:center;gap:.6rem;padding:.75rem .9rem .4rem;flex:0 0 auto}'
+    + '.notif-title{font-weight:700;font-size:.95rem}'
+    + '.notif-shares{margin-left:auto;font-size:.78rem;color:var(--muted);background:none;border:none;cursor:pointer;padding:.2rem .4rem;border-radius:6px}'
+    + '.notif-shares:hover{color:var(--text);background:var(--panel-2)}'
+    + '.notif-x{margin-left:.2rem}'
+    + '.notif-tools{display:flex;align-items:center;gap:.5rem;padding:.2rem .9rem .5rem;flex:0 0 auto;flex-wrap:wrap}'
+    + '.notif-tools .notif-readall{margin-left:auto}'
+    + '.notif-list{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 .4rem .4rem}'
+    + '.notif-row{display:grid;grid-template-columns:34px 1fr auto;gap:.6rem;padding:.6rem .5rem;border-radius:10px;cursor:pointer;align-items:start;position:relative}'
+    + '.notif-row:hover{background:var(--panel-2)}'
+    + '.notif-row.unread{background:color-mix(in srgb,var(--accent) 6%,transparent)}'
+    + '.notif-row.unread:hover{background:color-mix(in srgb,var(--accent) 12%,transparent)}'
+    + '.notif-av{width:34px;height:34px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;color:#fff;flex:0 0 auto}'
+    + '.notif-av.api{background:var(--panel-2);color:var(--muted);border:1px solid var(--border)}'
+    + '.notif-body{min-width:0}'
+    + '.notif-what{font-size:.88rem;line-height:1.35}'
+    + '.notif-what b{font-weight:600}'
+    + '.notif-path{font-size:.8rem;color:var(--muted);margin-top:.1rem;line-height:1.35;word-break:break-word}'
+    + '.notif-path .np-sep{opacity:.6;margin:0 .3rem}'
+    + '.notif-quote{margin:.3rem 0 0;padding:.15rem 0 .15rem .6rem;border-left:2px solid var(--border);font-style:italic;color:var(--muted);font-size:.82rem;line-height:1.35;word-break:break-word}'
+    + '.notif-when{font-size:.74rem;color:var(--muted);white-space:nowrap;padding-top:.15rem}'
+    + '.notif-dot{position:absolute;right:.55rem;bottom:.7rem;width:8px;height:8px;border-radius:50%;background:var(--orange,#f59e0b)}'
+    + '.notif-empty{padding:1.4rem .9rem;color:var(--muted);font-size:.85rem;text-align:center}'
+    + '.notif-more{padding:.3rem .9rem .5rem;flex:0 0 auto;text-align:center}'
+    + '.notif-foot{padding:.4rem .9rem .7rem;font-size:.74rem;color:var(--muted);border-top:1px solid var(--border);flex:0 0 auto}'
+    + '.notif-chip{color:var(--orange,#f59e0b)!important;border:1px solid color-mix(in srgb,var(--orange,#f59e0b) 55%,transparent);cursor:pointer}'
+    + '.notif-chip:hover{background:color-mix(in srgb,var(--orange,#f59e0b) 14%,transparent)}'
+    + '.notif-bell{position:relative}'
+    + '.notif-badge{position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;font-size:.72rem;font-weight:700;border-radius:999px;padding:.05rem .3rem;min-width:1rem;text-align:center;display:none;line-height:1.2}'
+    + '@media (max-width: 900px){'
+    +   '#notif-dlg{inset:auto 0 0 0!important;width:100%!important;max-width:none;max-height:none;height:86vh;border-radius:16px 16px 0 0;border:none;'
+    +   'box-shadow:0 -8px 30px rgba(0,0,0,.45);padding-bottom:env(safe-area-inset-bottom,0px)}'
+    +   '#notif-dlg::backdrop{background:rgba(0,0,0,.5)}'
+    +   '@keyframes notif-in{from{transform:translateY(14%);opacity:.6}to{transform:none;opacity:1}}'
+    +   '.notif-row{grid-template-columns:30px 1fr}'
+    +   '.notif-when{grid-column:2;padding-top:0}'
+    +   '.notif-path{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}'
+    + '}';
+  document.head.appendChild(st);
+}
+
+// Date relative FR courte (pur, identique owner/invité). Le titre du nœud porte l'absolue.
+function notifRelTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'à l\'instant';
+  if (s < 3600) return 'il y a ' + Math.floor(s / 60) + ' min';
+  if (s < 86400) return 'il y a ' + Math.floor(s / 3600) + ' h';
+  const j = Math.floor(s / 86400);
+  if (j < 30) return 'il y a ' + j + ' j';
+  const mo = Math.floor(j / 30);
+  return mo < 12 ? 'il y a ' + mo + ' mois' : 'il y a ' + Math.floor(mo / 12) + ' an' + (Math.floor(mo / 12) > 1 ? 's' : '');
+}
+function notifAbsTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso || '';
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+// Couleur stable dérivée du nom (même doctrine que les pastilles d'assignés : teinte par hachage).
+function notifHue(name) {
+  let h = 0; const s = String(name || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+const NOTIF_ROLE_LABEL = { admin: 'Admin', editor: 'Éditeur', commenter: 'Commentateur', viewer: 'Lecteur' };
+// « qui + quoi », au singulier ou groupé (`n` entrées regroupées). `me` = la page est celle du destinataire.
+function notifWhat(item, n) {
+  const k = item.kind, plur = n > 1;
+  const memos = plur ? n + ' mémos' : 'un mémo';
+  switch (k) {
+    case 'comment': return plur ? 'a commenté ' + n + ' fois' : 'a commenté';
+    case 'mention': return 't\'a mentionné' + (plur ? ' (' + n + ')' : '');
+    case 'reply': return 'a répondu à ton commentaire' + (plur ? ' (' + n + ')' : '');
+    case 'vote': return (item.excerpt && item.excerpt.indexOf('❤') >= 0) ? 'a mis un coup de cœur' : 'a voté';
+    case 'guest_new': return 'a rejoint le dashboard';
+    case 'role_request': return 'demande un rôle';
+    case 'role_granted': return 'a réglé un rôle' + (item.excerpt ? ' : ' + item.excerpt : '');
+    case 'edit': return plur ? 'a modifié ' + memos : 'a modifié';
+    case 'memo_create': return 'a créé ' + memos;
+    case 'memo_move': return 'a déplacé ' + memos + (item.excerpt && !plur ? ' vers « ' + item.excerpt + ' »' : '');
+    case 'memo_delete': return 'a mis ' + memos + ' à la corbeille';
+    case 'image_delete': return 'a supprimé des photos' + (item.excerpt && !plur ? ' (' + item.excerpt + ')' : '');
+    case 'api_write': return plur ? n + ' écritures (' + (item.excerpt || 'API') + '…)' : (item.excerpt || 'a écrit') + ' via l\'API';
+    default: return k;
+  }
+}
+const NOTIF_QUOTE_KINDS = { comment: 1, mention: 1, reply: 1, role_request: 1 };
+
+// Une entrée du panneau. `item` = ligne de l'API (+ `memo_title`, `project_name`, `share_name`,
+// `memo_deleted`, `read`) ; `group` = nombre d'entrées fusionnées (activité) ; `cfg.onOpen(item)`.
+function notifRow(item, cfg, group) {
+  const n = group || 1;
+  const row = el('div', { class: 'notif-row' + (item.read ? '' : ' unread'), attrs: { 'data-notif-id': item.id, 'data-kind': item.kind, role: 'button', tabindex: '0' } });
+  const av = el('span', { class: 'notif-av' + (item.actor_kind === 'api' ? ' api' : ''), text: item.actor_kind === 'api' ? '⚙' : initials(item.actor) });
+  if (item.actor_kind !== 'api') av.style.background = 'hsl(' + notifHue(item.actor) + ' 45% 42%)';
+  row.appendChild(av);
+  const body = el('div', { class: 'notif-body' });
+  const what = el('div', { class: 'notif-what' });
+  what.appendChild(el('b', { text: item.actor || '?' }));
+  what.appendChild(document.createTextNode(' ' + notifWhat(item, n)));
+  body.appendChild(what);
+  const path = el('div', { class: 'notif-path' });
+  const parts = [];
+  if (item.share_name) parts.push(item.share_name);
+  if (item.project_name && item.project_name !== item.share_name) parts.push(item.project_name);
+  if (item.kind === 'guest_new' || item.kind === 'role_request' || item.kind === 'role_granted') { if (item.title && !parts.includes(item.title)) parts.push(item.title); }
+  else if (n === 1 && (item.memo_title || item.title)) parts.push(item.memo_title || item.title);
+  parts.forEach((p, i) => { if (i) path.appendChild(el('span', { class: 'np-sep', text: '›' })); path.appendChild(el('span', { text: p })); });
+  if (item.memo_deleted) path.appendChild(el('span', { class: 'np-sep', text: '· dans la Corbeille' }));
+  if (parts.length) body.appendChild(path);
+  if (n === 1 && NOTIF_QUOTE_KINDS[item.kind] && item.excerpt) body.appendChild(el('div', { class: 'notif-quote', text: item.excerpt }));
+  row.appendChild(body);
+  row.appendChild(el('span', { class: 'notif-when', text: notifRelTime(item.created_at), attrs: { title: notifAbsTime(item.created_at) } }));
+  if (!item.read) row.appendChild(el('span', { class: 'notif-dot', attrs: { 'aria-label': 'non lu' } }));
+  const go = () => { if (cfg && cfg.onOpen) cfg.onOpen(item, row); };
+  row.addEventListener('click', go);
+  row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  return row;
+}
+
+// Regroupe à l'AFFICHAGE les entrées d'activité consécutives (même acteur, même kind, même dossier,
+// dans la même heure) : « Claude chat a créé 7 mémos — Dash ». Rend [[item, n]].
+function notifGroup(items, level) {
+  if (level !== 'activity') return items.map(i => [i, 1]);
+  const out = [];
+  items.forEach(i => {
+    const last = out[out.length - 1];
+    if (last && last[0].actor === i.actor && last[0].kind === i.kind && (last[0].project_id || 0) === (i.project_id || 0)
+        && Math.abs(new Date(last[0].created_at) - new Date(i.created_at)) < 3600 * 1000) { last[1] += 1; last[2].push(i); }
+    else out.push([i, 1, [i]]);
+  });
+  return out;
+}
+
+// La cloche des pages invitées (même gabarit que `guestGearButton`) : bouton + pastille rouge.
+function notifBellButton(cls, onClick) {
+  _notifStyle();
+  const b = el('button', { class: (cls || '') + ' notif-bell', attrs: { type: 'button', id: 'notif-btn', title: 'Notifications', 'aria-label': 'Notifications', 'aria-haspopup': 'dialog', 'aria-expanded': 'false' } });
+  b.appendChild(hdrIconAt('bell', 18));
+  b.appendChild(el('span', { class: 'notif-badge', attrs: { id: 'notif-badge' } }));
+  b.addEventListener('click', onClick);
+  return b;
+}
+function notifSetBadge(n, badgeEl) {
+  const badge = badgeEl || document.getElementById('notif-badge');
+  if (!badge) return;
+  n = Number(n) || 0;
+  badge.textContent = String(n);
+  badge.style.display = n > 0 ? 'block' : 'none';
+}
+
+/* Le panneau. `notifPanel(cfg)` rend {open, close, toggle, refresh}. cfg :
+   fetch(level, cursor) → Promise {items, next_cursor, unread_me} ; markRead(payload) → Promise {unread_me} ;
+   onOpen(item) ; onBadge(n) ; anchor = la cloche ; footer = texte ; sharesLink = {label, onClick} (owner). */
+function notifPanel(cfg) {
+  _notifStyle();
+  let dlg = document.getElementById('notif-dlg');
+  if (!dlg) {
+    dlg = document.createElement('dialog'); dlg.id = 'notif-dlg'; dlg.setAttribute('aria-label', 'Notifications');
+    document.body.appendChild(dlg);
+  }
+  const st = { level: 'me', items: [], cursor: null, unread: 0, open: false };
+  const isMobile = () => window.matchMedia('(max-width: 900px)').matches;
+  const anchorEl = () => (typeof cfg.anchor === 'function' ? cfg.anchor() : cfg.anchor) || document.getElementById('notif-btn') || document.getElementById('activity-btn');
+
+  function place() {
+    if (isMobile()) { dlg.style.top = ''; dlg.style.right = ''; dlg.style.left = ''; return; }
+    const a = anchorEl();
+    const r = a ? a.getBoundingClientRect() : { bottom: 56, right: window.innerWidth - 16 };
+    dlg.style.top = Math.round(r.bottom + 8) + 'px';
+    dlg.style.right = Math.max(12, Math.round(window.innerWidth - r.right)) + 'px';
+    dlg.style.left = 'auto';
+  }
+  function render() {
+    dlg.innerHTML = '';
+    const head = el('div', { class: 'notif-head' });
+    head.appendChild(el('span', { class: 'notif-title', text: 'Notifications' }));
+    if (cfg.sharesLink) head.appendChild(el('button', { class: 'notif-shares', text: cfg.sharesLink.label + ' →', attrs: { type: 'button', id: 'notif-shares-link' }, on: { click: () => { close(); cfg.sharesLink.onClick(); } } }));
+    const x = el('button', { class: 'icon notif-x', attrs: { type: 'button', id: 'notif-close', title: 'Fermer', 'aria-label': 'Fermer' }, on: { click: close } });
+    x.appendChild(hdrIconAt('x', 16));
+    if (!cfg.sharesLink) x.style.marginLeft = 'auto';
+    head.appendChild(x);
+    dlg.appendChild(head);
+    const tools = el('div', { class: 'notif-tools' });
+    const seg = el('div', { class: 'cover-seg notif-tabs', attrs: { role: 'tablist', 'aria-label': 'Niveau' } });
+    const unreadAct = st.level === 'activity' ? st.items.filter(i => !i.read).length : null;
+    [['me', 'Pour moi' + (st.unread ? ' (' + st.unread + ')' : '')], ['activity', 'Activité' + (unreadAct ? ' · ' + unreadAct : '')]].forEach(([lv, label]) => {
+      seg.appendChild(el('button', { class: st.level === lv ? 'on' : '', text: label, attrs: { type: 'button', 'data-level': lv, role: 'tab', 'aria-selected': st.level === lv ? 'true' : 'false' },
+        on: { click: () => { if (st.level !== lv) { st.level = lv; load(true); } } } }));
+    });
+    tools.appendChild(seg);
+    if (st.items.some(i => !i.read)) tools.appendChild(el('button', { class: 'prio-btn notif-readall', text: 'Tout marquer lu', attrs: { type: 'button', id: 'notif-readall' },
+      on: { click: async () => { const r = await cfg.markRead({ level: st.level, all: true }); st.items.forEach(i => { i.read = true; }); setUnread(r && r.unread_me); render(); } } }));
+    dlg.appendChild(tools);
+    const list = el('div', { class: 'notif-list', attrs: { id: 'notif-list' } });
+    if (!st.items.length) list.appendChild(el('div', { class: 'notif-empty', text: st.level === 'me' ? 'Rien pour toi pour le moment.' : 'Aucune activité pour le moment.' }));
+    notifGroup(st.items, st.level).forEach(([i, n, members]) => {
+      const row = notifRow(i, { onOpen: (item, rowEl) => openItem(item, rowEl, members) }, n);
+      list.appendChild(row);
+    });
+    dlg.appendChild(list);
+    if (st.cursor) dlg.appendChild(el('div', { class: 'notif-more' }, el('button', { class: 'prio-btn', text: 'Voir plus', attrs: { type: 'button', id: 'notif-more' }, on: { click: () => load(false) } })));
+    if (cfg.footer) dlg.appendChild(el('div', { class: 'notif-foot', text: cfg.footer }));
+  }
+  function setUnread(n) {
+    if (n == null) return;
+    st.unread = Number(n) || 0;
+    if (cfg.onBadge) cfg.onBadge(st.unread);
+  }
+  async function load(reset) {
+    try {
+      const r = await cfg.fetch(st.level, reset ? null : st.cursor);
+      st.items = reset ? (r.items || []) : st.items.concat(r.items || []);
+      st.cursor = r.next_cursor || null;
+      setUnread(r.unread_me);
+    } catch (_) { if (reset) st.items = []; st.cursor = null; }
+    render();
+  }
+  async function openItem(item, rowEl, members) {
+    const ids = (members || [item]).filter(i => !i.read).map(i => i.id);
+    if (ids.length) {
+      try { const r = await cfg.markRead({ ids }); setUnread(r && r.unread_me); } catch (_) {}
+      (members || [item]).forEach(i => { i.read = true; });
+      if (rowEl) { rowEl.classList.remove('unread'); const d = rowEl.querySelector('.notif-dot'); if (d) d.remove(); }
+    }
+    close();
+    if (cfg.onOpen) cfg.onOpen(item);
+  }
+  function onDocClick(e) { if (st.open && !dlg.contains(e.target) && !(anchorEl() && anchorEl().contains(e.target))) close(); }
+  function onKey(e) { if (e.key === 'Escape' && st.open) { e.preventDefault(); close(); } }
+  function open() {
+    if (st.open) return;
+    st.open = true;
+    place();
+    if (isMobile()) { if (!dlg.open) dlg.showModal(); }
+    else { if (!dlg.open) dlg.show(); setTimeout(() => document.addEventListener('click', onDocClick, true), 0); }
+    document.addEventListener('keydown', onKey, true);
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); }, { once: true });
+    const a = anchorEl(); if (a) a.setAttribute('aria-expanded', 'true');
+    render();
+    load(true);
+  }
+  function close() {
+    if (!st.open) return;
+    st.open = false;
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    if (dlg.open) dlg.close();
+    const a = anchorEl(); if (a) a.setAttribute('aria-expanded', 'false');
+  }
+  window.addEventListener('resize', () => { if (st.open) place(); });
+  return { open, close, toggle: () => (st.open ? close() : open()), refresh: () => (st.open ? load(true) : null), isOpen: () => st.open, state: st };
+}
+
+// Chip « n pour toi » sur une card invitée (orange, gabarit .badge) : clic = lit et retire le chip.
+function notifMemoChip(n, onRead) {
+  _notifStyle();
+  const b = el('span', { class: 'badge notif-chip', text: n + ' pour toi', attrs: { title: n > 1 ? n + ' notifications pour toi sur ce mémo' : 'une notification pour toi sur ce mémo', role: 'button', tabindex: '0' } });
+  const go = async (e) => { e.stopPropagation(); try { await onRead(); } catch (_) {} b.remove(); };
+  b.addEventListener('click', go);
+  return b;
+}
+
 </script>

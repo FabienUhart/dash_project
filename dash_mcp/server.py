@@ -237,6 +237,11 @@ async def get_context(ctx: Context, keywords: str, limit: int = 8) -> str:
     return "\n".join(out)
 
 
+async def get_notifications(ctx: Context, level: str = "me", limit: int = 20) -> dict:
+    params = _clean({"level": level if level in ("me", "activity") else "me", "limit": max(1, min(100, limit))})
+    return await _acall(ctx, "GET", "/notifications", params=params)
+
+
 # ───────────────────────── outils — ÉCRITURE ─────────────────────────
 
 async def create_memo(ctx: Context, title: str, content_text: str | None = None, content_html: str | None = None,
@@ -322,6 +327,7 @@ TOOL_DESCRIPTIONS = {
     "get_counts": "Rend les six chiffres des tuiles du tableau de bord (en cours, en retard, aujourd'hui, planifiés, terminés, historique), pour tout le dashboard ou un dossier.",
     "get_plan": "Rend la vue Plan : les dossiers racines, leurs sous-dossiers et leurs mémos actifs, plus l'Inbox des mémos sans dossier.",
     "whoami": "Dit quel jeton parle : son nom, ses droits (lecture ou écriture), sa source et sa date d'expiration.",
+    "get_notifications": "Rend les notifications du propriétaire : `level` = « me » (ce qu'on lui adresse : commentaires, mentions, réponses, votes, nouveaux invités, rôles) ou « activity » (ce que les invités et les clients API ont fait), avec le compteur de non-lues.",
     "get_context": "Donne en un appel le contexte utile sur un sujet : les mémos trouvés par mots-clés, puis les derniers modifiés et ceux du jour, dédoublonnés et résumés en texte compact (titre, dossier, dates, extrait, sous-tâches).",
     "create_memo": "Crée un mémo : titre, contenu en texte brut (`content_text`) ou HTML (`content_html`), dossier, dates d'échéance (début/fin, heure), priorité, sous-tâches, #tags et liens.",
     "update_memo": "Modifie un mémo existant, champ par champ : titre, contenu (texte brut ou HTML), dossier, dates, heure, priorité. Les champs omis ne bougent pas.",

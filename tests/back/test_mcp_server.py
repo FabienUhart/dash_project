@@ -10,7 +10,7 @@ Ce que ces tests PROTÈGENT :
 1. `/mcp/` sans jeton (ni dans l'URL ni en Bearer) → 401 avant tout ;
 2. un jeton RÉVOQUÉ dans l'URL → l'outil répond l'erreur « jeton invalide ou révoqué » (c'est l'API qui
    tranche, le MCP ne valide rien) ;
-3. `tools/list` = les 21 outils du brief, chacun avec une description française non vide ;
+3. `tools/list` = les 21 outils du brief + `get_notifications` ([NOTIF-CENTER]), chacun avec une description française non vide ;
 4. `get_counts` rend exactement `/counts` ;
 5. `create_memo` écrit en base avec la `source` du jeton et laisse une ligne d'audit API ;
 6. `delete_memo` = CORBEILLE (jamais une purge), `get_memo` ensuite → erreur « introuvable ou en corbeille » ;
@@ -109,7 +109,7 @@ def _db(app_module):
 
 
 TOOLS = {
-    "get_tree", "list_memos", "get_memo", "search_memos", "get_counts", "get_plan", "whoami", "get_context",
+    "get_tree", "list_memos", "get_memo", "search_memos", "get_counts", "get_plan", "whoami", "get_context", "get_notifications",
     "create_memo", "update_memo", "append_to_memo", "move_memo", "complete_memo", "reopen_memo", "add_subtask",
     "toggle_subtask", "add_url", "add_comment", "delete_memo", "restore_memo", "create_folder",
 }
@@ -154,7 +154,7 @@ async def test_tools_list_21_outils_decrits(client, mcp_app):
         tools = (await s.list_tools()).tools
     names = {x.name for x in tools}
     assert names == TOOLS, names ^ TOOLS
-    assert len(tools) == 21
+    assert len(tools) == 22   # [NOTIF-CENTER] + get_notifications
     for x in tools:
         assert x.description and len(x.description.strip()) > 15, x.name
         assert "é" in x.description or "è" in x.description or " le " in x.description or " un " in x.description or " la " in x.description, \

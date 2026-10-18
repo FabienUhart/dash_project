@@ -1170,6 +1170,49 @@ const themeBtn = document.getElementById('theme-btn');
 initThemePref();
 { const _hdr = document.querySelector('header');
   if (_hdr) _hdr.appendChild(guestGearButton('icon', () => openGuestSettings({}))); }
+// [NOTIF-CENTER] la cloche de l'invité : même composant que l'owner, scopée à CE partage par le serveur.
+const notifCenter = notifPanel({
+  anchor: () => document.getElementById('notif-btn'),
+  fetch: async (level, cursor) => {
+    const r = await fetch(API + '/notifications?level=' + level + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''), { headers: { 'X-Guest-Token': guestToken() } });
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
+  },
+  markRead: async (payload) => {
+    const r = await fetch(API + '/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify(payload) });
+    return r.ok ? r.json() : {};
+  },
+  onBadge: (n) => notifSetBadge(n),
+  footer: 'Seulement ce qu\'on t\'adresse dans ce dossier.',
+  onOpen: (item) => {
+    if (!item.memo_id) return;
+    const m = (DATA.memos || []).find(x => x.id === item.memo_id);
+    if (!m) return;
+    if (DATA.memo_unread) delete DATA.memo_unread[String(m.id)];
+    const card = document.querySelector('.task[data-memo-id="' + m.id + '"]');
+    if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.classList.add('memo-flash'); setTimeout(() => card.classList.remove('memo-flash'), 1100); card.querySelectorAll('.notif-chip').forEach(c => c.remove()); }
+    // Un commentaire, une mention, une réponse → le FIL (pop-in 💬) ; le reste → la fiche 👁 (retouche Cowork).
+    if (['comment', 'mention', 'reply'].includes(item.kind)) openShareCommentsPopin(m);
+    else openMemoView(shareMemoViewCfg(), m.id);
+  },
+});
+// La cloche n'est posée que pour un invité APPROUVÉ — statut connu après le chargement des données,
+// donc depuis `load()` (idempotent), pas au boot.
+function ensureNotifBell() {
+  const _hdr = document.querySelector('header');
+  if (!_hdr || document.getElementById('notif-btn') || !approved()) return;
+  _hdr.appendChild(notifBellButton('icon', () => notifCenter.toggle()));
+}
+// Lit ce qu'on m'adressait sur un mémo (chip « n pour toi ») — ouverture de la fiche, clic sur le chip.
+async function notifReadMemo(memoId) {
+  if (!DATA.memo_unread || !DATA.memo_unread[String(memoId)]) return;
+  delete DATA.memo_unread[String(memoId)];
+  try {
+    const r = await fetch(API + '/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Guest-Token': guestToken() }, body: JSON.stringify({ memo_id: memoId }) });
+    if (r.ok) { const j = await r.json(); DATA.unread_me = j.unread_me; notifSetBadge(j.unread_me); }
+  } catch (_) {}
+  document.querySelectorAll('.task[data-memo-id="' + memoId + '"] .notif-chip').forEach(c => c.remove());
+}
 
 /* [GUEST-ROLES V2 · T4b] « Gérer les accès » — visible UNIQUEMENT pour un Admin (maquette ①).
    Le bouton se pose à côté de l'engrenage : même famille de commandes (l'engrenage règle ce qui
@@ -3779,6 +3822,9 @@ function render() {
       onAttach: (memo.attachments || []).length ? () => openShareMemoAttachments(memo) : null,
     });
     if (_pic) content.appendChild(_pic);
+    // [NOTIF-CENTER] chip « n pour toi » : des notifications non lues pour MOI sur ce mémo.
+    { const _nu = DATA.memo_unread && DATA.memo_unread[String(memo.id)];
+      if (_nu) content.appendChild(notifMemoChip(_nu, () => notifReadMemo(memo.id))); }
     // [MEMO-LINKS] D3 : chips des deux côtés ; clic = éditeur du mémo relié (si droit d'éditer).
     const _lk = memoLinkChips(memo.links, (otherId) => {
       const target = (DATA.memos || []).find((x) => x.id === otherId);
@@ -4020,6 +4066,7 @@ async function load() {
     return;
   }
   DATA = await r.json();
+  ensureNotifBell(); notifSetBadge(DATA.unread_me || 0);  // [NOTIF-CENTER] la cloche suit chaque chargement
   if (Array.isArray(DATA.reaction_emojis)) REACTION_EMOJIS = DATA.reaction_emojis;  // [REACTION-PALETTE]
   promptReloadIfStale(EMBEDDED_BUILD, DATA.build_version);  // [UPDATE-PROMPT]
   await refreshGuest();
