@@ -143,6 +143,18 @@ Ce qui marche et ne doit pas régresser : `p#`/`l#`/`m#`, `#étiquette` (match e
 
 Cas déclencheur : mémo « Réparation iPad M5 » en prod, un **lien de suivi** reçu par mail à accrocher au mémo comme une date ou un fichier, pas noyé dans le texte. Attendu : dans l'éditeur, à côté de « Fichiers », un bloc **« Liens »** (ajouter une URL + libellé optionnel, retirer, réordonner) ; en pied de card / fiche 👁 / page de lecture, la **liste des URL** cliquables (favicon + titre OG via `_fetch_og` de [LINK-REFS]) ; les **URL présentes dans le texte** détectées (détecteur d'[EDITOR-AUTOLINK]) et listées au même endroit, dédoublonnées, sans stockage ; parité invités (lecture, ajout si contributeur). Reco : table additive `memo_urls (memo_id, url, label, position)` → **export v29** (lot lancé le 15 oct., [MEMO-TYPES] visera v30) ; pas dans la vue Liens par défaut (un lien de suivi n'est pas un favori), bouton « Envoyer vers Liens » si besoin. Maquette avant brief. Mémo prod 403.
 
+### 🧹 DETTE — [CI-HYGIENE] : zéro avertissement, zéro skip (Fabien, 18 oct. 2026 : « faut qu'on répare tout aujourd'hui »)
+
+Vu sur le run Deploy de V30.1.283 : (1) `DeprecationWarning: Use streamable_http_client instead` dans `tests/back/test_mcp_server.py` → renommer l'appel du SDK MCP (et vérifier `dash_mcp/server.py`) ; (2) les 2 `SKIPPED` de `tests/back/test_invariants.py` l.93 (fixture export v1 minimal à charger et importer) et l.105 (`DELETE /api/shares/<id>` doit purger `share_guests` + `guest_roles`, `role_requests`, `admin_actions`) → les écrire rouge-vert, plus de skip ; (3) `Node.js 20 is deprecated` → monter `actions/checkout@v5` et `actions/setup-python@v6` (ou versions courantes) dans `.github/workflows/*.yml` ; (4) `punycode` deprecated (node) : disparaît avec (3) ; (5) les 9 warnings pytest restants : lister et corriger ou filtrer explicitement dans `pytest.ini` avec justification. Critère de sortie : `make test` et le run CI sans aucun avertissement ni skip. Cible V30.2.284, à faire **juste après la validation du connecteur MCP**.
+
+### 🌱 Graine — [TITLE-OVERFLOW] : un texte long collé dans le titre ne doit jamais être coupé (constat 18 oct. 2026)
+
+Trois notes Hue / Alexa collées dans le champ titre (mémos prod 405–407) ont été tronquées à 200 caractères, la fin est perdue. **Attendu** : à la saisie, au collage et à la dictée, l'éditeur garde la première ligne (ou la première phrase) comme titre et bascule le reste dans le contenu ; même règle côté `POST /api/v1/memos` et outil MCP `create_memo` (un titre > limite n'est pas tronqué silencieusement : découpe ou 422 explicite). Zéro perte, test rouge d'abord : coller 600 caractères dans le titre → titre court + contenu complet. Front pur + API, export inchangé. Mémo prod 415.
+
+### 📌 Index — idées de ce fichier qui ont un mémo dans Dash (dossier Dash, 18 oct. 2026)
+
+[DASH-API] 401 · [MEMO-URLS] 403 (livré) · plans [DASH-API] 408/410 · bugs éditeur 409 (livré) · [NOTIF-CENTER] 411 · [GUEST-AVATAR]+[GUEST-WALL] 412 · [BROWSER-EXT] 413 · [DASH-API-C] 414 · [TITLE-OVERFLOW] 415 · « À faire Dash (octobre 2026) » 416 (GitHub privé, export v30, [CI-HYGIENE], [DASH-API-A2], ménage). Les mémos Idées de juin (53, 54, 59–62) sont déjà reportés dans les sections Quick wins / Confort / Moyens / Plus ambitieux ci-dessous.
+
 ### 🌱 Graine — [BROWSER-EXT] : extension Opera/Chrome, capture de pages façon Evernote (Fabien, 18 oct. 2026)
 
 Remplace [BROWSER-EXTENSION] et le bookmarklet [WEB-CAPTURE]. Manifest v3, un seul code Opera + Chrome, chargée depuis `extension/` du repo (pas de store), distribuée par le dashboard lui-même.

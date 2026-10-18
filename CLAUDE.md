@@ -141,6 +141,8 @@ Déplacé dans **[`docs/HISTORIQUE.md`](docs/HISTORIQUE.md)** (chargé à la dem
 À lire quand il faut le contexte d'une feature ancienne ; la source de vérité des lots livrés reste
 [`REALISATION.md`](REALISATION.md).
 
+- **18 octobre 2026 — train V30.0.282 → V30.1.283 : Claude lit et écrit le dashboard sans Chrome.** [DASH-API] lot A (**bump export v29 → v30**, `memos.source`) : API v1 à jeton Bearer sous `/api/v1/*`, hors Authelia (règle bypass appliquée en prod le 18/10), invariant 10, onglet Paramètres › Appareils connectés, fixture jumelle des six tuiles. [DASH-MCP] lot B (export inchangé) : serveur MCP `dash_mcp/server.py` (FastMCP, uvicorn 8100 dans le même conteneur via `bin/start.sh`, route Caddy `/mcp*` appliquée le 18/10), 21 outils, connecteur claude.ai « Dash » validé. Incident fail2ban du même jour (test d'intrusion depuis le Mac → ban de la box) : contrôles prod depuis le Zimaboard désormais (`docs/infra/`).
+
 ## Sauvegardes
 
 Sauvegarde quotidienne automatique (`_backup_loop`) dans `data/backups/`, rotation `BACKUP_KEEP_DAYS`. Ne jamais committer `data/`.
