@@ -46,6 +46,11 @@ docker restart authelia
 
 ## 3. Test d'intrusion prod (après déploiement + règle)
 
+> ⚠ **Depuis le Mac, ce test fait bannir la box par fail2ban** (tout 401 compte, `maxretry 5` en 10 min, et l'IP
+> publique dynamique n'est pas forcément dans `ignoreip`) — vécu le 18 oct. 2026, voir
+> `fail2ban-incident-20261018.md`. Le faire depuis le Zimaboard (`--resolve dash.fabnode.dev:443:127.0.0.1`)
+> ou s'assurer d'abord que l'IP publique courante est ignorée.
+
 ```bash
 # sans jeton → on ATTEINT l'app (401 JSON), PAS la page Authelia (302/HTML)
 curl -si https://dash.<domaine>/api/v1/me | head -1            # HTTP/2 401
@@ -60,7 +65,7 @@ curl -si https://dash.<domaine>/api/tokens | head -1
 ## 4. fail2ban — les 401 de l'API sont DÉJÀ couverts
 
 Constaté le 18 oct. 2026 sur le Zimaboard : la jail `caddy-auth` existante (`/etc/fail2ban/jail.d/caddy.local`,
-`maxretry 5`, `findtime 600`, `bantime 3600`, `ignoreip 127.0.0.1/8 192.168.1.0/24 + l'IP fixe de Fabien`) utilise
+`maxretry 5`, `findtime 600`, `bantime 3600`, `ignoreip` = `127.0.0.1/8 ::1 192.168.1.0/24 90.30.38.24 homebayonne.duckdns.org` depuis le 18 oct. 2026 — l'IP publique est dynamique, le nom duckdns la suit à chaque reload) utilise
 le filtre `/etc/fail2ban/filter.d/caddy-auth.conf` :
 
 ```
