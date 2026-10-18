@@ -60,11 +60,11 @@ def mcp_app(app_module, monkeypatch):
     return ns
 
 
-def _factory_for(mcp_app):
-    def factory(headers=None, timeout=None, auth=None):
-        return httpx.AsyncClient(transport=httpx.ASGITransport(app=mcp_app.app), base_url="http://mcp.test",
-                                 headers=headers, timeout=timeout, auth=auth, follow_redirects=True)
-    return factory
+def _http_client_for(mcp_app, headers=None):
+    """Le client httpx que `streamable_http_client` (API courante du SDK 1.30, non dépréciée) utilise :
+    branché en ASGI sur notre serveur, pas sur le réseau."""
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=mcp_app.app), base_url="http://mcp.test",
+                             headers=headers, timeout=30.0, follow_redirects=True)
 
 
 class _Session:
@@ -75,10 +75,12 @@ class _Session:
 
     async def __aenter__(self):
         from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client
         self._life = self.mcp_app.mcp.session_manager.run()   # lifespan : ASGITransport ne le joue pas
         await self._life.__aenter__()
-        self._cm = streamablehttp_client(self.url, headers=self.headers, httpx_client_factory=_factory_for(self.mcp_app))
+        self._http = _http_client_for(self.mcp_app, self.headers)
+        await self._http.__aenter__()
+        self._cm = streamable_http_client(self.url, http_client=self._http)
         read, write, _ = await self._cm.__aenter__()
         self._sess = ClientSession(read, write)
         await self._sess.__aenter__()
@@ -88,6 +90,7 @@ class _Session:
     async def __aexit__(self, *exc):
         await self._sess.__aexit__(*exc)
         await self._cm.__aexit__(*exc)
+        await self._http.__aexit__(*exc)
         await self._life.__aexit__(*exc)
 
 

@@ -1,0 +1,27 @@
+{
+  "_doc": "[CI-HYGIENE] Export v1 MINIMAL, à la forme des toutes premières sauvegardes : `memos` est une liste de CHAÎNES (pas d'uid, pas de dates), `categories` une liste de NOMS, `links` sans uid. Un dossier (`projects`, par nom) est ajouté pour la couverture demandée. Joué par tests/back/test_invariants.py::test_v1_export_still_importable : doit s'importer SANS erreur ni perte, pour toujours (invariant 1).",
+  "version": 1,
+  "categories": [
+    "Infra"
+  ],
+  "links": [
+    {
+      "name": "Zimaboard",
+      "descr": "Le serveur",
+      "url_public": "https://dash.exemple.test",
+      "url_local": "http://192.168.1.39:8099",
+      "memo": "Mot de passe dans le trousseau",
+      "category": "Infra"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Maison",
+      "color": ""
+    }
+  ],
+  "memos": [
+    "Changer le filtre de la hotte",
+    "Appeler le plombier"
+  ]
+}

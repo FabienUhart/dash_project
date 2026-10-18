@@ -88,25 +88,94 @@ def test_reimport_same_file_is_idempotent(client):
     assert _memos(client) == before, "Reimport a l'identique a cree des doublons."
 
 
-# --- v1 toujours importable (invariant 1) — squelette à compléter ---------
+# --- v1 toujours importable (invariant 1) ------------------------------------------------------
 
-@pytest.mark.skip(reason="TODO CC : charger un fixture export v1 minimal et l'importer")
 def test_v1_export_still_importable(client):
+    """Un export de la TOUTE première forme (`tests/fixtures/export_v1_min.json` : mémos = chaînes,
+    catégories = noms, liens sans uid, un dossier par nom) doit s'importer pour toujours, sans erreur
+    ni perte, et un second import ne doit rien dupliquer. C'est la promesse de l'invariant 1 : une
+    sauvegarde de 2024 reste restaurable dans la version d'aujourd'hui."""
     import json, os
-    p = os.path.join(os.path.dirname(__file__), "fixtures", "export_v1_min.json")
+    p = os.path.join(os.path.dirname(__file__), "..", "fixtures", "export_v1_min.json")
     with open(p, encoding="utf-8") as f:
         payload = json.load(f)
+    assert payload["version"] == 1 and isinstance(payload["memos"][0], str), "la fixture doit rester un VRAI v1"
+    r = client.post("/api/import", json=payload)
+    assert r.status_code == 200, r.data
+    rapport = r.get_json()
+    assert rapport.get("imported_memos") == 2 and rapport.get("imported") == 1, rapport
+    # rien de perdu : les deux mémos, le lien avec ses deux URL et sa catégorie, le dossier
+    assert _memos(client) == sorted(payload["memos"])
+    liens = client.get("/api/links").get_json()
+    z = [l for l in liens if l["name"] == "Zimaboard"]
+    assert len(z) == 1 and z[0]["url_public"] == "https://dash.exemple.test" and z[0]["url_local"] == "http://192.168.1.39:8099"
+    assert z[0].get("memo") == "Mot de passe dans le trousseau" and z[0].get("descr") == "Le serveur"
+    assert "Infra" in [c["name"] for c in client.get("/api/categories").get_json()]
+    assert "Maison" in [pr["name"] for pr in client.get("/api/projects").get_json()]
+    # et l'import est idempotent (invariant 2) : rejouer le même fichier ne crée aucun doublon
     assert client.post("/api/import", json=payload).status_code == 200
-    assert len(_memos(client)) >= 1
+    assert _memos(client) == sorted(payload["memos"])
+    assert len([l for l in client.get("/api/links").get_json() if l["name"] == "Zimaboard"]) == 1
+    # et ce qui ressort aujourd'hui est du v30, réimportable (round-trip)
+    assert client.get("/api/export").get_json()["version"] == 30
 
 
-# --- Cascades sans orphelin (invariant à écrire quand on attaquera le lot) -
+# --- Cascade sans orphelin : supprimer un partage emporte tout ce qui pendait à ses invités ----
 
-@pytest.mark.skip(reason="TODO CC : DELETE /api/shares/<id> doit purger share_guests "
-                         "(+ guest_roles, role_requests, admin_actions) — à écrire en "
-                         "rouge-vert lors du prochain lot partages")
-def test_delete_share_leaves_no_orphan_guest(client):
-    raise NotImplementedError
+def _table_count(app_module, sql, args):
+    import sqlite3
+    con = sqlite3.connect(app_module.DB_PATH)
+    try:
+        return con.execute(sql, args).fetchone()[0]
+    finally:
+        con.close()
+
+
+def test_delete_share_leaves_no_orphan_guest(client, app_module):
+    """`DELETE /api/shares/<id>` doit purger `share_guests` ET ce qui pend à chaque invité :
+    `guest_roles`, `role_requests`, `admin_actions` (comme cible OU comme acteur). Décor complet :
+    A est nommé admin par le propriétaire, B demande `editor`, A accorde (c'est l'accord par un
+    admin délégué qui écrit `admin_actions`). Les MÉMOS, eux, ne bougent pas (invariant 7)."""
+    pid = _mk_project(client, "Partagé")
+    m = _mk_memo(client, pid, "Le mémo reste")
+    sh = client.post("/api/shares", json={"kind": "project", "target_id": pid}).get_json()
+    sid = sh.get("share_id") or sh["id"]
+    gts = {}
+    for who in ("a", "b"):
+        reg = client.post("/share/%s/register" % sh["token"],
+                          json={"name": who.upper(), "email": "%s@orphelins.ex" % who, "pin": sh["pin"]})
+        assert reg.status_code in (200, 201), reg.data
+        gts[who] = reg.get_json()["guest_token"]
+    ga = _table_count(app_module, "SELECT id FROM share_guests WHERE share_id = ? AND email = ?", (sid, "a@orphelins.ex"))
+    gb = _table_count(app_module, "SELECT id FROM share_guests WHERE share_id = ? AND email = ?", (sid, "b@orphelins.ex"))
+    assert client.put("/api/guests/%d/role" % ga, json={"role": "admin", "project_id": pid}).status_code == 200
+    r = client.post("/share/%s/role-request" % sh["token"], json={"role": "editor"}, headers={"X-Guest-Token": gts["b"]})
+    assert r.status_code in (200, 201), r.data
+    req = _table_count(app_module, "SELECT id FROM role_requests WHERE guest_id = ?", (gb,))
+    r = client.post("/share/%s/role-request/%d" % (sh["token"], req), json={"decision": "grant"},
+                    headers={"X-Guest-Token": gts["a"]})
+    assert r.status_code == 200, r.data
+
+    def compte():
+        return {
+            "share_guests": _table_count(app_module, "SELECT COUNT(*) FROM share_guests WHERE share_id = ?", (sid,)),
+            "guest_roles": _table_count(app_module, "SELECT COUNT(*) FROM guest_roles WHERE guest_id IN (?, ?)", (ga, gb)),
+            "role_requests": _table_count(app_module, "SELECT COUNT(*) FROM role_requests WHERE guest_id IN (?, ?)", (ga, gb)),
+            "admin_actions": _table_count(app_module, "SELECT COUNT(*) FROM admin_actions WHERE target_guest_id IN (?, ?) OR actor_guest_id IN (?, ?)", (ga, gb, ga, gb)),
+        }
+
+    avant = compte()
+    assert all(v >= 1 for v in avant.values()), "le décor doit peupler les 4 tables : %r" % avant
+    assert avant["share_guests"] == 2
+
+    assert client.delete("/api/shares/%d" % sid).status_code == 204
+
+    apres = compte()
+    assert apres == {k: 0 for k in apres}, "orphelins après suppression du partage : %r" % apres
+    assert _table_count(app_module, "SELECT COUNT(*) FROM shares WHERE id = ?", (sid,)) == 0
+    # invariant 7 : le mémo et le dossier sont intacts
+    assert m["id"] in [x["id"] for x in client.get("/api/memos").get_json()]
+    assert pid in [p["id"] for p in client.get("/api/projects").get_json()]
 
 
 # --- Invariant 10 : /api/v1/* n'accepte qu'un Bearer valide ([DASH-API]) -----------------------
