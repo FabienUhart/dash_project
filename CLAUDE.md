@@ -115,6 +115,17 @@ qui s'était installée, et rétablit le workflow d'origine.
 « déploie », « le train part », « GO »). Ni une passe Cowork verte, ni des tests verts, ni « le lot est
 fini » ne valent autorisation. Dans le doute : proposer, ne pas pousser.
 
+### Après le GO : commit, CI, mémoire du projet, graphify — ORDRE STRICT (règle actée le 18 oct. 2026)
+
+1. **Commit + tag + push du lot** (le tag déploie).
+2. **Pendant l'attente de la CI** : uniquement du **texte, léger** — `.claude/memory/MEMORY.md` (état, version, prochain
+   lot), `.claude/session-log.md`, `.claude/handoff.json`, et la **ligne d'historique de ce fichier** pour le lot. Si cela
+   produit un diff versionné, un commit **docs-only** « `docs: mémoire projet après VX.Y.Z` », **SANS tag**, est poussé
+   **après la CI verte du lot** (il ne déclenche pas de déploiement : seul un tag déploie). CI rouge → la mémoire se
+   corrige d'abord (l'état réel prime), puis le commit docs part avec le correctif.
+3. **Après la CI verte ET le commit docs poussé** : `graphify update . --force`, **seul, en dernier** — il travaille sur
+   le commit en place et consomme des ressources. **Jamais avant le commit, jamais en parallèle du build ou des tests.**
+
 (Option « dure » équivalente : un hook `Stop` dans `.claude/settings.local.json` qui lance le rebuild automatiquement — voir le script fourni hors dépôt. Le présent process reste la source de vérité même si le hook n'est pas activé.)
 
 ### Les garde-fous : qui teste où
@@ -142,6 +153,7 @@ Déplacé dans **[`docs/HISTORIQUE.md`](docs/HISTORIQUE.md)** (chargé à la dem
 [`REALISATION.md`](REALISATION.md).
 
 - **18 octobre 2026 — train V30.0.282 → V30.1.283 : Claude lit et écrit le dashboard sans Chrome.** [DASH-API] lot A (**bump export v29 → v30**, `memos.source`) : API v1 à jeton Bearer sous `/api/v1/*`, hors Authelia (règle bypass appliquée en prod le 18/10), invariant 10, onglet Paramètres › Appareils connectés, fixture jumelle des six tuiles. [DASH-MCP] lot B (export inchangé) : serveur MCP `dash_mcp/server.py` (FastMCP, uvicorn 8100 dans le même conteneur via `bin/start.sh`, route Caddy `/mcp*` appliquée le 18/10), 21 outils, connecteur claude.ai « Dash » validé. Incident fail2ban du même jour (test d'intrusion depuis le Mac → ban de la box) : contrôles prod depuis le Zimaboard désormais (`docs/infra/`).
+- **18 octobre 2026 (nuit) — V30.2.284 → V30.3.285.** [CI-HYGIENE] (export inchangé) : plus aucun avertissement ni skip dans `make test` et la CI (client MCP non déprécié, fixture d'export v1 réelle, cascade des invités prouvée, actions GitHub v7). [NOTIF-CENTER] (export inchangé, table volatile `notifications`) : la cloche devient un centre de notifications owner ET invités — deux niveaux « pour moi » / « activité », fan-out par destinataire au moment de l'événement, invariant 5 par double filtre `recipient` + `share_id`, panneau partagé du partial (popover desktop, feuille mobile), chip « n pour toi » sur les cards invitées, API v1 + outil MCP `get_notifications`.
 
 ## Sauvegardes
 
