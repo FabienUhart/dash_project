@@ -35,3 +35,6 @@ graphify-out/
 htmlcov/
 .coverage
 junit-*.xml
+
+# Sorties Cowork (PDF générés à la main, etc.) — jamais versionnées
+Claude outputs/

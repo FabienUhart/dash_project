@@ -1,6 +1,6 @@
 # MEMORY BANK — dash_project
 
-**Dernière mise à jour :** 18 octobre 2026 (nuit) — **prod V30.3.285** (train du 18 oct. : [DASH-API] V30.0.282 = **format d'export v30**, [DASH-MCP] V30.1.283, [CI-HYGIENE] V30.2.284, [NOTIF-CENTER] V30.3.285), **699 tests** verts, **0 skip, 0 warning**. Le détail lot par lot vit dans `REALISATION.md` : ce fichier ne le recopie pas.
+**Dernière mise à jour :** 29 octobre 2026 — **prod V30.4.286** ([MEMO-PRINT], export **v30** inchangé ; train du 18 oct. : [DASH-API] V30.0.282 = **format d'export v30**, [DASH-MCP] V30.1.283, [CI-HYGIENE] V30.2.284, [NOTIF-CENTER] V30.3.285), **709 tests** verts, **0 skip, 0 warning**. Le détail lot par lot vit dans `REALISATION.md` : ce fichier ne le recopie pas.
 **Nature :** index de mémoire. La **source canonique** reste `CLAUDE.md` (racine) ; ce fichier pointe, il ne duplique pas (ADR-001).
 
 ## Résumé global
@@ -31,9 +31,10 @@ Dashboard personnel auto-hébergé sur un **Zimaboard**, page d'accueil du navig
 - **`.claude/handoff.json`** — état du dernier lot (`ready` = build + tests verts), écrit par CC et par le hook Stop.
 - Boucle : idée Fabien → brief Cowork → CC (tests rouges → code → mutations → `make test` → rebuild local → smoke → journal/handoff → **STOP**) → passe Cowork → **GO explicite** de Fabien → commit + tag + push (= deploy) → **pendant la CI : mémoire du projet, texte seulement** (MEMORY.md, journal, handoff, historique CLAUDE.md → commit docs-only sans tag, poussé après la CI verte) → **graphify update . --force seul, en dernier**, après ce push (règle du 18 oct., ordre strict) → infra sur GO, **contrôles prod depuis le Zimaboard**.
 
-## État actuel (18 octobre 2026, nuit)
+## État actuel (29 octobre 2026)
 
-- **Prod V30.3.285**, export **v30** (`memos.source` : `''` = UI, sinon source du jeton API). Sauvegarde fraîche v30 à garder.
+- **Prod V30.4.286**, export **v30** (`memos.source` : `''` = UI, sinon source du jeton API). ⚠ **Sauvegarde prod NON vérifiée le 29/10** (Fabien hors maison, Zimaboard injoignable) : à contrôler depuis le LAN/WireGuard avant le départ au Japon (1er nov., ~2,5 semaines) — `data/backups/`, `BACKUP_KEEP_DAYS=7` → garder un export manuel hors Zimaboard.
+- **[MEMO-PRINT]** (v1 de [MEMO-PDF]) : routes owner `/print/project/<id>` + `/print/memo/<id>` (sans JS, no-store, 404 corbeille, jamais sous `/share`), gabarit `templates/print.html`, bouton 🖨 barre du board + fiche 👁 (`cfg.printUrl` owner seul). Le navigateur fait le PDF ; v2 serveur + cache = graine [MEMO-PDF]. Le smoke du Deploy tourne SUR le Zimaboard (runner) : sa ligne « version servie » vaut contrôle `/api/version` quand on est hors LAN.
 - **[NOTIF-CENTER]** : la cloche = centre de notifications owner ET invités (panneau partagé du partial : popover 760 px desktop / feuille mobile, onglets « Pour moi » / « Activité », badge = non lues « pour moi » seulement, la vue Partages ne marque plus rien) ; invités : cloche après chargement + chip « n pour toi » ; routes owner `/api/notifications[/read]`, invité `/share/<t>/notifications[/read]` (destinataire déduit du jeton + filtre `share_id`), hub, API v1, outil MCP `get_notifications` (22 outils). Treize points d'écriture (`_notify`), réponses par `parent_id` seulement, `_revision_nature` pour l'excerpt des révisions.
 - **API v1** (`/api/v1/*`, hors Authelia) : jetons créés dans **Paramètres › Appareils connectés** (empreinte sha256 seule, clair montré une fois, révocation douce, audit 50 lignes), 401 `{}` sans indice, 403 scope, quotas 120/30/20 par minute (**par worker gunicorn**, donc ×2 — dette), fixture jumelle des tuiles `tests/fixtures/tiles_cases.json` jouée par pytest ET le board.
 - **MCP** validé de bout en bout : connecteur claude.ai « Dash » branché par Fabien le 18/10 15:22 (jeton « Claude chat », read+write), `get_context("iPad réparation")` rend le mémo 402. Cowork crée des mémos via le connecteur (411–416).
