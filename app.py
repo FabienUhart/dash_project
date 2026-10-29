@@ -5884,6 +5884,152 @@ def download_project_zip(project_id):
     return _send_zip(entries, _zip_base(proj["name"], scope, "dossier-" + str(project_id)))
 
 
+# ─────────────────────────── [MEMO-PRINT] vue imprimable (owner) ───────────────────────────
+# v1 de [MEMO-PDF] : une page HTML autonome, sans JS, que le NAVIGATEUR transforme en PDF
+# (⌘P / « Enregistrer en PDF »). Lecture seule, owner seulement (derrière Authelia) : AUCUNE
+# route /share/**/print (invariant 5). Mémos hors corbeille uniquement (invariant 7). Les <img>
+# du contenu Quill sont retirées (pas de réseau en avion) et remplacées par « 📎 n fichier(s) ».
+_PRINT_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+_PRINT_DAYS = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
+_PRINT_STRIP_RE = re.compile(r"<img\b[^>]*>|<script\b.*?</script\s*>|<script\b[^>]*>", re.I | re.S)
+
+
+def _print_day(s, weekday=True):
+    """'2026-11-03' → 'mar. 3 nov.' (ou '3 nov.' sans le jour). Chaîne invalide → telle quelle."""
+    try:
+        d = date.fromisoformat((s or "")[:10])
+    except ValueError:
+        return s or ""
+    txt = "%d %s" % (d.day, _PRINT_MONTHS[d.month - 1])
+    return (_PRINT_DAYS[d.weekday()] + " " + txt) if weekday else txt
+
+
+def _print_memo(m):
+    """Enrichit un dict `_memo_dict` des champs d'affichage du gabarit print.html."""
+    when = ""
+    if m.get("due_date"):
+        when = _print_day(m["due_date"])
+        if m.get("due_end") and m["due_end"] > m["due_date"]:
+            when = _print_day(m["due_date"], False) + " → " + _print_day(m["due_end"], False)
+        if m.get("due_time"):
+            when += " · " + m["due_time"]
+            if m.get("end_time"):
+                when += "–" + m["end_time"]
+    m["print_when"] = when
+    m["print_body"] = _PRINT_STRIP_RE.sub("", m.get("content") or "")
+    m["print_files"] = len(m.get("images") or []) + len(m.get("attachments") or [])
+    return m
+
+
+def _print_memos(db, where, args):
+    """Mémos hors corbeille enrichis (urls, PJ) — même sérialisation que l'API (`_memo_dict`)."""
+    rows = db.execute(
+        "SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' AND " + where + " ORDER BY position, id",
+        args,
+    ).fetchall()
+    ids = [r["id"] for r in rows]
+    owner_name = _owner_name(db)
+    umap = _memo_urls_map(db, ids, owner_name)
+    amap = _attachments_map(db, ids, lambda r: "/api/attachments/" + str(r["id"]))
+    out = []
+    for r in rows:
+        d = _memo_dict(r, owner_name)
+        d["urls"] = umap.get(d["id"], [])
+        d["attachments"] = amap.get(d["id"], [])
+        out.append(_print_memo(d))
+    return out
+
+
+def _print_folder_order(db, root_id):
+    """Sous-arbre en ordre d'arbre : parent avant ses enfants, frères par `position`.
+    Mêmes ids que `_project_descendants`, ordre lisible en plus (sommaire + sections)."""
+    allowed = set(_project_descendants(db, root_id))
+    kids = {}
+    for r in db.execute("SELECT id, parent_id FROM projects ORDER BY position, id").fetchall():
+        if r["id"] in allowed:
+            kids.setdefault(r["parent_id"], []).append(r["id"])
+    order, stack = [], [root_id]
+    while stack:
+        pid = stack.pop()
+        order.append(pid)
+        stack.extend(reversed([k for k in kids.get(pid, []) if k != root_id and k not in order]))
+    return order
+
+
+def _print_folders(db):
+    return {r["id"]: dict(r) for r in db.execute("SELECT id, name, emoji, parent_id FROM projects").fetchall()}
+
+
+def _print_path(folders, pid):
+    names, guard = [], 0
+    while pid in folders and guard < 60:
+        names.append(folders[pid]["name"])
+        pid = folders[pid]["parent_id"]
+        guard += 1
+    return " › ".join(reversed(names))
+
+
+def _print_label(folders, pid):
+    f = folders.get(pid)
+    return ((f.get("emoji") or "") + " " + f["name"]).strip() if f else "Inbox"
+
+
+def _print_response(html):
+    resp = Response(html, mimetype="text/html")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/print/project/<int:project_id>")
+def print_project(project_id):
+    db = get_db()
+    folders = _print_folders(db)
+    if project_id not in folders:
+        return "", 404
+    order = _print_folder_order(db, project_id)
+    ph = ",".join("?" * len(order))
+    memos = _print_memos(db, "project_id IN (%s)" % ph, order)
+    for m in memos:
+        m["print_folder"] = _print_label(folders, m.get("project_id"))
+    dated = sorted((m for m in memos if m.get("due_date")),
+                   key=lambda m: (m["due_date"], m.get("due_time") or "", m.get("position") or 0, m["id"]))
+    days = []
+    for m in dated:
+        if not days or days[-1]["date"] != m["due_date"]:
+            days.append({"date": m["due_date"], "label": _print_day(m["due_date"]), "memos": []})
+        days[-1]["memos"].append(m)
+    sections, n = [], 1
+    for pid in order:
+        ms = [m for m in memos if m.get("project_id") == pid]
+        if not ms:
+            continue
+        n += 1
+        ms.sort(key=lambda m: (m.get("due_date") or "9999", m.get("position") or 0, m["id"]))
+        sections.append({"id": pid, "num": n, "label": _print_label(folders, pid),
+                         "path": _print_path(folders, pid), "memos": ms})
+    return _print_response(render_template(
+        "print.html", mode="project", title=folders[project_id]["name"],
+        heading=_print_label(folders, project_id), today=date.today().strftime("%d/%m/%Y"),
+        n_memos=len(memos), n_folders=len(order), days=days, sections=sections,
+    ))
+
+
+@app.route("/print/memo/<int:memo_id>")
+def print_memo(memo_id):
+    db = get_db()
+    memos = _print_memos(db, "id = ?", (memo_id,))
+    if not memos:
+        return "", 404
+    m = memos[0]
+    folders = _print_folders(db)
+    m["print_folder"] = _print_path(folders, m.get("project_id")) or "Inbox"
+    title = m.get("title") or _text_excerpt(m.get("content")) or "(sans titre)"
+    return _print_response(render_template(
+        "print.html", mode="memo", title=title, heading=((m.get("emoji") or "") + " " + title).strip(),
+        today=date.today().strftime("%d/%m/%Y"), memo=m,
+    ))
+
+
 @app.route("/api/history", methods=["GET"])
 def list_history():
     rows = (

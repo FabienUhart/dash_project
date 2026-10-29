@@ -227,8 +227,6 @@ def test_aide_des_dates_calculee_sur_le_mois_courant(page, live_server, console_
     mois = page.evaluate("() => { const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0'); }")
     assert ("d#" + mois) in texte, "l'aide ne parle pas du mois courant %s : %r" % (mois, texte)
     assert ("c#" + mois) in texte
-    if mois != "2026-11":
-        assert "2026-11" not in texte, "texte figé sur novembre 2026 : %r" % texte
     assert "d#semaine" in texte and texte.startswith("Dates")
     # la semaine courante : lundi..dimanche, dates LOCALES
     lundi, dimanche = page.evaluate("""() => {
@@ -236,7 +234,12 @@ def test_aide_des_dates_calculee_sur_le_mois_courant(page, live_server, console_
       const l = new Date(n); l.setDate(n.getDate() - (j - 1)); const d = new Date(l); d.setDate(l.getDate() + 6);
       const f = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
       return [f(l), f(d)]; }""")
-    assert ("d#%s..%s" % (lundi, dimanche)) in texte, texte
+    semaine = "d#%s..%s" % (lundi, dimanche)
+    assert semaine in texte, texte
+    # Hors la semaine calculée (qui peut légitimement déborder sur novembre, ex. 26/10 → 01/11),
+    # aucune trace du mois figé d'origine.
+    if mois != "2026-11":
+        assert "2026-11" not in texte.replace(semaine, ""), "texte figé sur novembre 2026 : %r" % texte
     fs_aide = page.evaluate("() => parseFloat(getComputedStyle(document.querySelector('#memo-date-help')).fontSize)")
     fs_tri = page.evaluate("() => parseFloat(getComputedStyle(document.querySelector('#memo-sort-seg button')).fontSize)")
     assert fs_aide < fs_tri, "l'aide doit être plus discrète que la ligne de tri (%s vs %s)" % (fs_aide, fs_tri)

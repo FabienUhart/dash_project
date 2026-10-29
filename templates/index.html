@@ -9202,6 +9202,7 @@ function memoViewCfg() {
       };
     },
     onEdit: (m) => openMemoEditor(m),
+    printUrl: (m) => '/print/memo/' + m.id,  // [MEMO-PRINT] owner seulement
     // [MEMO-VIEW évolution] cocher depuis la fiche = MÊME appel que la card (patchMemo → PUT
     // /api/memos/<id> puis loadAll) : la card derrière reflète l'état, la fiche reste ouverte.
     onToggleSub: (m, subtasks) => patchMemo(m.id, { subtasks }),
@@ -9880,6 +9881,10 @@ function renderBoard() {
           title: 'Télécharger les fichiers du dossier en .zip',
           onClick: () => openProjectZip(proj) }); tbCount++;
       }
+      // [MEMO-PRINT] Vue imprimable du dossier + sous-dossiers ; le navigateur fait le PDF.
+      tb.add({ icon: 'printer', label: 'Imprimer',
+        title: 'Vue imprimable du dossier (PDF via le navigateur)',
+        onClick: () => window.open('/print/project/' + proj.id, '_blank', 'noopener') }); tbCount++;
       // [AGENDA-PROJECT] Agenda pré-filtré sur ce projet + ses sous-projets (même
       // périmètre que la carte). L'item sidebar « 📆 Agenda » reste l'agenda global.
       // [AGENDA-SMART-MONTH] chaque clic ré-évalue le mois d'atterrissage (un projet
