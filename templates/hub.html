@@ -664,6 +664,7 @@ span.prio-btn { display: inline-flex; align-items: center; cursor: default; }
 {% include 'partials/_shared.js.html' %}
 <script>
 const EMBEDDED_BUILD = "{{ build }}";  // [UPDATE-PROMPT] version embarquée au rendu
+const PDF_ENABLED = {{ 'true' if pdf_enabled else 'false' }};  // [MEMO-PDF v2] WeasyPrint présent sur le serveur
 // [HUB-ROUTE-PREFIX] URL = /share/hub/<token> → le token est le dernier segment.
 const HUB_TOKEN = location.pathname.split('/').filter(Boolean).pop();
 const HUB_BASE = '/share/hub/' + HUB_TOKEN;
@@ -1785,6 +1786,11 @@ function renderBoard() {
             buildUrl: (scope, subs) => '/share/' + fp.share_token + '/project/' + FOCUS + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0),
           }) });
       }
+      // [MEMO-PDF v2] PDF du dossier focalisé, scopé au jeton (projection invitée).
+      if (fp.share_token && pdfEnabled()) {
+        const pdfBtn = tb.add({ icon: 'file-pdf', label: 'PDF', title: 'Télécharger le PDF du dossier (A5)',
+          onClick: () => pdfDownload('/share/' + fp.share_token + '/project/' + FOCUS + '/pdf', pdfBtn) });
+      }
       tb.end();
       hd.appendChild(tb.bar);
       board.appendChild(hd);
@@ -2284,6 +2290,7 @@ function hubMemoViewCfg() {
       };
     },
     onEdit: (m) => openEditor(m),
+    pdfUrl: (m) => '/share/' + m.share_token + '/memo/' + m.id + '/pdf',  // [MEMO-PDF v2]
     // [MEMO-VIEW évolution] même appel que la card du hub (PUT sur le partage du mémo, scope
     // et rôle revalidés serveur) ; `reload()` rafraîchit les cards derrière.
     onToggleSub: (m, subtasks) => putMemo(m, { subtasks }),

@@ -10,3 +10,5 @@ tzdata==2024.1
 mcp==1.30.0
 uvicorn==0.41.0
 httpx==0.28.1
+# [MEMO-PDF v2] PDF serveur (HTML → PDF) ; libs système Pango + polices dans le Dockerfile
+weasyprint==70.0

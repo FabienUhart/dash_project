@@ -20,6 +20,10 @@ $(VENV)/bin/python:  ## (interne) crée le venv s'il manque
 	python3 -m venv $(VENV)
 
 install: $(VENV)/bin/python  ## Crée le venv au besoin + deps de dev + navigateur headless
+	@# [MEMO-PDF v2] WeasyPrint a besoin de Pango (libs système) : brew sur macOS, apt ailleurs.
+	@if command -v brew >/dev/null 2>&1; then brew list pango >/dev/null 2>&1 || brew install pango; \
+	elif command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 fonts-noto-cjk fonts-noto-color-emoji; \
+	else echo "⚠ installe Pango à la main (WeasyPrint) — sinon les tests PDF échouent"; fi
 	$(PY) -m pip install -r requirements-dev.txt
 	$(PY) -m playwright install chromium
 

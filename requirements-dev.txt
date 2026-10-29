@@ -2,3 +2,5 @@
 pytest==8.3.4
 pytest-playwright==0.7.0
 pytest-cov==5.0.0
+# [MEMO-PDF v2] extraction du texte des PDF dans les tests (pas pypdf)
+pdfminer.six==20260107

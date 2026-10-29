@@ -1140,6 +1140,13 @@ def init_db():
         conn.execute("ALTER TABLE memos ADD COLUMN due_time TEXT DEFAULT ''")
     # [FESTIVAL-VOTE] heure de fin optionnelle (même gabarit que due_time). NON exportée
     # en V23.1 (comme votes.event_date) → pas de bump : format d'export reste v23.
+    # [MEMO-PDF v2] cache des PDF générés (donnée DÉRIVÉE, jamais exportée). share_id 0 = owner.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pdf_cache (kind TEXT NOT NULL, target_id INTEGER NOT NULL, "
+        "share_id INTEGER NOT NULL DEFAULT 0, fingerprint TEXT DEFAULT '', generated_at TEXT DEFAULT '', "
+        "size INTEGER DEFAULT 0, filename TEXT DEFAULT '', claimed_at TEXT DEFAULT '', "
+        "PRIMARY KEY (kind, target_id, share_id))"
+    )
     if "end_time" not in mcols:
         conn.execute("ALTER TABLE memos ADD COLUMN end_time TEXT DEFAULT ''")
     if "created_by" not in mcols:
@@ -1809,13 +1816,14 @@ def init_db():
 @app.route("/")
 def index():
     # Footer owner : version COMPLÈTE de build (X.Y.Z) pour distinguer local/Zimaboard.
-    return render_template("index.html", version=BUILD_VERSION)
+    return render_template("index.html", version=BUILD_VERSION, pdf_enabled=_weasy() is not None)
 
 
 @app.route("/api/version", methods=["GET"])
 def api_version():
     # Version courante exposée (même exposition que /api/links, pas d'auth propre).
-    return jsonify({"version": BUILD_VERSION, "export": int(APP_VERSION)})
+    return jsonify({"version": BUILD_VERSION, "export": int(APP_VERSION),
+                    "pdf_enabled": _weasy() is not None})  # [MEMO-PDF v2]
 
 
 # ─────────────────────────── [PWA] manifest + Share Target (owner) ───────────────────────────
@@ -2953,6 +2961,7 @@ def delete_project(project_id):
     for a in db.execute("SELECT filename FROM attachments WHERE project_id = ?", (project_id,)).fetchall():
         _delete_attachment_file(a["filename"])
     db.execute("DELETE FROM attachments WHERE project_id = ?", (project_id,))
+    _pdf_forget(db, "project", project_id)   # [MEMO-PDF v2] PDF owner + invités du dossier
     db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
     _purge_shares_for(db, "project", project_id)   # [CASCADE-SHARES] partages ET leurs invités
     db.commit()
@@ -3260,6 +3269,8 @@ def _purge_shares_for(conn, kind, target_id):
         "DELETE FROM share_guests WHERE share_id IN "
         "(SELECT id FROM shares WHERE kind = ? AND target_id = ?)", (kind, target_id),
     )
+    for sh in conn.execute("SELECT id FROM shares WHERE kind = ? AND target_id = ?", (kind, target_id)).fetchall():
+        _pdf_forget(conn, share_id=sh[0])   # [MEMO-PDF v2] PDF invités du partage
     conn.execute("DELETE FROM shares WHERE kind = ? AND target_id = ?", (kind, target_id))
 
 
@@ -4992,6 +5003,7 @@ def _purge_memo_row(db, memo_id):
     db.execute("DELETE FROM attachments WHERE memo_id = ?", (memo_id,))
     db.execute("DELETE FROM memo_urls WHERE memo_id = ?", (memo_id,))  # [MEMO-URLS] v29 : cascade
     db.execute("DELETE FROM notifications WHERE memo_id = ?", (memo_id,))  # [NOTIF-CENTER] cascade
+    _pdf_forget(db, "memo", memo_id)   # [MEMO-PDF v2] PDF du mémo purgé
     db.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
     _purge_shares_for(db, "memo", memo_id)   # [CASCADE-SHARES] partages ET leurs invités
     # [COMMENT-REACTIONS] purge des réactions AVANT les commentaires (comment_id → orphelin sinon).
@@ -5889,6 +5901,11 @@ def download_project_zip(project_id):
 # (⌘P / « Enregistrer en PDF »). Lecture seule, owner seulement (derrière Authelia) : AUCUNE
 # route /share/**/print (invariant 5). Mémos hors corbeille uniquement (invariant 7). Les <img>
 # du contenu Quill sont retirées (pas de réseau en avion) et remplacées par « 📎 n fichier(s) ».
+# [MEMO-PDF v2] Le même rendu nourrit le PDF serveur (WeasyPrint) : `_print_context` construit les
+# données UNE fois, `_print_html` les rend ; l'empreinte du cache est calculée sur ces données.
+# Incrémenter PRINT_TEMPLATE_VERSION à chaque changement de `templates/print.html` : tous les PDF
+# en cache deviennent périmés et le sweep les régénère.
+PRINT_TEMPLATE_VERSION = 1
 _PRINT_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
 _PRINT_DAYS = ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
 _PRINT_STRIP_RE = re.compile(r"<img\b[^>]*>|<script\b.*?</script\s*>|<script\b[^>]*>", re.I | re.S)
@@ -5905,7 +5922,8 @@ def _print_day(s, weekday=True):
 
 
 def _print_memo(m):
-    """Enrichit un dict `_memo_dict` des champs d'affichage du gabarit print.html."""
+    """Enrichit un dict mémo (owner `_memo_dict` ou invité `_share_memo_dict`) des champs
+    d'affichage du gabarit print.html."""
     when = ""
     if m.get("due_date"):
         when = _print_day(m["due_date"])
@@ -5921,8 +5939,9 @@ def _print_memo(m):
     return m
 
 
-def _print_memos(db, where, args):
-    """Mémos hors corbeille enrichis (urls, PJ) — même sérialisation que l'API (`_memo_dict`)."""
+def _print_memos(db, where, args, guest=False):
+    """Mémos hors corbeille enrichis (urls, PJ). Owner : `_memo_dict` (même sérialisation que
+    l'API). Invité : `_share_memo_dict`, la projection STRICTE de share_data (invariant 5)."""
     rows = db.execute(
         "SELECT * FROM memos WHERE COALESCE(deleted_at, '') = '' AND " + where + " ORDER BY position, id",
         args,
@@ -5933,9 +5952,13 @@ def _print_memos(db, where, args):
     amap = _attachments_map(db, ids, lambda r: "/api/attachments/" + str(r["id"]))
     out = []
     for r in rows:
-        d = _memo_dict(r, owner_name)
-        d["urls"] = umap.get(d["id"], [])
-        d["attachments"] = amap.get(d["id"], [])
+        if guest:
+            d = _share_memo_dict(r, urls=umap.get(r["id"], []))
+            d["attachments"] = [{} for _ in amap.get(r["id"], [])]   # le compte seul
+        else:
+            d = _memo_dict(r, owner_name)
+            d["urls"] = umap.get(d["id"], [])
+            d["attachments"] = amap.get(d["id"], [])
         out.append(_print_memo(d))
     return out
 
@@ -5957,13 +5980,17 @@ def _print_folder_order(db, root_id):
 
 
 def _print_folders(db):
-    return {r["id"]: dict(r) for r in db.execute("SELECT id, name, emoji, parent_id FROM projects").fetchall()}
+    return {r["id"]: dict(r) for r in db.execute("SELECT id, uid, name, emoji, parent_id FROM projects").fetchall()}
 
 
-def _print_path(folders, pid):
+def _print_path(folders, pid, stop=None):
+    """Chemin « A › B › C » jusqu'à la racine — ou jusqu'à `stop` inclus (périmètre invité :
+    jamais le nom d'un dossier PARENT de la cible partagée)."""
     names, guard = [], 0
     while pid in folders and guard < 60:
         names.append(folders[pid]["name"])
+        if pid == stop:
+            break
         pid = folders[pid]["parent_id"]
         guard += 1
     return " › ".join(reversed(names))
@@ -5974,6 +6001,62 @@ def _print_label(folders, pid):
     return ((f.get("emoji") or "") + " " + f["name"]).strip() if f else "Inbox"
 
 
+def _print_context(db, kind, target_id, share=None):
+    """Données du gabarit print.html (SANS la date du jour, pour que l'empreinte n'en dépende pas),
+    ou None si la cible n'existe pas / est en corbeille / sort du périmètre de `share`."""
+    folders = _print_folders(db)
+    guest = share is not None
+    if kind == "project":
+        if target_id not in folders:
+            return None
+        stop = None
+        if guest:
+            if share["kind"] != "project" or target_id not in set(_project_descendants(db, share["target_id"])):
+                return None
+            stop = share["target_id"]
+        order = _print_folder_order(db, target_id)
+        memos = _print_memos(db, "project_id IN (%s)" % ",".join("?" * len(order)), order, guest)
+        for m in memos:
+            m["print_folder"] = _print_label(folders, m.get("project_id"))
+        dated = sorted((m for m in memos if m.get("due_date")),
+                       key=lambda m: (m["due_date"], m.get("due_time") or "", m.get("position") or 0, m["id"]))
+        days = []
+        for m in dated:
+            if not days or days[-1]["date"] != m["due_date"]:
+                days.append({"date": m["due_date"], "label": _print_day(m["due_date"]), "memos": []})
+            days[-1]["memos"].append(m)
+        sections, n = [], 1
+        for pid in order:
+            ms = [m for m in memos if m.get("project_id") == pid]
+            if not ms:
+                continue
+            n += 1
+            ms.sort(key=lambda m: (m.get("due_date") or "9999", m.get("position") or 0, m["id"]))
+            sections.append({"id": pid, "num": n, "label": _print_label(folders, pid),
+                             "path": _print_path(folders, pid, stop), "memos": ms})
+        return {"mode": "project", "title": folders[target_id]["name"],
+                "heading": _print_label(folders, target_id), "n_memos": len(memos),
+                "n_folders": len(order), "days": days, "sections": sections}
+    if guest and target_id not in {m["id"] for m in _share_scope_memos(db, share)}:
+        return None
+    memos = _print_memos(db, "id = ?", (target_id,), guest)
+    if not memos:
+        return None
+    m = memos[0]
+    if not guest:
+        m["print_folder"] = _print_path(folders, m.get("project_id")) or "Inbox"
+    elif share["kind"] == "project":
+        m["print_folder"] = _print_path(folders, m.get("project_id"), share["target_id"])
+    else:
+        m["print_folder"] = ""                        # mémo partagé seul : son dossier est hors périmètre
+    title = m.get("title") or _text_excerpt(m.get("content")) or "(sans titre)"
+    return {"mode": "memo", "title": title, "heading": ((m.get("emoji") or "") + " " + title).strip(), "memo": m}
+
+
+def _print_html(ctx):
+    return render_template("print.html", today=date.today().strftime("%d/%m/%Y"), **ctx)
+
+
 def _print_response(html):
     resp = Response(html, mimetype="text/html")
     resp.headers["Cache-Control"] = "no-store"
@@ -5982,52 +6065,297 @@ def _print_response(html):
 
 @app.route("/print/project/<int:project_id>")
 def print_project(project_id):
-    db = get_db()
-    folders = _print_folders(db)
-    if project_id not in folders:
-        return "", 404
-    order = _print_folder_order(db, project_id)
-    ph = ",".join("?" * len(order))
-    memos = _print_memos(db, "project_id IN (%s)" % ph, order)
-    for m in memos:
-        m["print_folder"] = _print_label(folders, m.get("project_id"))
-    dated = sorted((m for m in memos if m.get("due_date")),
-                   key=lambda m: (m["due_date"], m.get("due_time") or "", m.get("position") or 0, m["id"]))
-    days = []
-    for m in dated:
-        if not days or days[-1]["date"] != m["due_date"]:
-            days.append({"date": m["due_date"], "label": _print_day(m["due_date"]), "memos": []})
-        days[-1]["memos"].append(m)
-    sections, n = [], 1
-    for pid in order:
-        ms = [m for m in memos if m.get("project_id") == pid]
-        if not ms:
-            continue
-        n += 1
-        ms.sort(key=lambda m: (m.get("due_date") or "9999", m.get("position") or 0, m["id"]))
-        sections.append({"id": pid, "num": n, "label": _print_label(folders, pid),
-                         "path": _print_path(folders, pid), "memos": ms})
-    return _print_response(render_template(
-        "print.html", mode="project", title=folders[project_id]["name"],
-        heading=_print_label(folders, project_id), today=date.today().strftime("%d/%m/%Y"),
-        n_memos=len(memos), n_folders=len(order), days=days, sections=sections,
-    ))
+    ctx = _print_context(get_db(), "project", project_id)
+    return _print_response(_print_html(ctx)) if ctx else ("", 404)
 
 
 @app.route("/print/memo/<int:memo_id>")
 def print_memo(memo_id):
-    db = get_db()
-    memos = _print_memos(db, "id = ?", (memo_id,))
-    if not memos:
-        return "", 404
-    m = memos[0]
-    folders = _print_folders(db)
-    m["print_folder"] = _print_path(folders, m.get("project_id")) or "Inbox"
-    title = m.get("title") or _text_excerpt(m.get("content")) or "(sans titre)"
-    return _print_response(render_template(
-        "print.html", mode="memo", title=title, heading=((m.get("emoji") or "") + " " + title).strip(),
-        today=date.today().strftime("%d/%m/%Y"), memo=m,
-    ))
+    ctx = _print_context(get_db(), "memo", memo_id)
+    return _print_response(_print_html(ctx)) if ctx else ("", 404)
+
+
+# ─────────────────────────── [MEMO-PDF v2] PDF serveur + cache ───────────────────────────
+# Le PDF = `print.html` passé à WeasyPrint, en A5 (le @page du gabarit). Rangé dans
+# `uploads/pdf/` (même volume, JAMAIS exporté : donnée dérivée recalculable comme `derived/`), suivi
+# par la table additive `pdf_cache`. « À jour » = empreinte identique ET fichier présent. L'empreinte
+# est le sha256 des DONNÉES du gabarit (contenu, structure, chemins) + PRINT_TEMPLATE_VERSION (+ le
+# partage et son rôle pour un PDF invité) : elle bouge exactement quand le PDF changerait.
+# WeasyPrint est importé PARESSEUSEMENT : sans Pango (dev), l'app démarre, le PDF répond 503 et la
+# v1 Imprimer reste là. Deux garde-fous mémoire : un rendu à la fois par processus (`_PDF_LOCK`) et
+# un CLAIM en base entre workers gunicorn (même doctrine que [LINK-OG] : la ligne se réserve par
+# `claimed_at`, et une réservation plus vieille que PDF_CLAIM_TTL est reprise).
+PDF_CLAIM_TTL = 120          # s — au-delà, un worker mort en plein rendu est considéré perdu
+PDF_WAIT = 90                # s — attente max d'une génération tenue par un autre worker
+PDF_SWEEP_EVERY = 600        # s — 10 min entre deux passages du sweep
+PDF_SWEEP_MAX = 20           # générations max par passage
+_PDF_LOCK = threading.Lock()
+_WEASY = []                  # cache de l'import paresseux : [module] ou [None]
+PDF_UNAVAILABLE = "PDF indisponible sur cette installation"
+
+
+class PdfBusy(Exception):
+    """La cible est en cours de génération par un autre worker depuis trop longtemps."""
+
+
+def _weasy():
+    """Le module weasyprint, ou None s'il (ou une de ses libs système) manque. Mis en cache."""
+    if not _WEASY:
+        try:
+            import weasyprint  # noqa: import paresseux VOLONTAIRE (voir l'en-tête de section)
+            _WEASY.append(weasyprint)
+        except Exception:
+            _WEASY.append(None)
+    return _WEASY[0]
+
+
+def _pdf_dir():
+    return os.path.join(UPLOAD_DIR, "pdf")
+
+
+def _pdf_filename(db, kind, target_id, share_id=0):
+    table = "projects" if kind == "project" else "memos"
+    r = db.execute(f"SELECT uid FROM {table} WHERE id = ?", (target_id,)).fetchone()
+    uid = (_row_get(r, "uid", "") if r else "") or str(target_id)
+    return ("share-%d-" % share_id if share_id else "") + "%s-%s.pdf" % (kind, uid)
+
+
+def _pdf_fingerprint(ctx, share=None):
+    payload = {"v": PRINT_TEMPLATE_VERSION, "ctx": ctx,
+               "share": [share["id"], _row_get(share, "role", "")] if share is not None else None}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False)
+                          .encode("utf-8")).hexdigest()
+
+
+def _pdf_write(html, path):
+    """Rend `html` en PDF vers `path`, de façon atomique (temp + os.replace)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp-%d" % os.getpid()
+    try:
+        _weasy().HTML(string=html, base_url=app.root_path).write_pdf(tmp)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _pdf_row(db, kind, target_id, share_id):
+    return db.execute("SELECT * FROM pdf_cache WHERE kind = ? AND target_id = ? AND share_id = ?",
+                      (kind, target_id, share_id)).fetchone()
+
+
+def _pdf_status(db, kind, target_id, share=None):
+    """{fresh, generated_at, size} — ou None si la cible n'existe pas / sort du périmètre."""
+    ctx = _print_context(db, kind, target_id, share)
+    if ctx is None:
+        return None
+    sid = share["id"] if share is not None else 0
+    row = _pdf_row(db, kind, target_id, sid)
+    path = os.path.join(_pdf_dir(), _pdf_filename(db, kind, target_id, sid))
+    fresh = bool(row and row["fingerprint"] == _pdf_fingerprint(ctx, share) and os.path.isfile(path))
+    return {"fresh": fresh, "generated_at": (row["generated_at"] if row else "") or "",
+            "size": (row["size"] if row else 0) or 0, "enabled": _weasy() is not None}
+
+
+def _pdf_ensure(db, kind, target_id, share=None, force=False):
+    """Garantit un PDF à jour et rend (chemin, empreinte, titre), ou None (404). Lève PdfBusy si un
+    autre worker tient la cible plus de PDF_WAIT secondes."""
+    ctx = _print_context(db, kind, target_id, share)
+    if ctx is None:
+        return None
+    fp = _pdf_fingerprint(ctx, share)
+    sid = share["id"] if share is not None else 0
+    name = _pdf_filename(db, kind, target_id, sid)
+    path = os.path.join(_pdf_dir(), name)
+    db.execute("INSERT OR IGNORE INTO pdf_cache (kind, target_id, share_id, filename) VALUES (?, ?, ?, ?)",
+               (kind, target_id, sid, name))
+    db.commit()
+    fin = time.time() + PDF_WAIT
+    while True:
+        row = _pdf_row(db, kind, target_id, sid)
+        if not force and row and row["fingerprint"] == fp and os.path.isfile(path):
+            return path, fp, ctx["title"]
+        now = datetime.now(timezone.utc)
+        pris = db.execute(
+            "UPDATE pdf_cache SET claimed_at = ? WHERE kind = ? AND target_id = ? AND share_id = ? "
+            "AND (COALESCE(claimed_at, '') = '' OR claimed_at < ?)",
+            (now.isoformat(), kind, target_id, sid, (now - timedelta(seconds=PDF_CLAIM_TTL)).isoformat()),
+        )
+        db.commit()
+        if pris.rowcount:
+            break
+        if time.time() > fin:
+            raise PdfBusy()
+        time.sleep(0.25)
+        force = False   # un autre worker génère : ce qu'il produira vaut le « force » demandé
+    try:
+        html = _print_html(ctx)
+        with _PDF_LOCK:
+            _pdf_write(html, path)
+        db.execute(
+            "UPDATE pdf_cache SET fingerprint = ?, generated_at = ?, size = ?, filename = ?, claimed_at = '' "
+            "WHERE kind = ? AND target_id = ? AND share_id = ?",
+            (fp, datetime.now(timezone.utc).isoformat(), os.path.getsize(path), name, kind, target_id, sid),
+        )
+        db.commit()
+    except BaseException:
+        db.execute("UPDATE pdf_cache SET claimed_at = '' WHERE kind = ? AND target_id = ? AND share_id = ?",
+                   (kind, target_id, sid))
+        db.commit()
+        raise
+    return path, fp, ctx["title"]
+
+
+def _pdf_ensure_standalone(kind, target_id, share=None, force=False):
+    """`_pdf_ensure` hors requête (sweep, autre worker) : sa propre connexion + contexte Flask."""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        with app.app_context():
+            return _pdf_ensure(conn, kind, target_id, share, force)
+    finally:
+        conn.close()
+
+
+def _pdf_forget(db, kind=None, target_id=None, share_id=None):
+    """Purge fichiers + lignes : d'une cible (tous partages confondus) ou d'un partage."""
+    if share_id is not None:
+        rows = db.execute("SELECT * FROM pdf_cache WHERE share_id = ?", (share_id,)).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM pdf_cache WHERE kind = ? AND target_id = ?", (kind, target_id)).fetchall()
+    for r in rows:
+        nom = os.path.basename(r["filename"] or "")
+        if nom:
+            try:
+                os.remove(os.path.join(_pdf_dir(), nom))
+            except OSError:
+                pass
+        db.execute("DELETE FROM pdf_cache WHERE kind = ? AND target_id = ? AND share_id = ?",
+                   (r["kind"], r["target_id"], r["share_id"]))
+
+
+def _pdf_send(res):
+    path, fp, title = res
+    resp = send_file(path, mimetype="application/pdf", as_attachment=True,
+                     download_name=(title or "document") + ".pdf", etag=False, max_age=0)
+    resp.headers["ETag"] = '"%s"' % fp
+    resp.headers["Cache-Control"] = "private, no-store"
+    return resp
+
+
+def _pdf_route(kind, target_id, share=None):
+    if _weasy() is None:
+        return PDF_UNAVAILABLE, 503
+    try:
+        res = _pdf_ensure(get_db(), kind, target_id, share, force=request.args.get("force") == "1")
+    except PdfBusy:
+        return "PDF en cours de génération, réessaie dans un instant", 503
+    return _pdf_send(res) if res else ("", 404)
+
+
+@app.route("/api/projects/<int:project_id>/pdf")
+def project_pdf(project_id):
+    return _pdf_route("project", project_id)
+
+
+@app.route("/api/memos/<int:memo_id>/pdf")
+def memo_pdf(memo_id):
+    return _pdf_route("memo", memo_id)
+
+
+@app.route("/api/projects/<int:project_id>/pdf/status")
+def project_pdf_status(project_id):
+    st = _pdf_status(get_db(), "project", project_id)
+    return jsonify(st) if st else (jsonify({"error": "not found"}), 404)
+
+
+@app.route("/api/memos/<int:memo_id>/pdf/status")
+def memo_pdf_status(memo_id):
+    st = _pdf_status(get_db(), "memo", memo_id)
+    return jsonify(st) if st else (jsonify({"error": "not found"}), 404)
+
+
+# Invité (invariant 5) : sous /share/*, jeton seul (lecture, comme le .zip), la cible doit être dans
+# le périmètre ; rendu avec la PROJECTION invitée, dans un fichier À PART (share-<id>-…). Pas de
+# sweep pour les invités : génération à la demande seulement.
+@app.route("/share/<token>/project/<int:project_id>/pdf")
+def share_project_pdf(token, project_id):
+    share = _share_by_token(get_db(), token)
+    return _pdf_route("project", project_id, share) if share else ("", 404)
+
+
+@app.route("/share/<token>/memo/<int:memo_id>/pdf")
+def share_memo_pdf(token, memo_id):
+    share = _share_by_token(get_db(), token)
+    return _pdf_route("memo", memo_id, share) if share else ("", 404)
+
+
+def _pdf_sweep(limit=PDF_SWEEP_MAX, pause=1.0):
+    """Régénère les PDF owner périmés ou absents : tous les dossiers qui ont au moins un mémo
+    (sous-arbre compris), et les mémos modifiés depuis 24 h ou déjà demandés une fois. Un à la fois,
+    `pause` entre deux, au plus `limit` par passage. Rend le nombre généré. Ne lève jamais."""
+    if _weasy() is None:
+        return 0
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30)
+        conn.row_factory = sqlite3.Row
+    except Exception:
+        return 0
+    fait = 0
+    try:
+        with app.app_context():
+            pleins = {r[0] for r in conn.execute(
+                "SELECT DISTINCT project_id FROM memos WHERE COALESCE(deleted_at, '') = '' AND project_id IS NOT NULL")}
+            cibles = []
+            for r in conn.execute("SELECT id FROM projects ORDER BY position, id").fetchall():
+                if pleins.intersection(_project_descendants(conn, r["id"])):
+                    cibles.append(("project", r["id"]))
+            hier = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+            for r in conn.execute(
+                "SELECT id FROM memos WHERE COALESCE(deleted_at, '') = '' AND (COALESCE(updated_at, '') >= ? "
+                "OR id IN (SELECT target_id FROM pdf_cache WHERE kind = 'memo' AND share_id = 0)) ORDER BY id",
+                (hier,),
+            ).fetchall():
+                cibles.append(("memo", r["id"]))
+            for kind, tid in cibles:
+                if fait >= limit:
+                    break
+                try:
+                    st = _pdf_status(conn, kind, tid)
+                    if not st or st["fresh"]:
+                        continue
+                    _pdf_ensure(conn, kind, tid)
+                    fait += 1
+                except Exception:
+                    continue
+                if pause:
+                    time.sleep(pause)
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return fait
+
+
+def _pdf_loop():
+    """Thread daemon : sommeil initial (jamais pendant les tests, qui posent aussi PDF_SWEEP=0),
+    puis un passage toutes les 10 min."""
+    if os.environ.get("PDF_SWEEP", "1") == "0":
+        return
+    time.sleep(60)
+    while True:
+        n = _pdf_sweep()
+        if n:
+            try:
+                app.logger.info("[MEMO-PDF] sweep : %d PDF régénéré(s)", n)
+            except Exception:
+                pass
+        time.sleep(PDF_SWEEP_EVERY)
 
 
 @app.route("/api/history", methods=["GET"])
@@ -7422,6 +7750,7 @@ def delete_share(share_id):
         db.execute("DELETE FROM role_requests WHERE guest_id = ?", (g["id"],))
         db.execute("DELETE FROM admin_actions WHERE target_guest_id = ? OR actor_guest_id = ?", (g["id"], g["id"]))
     db.execute("DELETE FROM share_guests WHERE share_id = ?", (share_id,))
+    _pdf_forget(db, share_id=share_id)   # [MEMO-PDF v2] PDF invités de ce partage
     db.execute("DELETE FROM shares WHERE id = ?", (share_id,))
     db.commit()
     return "", 204
@@ -9386,7 +9715,8 @@ def share_assets(name):
 def share_page(token):
     if not _share_by_token(get_db(), token):
         return "Lien de partage invalide ou révoqué.", 404
-    return render_template("share.html", version=APP_VERSION, build=BUILD_VERSION, share_token=token)
+    return render_template("share.html", version=APP_VERSION, build=BUILD_VERSION, share_token=token,
+                           pdf_enabled=_weasy() is not None)  # [MEMO-PDF v2]
 
 
 @app.route("/share/<token>/manifest.webmanifest")
@@ -9414,7 +9744,8 @@ def hub_page(hub_token):
     # Shell statique : aucune donnée invité dans le HTML (la liste vient de /approve après PIN).
     if not _hub_by_token(get_db(), hub_token):
         return "Lien invalide ou révoqué.", 404
-    return render_template("hub.html", version=APP_VERSION, build=BUILD_VERSION)
+    return render_template("hub.html", version=APP_VERSION, build=BUILD_VERSION,
+                           pdf_enabled=_weasy() is not None)  # [MEMO-PDF v2]
 
 
 @app.route("/share/hub/<hub_token>/manifest.webmanifest")
@@ -14627,3 +14958,4 @@ threading.Thread(target=_backup_loop, daemon=True).start()
 threading.Thread(target=_backfill_image_meta, daemon=True).start()  # [PHOTO-MAP]
 threading.Thread(target=_backfill_og, daemon=True).start()  # [LINK-OG] sweep des aperçus manquants
 threading.Thread(target=_backfill_derived, daemon=True).start()  # [IMAGE-THUMBS]
+threading.Thread(target=_pdf_loop, daemon=True).start()  # [MEMO-PDF v2] sweep des PDF périmés

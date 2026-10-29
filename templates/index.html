@@ -3078,6 +3078,7 @@ main { position: relative; padding-bottom: calc(1.25rem + var(--footer-h)); }
 {% include 'partials/_shared.js.html' %}
 <script>
 const EMBEDDED_BUILD = "{{ version }}";  // [UPDATE-PROMPT] version embarquée au rendu (comparée au poll)
+const PDF_ENABLED = {{ 'true' if pdf_enabled else 'false' }};  // [MEMO-PDF v2] WeasyPrint présent sur le serveur
 const RECUR_OPTIONS = [
   ['', '🔁 Récurrence'], ['daily', 'Quotidienne'], ['weekly', 'Hebdomadaire'],
   ['monthly', 'Mensuelle'], ['quarterly', 'Trimestrielle'], ['yearly', 'Annuelle'],
@@ -5240,6 +5241,7 @@ function openProjectFiles(proj) {
   openFilesDialog({
     title: proj.name,
     load: () => api(`/api/projects/${proj.id}/files?subtree=1`),
+    pdf: { url: `/api/projects/${proj.id}/pdf`, statusUrl: `/api/projects/${proj.id}/pdf/status` },  // [MEMO-PDF v2]
     onOpenSource: openFileSource,
     openImage: (a) => runImageViewer({ images: [a], startIndex: 0, imageUrl: (x) => x.url }),
     zip: { hasSubprojects: true, count: (scope, subs) => projectZipCount(proj.id, scope, subs),
@@ -9203,6 +9205,7 @@ function memoViewCfg() {
     },
     onEdit: (m) => openMemoEditor(m),
     printUrl: (m) => '/print/memo/' + m.id,  // [MEMO-PRINT] owner seulement
+    pdfUrl: (m) => '/api/memos/' + m.id + '/pdf',  // [MEMO-PDF v2]
     // [MEMO-VIEW évolution] cocher depuis la fiche = MÊME appel que la card (patchMemo → PUT
     // /api/memos/<id> puis loadAll) : la card derrière reflète l'état, la fiche reste ouverte.
     onToggleSub: (m, subtasks) => patchMemo(m.id, { subtasks }),
@@ -9885,6 +9888,12 @@ function renderBoard() {
       tb.add({ icon: 'printer', label: 'Imprimer',
         title: 'Vue imprimable du dossier (PDF via le navigateur)',
         onClick: () => window.open('/print/project/' + proj.id, '_blank', 'noopener') }); tbCount++;
+      // [MEMO-PDF v2] PDF fabriqué par le serveur (A5), à côté d'Imprimer qui reste.
+      if (pdfEnabled()) {
+        const pdfBtn = tb.add({ icon: 'file-pdf', label: 'PDF',
+          title: 'Télécharger le PDF du dossier (A5, généré par le serveur)',
+          onClick: () => pdfDownload('/api/projects/' + proj.id + '/pdf', pdfBtn) }); tbCount++;
+      }
       // [AGENDA-PROJECT] Agenda pré-filtré sur ce projet + ses sous-projets (même
       // périmètre que la carte). L'item sidebar « 📆 Agenda » reste l'agenda global.
       // [AGENDA-SMART-MONTH] chaque clic ré-évalue le mois d'atterrissage (un projet

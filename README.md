@@ -152,6 +152,9 @@ Les URLs sans scheme sont préfixées automatiquement en `http://` au save. La m
 | GET     | `/uploads/<nom>`           | Sert une image uploadée                        |
 | GET     | `/api/favicon/<id>`        | Favicon du service, récupéré côté serveur (cache mémoire) |
 | GET     | `/api/og-image/<nom>`      | **[LINK-OG]** Vignette d'aperçu cachée (`<uid>.jpg` uniquement, revalidation ETag) |
+| GET     | `/print/project/<id>` · `/print/memo/<id>` | **[MEMO-PRINT]** Vue imprimable (HTML sans JS, A5) d'un dossier (sous-arbre) ou d'un mémo — le navigateur fait le PDF |
+| GET     | `/api/projects/<id>/pdf` · `/api/memos/<id>/pdf` | **[MEMO-PDF v2]** PDF A5 fabriqué par le serveur (WeasyPrint) depuis le même gabarit ; servi depuis le cache s'il est à jour, régénéré sinon ; `?force=1` force ; 503 si WeasyPrint absent |
+| GET     | `/api/projects/<id>/pdf/status` · `/api/memos/<id>/pdf/status` | **[MEMO-PDF v2]** `{fresh, generated_at, size, enabled}` (entrée « PDF du dossier » de la vue Fichiers) |
 | GET     | `/api/export`              | Sauvegarde JSON v30 (liens + catégories + projets hiérarchisés + priorités + mémos hors corbeille + historique + géoloc + commentaires avec priorité/réponses) |
 | POST    | `/api/import`              | Réimporte une sauvegarde (voir Backup / restore) |
 
@@ -231,6 +234,7 @@ access_control:
 | POST    | `/share/<token>/memos`          | Ajout d'un mémo (projet + `can_edit`)    |
 | POST    | `/share/<token>/memo/<id>/comments` | Commentaire signé d'un invité validé (`{body, priority?, parent_id?}`) |
 | GET     | `/share/<token>/image/<nom>`    | Image d'un mémo du partage               |
+| GET     | `/share/<token>/project/<id>/pdf` · `/share/<token>/memo/<id>/pdf` | **[MEMO-PDF v2]** PDF de la cible SI elle est dans le périmètre du jeton, rendu avec la projection invitée, fichier distinct de celui de l'owner ; à la demande seulement |
 | POST    | `/share/<token>/register`       | Demande d'accès invité (`{email, name}`) |
 | GET     | `/share/<token>/me`             | Statut de l'invité (header `X-Guest-Token`) |
 | GET     | `/api/guests`                   | Invités (toutes demandes)                |
@@ -273,6 +277,11 @@ Un thread interne crée chaque jour dans `data/backups/` : un **export JSON** co
 ## Persistance
 
 La base SQLite vit dans `./data/dashboard.db`, monté en volume dans le conteneur.
+
+**[MEMO-PDF v2]** Les PDF générés vivent dans `./data/uploads/pdf/` (`project-<uid>.pdf`, `memo-<uid>.pdf`,
+`share-<id>-…` pour les invités), suivis par la table `pdf_cache` (empreinte des données du gabarit +
+`PRINT_TEMPLATE_VERSION`). **Donnée dérivée** comme `derived/` : jamais exportée, purgée avec son dossier,
+son mémo ou son partage, régénérée par un sweep toutes les 10 min (20 max par passage, claim entre workers).
 
 ## Pas d'auth
 

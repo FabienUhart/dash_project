@@ -1,8 +1,8 @@
 # Brief CC — [TRIP-VIEW] : la vue Voyage façon Polarsteps (étapes + carte + trajets)
 
-> _Renuméroté le 29 oct. 2026 : V30.4.286 est parti avec [MEMO-PRINT] ; lot 1 → **V30.5.x**, lot 2 → **V31.0.x** (Z fixé à la livraison, cf. REALISATION.md)._
+> _Renuméroté le 29 oct. 2026 : V30.4.286 est parti avec [MEMO-PRINT], V30.5.287 avec [MEMO-PDF] v2 ; lot 1 → **V30.6.x**, lot 2 → **V31.0.x** (Z fixé à la livraison, cf. REALISATION.md)._
 
-> **Deux lots.** Lot 1 **V30.5.x** = front + 1 route batch de dates, **export 30 inchangé** (la
+> **Deux lots.** Lot 1 **V30.6.x** = front + 1 route batch de dates, **export 30 inchangé** (la
 > préférence d'affichage vit en `localStorage` par dossier, V1). Lot 2 **V31.0.x** = table
 > additive `trip_legs` → **bump export v31**. Doctrine TDD, STOP avant push, GO Fabien. Demande
 > Fabien du 20 oct. 2026 (mémo prod 513) devant Polarsteps : « l'affichage de Polarsteps est mieux
@@ -39,7 +39,7 @@
   - Sous-arbre inclus (les activités vivent dans les sous-dossiers). **Rien à changer aux
     activités existantes : le seed de démo (§ 1.6) ne pose que les 6 séjours.**
 
-## 1. Lot 1 — V30.5.x : étapes + carte + nuits
+## 1. Lot 1 — V30.6.x : étapes + carte + nuits
 
 ### 1.1 Accès
 - **Un sélecteur d'affichage** (Fabien, 14h22 : « faudrait que ce soit un choix possible, comme
@@ -143,7 +143,7 @@ c'est le test de la règle étape/activité. Lancer avant la capture du STOP.
   export/import v31 + v30 toujours importable, invariant 5.
 
 ## 3. Livraison
-Lot 1 : `REALISATION.md` [V30.5.x], brief ↔ IDEAS.md ([TRIP-VIEW] retiré de la file après le
+Lot 1 : `REALISATION.md` [V30.6.x], brief ↔ IDEAS.md ([TRIP-VIEW] retiré de la file après le
 lot 2 seulement), handoff pour la passe Cowork (owner desktop sur Voyage Japon local 124, mobile
 390, invité Demo invité 142 / share 87 si le dossier est voyage, sinon créer un partage lecteur sur
 Voyage Japon LOCAL). STOP avant commit avec la ligne pytest.

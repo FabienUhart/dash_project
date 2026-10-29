@@ -29,6 +29,8 @@ if REPO_ROOT not in sys.path:
 # vraie base. La base par test est posée par `new_base()`.
 os.environ.setdefault("DB_PATH", os.path.join(REPO_ROOT, ".pytest-scratch", "dashboard.db"))
 os.environ.setdefault("TZ", "Europe/Paris")
+# [MEMO-PDF v2] le sweep des PDF ne tourne jamais pendant les tests (il est appelé à la main).
+os.environ.setdefault("PDF_SWEEP", "0")
 
 
 # ------------------------------------------------------- GARDE ZÉRO-RÉSEAU ----

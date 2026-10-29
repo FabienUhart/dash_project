@@ -274,6 +274,10 @@ button.icon:active { transform: scale(0.94); }
 main { flex: 1; min-width: 0; max-width: 720px; margin: 0 auto; padding: 1.25rem; }
 @media (max-width: 900px) {
   #layout { flex-direction: column; }
+  /* [MEMO-PDF v2] En colonne, les marges `auto` de main désactivent l'étirement : main prenait la
+     largeur de son contenu, et une barre d'actions plus longue (bouton 📄) poussait la page hors
+     écran au lieu de défiler dans son cadre. Largeur bornée au viewport : la barre défile. */
+  main { width: 100%; box-sizing: border-box; }
   #snav { width: 100%; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); padding: 0.5rem 0.75rem; gap: 0.3rem;
     /* Navigation projets collante : épinglée sous le header au défilement (--header-h mesuré en JS). */
     position: sticky; top: var(--header-h, 0px); z-index: 9; background: var(--panel); }
@@ -1155,6 +1159,7 @@ dialog img { max-width: 94vw; max-height: 90vh; border-radius: 8px; cursor: zoom
 {% include 'partials/_shared.js.html' %}
 <script>
 const EMBEDDED_BUILD = "{{ build }}";  // [UPDATE-PROMPT] version embarquée au rendu
+const PDF_ENABLED = {{ 'true' if pdf_enabled else 'false' }};  // [MEMO-PDF v2] WeasyPrint présent sur le serveur
 const TOKEN = location.pathname.split('/')[2];
 const API = '/share/' + TOKEN;
 // [FX-CONVERTER] widget convertisseur de devises (invité → /share/<token>/fx, taux publics).
@@ -2162,6 +2167,7 @@ function shareMemoViewCfg() {
       };
     },
     onEdit: (m) => openEditor(m, el('span', ''), el('span', '')),
+    pdfUrl: (m) => API + '/memo/' + m.id + '/pdf',  // [MEMO-PDF v2] projection invitée, périmètre vérifié serveur
     // [MEMO-VIEW évolution] même appel que la card invitée (PUT /share/<t>/memo/<id> scopé,
     // droits revalidés serveur — invariant 5) ; `load()` rafraîchit les cards derrière.
     onToggleSub: (m, subtasks) => put(m.id, { subtasks }),
@@ -3131,6 +3137,14 @@ function renderTiles() {
           count: (scope, subs) => shareProjectZipCount(zpid, scope, subs),
           buildUrl: (scope, subs) => API + '/project/' + zpid + '/download.zip?scope=' + scope + '&subprojects=' + (subs ? 1 : 0),
         }) }); tbN++;
+    }
+  }
+  // [MEMO-PDF v2] « PDF » du dossier courant, rendu avec la projection invitée (sous /share/*).
+  if (DATA.kind === 'project' && pdfEnabled()) {
+    const ppid = (PFILTER !== 'all') ? PFILTER : DATA.root_id;
+    if (ppid) {
+      const pdfBtn = tb.add({ icon: 'file-pdf', label: 'PDF', title: 'Télécharger le PDF du dossier (A5)',
+        onClick: () => pdfDownload(API + '/project/' + ppid + '/pdf', pdfBtn) }); tbN++;
     }
   }
   // [AGENDA-PROJECT] « Agenda » : pré-filtré sur le dossier courant (PFILTER) + descendants ;
